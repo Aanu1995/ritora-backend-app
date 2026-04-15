@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ritora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      DATABASE_HOST: localhost
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ritora_test
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_SSL: false
+      JWT_SECRET: ci-jwt-secret-long-enough-for-validation
+      JWT_REFRESH_SECRET: ci-jwt-refresh-secret-long-enough
+      JWT_ACCESS_EXPIRY: 15m
+      JWT_REFRESH_EXPIRY: 7d
+      JWT_ISSUER: ritora
+      JWT_AUDIENCE: ritora-web
+      CORS_ORIGINS: http://localhost:3000
+      COOKIE_DOMAIN: ''
+      COOKIE_SECURE: false
+      COOKIE_SAME_SITE: lax
+      COOKIE_REFRESH_NAME: ritora_refresh
+      BCRYPT_SALT_ROUNDS: 4
+      EMAIL_VERIFICATION_EXPIRY: 24h
+      PASSWORD_RESET_EXPIRY: 1h
+      MAIL_HOST: localhost
+      MAIL_PORT: 1025
+      MAIL_USER: ''
+      MAIL_PASS: ''
+      MAIL_FROM: noreply@ritora.com
+      FRONTEND_URL: http://localhost:3000
+      SWAGGER_ENABLED: false
+      LEGAL_TERMS_VERSION: 1.0.0
+      LEGAL_PRIVACY_VERSION: 1.0.0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run test:cov
+        env:
+          JEST_JUNIT_OUTPUT_DIR: ./coverage
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(npx jest --coverage --coverageReporters=json-summary 2>/dev/null | tail -1 || true)
+          node -e "
+            const summary = require('./coverage/coverage-summary.json');
+            const { lines, functions } = summary.total;
+            const pass = lines.pct >= 80 && functions.pct >= 80;
+            console.log('Lines:', lines.pct + '%', 'Functions:', functions.pct + '%');
+            if (!pass) { console.error('Coverage below 80% threshold'); process.exit(1); }
+          "
+
+      - run: npm run test:e2e
+
+      - run: npm run build
