@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { Response } from 'express';
+import type { SignOptions } from 'jsonwebtoken';
 import { IsNull, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { SkinProfileResponseDto } from '../skin-profile/dto/skin-profile-response.dto';
@@ -69,10 +70,7 @@ export class AuthService {
       'EMAIL_VERIFICATION_EXPIRY',
       '24h',
     );
-    this.passwordResetExpiry = configService.get(
-      'PASSWORD_RESET_EXPIRY',
-      '1h',
-    );
+    this.passwordResetExpiry = configService.get('PASSWORD_RESET_EXPIRY', '1h');
     this.termsVersion = configService.get('LEGAL_TERMS_VERSION', '1.0.0');
     this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
   }
@@ -113,9 +111,7 @@ export class AuthService {
       last_name: dto.lastName,
       preferred_language: dto.preferredLanguage,
       email_verification_token_hash: verificationTokenHash,
-      email_verification_expires: this.expiresIn(
-        this.emailVerificationExpiry,
-      ),
+      email_verification_expires: this.expiresIn(this.emailVerificationExpiry),
     });
 
     await this.recordConsents(user.id, ip, [
@@ -127,12 +123,7 @@ export class AuthService {
       .sendVerificationEmail(user.email, verificationToken, user.first_name)
       .catch(() => {});
 
-    const { accessToken, refreshToken } = await this.createSession(
-      user,
-      res,
-      ip,
-      userAgent,
-    );
+    const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
     return {
       accessToken,
@@ -157,12 +148,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const { accessToken } = await this.createSession(
-      user,
-      res,
-      ip,
-      userAgent,
-    );
+    const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
     return {
       accessToken,
@@ -220,6 +206,12 @@ export class AuthService {
     const newSecretHash = this.sha256(newSecret);
     session.refresh_token_hash = newSecretHash;
     session.last_used_at = new Date();
+    if (ip) {
+      session.ip_address = ip;
+    }
+    if (userAgent) {
+      session.user_agent = userAgent;
+    }
     await this.sessionsRepository.save(session);
 
     const newRefreshToken = `${session.id}.${newSecret}`;
@@ -264,9 +256,7 @@ export class AuthService {
 
     await this.usersService.update(user.id, {
       email_verification_token_hash: verificationTokenHash,
-      email_verification_expires: this.expiresIn(
-        this.emailVerificationExpiry,
-      ),
+      email_verification_expires: this.expiresIn(this.emailVerificationExpiry),
     });
 
     await this.mailService
@@ -354,7 +344,7 @@ export class AuthService {
 
     return sessions
       .filter((s) => s.expires_at > new Date())
-      .map(SessionResponseDto.fromEntity);
+      .map((session) => SessionResponseDto.fromEntity(session));
   }
 
   async exportData(
@@ -432,7 +422,7 @@ export class AuthService {
     res: Response,
     ip?: string,
     userAgent?: string,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+  ): Promise<{ accessToken: string }> {
     const sessionId = ulid();
     const secret = randomBytes(32).toString('hex');
     const secretHash = this.sha256(secret);
@@ -452,14 +442,16 @@ export class AuthService {
     this.setRefreshCookie(res, refreshToken);
     const accessToken = this.generateAccessToken(user);
 
-    return { accessToken, refreshToken };
+    return { accessToken };
   }
 
   private generateAccessToken(user: User): string {
+    const expiresIn = this.jwtAccessExpiry as SignOptions['expiresIn'];
+
     return this.jwtService.sign(
       { sub: user.id, email: user.email },
       {
-        expiresIn: this.jwtAccessExpiry as any,
+        expiresIn,
         issuer: this.jwtIssuer,
         audience: this.jwtAudience,
       },

@@ -26,10 +26,7 @@ export class SkinProfileService {
     private readonly usersService: UsersService,
     configService: ConfigService,
   ) {
-    this.privacyVersion = configService.get(
-      'LEGAL_PRIVACY_VERSION',
-      '1.0.0',
-    );
+    this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
   }
 
   async findByUserId(userId: string): Promise<SkinProfile | null> {
@@ -46,7 +43,9 @@ export class SkinProfileService {
     }
 
     if (!user.email_verified) {
-      throw new ForbiddenException('Email must be verified to create a skin profile');
+      throw new ForbiddenException(
+        'Email must be verified to create a skin profile',
+      );
     }
 
     const existing = await this.findByUserId(userId);

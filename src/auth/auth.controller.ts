@@ -38,6 +38,20 @@ const authThrottle = (limit: number) => ({
   },
 });
 
+function getHeaderValue(
+  headers: Request['headers'],
+  key: string,
+): string | undefined {
+  const value = headers[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function getCookieValue(req: Request, cookieName: string): string | undefined {
+  const cookies = req.cookies as Record<string, unknown> | undefined;
+  const value = cookies?.[cookieName];
+  return typeof value === 'string' ? value : undefined;
+}
+
 @ApiTags('auth')
 @Controller('auth')
 @UseInterceptors(NoCacheInterceptor)
@@ -68,7 +82,7 @@ export class AuthController {
       dto,
       res,
       req.ip,
-      req.headers['user-agent'],
+      getHeaderValue(req.headers, 'user-agent'),
     );
   }
 
@@ -88,7 +102,7 @@ export class AuthController {
       dto.password,
       res,
       req.ip,
-      req.headers['user-agent'],
+      getHeaderValue(req.headers, 'user-agent'),
     );
   }
 
@@ -96,13 +110,14 @@ export class AuthController {
   @Public()
   @UseGuards(OriginCheckGuard)
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ schema: { properties: { accessToken: { type: 'string' } } } })
+  @ApiOkResponse({
+    schema: { properties: { accessToken: { type: 'string' } } },
+  })
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ accessToken: string }> {
-    const refreshToken: string | undefined =
-      req.cookies?.[this.cookieRefreshName];
+    const refreshToken = getCookieValue(req, this.cookieRefreshName);
 
     if (!refreshToken) {
       throw new UnauthorizedException('No refresh token');
@@ -112,16 +127,14 @@ export class AuthController {
       refreshToken,
       res,
       req.ip,
-      req.headers['user-agent'],
+      getHeaderValue(req.headers, 'user-agent'),
     );
   }
 
   @Post('verify-email')
   @Public()
   @HttpCode(HttpStatus.OK)
-  async verifyEmail(
-    @Body() dto: VerifyEmailDto,
-  ): Promise<{ message: string }> {
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
     await this.authService.verifyEmail(dto.token);
     return { message: 'Email verified successfully' };
   }
@@ -134,7 +147,9 @@ export class AuthController {
     @Body() dto: ForgotPasswordDto,
   ): Promise<{ message: string }> {
     await this.authService.resendVerification(dto.email);
-    return { message: 'If the email is registered, a verification link has been sent' };
+    return {
+      message: 'If the email is registered, a verification link has been sent',
+    };
   }
 
   @Post('forgot-password')
@@ -145,7 +160,9 @@ export class AuthController {
     @Body() dto: ForgotPasswordDto,
   ): Promise<{ message: string }> {
     await this.authService.forgotPassword(dto.email);
-    return { message: 'If the email is registered, a reset link has been sent' };
+    return {
+      message: 'If the email is registered, a reset link has been sent',
+    };
   }
 
   @Post('reset-password')
@@ -160,9 +177,7 @@ export class AuthController {
 
   @Get('me')
   @ApiOkResponse({ type: UserResponseDto })
-  async me(
-    @CurrentUser('id') userId: string,
-  ): Promise<UserResponseDto> {
+  async me(@CurrentUser('id') userId: string): Promise<UserResponseDto> {
     return this.authService.getMe(userId);
   }
 
@@ -181,8 +196,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
-    const refreshToken: string | undefined =
-      req.cookies?.[this.cookieRefreshName];
+    const refreshToken = getCookieValue(req, this.cookieRefreshName);
 
     if (refreshToken) {
       const dotIndex = refreshToken.indexOf('.');

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import type { Request, Response } from 'express';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
@@ -24,13 +25,25 @@ const mockRes = () => ({
   clearCookie: jest.fn(),
 });
 
+type MockRequest = Pick<Request, 'ip' | 'headers'> & {
+  cookies: Record<string, string>;
+};
+
+type MockResponse = Pick<Response, 'cookie' | 'clearCookie'>;
+
 const mockReq = (overrides: Record<string, unknown> = {}) =>
   ({
     ip: '127.0.0.1',
     headers: { 'user-agent': 'TestAgent', origin: 'http://localhost:3000' },
     cookies: {},
     ...overrides,
-  }) as any;
+  }) as MockRequest;
+
+const asRequest = (request: MockRequest): Request =>
+  request as unknown as Request;
+
+const asResponse = (response: MockResponse): Response =>
+  response as unknown as Response;
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -75,8 +88,8 @@ describe('AuthController', () => {
         termsAccepted: true,
         privacyPolicyAccepted: true,
       },
-      res as any,
-      mockReq(),
+      asResponse(res),
+      asRequest(mockReq()),
     );
 
     expect(result).toEqual(authResponse);
@@ -90,8 +103,8 @@ describe('AuthController', () => {
 
     const result = await controller.login(
       { email: 'test@example.com', password: 'Password1' },
-      res as any,
-      mockReq(),
+      asResponse(res),
+      asRequest(mockReq()),
     );
 
     expect(result).toEqual(authResponse);
@@ -148,8 +161,8 @@ describe('AuthController', () => {
     authService.logout.mockResolvedValue(undefined);
 
     const result = await controller.logout(
-      mockReq({ cookies: { [cookieName]: '01SESSION.secret' } }),
-      res as any,
+      asRequest(mockReq({ cookies: { [cookieName]: '01SESSION.secret' } })),
+      asResponse(res),
     );
 
     expect(result.message).toBe('Logged out');
@@ -161,8 +174,8 @@ describe('AuthController', () => {
     authService.refreshTokens.mockResolvedValue({ accessToken: 'refreshed' });
 
     const result = await controller.refresh(
-      mockReq({ cookies: { [cookieName]: '01SESSION.secret' } }),
-      res as any,
+      asRequest(mockReq({ cookies: { [cookieName]: '01SESSION.secret' } })),
+      asResponse(res),
     );
 
     expect(result).toEqual({ accessToken: 'refreshed' });
@@ -178,7 +191,7 @@ describe('AuthController', () => {
     const res = mockRes();
     authService.logoutAll.mockResolvedValue(undefined);
 
-    const result = await controller.logoutAll('01', res as any);
+    const result = await controller.logoutAll('01', asResponse(res));
 
     expect(result.message).toBe('All sessions revoked');
   });
@@ -200,7 +213,7 @@ describe('AuthController', () => {
     const result = await controller.deleteAccount(
       '01',
       { password: 'Password1' },
-      res as any,
+      asResponse(res),
     );
 
     expect(result.message).toBe('Account deleted');

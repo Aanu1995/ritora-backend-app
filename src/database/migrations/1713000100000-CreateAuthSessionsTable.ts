@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateAuthSessionsTable1713000100000
-  implements MigrationInterface
-{
+export class CreateAuthSessionsTable1713000100000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE "auth_sessions" (

@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SkinProfile } from './entities/skin-profile.entity';
 import { SkinProfileController } from './skin-profile.controller';
 import { SkinProfileService } from './skin-profile.service';
+import { User } from '../users/entities/user.entity';
 
 const mockService = () => ({
   findByUserId: jest.fn(),
@@ -42,7 +43,7 @@ describe('SkinProfileController', () => {
       routine_complexity: null,
       created_at: new Date('2024-01-01'),
       updated_at: new Date('2024-01-01'),
-      user: {} as any,
+      user: { id: '01TESTUSER' } as User,
       generateId: jest.fn(),
     }) as SkinProfile;
 

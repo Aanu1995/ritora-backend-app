@@ -103,9 +103,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('should reject without auth token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/auth/me')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/auth/me').expect(401);
     });
   });
 

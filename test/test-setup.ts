@@ -65,9 +65,7 @@ export async function truncateTables(app: INestApplication): Promise<void> {
   const dataSource = app.get(DataSource);
   const entities = dataSource.entityMetadatas;
 
-  const tableNames = entities
-    .map((e) => `"${e.tableName}"`)
-    .join(', ');
+  const tableNames = entities.map((e) => `"${e.tableName}"`).join(', ');
 
   if (tableNames.length > 0) {
     await dataSource.query(`TRUNCATE TABLE ${tableNames} CASCADE`);

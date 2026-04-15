@@ -1,10 +1,15 @@
-import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
+import type { Response } from 'express';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
@@ -21,6 +26,11 @@ const mockRes = () => ({
   cookie: jest.fn(),
   clearCookie: jest.fn(),
 });
+
+type MockResponse = Pick<Response, 'cookie' | 'clearCookie'>;
+
+const asResponse = (response: MockResponse): Response =>
+  response as unknown as Response;
 
 const mockConfigValues: Record<string, string | number | boolean> = {
   JWT_ACCESS_EXPIRY: '15m',
@@ -133,8 +143,8 @@ describe('AuthService', () => {
     it('creates user, records consents, sends email, returns auth response', async () => {
       const res = mockRes();
       const user = fakeUser();
-      usersService.findByEmail!.mockResolvedValue(null);
-      usersService.create!.mockResolvedValue(user);
+      usersService.findByEmail.mockResolvedValue(null);
+      usersService.create.mockResolvedValue(user);
 
       const result = await service.register(
         {
@@ -146,7 +156,7 @@ describe('AuthService', () => {
           termsAccepted: true,
           privacyPolicyAccepted: true,
         },
-        res as any,
+        asResponse(res),
         '127.0.0.1',
         'TestAgent',
       );
@@ -160,7 +170,7 @@ describe('AuthService', () => {
 
     it('rejects duplicate email', async () => {
       const res = mockRes();
-      usersService.findByEmail!.mockResolvedValue(fakeUser());
+      usersService.findByEmail.mockResolvedValue(fakeUser());
 
       await expect(
         service.register(
@@ -173,7 +183,7 @@ describe('AuthService', () => {
             termsAccepted: true,
             privacyPolicyAccepted: true,
           },
-          res as any,
+          asResponse(res),
         ),
       ).rejects.toThrow(ConflictException);
     });
@@ -192,7 +202,7 @@ describe('AuthService', () => {
             termsAccepted: false,
             privacyPolicyAccepted: true,
           },
-          res as any,
+          asResponse(res),
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -204,12 +214,12 @@ describe('AuthService', () => {
     it('returns auth response on valid credentials', async () => {
       const res = mockRes();
       const user = fakeUser();
-      usersService.findByEmail!.mockResolvedValue(user);
+      usersService.findByEmail.mockResolvedValue(user);
 
       const result = await service.login(
         'test@example.com',
         'Password1',
-        res as any,
+        asResponse(res),
       );
 
       expect(result.accessToken).toBe('access-token-123');
@@ -219,19 +229,19 @@ describe('AuthService', () => {
 
     it('rejects invalid password with generic message', async () => {
       const res = mockRes();
-      usersService.findByEmail!.mockResolvedValue(fakeUser());
+      usersService.findByEmail.mockResolvedValue(fakeUser());
 
       await expect(
-        service.login('test@example.com', 'WrongPassword1', res as any),
+        service.login('test@example.com', 'WrongPassword1', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
     });
 
     it('rejects unknown email with generic message', async () => {
       const res = mockRes();
-      usersService.findByEmail!.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
 
       await expect(
-        service.login('nobody@example.com', 'Password1', res as any),
+        service.login('nobody@example.com', 'Password1', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
     });
   });
@@ -256,7 +266,7 @@ describe('AuthService', () => {
 
       const result = await service.refreshTokens(
         `01SESSION.${secret}`,
-        res as any,
+        asResponse(res),
       );
 
       expect(result.accessToken).toBe('access-token-123');
@@ -274,7 +284,7 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.refreshTokens('01SESSION.fakesecret', res as any),
+        service.refreshTokens('01SESSION.fakesecret', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
 
       expect(sessionsRepo.update).toHaveBeenCalled();
@@ -291,7 +301,7 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.refreshTokens('01SESSION.fakesecret', res as any),
+        service.refreshTokens('01SESSION.fakesecret', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
     });
   });
@@ -307,7 +317,7 @@ describe('AuthService', () => {
         email_verification_expires: new Date(Date.now() + 86400000),
       });
 
-      usersService.findByVerificationTokenHash!.mockResolvedValue(user);
+      usersService.findByVerificationTokenHash.mockResolvedValue(user);
 
       await service.verifyEmail(rawToken);
 
@@ -328,7 +338,7 @@ describe('AuthService', () => {
         email_verification_expires: new Date(Date.now() - 1000),
       });
 
-      usersService.findByVerificationTokenHash!.mockResolvedValue(user);
+      usersService.findByVerificationTokenHash.mockResolvedValue(user);
 
       await expect(service.verifyEmail(rawToken)).rejects.toThrow(
         BadRequestException,
@@ -336,7 +346,7 @@ describe('AuthService', () => {
     });
 
     it('rejects invalid token', async () => {
-      usersService.findByVerificationTokenHash!.mockResolvedValue(null);
+      usersService.findByVerificationTokenHash.mockResolvedValue(null);
 
       await expect(service.verifyEmail('invalidtoken')).rejects.toThrow(
         BadRequestException,
@@ -348,7 +358,7 @@ describe('AuthService', () => {
 
   describe('forgotPassword', () => {
     it('sends reset email for existing user', async () => {
-      usersService.findByEmail!.mockResolvedValue(fakeUser());
+      usersService.findByEmail.mockResolvedValue(fakeUser());
 
       await service.forgotPassword('test@example.com');
 
@@ -357,7 +367,7 @@ describe('AuthService', () => {
     });
 
     it('does nothing for unknown email (no info leak)', async () => {
-      usersService.findByEmail!.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
 
       await service.forgotPassword('nobody@example.com');
 
@@ -377,7 +387,7 @@ describe('AuthService', () => {
         password_reset_expires: new Date(Date.now() + 3600000),
       });
 
-      usersService.findByResetTokenHash!.mockResolvedValue(user);
+      usersService.findByResetTokenHash.mockResolvedValue(user);
 
       await service.resetPassword(rawToken, 'NewPassword1');
 
@@ -399,7 +409,7 @@ describe('AuthService', () => {
         password_reset_expires: new Date(Date.now() - 1000),
       });
 
-      usersService.findByResetTokenHash!.mockResolvedValue(user);
+      usersService.findByResetTokenHash.mockResolvedValue(user);
 
       await expect(
         service.resetPassword(rawToken, 'NewPassword1'),
@@ -417,7 +427,7 @@ describe('AuthService', () => {
         revoked_at: null,
       });
 
-      await service.logout('01SESSION', res as any);
+      await service.logout('01SESSION', asResponse(res));
 
       expect(sessionsRepo.save).toHaveBeenCalled();
       expect(res.clearCookie).toHaveBeenCalled();
@@ -430,7 +440,7 @@ describe('AuthService', () => {
     it('revokes all sessions and clears cookie', async () => {
       const res = mockRes();
 
-      await service.logoutAll('01TESTUSER', res as any);
+      await service.logoutAll('01TESTUSER', asResponse(res));
 
       expect(sessionsRepo.update).toHaveBeenCalled();
       expect(res.clearCookie).toHaveBeenCalled();
@@ -442,7 +452,7 @@ describe('AuthService', () => {
   describe('exportData', () => {
     it('returns user, skin profile, consents, and sessions', async () => {
       const user = fakeUser();
-      usersService.findById!.mockResolvedValue(user);
+      usersService.findById.mockResolvedValue(user);
       consentsRepo.find.mockResolvedValue([
         {
           consent_type: 'privacy_policy',
@@ -494,11 +504,11 @@ describe('AuthService', () => {
 
     it('rejects when password confirmation is wrong', async () => {
       const user = fakeUser();
-      usersService.findById!.mockResolvedValue(user);
+      usersService.findById.mockResolvedValue(user);
 
-      await expect(service.exportData(user.id, 'WrongPassword1')).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.exportData(user.id, 'WrongPassword1'),
+      ).rejects.toThrow(UnauthorizedException);
     });
   });
 
@@ -508,9 +518,9 @@ describe('AuthService', () => {
     it('deletes user after password confirmation', async () => {
       const res = mockRes();
       const user = fakeUser();
-      usersService.findById!.mockResolvedValue(user);
+      usersService.findById.mockResolvedValue(user);
 
-      await service.deleteAccount(user.id, 'Password1', res as any);
+      await service.deleteAccount(user.id, 'Password1', asResponse(res));
 
       expect(usersService.remove).toHaveBeenCalledWith(user.id);
       expect(res.clearCookie).toHaveBeenCalled();
@@ -519,10 +529,10 @@ describe('AuthService', () => {
     it('rejects with wrong password', async () => {
       const res = mockRes();
       const user = fakeUser();
-      usersService.findById!.mockResolvedValue(user);
+      usersService.findById.mockResolvedValue(user);
 
       await expect(
-        service.deleteAccount(user.id, 'WrongPassword1', res as any),
+        service.deleteAccount(user.id, 'WrongPassword1', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
     });
   });
