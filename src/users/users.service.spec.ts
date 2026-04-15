@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -104,6 +105,42 @@ describe('UsersService', () => {
       );
       expect(result).toEqual(updated);
     });
+
+    it('throws when updating a missing user', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.update('missing', { email_verified: true }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findByVerificationTokenHash', () => {
+    it('finds a user by verification token hash', async () => {
+      const user = { id: '01' } as User;
+      repo.findOne.mockResolvedValue(user);
+
+      const result = await service.findByVerificationTokenHash('hash-123');
+
+      expect(repo.findOne).toHaveBeenCalledWith({
+        where: { email_verification_token_hash: 'hash-123' },
+      });
+      expect(result).toEqual(user);
+    });
+  });
+
+  describe('findByResetTokenHash', () => {
+    it('finds a user by password reset token hash', async () => {
+      const user = { id: '01' } as User;
+      repo.findOne.mockResolvedValue(user);
+
+      const result = await service.findByResetTokenHash('hash-456');
+
+      expect(repo.findOne).toHaveBeenCalledWith({
+        where: { password_reset_token_hash: 'hash-456' },
+      });
+      expect(result).toEqual(user);
+    });
   });
 
   describe('remove', () => {
@@ -115,6 +152,14 @@ describe('UsersService', () => {
       await service.remove('01');
 
       expect(repo.remove).toHaveBeenCalledWith(user);
+    });
+
+    it('throws when removing a missing user', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(service.remove('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });
