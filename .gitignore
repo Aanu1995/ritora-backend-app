@@ -22,3 +22,7 @@ coverage/
 
 # OpenAPI generated spec
 openapi.json
+
+coverage/
+
+.claude
