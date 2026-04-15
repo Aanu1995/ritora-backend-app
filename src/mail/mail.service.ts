@@ -21,7 +21,7 @@ export class MailService {
     token: string,
     firstName: string,
   ): Promise<void> {
-    const verificationUrl = `${this.frontendUrl}/verify-email?token=${token}`;
+    const verificationUrl = `${this.frontendUrl}/verify-email#token=${token}`;
 
     await this.mailerService.sendMail({
       to: email,
@@ -39,7 +39,7 @@ export class MailService {
     token: string,
     firstName: string,
   ): Promise<void> {
-    const resetUrl = `${this.frontendUrl}/reset-password?token=${token}`;
+    const resetUrl = `${this.frontendUrl}/reset-password#token=${token}`;
 
     await this.mailerService.sendMail({
       to: email,

@@ -26,6 +26,7 @@ import { ConfirmPasswordDto } from './dto/confirm-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RegisterResponseDto } from './dto/register-response.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -72,18 +73,12 @@ export class AuthController {
   @Public()
   @UseGuards(OriginCheckGuard)
   @Throttle(authThrottle(3))
-  @ApiOkResponse({ type: AuthResponseDto })
+  @ApiOkResponse({ type: RegisterResponseDto })
   async register(
     @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
     @Req() req: Request,
-  ): Promise<AuthResponseDto> {
-    return this.authService.register(
-      dto,
-      res,
-      req.ip,
-      getHeaderValue(req.headers, 'user-agent'),
-    );
+  ): Promise<RegisterResponseDto> {
+    return this.authService.register(dto, req.ip);
   }
 
   @Post('login')

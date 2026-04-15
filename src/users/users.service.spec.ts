@@ -8,6 +8,7 @@ import { UsersService } from './users.service';
 const mockRepository = () => ({
   findOne: jest.fn(),
   create: jest.fn(),
+  createQueryBuilder: jest.fn(),
   save: jest.fn(),
   remove: jest.fn(),
 });
@@ -58,6 +59,42 @@ describe('UsersService', () => {
       const result = await service.findById('01');
 
       expect(repo.findOne).toHaveBeenCalledWith({ where: { id: '01' } });
+      expect(result).toEqual(user);
+    });
+  });
+
+  describe('findByEmailForAuth', () => {
+    it('loads the password hash for authentication checks', async () => {
+      const user = { id: '01', email: 'test@example.com' } as User;
+      const getOne = jest.fn().mockResolvedValue(user);
+      const where = jest.fn().mockReturnValue({ getOne });
+      const addSelect = jest.fn().mockReturnValue({ where });
+      repo.createQueryBuilder.mockReturnValue({ addSelect } as never);
+
+      const result = await service.findByEmailForAuth('Test@Example.COM');
+
+      expect(repo.createQueryBuilder).toHaveBeenCalledWith('user');
+      expect(addSelect).toHaveBeenCalledWith('user.password_hash');
+      expect(where).toHaveBeenCalledWith('LOWER(user.email) = :email', {
+        email: 'test@example.com',
+      });
+      expect(result).toEqual(user);
+    });
+  });
+
+  describe('findByIdForAuth', () => {
+    it('loads the password hash for password confirmation checks', async () => {
+      const user = { id: '01' } as User;
+      const getOne = jest.fn().mockResolvedValue(user);
+      const where = jest.fn().mockReturnValue({ getOne });
+      const addSelect = jest.fn().mockReturnValue({ where });
+      repo.createQueryBuilder.mockReturnValue({ addSelect } as never);
+
+      const result = await service.findByIdForAuth('01');
+
+      expect(repo.createQueryBuilder).toHaveBeenCalledWith('user');
+      expect(addSelect).toHaveBeenCalledWith('user.password_hash');
+      expect(where).toHaveBeenCalledWith('user.id = :id', { id: '01' });
       expect(result).toEqual(user);
     });
   });

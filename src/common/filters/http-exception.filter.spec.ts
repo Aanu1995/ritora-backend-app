@@ -64,6 +64,26 @@ describe('GlobalExceptionFilter', () => {
     );
   });
 
+  it('preserves structured error codes when present', () => {
+    const exception = new HttpException(
+      {
+        statusCode: HttpStatus.FORBIDDEN,
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Email not verified',
+      },
+      HttpStatus.FORBIDDEN,
+    );
+
+    filter.catch(exception, mockHost);
+
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Email not verified',
+      }),
+    );
+  });
+
   it('falls back to 500 for unknown exceptions', () => {
     const exception = new Error('Something broke');
 

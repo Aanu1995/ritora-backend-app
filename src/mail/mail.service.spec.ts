@@ -32,7 +32,7 @@ describe('MailService', () => {
       template: 'verification',
       context: {
         firstName: 'Jane',
-        verificationUrl: 'http://localhost:3000/verify-email?token=token-123',
+        verificationUrl: 'http://localhost:3000/verify-email#token=token-123',
       },
     });
   });
@@ -52,7 +52,7 @@ describe('MailService', () => {
       template: 'password-reset',
       context: {
         firstName: 'Jane',
-        resetUrl: 'http://localhost:3000/reset-password?token=token-456',
+        resetUrl: 'http://localhost:3000/reset-password#token=token-456',
       },
     });
   });

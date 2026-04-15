@@ -21,31 +21,41 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     response.status(status).json({
       statusCode: status,
-      message: this.getMessage(exception),
+      ...this.getExceptionPayload(exception),
       timestamp: new Date().toISOString(),
       path: request.url,
     });
   }
 
-  private getMessage(exception: unknown): string | string[] {
+  private getExceptionPayload(
+    exception: unknown,
+  ): Record<string, string | string[] | number> {
     if (!(exception instanceof HttpException)) {
-      return 'Internal server error';
+      return { message: 'Internal server error' };
     }
 
     const exceptionResponse = exception.getResponse();
 
     if (typeof exceptionResponse === 'string') {
-      return exceptionResponse;
+      return { message: exceptionResponse };
     }
 
-    if (
-      typeof exceptionResponse === 'object' &&
-      exceptionResponse !== null &&
-      'message' in exceptionResponse
-    ) {
-      return exceptionResponse.message as string | string[];
+    if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      const payload: Record<string, string | string[] | number> = {};
+
+      if ('message' in exceptionResponse) {
+        payload.message = exceptionResponse.message as string | string[];
+      } else {
+        payload.message = exception.message;
+      }
+
+      if ('code' in exceptionResponse) {
+        payload.code = exceptionResponse.code as string;
+      }
+
+      return payload;
     }
 
-    return exception.message;
+    return { message: exception.message };
   }
 }

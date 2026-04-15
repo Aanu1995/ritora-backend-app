@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -21,11 +23,13 @@ import { UserResponseDto } from '../users/dto/user-response.dto';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { AuthSession } from './entities/auth-session.entity';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly jwtAccessExpiry: string;
   private readonly jwtRefreshExpiry: string;
   private readonly jwtIssuer: string;
@@ -40,6 +44,10 @@ export class AuthService {
   private readonly passwordResetExpiry: string;
   private readonly termsVersion: string;
   private readonly privacyVersion: string;
+  private readonly frontendUrl: string;
+  private readonly nodeEnv: string;
+  private readonly mailHost: string;
+  private readonly mailPort: number;
 
   constructor(
     private readonly usersService: UsersService,
@@ -73,6 +81,13 @@ export class AuthService {
     this.passwordResetExpiry = configService.get('PASSWORD_RESET_EXPIRY', '1h');
     this.termsVersion = configService.get('LEGAL_TERMS_VERSION', '1.0.0');
     this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
+    this.frontendUrl = configService.get(
+      'FRONTEND_URL',
+      'http://localhost:3000',
+    );
+    this.nodeEnv = configService.get('NODE_ENV', 'development');
+    this.mailHost = configService.get('MAIL_HOST', 'localhost');
+    this.mailPort = configService.get('MAIL_PORT', 1025);
   }
 
   async register(
@@ -85,10 +100,8 @@ export class AuthService {
       termsAccepted: boolean;
       privacyPolicyAccepted: boolean;
     },
-    res: Response,
     ip?: string,
-    userAgent?: string,
-  ): Promise<AuthResponseDto> {
+  ): Promise<RegisterResponseDto> {
     if (!dto.termsAccepted || !dto.privacyPolicyAccepted) {
       throw new BadRequestException(
         'You must accept the terms of service and privacy policy',
@@ -119,14 +132,14 @@ export class AuthService {
       { type: 'privacy_policy', version: this.privacyVersion },
     ]);
 
-    await this.mailService
-      .sendVerificationEmail(user.email, verificationToken, user.first_name)
-      .catch(() => {});
-
-    const { accessToken } = await this.createSession(user, res, ip, userAgent);
+    await this.sendVerificationEmailOrLogFailure(
+      user.email,
+      verificationToken,
+      user.first_name,
+    );
 
     return {
-      accessToken,
+      message: 'Verify your email to activate your account',
       user: UserResponseDto.fromEntity(user),
     };
   }
@@ -138,7 +151,7 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
   ): Promise<AuthResponseDto> {
-    const user = await this.usersService.findByEmail(email);
+    const user = await this.usersService.findByEmailForAuth(email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -146,6 +159,13 @@ export class AuthService {
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (!user.email_verified) {
+      throw new ForbiddenException({
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Email not verified',
+      });
     }
 
     const { accessToken } = await this.createSession(user, res, ip, userAgent);
@@ -259,9 +279,11 @@ export class AuthService {
       email_verification_expires: this.expiresIn(this.emailVerificationExpiry),
     });
 
-    await this.mailService
-      .sendVerificationEmail(user.email, verificationToken, user.first_name)
-      .catch(() => {});
+    await this.sendVerificationEmailOrLogFailure(
+      user.email,
+      verificationToken,
+      user.first_name,
+    );
   }
 
   async forgotPassword(email: string): Promise<void> {
@@ -278,9 +300,11 @@ export class AuthService {
       password_reset_expires: this.expiresIn(this.passwordResetExpiry),
     });
 
-    await this.mailService
-      .sendPasswordResetEmail(user.email, resetToken, user.first_name)
-      .catch(() => {});
+    await this.sendPasswordResetEmailOrLogFailure(
+      user.email,
+      resetToken,
+      user.first_name,
+    );
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
@@ -351,7 +375,7 @@ export class AuthService {
     userId: string,
     password: string,
   ): Promise<Record<string, unknown>> {
-    const user = await this.usersService.findById(userId);
+    const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
@@ -401,7 +425,7 @@ export class AuthService {
     password: string,
     res: Response,
   ): Promise<void> {
-    const user = await this.usersService.findById(userId);
+    const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
@@ -537,6 +561,66 @@ export class AuthService {
       return this.usersService.findByVerificationTokenHash(value);
     }
     return this.usersService.findByResetTokenHash(value);
+  }
+
+  private async sendVerificationEmailOrLogFailure(
+    email: string,
+    token: string,
+    firstName: string,
+  ): Promise<void> {
+    try {
+      await this.mailService.sendVerificationEmail(email, token, firstName);
+    } catch (error) {
+      this.logEmailDeliveryFailure(
+        'verification',
+        email,
+        `${this.frontendUrl}/verify-email#token=${token}`,
+        error,
+      );
+    }
+  }
+
+  private async sendPasswordResetEmailOrLogFailure(
+    email: string,
+    token: string,
+    firstName: string,
+  ): Promise<void> {
+    try {
+      await this.mailService.sendPasswordResetEmail(email, token, firstName);
+    } catch (error) {
+      this.logEmailDeliveryFailure(
+        'password reset',
+        email,
+        `${this.frontendUrl}/reset-password#token=${token}`,
+        error,
+      );
+    }
+  }
+
+  private logEmailDeliveryFailure(
+    type: 'verification' | 'password reset',
+    email: string,
+    actionUrl: string,
+    error: unknown,
+  ): void {
+    const message =
+      error instanceof Error ? error.message : 'Unknown email delivery error';
+    const stack = error instanceof Error ? error.stack : undefined;
+
+    this.logger.error(
+      `Failed to send ${type} email to ${email} via ${this.mailHost}:${this.mailPort}: ${message}`,
+      stack,
+    );
+
+    if (this.nodeEnv !== 'development') {
+      return;
+    }
+
+    this.logger.warn(
+      `Local development mail is configured for SMTP ${this.mailHost}:${this.mailPort}. ` +
+        'If you are not running Mailpit, start it and open http://localhost:8025, ' +
+        `or configure a real SMTP provider. Temporary ${type} URL for ${email}: ${actionUrl}`,
+    );
   }
 
   private sha256(data: string): string {

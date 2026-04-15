@@ -45,7 +45,11 @@ export const envValidationSchema = Joi.object({
     then: Joi.string().trim().min(1).required(),
     otherwise: Joi.string().allow('').default(''),
   }),
-  COOKIE_SECURE: Joi.boolean().default(false),
+  COOKIE_SECURE: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.boolean().valid(true).required(),
+    otherwise: Joi.boolean().default(false),
+  }),
   COOKIE_SAME_SITE: Joi.string().valid('lax', 'strict', 'none').default('lax'),
   COOKIE_REFRESH_NAME: Joi.string().trim().default('ritora_refresh'),
 
@@ -67,9 +71,15 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().email().default('noreply@ritora.com'),
   }),
 
-  FRONTEND_URL: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .default('http://localhost:3000'),
+  FRONTEND_URL: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string()
+      .uri({ scheme: ['https'] })
+      .required(),
+    otherwise: Joi.string()
+      .uri({ scheme: ['http', 'https'] })
+      .default('http://localhost:3000'),
+  }),
 
   SWAGGER_ENABLED: Joi.boolean().default(true),
 

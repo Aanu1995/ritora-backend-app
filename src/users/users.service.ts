@@ -16,8 +16,26 @@ export class UsersService {
     });
   }
 
+  async findByEmailForAuth(email: string): Promise<User | null> {
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password_hash')
+      .where('LOWER(user.email) = :email', {
+        email: email.toLowerCase().trim(),
+      })
+      .getOne();
+  }
+
   async findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
+  }
+
+  async findByIdForAuth(id: string): Promise<User | null> {
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password_hash')
+      .where('user.id = :id', { id })
+      .getOne();
   }
 
   async create(data: {

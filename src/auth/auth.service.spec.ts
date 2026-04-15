@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -47,6 +48,10 @@ const mockConfigValues: Record<string, string | number | boolean> = {
   PASSWORD_RESET_EXPIRY: '1h',
   LEGAL_TERMS_VERSION: '1.0.0',
   LEGAL_PRIVACY_VERSION: '1.0.0',
+  FRONTEND_URL: 'http://localhost:3000',
+  NODE_ENV: 'development',
+  MAIL_HOST: 'localhost',
+  MAIL_PORT: 1025,
 };
 
 describe('AuthService', () => {
@@ -61,7 +66,9 @@ describe('AuthService', () => {
   beforeEach(async () => {
     usersService = {
       findByEmail: jest.fn(),
+      findByEmailForAuth: jest.fn(),
       findById: jest.fn(),
+      findByIdForAuth: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       remove: jest.fn(),
@@ -140,8 +147,7 @@ describe('AuthService', () => {
   // --- register ---
 
   describe('register', () => {
-    it('creates user, records consents, sends email, returns auth response', async () => {
-      const res = mockRes();
+    it('creates user, records consents, sends email, and does not create a session', async () => {
       const user = fakeUser();
       usersService.findByEmail.mockResolvedValue(null);
       usersService.create.mockResolvedValue(user);
@@ -156,54 +162,43 @@ describe('AuthService', () => {
           termsAccepted: true,
           privacyPolicyAccepted: true,
         },
-        asResponse(res),
         '127.0.0.1',
-        'TestAgent',
       );
 
-      expect(result.accessToken).toBe('access-token-123');
+      expect(result.message).toContain('Verify your email');
       expect(result.user.email).toBe('test@example.com');
       expect(consentsRepo.save).toHaveBeenCalled();
       expect(mailService.sendVerificationEmail).toHaveBeenCalled();
-      expect(res.cookie).toHaveBeenCalled();
+      expect(sessionsRepo.save).not.toHaveBeenCalled();
     });
 
     it('rejects duplicate email', async () => {
-      const res = mockRes();
       usersService.findByEmail.mockResolvedValue(fakeUser());
 
       await expect(
-        service.register(
-          {
-            email: 'test@example.com',
-            password: 'Password1',
-            firstName: 'Jane',
-            lastName: 'Doe',
-            preferredLanguage: 'en',
-            termsAccepted: true,
-            privacyPolicyAccepted: true,
-          },
-          asResponse(res),
-        ),
+        service.register({
+          email: 'test@example.com',
+          password: 'Password1',
+          firstName: 'Jane',
+          lastName: 'Doe',
+          preferredLanguage: 'en',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        }),
       ).rejects.toThrow(ConflictException);
     });
 
     it('rejects if terms not accepted', async () => {
-      const res = mockRes();
-
       await expect(
-        service.register(
-          {
-            email: 'test@example.com',
-            password: 'Password1',
-            firstName: 'Jane',
-            lastName: 'Doe',
-            preferredLanguage: 'en',
-            termsAccepted: false,
-            privacyPolicyAccepted: true,
-          },
-          asResponse(res),
-        ),
+        service.register({
+          email: 'test@example.com',
+          password: 'Password1',
+          firstName: 'Jane',
+          lastName: 'Doe',
+          preferredLanguage: 'en',
+          termsAccepted: false,
+          privacyPolicyAccepted: true,
+        }),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -213,8 +208,8 @@ describe('AuthService', () => {
   describe('login', () => {
     it('returns auth response on valid credentials', async () => {
       const res = mockRes();
-      const user = fakeUser();
-      usersService.findByEmail.mockResolvedValue(user);
+      const user = fakeUser({ email_verified: true });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
 
       const result = await service.login(
         'test@example.com',
@@ -229,7 +224,7 @@ describe('AuthService', () => {
 
     it('rejects invalid password with generic message', async () => {
       const res = mockRes();
-      usersService.findByEmail.mockResolvedValue(fakeUser());
+      usersService.findByEmailForAuth.mockResolvedValue(fakeUser());
 
       await expect(
         service.login('test@example.com', 'WrongPassword1', asResponse(res)),
@@ -238,11 +233,21 @@ describe('AuthService', () => {
 
     it('rejects unknown email with generic message', async () => {
       const res = mockRes();
-      usersService.findByEmail.mockResolvedValue(null);
+      usersService.findByEmailForAuth.mockResolvedValue(null);
 
       await expect(
         service.login('nobody@example.com', 'Password1', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects unverified users before creating a session', async () => {
+      const res = mockRes();
+      usersService.findByEmailForAuth.mockResolvedValue(fakeUser());
+
+      await expect(
+        service.login('test@example.com', 'Password1', asResponse(res)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(res.cookie).not.toHaveBeenCalled();
     });
   });
 
@@ -452,7 +457,7 @@ describe('AuthService', () => {
   describe('exportData', () => {
     it('returns user, skin profile, consents, and sessions', async () => {
       const user = fakeUser();
-      usersService.findById.mockResolvedValue(user);
+      usersService.findByIdForAuth.mockResolvedValue(user);
       consentsRepo.find.mockResolvedValue([
         {
           consent_type: 'privacy_policy',
@@ -492,6 +497,7 @@ describe('AuthService', () => {
 
       const result = await service.exportData(user.id, 'Password1');
 
+      expect(usersService.findByIdForAuth).toHaveBeenCalledWith(user.id);
       expect(result.user).toMatchObject({ email: 'test@example.com' });
       expect(result.skinProfile).toMatchObject({
         skinType: 'oily',
@@ -504,7 +510,7 @@ describe('AuthService', () => {
 
     it('rejects when password confirmation is wrong', async () => {
       const user = fakeUser();
-      usersService.findById.mockResolvedValue(user);
+      usersService.findByIdForAuth.mockResolvedValue(user);
 
       await expect(
         service.exportData(user.id, 'WrongPassword1'),
@@ -518,7 +524,7 @@ describe('AuthService', () => {
     it('deletes user after password confirmation', async () => {
       const res = mockRes();
       const user = fakeUser();
-      usersService.findById.mockResolvedValue(user);
+      usersService.findByIdForAuth.mockResolvedValue(user);
 
       await service.deleteAccount(user.id, 'Password1', asResponse(res));
 
@@ -529,7 +535,7 @@ describe('AuthService', () => {
     it('rejects with wrong password', async () => {
       const res = mockRes();
       const user = fakeUser();
-      usersService.findById.mockResolvedValue(user);
+      usersService.findByIdForAuth.mockResolvedValue(user);
 
       await expect(
         service.deleteAccount(user.id, 'WrongPassword1', asResponse(res)),

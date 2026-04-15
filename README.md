@@ -31,6 +31,22 @@
 $ npm install
 ```
 
+## Local email
+
+The default local development setup sends auth emails to Mailpit, not to a
+real inbox.
+
+```bash
+# SMTP listener
+localhost:1025
+
+# Mailpit web UI
+http://localhost:8025
+```
+
+If you want real email delivery in development, replace `MAIL_HOST`,
+`MAIL_PORT`, `MAIL_USER`, and `MAIL_PASS` with a real SMTP provider.
+
 ## Compile and run the project
 
 ```bash

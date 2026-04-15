@@ -74,8 +74,10 @@ describe('AuthController', () => {
   });
 
   it('register calls authService.register', async () => {
-    const res = mockRes();
-    const authResponse = { accessToken: 'tok', user: { id: '01' } };
+    const authResponse = {
+      message: 'Verify your email to activate your account',
+      user: { id: '01' },
+    };
     authService.register.mockResolvedValue(authResponse);
 
     const result = await controller.register(
@@ -88,7 +90,6 @@ describe('AuthController', () => {
         termsAccepted: true,
         privacyPolicyAccepted: true,
       },
-      asResponse(res),
       asRequest(mockReq()),
     );
 

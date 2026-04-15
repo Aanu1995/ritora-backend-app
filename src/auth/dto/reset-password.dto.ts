@@ -4,7 +4,9 @@ import { IsString, Matches, MinLength } from 'class-validator';
 export class ResetPasswordDto {
   @ApiProperty()
   @IsString()
-  @MinLength(1)
+  @Matches(/^[a-f0-9]{64}$/i, {
+    message: 'token must be a 64-character hexadecimal string',
+  })
   token: string;
 
   @ApiProperty({ minLength: 8 })

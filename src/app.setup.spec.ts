@@ -65,10 +65,10 @@ describe('configureApp', () => {
     });
     expect(app.setGlobalPrefix).toHaveBeenCalledWith('api/v1');
 
-    const validationPipe = (app.useGlobalPipes as jest.Mock).mock.calls[0][0];
+    const validationPipe = app.useGlobalPipes.mock.calls[0][0];
     expect(validationPipe).toBeInstanceOf(ValidationPipe);
 
-    const filter = (app.useGlobalFilters as jest.Mock).mock.calls[0][0];
+    const filter = app.useGlobalFilters.mock.calls[0][0];
     expect(filter).toBeInstanceOf(GlobalExceptionFilter);
 
     expect(disable).toHaveBeenCalledWith('x-powered-by');

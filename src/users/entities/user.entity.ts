@@ -18,7 +18,7 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'varchar', length: 255, select: false })
   password_hash: string;
 
   @Column({ type: 'varchar', length: 100 })
@@ -30,13 +30,13 @@ export class User {
   @Column({ type: 'boolean', default: false })
   email_verified: boolean;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
   email_verification_token_hash: string | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   email_verification_expires: Date | null;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
   password_reset_token_hash: string | null;
 
   @Column({ type: 'timestamptz', nullable: true })

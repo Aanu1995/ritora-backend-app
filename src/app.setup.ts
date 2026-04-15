@@ -32,6 +32,11 @@ export function configureApp(
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
   const expressApp = app.getHttpAdapter().getInstance() as Express;
+
+  if (configService.get<string>('NODE_ENV') === 'production') {
+    expressApp.set('trust proxy', 1);
+  }
+
   expressApp.disable('x-powered-by');
 
   if (configService.get<boolean>('SWAGGER_ENABLED', true)) {
