@@ -52,24 +52,39 @@ describe('Auth (e2e)', () => {
     return body ? req.send(body) : req;
   }
 
-  // ─── Registration ───────────────────────────────
+  function storeSessionFromAuthResponse(res: request.Response): void {
+    expect(res.body.accessToken).toBeDefined();
+    accessToken = res.body.accessToken;
+
+    const cookies = res.headers['set-cookie'];
+    expect(cookies).toBeDefined();
+    refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+    expect(refreshCookie).toContain('ritora_refresh');
+  }
+
+  async function loginAndStoreSession(password = TEST_USER.password) {
+    const res = await publicPost('/auth/login', {
+      email: TEST_USER.email,
+      password,
+    }).expect(200);
+
+    storeSessionFromAuthResponse(res);
+    return res;
+  }
 
   describe('POST /auth/register', () => {
-    it('should register a new user', async () => {
+    it('should register a new user without creating a session', async () => {
       const res = await publicPost('/auth/register', TEST_USER).expect(201);
 
-      expect(res.body.accessToken).toBeDefined();
+      expect(res.body.message).toBe(
+        'Verify your email to activate your account',
+      );
+      expect(res.body.accessToken).toBeUndefined();
       expect(res.body.user.email).toBe(TEST_USER.email);
       expect(res.body.user.firstName).toBe(TEST_USER.firstName);
       expect(res.body.user.emailVerified).toBe(false);
       expect(res.body.user.id).toBeDefined();
-
-      accessToken = res.body.accessToken;
-
-      const cookies = res.headers['set-cookie'];
-      expect(cookies).toBeDefined();
-      refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
-      expect(refreshCookie).toContain('ritora_refresh');
+      expect(res.headers['set-cookie']).toBeUndefined();
     });
 
     it('should reject duplicate email', async () => {
@@ -92,35 +107,27 @@ describe('Auth (e2e)', () => {
     });
   });
 
-  // ─── Current User ───────────────────────────────
+  describe('Protected routes before verification/login', () => {
+    it('should reject login before email verification', async () => {
+      const res = await publicPost('/auth/login', {
+        email: TEST_USER.email,
+        password: TEST_USER.password,
+      }).expect(403);
 
-  describe('GET /auth/me', () => {
-    it('should return the current user', async () => {
-      const res = await authGet('/auth/me').expect(200);
-
-      expect(res.body.email).toBe(TEST_USER.email);
-      expect(res.body.firstName).toBe(TEST_USER.firstName);
+      expect(res.body.code).toBe('EMAIL_NOT_VERIFIED');
+      expect(res.body.message).toBe('Email not verified');
     });
 
-    it('should reject without auth token', async () => {
+    it('should reject /auth/me without auth token', async () => {
       await request(app.getHttpServer()).get('/api/v1/auth/me').expect(401);
     });
-  });
 
-  // ─── Sessions ───────────────────────────────────
-
-  describe('GET /auth/sessions', () => {
-    it('should list active sessions', async () => {
-      const res = await authGet('/auth/sessions').expect(200);
-
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBeGreaterThanOrEqual(1);
-      expect(res.body[0].id).toBeDefined();
-      expect(res.body[0].createdAt).toBeDefined();
+    it('should reject /auth/sessions without auth token', async () => {
+      await request(app.getHttpServer())
+        .get('/api/v1/auth/sessions')
+        .expect(401);
     });
   });
-
-  // ─── Email Verification ─────────────────────────
 
   describe('POST /auth/verify-email', () => {
     it('should reject invalid token', async () => {
@@ -134,13 +141,8 @@ describe('Auth (e2e)', () => {
       expect(token).toBeDefined();
 
       await publicPost('/auth/verify-email', { token }).expect(200);
-
-      const res = await authGet('/auth/me').expect(200);
-      expect(res.body.emailVerified).toBe(true);
     });
   });
-
-  // ─── Resend Verification ────────────────────────
 
   describe('POST /auth/resend-verification', () => {
     it('should always return 200', async () => {
@@ -152,22 +154,12 @@ describe('Auth (e2e)', () => {
     });
   });
 
-  // ─── Login ──────────────────────────────────────
-
   describe('POST /auth/login', () => {
-    it('should login with valid credentials', async () => {
-      const res = await publicPost('/auth/login', {
-        email: TEST_USER.email,
-        password: TEST_USER.password,
-      }).expect(200);
+    it('should login with valid credentials after verification', async () => {
+      const res = await loginAndStoreSession();
 
-      expect(res.body.accessToken).toBeDefined();
       expect(res.body.user.email).toBe(TEST_USER.email);
-
-      accessToken = res.body.accessToken;
-
-      const cookies = res.headers['set-cookie'];
-      refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+      expect(res.body.user.emailVerified).toBe(true);
     });
 
     it('should reject invalid password', async () => {
@@ -187,7 +179,24 @@ describe('Auth (e2e)', () => {
     });
   });
 
-  // ─── Token Refresh ──────────────────────────────
+  describe('Authenticated routes', () => {
+    it('should return the current user', async () => {
+      const res = await authGet('/auth/me').expect(200);
+
+      expect(res.body.email).toBe(TEST_USER.email);
+      expect(res.body.firstName).toBe(TEST_USER.firstName);
+      expect(res.body.emailVerified).toBe(true);
+    });
+
+    it('should list active sessions', async () => {
+      const res = await authGet('/auth/sessions').expect(200);
+
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBeGreaterThanOrEqual(1);
+      expect(res.body[0].id).toBeDefined();
+      expect(res.body[0].createdAt).toBeDefined();
+    });
+  });
 
   describe('POST /auth/refresh', () => {
     it('should refresh tokens with valid cookie', async () => {
@@ -202,6 +211,7 @@ describe('Auth (e2e)', () => {
 
       const cookies = res.headers['set-cookie'];
       refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+      expect(refreshCookie).toContain('ritora_refresh');
     });
 
     it('should reject without cookie', async () => {
@@ -211,8 +221,6 @@ describe('Auth (e2e)', () => {
         .expect(401);
     });
   });
-
-  // ─── Forgot / Reset Password ────────────────────
 
   describe('Password reset flow', () => {
     const newPassword = 'NewPass1!';
@@ -250,15 +258,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('should login with new password', async () => {
-      const res = await publicPost('/auth/login', {
-        email: TEST_USER.email,
-        password: newPassword,
-      }).expect(200);
-
-      accessToken = res.body.accessToken;
-
-      const cookies = res.headers['set-cookie'];
-      refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+      await loginAndStoreSession(newPassword);
     });
 
     it('should reject old password', async () => {
@@ -268,8 +268,6 @@ describe('Auth (e2e)', () => {
       }).expect(401);
     });
   });
-
-  // ─── Data Export ────────────────────────────────
 
   describe('POST /auth/export', () => {
     it('should export user data with password confirmation', async () => {
@@ -290,8 +288,6 @@ describe('Auth (e2e)', () => {
     });
   });
 
-  // ─── Logout ─────────────────────────────────────
-
   describe('Logout', () => {
     it('should logout current session', async () => {
       const res = await request(app.getHttpServer())
@@ -305,15 +301,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('should login again for logout-all test', async () => {
-      const res = await publicPost('/auth/login', {
-        email: TEST_USER.email,
-        password: 'NewPass1!',
-      }).expect(200);
-
-      accessToken = res.body.accessToken;
-
-      const cookies = res.headers['set-cookie'];
-      refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+      await loginAndStoreSession('NewPass1!');
     });
 
     it('should logout all sessions', async () => {
@@ -323,16 +311,9 @@ describe('Auth (e2e)', () => {
     });
   });
 
-  // ─── Account Deletion ──────────────────────────
-
   describe('DELETE /auth/account', () => {
     it('should login for deletion test', async () => {
-      const res = await publicPost('/auth/login', {
-        email: TEST_USER.email,
-        password: 'NewPass1!',
-      }).expect(200);
-
-      accessToken = res.body.accessToken;
+      await loginAndStoreSession('NewPass1!');
     });
 
     it('should reject with wrong password', async () => {

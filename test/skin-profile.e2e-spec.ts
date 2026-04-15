@@ -24,14 +24,11 @@ describe('Skin Profile (e2e)', () => {
     mockMail = new MockMailService();
     app = await createTestApp(mockMail);
 
-    // Register a user
-    const registerRes = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .set('Origin', ORIGIN)
       .send(TEST_USER)
       .expect(201);
-
-    accessToken = registerRes.body.accessToken;
   });
 
   afterAll(async () => {
@@ -48,7 +45,8 @@ describe('Skin Profile (e2e)', () => {
   function authPost(path: string, body?: Record<string, unknown>) {
     const req = request(app.getHttpServer())
       .post(`/api/v1${path}`)
-      .set('Authorization', `Bearer ${accessToken}`);
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Origin', ORIGIN);
     return body ? req.send(body) : req;
   }
 
@@ -65,7 +63,19 @@ describe('Skin Profile (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`);
   }
 
-  // ─── Options (Public) ──────────────────────────
+  async function loginAndStoreSession() {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', ORIGIN)
+      .send({
+        email: TEST_USER.email,
+        password: TEST_USER.password,
+      })
+      .expect(200);
+
+    accessToken = res.body.accessToken;
+    expect(accessToken).toBeDefined();
+  }
 
   describe('GET /skin-profile/options', () => {
     it('should return all options without auth', async () => {
@@ -83,29 +93,35 @@ describe('Skin Profile (e2e)', () => {
     });
   });
 
-  // ─── Unverified User Rejection ──────────────────
-
   describe('Unverified email rejection', () => {
-    it('should reject skin profile creation for unverified user', async () => {
-      await authPost('/skin-profile', {
-        skinType: 'oily',
-      }).expect(403);
+    it('should reject login for an unverified user', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .set('Origin', ORIGIN)
+        .send({
+          email: TEST_USER.email,
+          password: TEST_USER.password,
+        })
+        .expect(403);
+
+      expect(res.body.code).toBe('EMAIL_NOT_VERIFIED');
+      expect(res.body.message).toBe('Email not verified');
     });
   });
-
-  // ─── Verify email to proceed ────────────────────
 
   describe('After email verification', () => {
     beforeAll(async () => {
       const token = mockMail.getVerificationToken(TEST_USER.email);
+      expect(token).toBeDefined();
+
       await request(app.getHttpServer())
         .post('/api/v1/auth/verify-email')
         .set('Origin', ORIGIN)
         .send({ token })
         .expect(200);
-    });
 
-    // ─── CRUD ─────────────────────────────────────
+      await loginAndStoreSession();
+    });
 
     it('should return 404 when no profile exists', async () => {
       await authGet('/skin-profile').expect(404);
