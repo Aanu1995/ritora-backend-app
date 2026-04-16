@@ -54,7 +54,10 @@ export class MailService {
     token: string,
     firstName: string,
   ): Promise<void> {
-    const verificationUrl = `${this.frontendUrl}/verify-email#token=${token}`;
+    const verificationUrl = this.buildFrontendPathActionUrl(
+      'verify-email',
+      token,
+    );
     const html = await this.renderTemplate(MailTemplateName.Verification, {
       firstName,
       verificationUrl,
@@ -72,7 +75,7 @@ export class MailService {
     token: string,
     firstName: string,
   ): Promise<void> {
-    const resetUrl = `${this.frontendUrl}/reset-password#token=${token}`;
+    const resetUrl = this.buildFrontendPathActionUrl('reset-password', token);
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
       firstName,
       resetUrl,
@@ -133,5 +136,20 @@ export class MailService {
 
     this.templateCache.set(templateName, compiledTemplate);
     return compiledTemplate;
+  }
+
+  private buildFrontendActionUrl(path: string, token: string): string {
+    const url = new URL(path, `${this.frontendUrl}/`);
+    url.searchParams.set('token', token);
+    return url.toString();
+  }
+
+  private buildFrontendPathActionUrl(path: string, token: string): string {
+    const base = new URL(this.frontendUrl);
+    const basePath = base.pathname.replace(/\/$/, '');
+    base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
+    base.search = '';
+    base.hash = '';
+    return base.toString();
   }
 }

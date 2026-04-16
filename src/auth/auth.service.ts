@@ -571,7 +571,7 @@ export class AuthService {
       this.logEmailDeliveryFailure(
         'verification',
         email,
-        `${this.frontendUrl}/verify-email#token=${token}`,
+        this.buildFrontendPathActionUrl('verify-email', token),
         error,
       );
     }
@@ -588,7 +588,7 @@ export class AuthService {
       this.logEmailDeliveryFailure(
         'password reset',
         email,
-        `${this.frontendUrl}/reset-password#token=${token}`,
+        this.buildFrontendPathActionUrl('reset-password', token),
         error,
       );
     }
@@ -617,6 +617,21 @@ export class AuthService {
       `${MAIL_PROVIDER_LABEL} delivery failed in development. Check your RESEND_API_KEY and verified MAIL_FROM address. ` +
         `Temporary ${type} URL for ${email}: ${actionUrl}`,
     );
+  }
+
+  private buildFrontendActionUrl(path: string, token: string): string {
+    const url = new URL(path, `${this.frontendUrl}/`);
+    url.searchParams.set('token', token);
+    return url.toString();
+  }
+
+  private buildFrontendPathActionUrl(path: string, token: string): string {
+    const base = new URL(this.frontendUrl);
+    const basePath = base.pathname.replace(/\/$/, '');
+    base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
+    base.search = '';
+    base.hash = '';
+    return base.toString();
   }
 
   private sha256(data: string): string {

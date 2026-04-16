@@ -49,7 +49,7 @@ describe('MailService', () => {
       to: ['test@example.com'],
       subject: 'Verify your Ritora account',
       html: expect.stringContaining(
-        'http://localhost:3000/verify-email#token=token-123',
+        'http://localhost:3000/verify-email/token-123',
       ),
     });
     expect(sendEmail).toHaveBeenCalledWith(
@@ -73,7 +73,7 @@ describe('MailService', () => {
       to: ['test@example.com'],
       subject: 'Reset your Ritora password',
       html: expect.stringContaining(
-        'http://localhost:3000/reset-password#token=token-456',
+        'http://localhost:3000/reset-password/token-456',
       ),
     });
     expect(sendEmail).toHaveBeenCalledWith(
