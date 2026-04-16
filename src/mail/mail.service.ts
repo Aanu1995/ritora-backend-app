@@ -14,11 +14,13 @@ import {
 type VerificationTemplateContext = {
   firstName: string;
   verificationUrl: string;
+  logoUrl: string;
 };
 
 type PasswordResetTemplateContext = {
   firstName: string;
   resetUrl: string;
+  logoUrl: string;
 };
 
 type MailTemplateContextMap = {
@@ -61,6 +63,7 @@ export class MailService {
     const html = await this.renderTemplate(MailTemplateName.Verification, {
       firstName,
       verificationUrl,
+      logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
     });
 
     await this.sendEmail({
@@ -79,6 +82,7 @@ export class MailService {
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
       firstName,
       resetUrl,
+      logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
     });
 
     await this.sendEmail({
@@ -148,6 +152,15 @@ export class MailService {
     const base = new URL(this.frontendUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
+    base.search = '';
+    base.hash = '';
+    return base.toString();
+  }
+
+  private buildBrandAssetUrl(fileName: string): string {
+    const base = new URL(this.frontendUrl);
+    const basePath = base.pathname.replace(/\/$/, '');
+    base.pathname = `${basePath}/brand/${fileName}`;
     base.search = '';
     base.hash = '';
     return base.toString();
