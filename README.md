@@ -29,7 +29,7 @@ The current backend keeps authentication in-house and is designed to avoid the c
 - TypeORM
 - PostgreSQL
 - JWT access tokens + rotating refresh-token cookies
-- Nodemailer via `@nestjs-modules/mailer`
+- Resend Email API + Handlebars templates
 - Swagger/OpenAPI
 - Jest + Supertest
 
@@ -53,7 +53,7 @@ Important groups:
 - JWT: `JWT_SECRET`, `JWT_REFRESH_SECRET`, expiry, issuer, audience
 - Cookie policy: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
-- Mail delivery: `MAIL_*`
+- Mail delivery: `RESEND_API_KEY`, `MAIL_FROM`
 - Frontend origin: `FRONTEND_URL`
 - Legal consent versions: `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`
 
@@ -113,14 +113,21 @@ npm run start:dev
 - Swagger docs: `http://localhost:3001/api/docs`
 - Health check: `http://localhost:3001/api/v1/health`
 
-## Local email
+## Email delivery
 
-The default development setup sends mail to Mailpit, not to a real inbox.
+The backend sends verification and reset emails through the Resend Email API.
 
-- SMTP listener: `localhost:1025`
-- Mail UI: `http://localhost:8025`
+For local development:
 
-If you want real delivery, replace `MAIL_HOST`, `MAIL_PORT`, `MAIL_USER`, and `MAIL_PASS` with a real SMTP provider and restart the API.
+- set `RESEND_API_KEY` in `/.env`
+- use `MAIL_FROM=onboarding@resend.dev` for initial testing
+
+For production:
+
+- use a verified sender domain in Resend, such as `noreply@ritora.com`
+- keep `MAIL_FROM` aligned with that verified domain
+
+If email delivery fails in development, the API logs a fallback verification or reset URL so you can keep testing while fixing your Resend configuration.
 
 ## Auth flow summary
 

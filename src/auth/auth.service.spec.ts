@@ -50,8 +50,7 @@ const mockConfigValues: Record<string, string | number | boolean> = {
   LEGAL_PRIVACY_VERSION: '1.0.0',
   FRONTEND_URL: 'http://localhost:3000',
   NODE_ENV: 'development',
-  MAIL_HOST: 'localhost',
-  MAIL_PORT: 1025,
+  RESEND_API_KEY: 're_test_mock',
 };
 
 describe('AuthService', () => {

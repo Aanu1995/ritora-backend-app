@@ -5,8 +5,7 @@ describe('envValidationSchema', () => {
     const result = envValidationSchema.validate({
       NODE_ENV: 'development',
       DATABASE_PASSWORD: '',
-      MAIL_USER: '',
-      MAIL_PASS: '',
+      RESEND_API_KEY: '',
       COOKIE_DOMAIN: '',
     });
 
@@ -16,7 +15,7 @@ describe('envValidationSchema', () => {
       CORS_ORIGINS: 'http://localhost:3000',
       JWT_SECRET: 'dev-jwt-secret-change-me',
       JWT_REFRESH_SECRET: 'dev-refresh-secret-change-me',
-      MAIL_FROM: 'noreply@ritora.com',
+      MAIL_FROM: 'onboarding@resend.dev',
       COOKIE_DOMAIN: '',
       SWAGGER_ENABLED: true,
     });
@@ -48,8 +47,7 @@ describe('envValidationSchema', () => {
       JWT_SECRET: '',
       JWT_REFRESH_SECRET: '',
       COOKIE_DOMAIN: '',
-      MAIL_USER: '',
-      MAIL_PASS: '',
+      RESEND_API_KEY: '',
       MAIL_FROM: 'noreply@ritora.com',
     });
 

@@ -21,6 +21,7 @@ import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { UsersService } from '../users/users.service';
+import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
@@ -46,8 +47,6 @@ export class AuthService {
   private readonly privacyVersion: string;
   private readonly frontendUrl: string;
   private readonly nodeEnv: string;
-  private readonly mailHost: string;
-  private readonly mailPort: number;
 
   constructor(
     private readonly usersService: UsersService,
@@ -86,8 +85,6 @@ export class AuthService {
       'http://localhost:3000',
     );
     this.nodeEnv = configService.get('NODE_ENV', 'development');
-    this.mailHost = configService.get('MAIL_HOST', 'localhost');
-    this.mailPort = configService.get('MAIL_PORT', 1025);
   }
 
   async register(
@@ -608,7 +605,7 @@ export class AuthService {
     const stack = error instanceof Error ? error.stack : undefined;
 
     this.logger.error(
-      `Failed to send ${type} email to ${email} via ${this.mailHost}:${this.mailPort}: ${message}`,
+      `Failed to send ${type} email to ${email} via ${MAIL_PROVIDER_LABEL}: ${message}`,
       stack,
     );
 
@@ -617,9 +614,8 @@ export class AuthService {
     }
 
     this.logger.warn(
-      `Local development mail is configured for SMTP ${this.mailHost}:${this.mailPort}. ` +
-        'If you are not running Mailpit, start it and open http://localhost:8025, ' +
-        `or configure a real SMTP provider. Temporary ${type} URL for ${email}: ${actionUrl}`,
+      `${MAIL_PROVIDER_LABEL} delivery failed in development. Check your RESEND_API_KEY and verified MAIL_FROM address. ` +
+        `Temporary ${type} URL for ${email}: ${actionUrl}`,
     );
   }
 

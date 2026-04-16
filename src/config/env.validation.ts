@@ -61,14 +61,15 @@ export const envValidationSchema = Joi.object({
   EMAIL_VERIFICATION_EXPIRY: Joi.string().trim().default('24h'),
   PASSWORD_RESET_EXPIRY: Joi.string().trim().default('1h'),
 
-  MAIL_HOST: Joi.string().trim().default('localhost'),
-  MAIL_PORT: Joi.number().port().default(1025),
-  MAIL_USER: productionSecret,
-  MAIL_PASS: productionSecret,
+  RESEND_API_KEY: Joi.when('NODE_ENV', {
+    is: 'test',
+    then: Joi.string().trim().default('re_test_mock'),
+    otherwise: productionSecret,
+  }),
   MAIL_FROM: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().email().required(),
-    otherwise: Joi.string().email().default('noreply@ritora.com'),
+    otherwise: Joi.string().email().default('onboarding@resend.dev'),
   }),
 
   FRONTEND_URL: Joi.when('NODE_ENV', {

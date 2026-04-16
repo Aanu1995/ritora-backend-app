@@ -1,24 +1,42 @@
 import { ConfigService } from '@nestjs/config';
-import { MailerService } from '@nestjs-modules/mailer';
+import { Resend } from 'resend';
 import { MailService } from './mail.service';
 
 describe('MailService', () => {
-  const mailerService = {
-    sendMail: jest.fn().mockResolvedValue(undefined),
-  } as unknown as MailerService;
-
-  const configService = {
-    get: jest.fn((key: string, fallback?: string) =>
-      key === 'FRONTEND_URL' ? 'http://localhost:3000' : fallback,
-    ),
-  } as unknown as ConfigService;
+  let resendClient: Resend;
+  let sendEmail: jest.Mock;
+  let configService: ConfigService;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    sendEmail = jest.fn().mockResolvedValue({
+      data: { id: 'email-123' },
+      error: null,
+    });
+
+    resendClient = {
+      emails: {
+        send: sendEmail,
+      },
+    } as unknown as Resend;
+
+    configService = {
+      get: jest.fn((key: string, fallback?: string) => {
+        switch (key) {
+          case 'FRONTEND_URL':
+            return 'http://localhost:3000';
+          case 'MAIL_FROM':
+            return 'onboarding@resend.dev';
+          case 'RESEND_API_KEY':
+            return 're_test_mock';
+          default:
+            return fallback;
+        }
+      }),
+    } as unknown as ConfigService;
   });
 
-  it('sends verification emails with the expected template and url', async () => {
-    const service = new MailService(mailerService, configService);
+  it('sends verification emails with rendered html and the expected url', async () => {
+    const service = new MailService(resendClient, configService);
 
     await service.sendVerificationEmail(
       'test@example.com',
@@ -26,19 +44,23 @@ describe('MailService', () => {
       'Jane',
     );
 
-    expect(mailerService.sendMail as jest.Mock).toHaveBeenCalledWith({
-      to: 'test@example.com',
+    expect(sendEmail).toHaveBeenCalledWith({
+      from: '"Ritora" <onboarding@resend.dev>',
+      to: ['test@example.com'],
       subject: 'Verify your Ritora account',
-      template: 'verification',
-      context: {
-        firstName: 'Jane',
-        verificationUrl: 'http://localhost:3000/verify-email#token=token-123',
-      },
+      html: expect.stringContaining(
+        'http://localhost:3000/verify-email#token=token-123',
+      ),
     });
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: expect.stringContaining('Jane'),
+      }),
+    );
   });
 
-  it('sends password reset emails with the expected template and url', async () => {
-    const service = new MailService(mailerService, configService);
+  it('sends password reset emails with rendered html and the expected url', async () => {
+    const service = new MailService(resendClient, configService);
 
     await service.sendPasswordResetEmail(
       'test@example.com',
@@ -46,14 +68,55 @@ describe('MailService', () => {
       'Jane',
     );
 
-    expect(mailerService.sendMail as jest.Mock).toHaveBeenCalledWith({
-      to: 'test@example.com',
+    expect(sendEmail).toHaveBeenCalledWith({
+      from: '"Ritora" <onboarding@resend.dev>',
+      to: ['test@example.com'],
       subject: 'Reset your Ritora password',
-      template: 'password-reset',
-      context: {
-        firstName: 'Jane',
-        resetUrl: 'http://localhost:3000/reset-password#token=token-456',
-      },
+      html: expect.stringContaining(
+        'http://localhost:3000/reset-password#token=token-456',
+      ),
     });
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: expect.stringContaining('Jane'),
+      }),
+    );
+  });
+
+  it('throws when Resend reports an API error', async () => {
+    sendEmail.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'Rate limit exceeded' },
+    });
+
+    const service = new MailService(resendClient, configService);
+
+    await expect(
+      service.sendVerificationEmail('test@example.com', 'token-123', 'Jane'),
+    ).rejects.toThrow('Rate limit exceeded');
+  });
+
+  it('throws when RESEND_API_KEY is missing', async () => {
+    configService = {
+      get: jest.fn((key: string, fallback?: string) => {
+        switch (key) {
+          case 'FRONTEND_URL':
+            return 'http://localhost:3000';
+          case 'MAIL_FROM':
+            return 'onboarding@resend.dev';
+          case 'RESEND_API_KEY':
+            return '';
+          default:
+            return fallback;
+        }
+      }),
+    } as unknown as ConfigService;
+
+    const service = new MailService(resendClient, configService);
+
+    await expect(
+      service.sendVerificationEmail('test@example.com', 'token-123', 'Jane'),
+    ).rejects.toThrow('RESEND_API_KEY is not configured');
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 });
