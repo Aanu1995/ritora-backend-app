@@ -63,6 +63,25 @@ describe('UsersService', () => {
     });
   });
 
+  describe('findByIdOrFail', () => {
+    it('returns the user when found', async () => {
+      const user = { id: '01' } as User;
+      repo.findOne.mockResolvedValue(user);
+
+      const result = await service.findByIdOrFail('01');
+
+      expect(result).toEqual(user);
+    });
+
+    it('throws when the user does not exist', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(service.findByIdOrFail('missing')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('findByEmailForAuth', () => {
     it('loads the password hash for authentication checks', async () => {
       const user = { id: '01', email: 'test@example.com' } as User;
@@ -149,6 +168,37 @@ describe('UsersService', () => {
       await expect(
         service.update('missing', { email_verified: true }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('updateProfile', () => {
+    it('trims first and last name before saving', async () => {
+      const existing = {
+        id: '01',
+        first_name: 'Jane',
+        last_name: 'Doe',
+      } as User;
+      const updated = {
+        ...existing,
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+      } as User;
+
+      repo.findOne.mockResolvedValue(existing);
+      repo.save.mockResolvedValue(updated);
+
+      const result = await service.updateProfile('01', {
+        firstName: '  Ada  ',
+        lastName: '  Lovelace  ',
+      });
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          first_name: 'Ada',
+          last_name: 'Lovelace',
+        }),
+      );
+      expect(result).toEqual(updated);
     });
   });
 

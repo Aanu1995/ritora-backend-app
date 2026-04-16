@@ -45,6 +45,14 @@ describe('Auth (e2e)', () => {
     return body ? req.send(body) : req;
   }
 
+  function authPatch(path: string, body?: Record<string, unknown>) {
+    const req = request(app.getHttpServer())
+      .patch(`/api/v1${path}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Origin', ORIGIN);
+    return body ? req.send(body) : req;
+  }
+
   function publicPost(path: string, body?: Record<string, unknown>) {
     const req = request(app.getHttpServer())
       .post(`/api/v1${path}`)
@@ -186,6 +194,31 @@ describe('Auth (e2e)', () => {
       expect(res.body.email).toBe(TEST_USER.email);
       expect(res.body.firstName).toBe(TEST_USER.firstName);
       expect(res.body.emailVerified).toBe(true);
+    });
+
+    it('should return the current user through /users/me', async () => {
+      const res = await authGet('/users/me').expect(200);
+
+      expect(res.body.email).toBe(TEST_USER.email);
+      expect(res.body.firstName).toBe(TEST_USER.firstName);
+      expect(res.body.lastName).toBe(TEST_USER.lastName);
+    });
+
+    it('should update the current user profile', async () => {
+      const res = await authPatch('/users/me', {
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+      }).expect(200);
+
+      expect(res.body.firstName).toBe('Ada');
+      expect(res.body.lastName).toBe('Lovelace');
+    });
+
+    it('should reject invalid profile payloads', async () => {
+      await authPatch('/users/me', {
+        firstName: '  ',
+        lastName: 'Lovelace',
+      }).expect(400);
     });
 
     it('should list active sessions', async () => {

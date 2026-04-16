@@ -30,6 +30,15 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { id } });
   }
 
+  async findByIdOrFail(id: string): Promise<User> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
   async findByIdForAuth(id: string): Promise<User | null> {
     return this.usersRepository
       .createQueryBuilder('user')
@@ -55,12 +64,19 @@ export class UsersService {
   }
 
   async update(id: string, data: Partial<User>): Promise<User> {
-    const user = await this.findById(id);
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+    const user = await this.findByIdOrFail(id);
     Object.assign(user, data);
     return this.usersRepository.save(user);
+  }
+
+  async updateProfile(
+    id: string,
+    data: { firstName: string; lastName: string },
+  ): Promise<User> {
+    return this.update(id, {
+      first_name: data.firstName.trim(),
+      last_name: data.lastName.trim(),
+    });
   }
 
   async findByVerificationTokenHash(hash: string): Promise<User | null> {
@@ -76,10 +92,7 @@ export class UsersService {
   }
 
   async remove(id: string): Promise<void> {
-    const user = await this.findById(id);
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+    const user = await this.findByIdOrFail(id);
     await this.usersRepository.remove(user);
   }
 }
