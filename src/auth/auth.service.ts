@@ -234,7 +234,7 @@ export class AuthService {
     const newRefreshToken = `${session.id}.${newSecret}`;
     this.setRefreshCookie(res, newRefreshToken);
 
-    const accessToken = this.generateAccessToken(session.user);
+    const accessToken = this.generateAccessToken(session.user, session.id);
 
     return { accessToken };
   }
@@ -461,16 +461,16 @@ export class AuthService {
     await this.sessionsRepository.save(session);
 
     this.setRefreshCookie(res, refreshToken);
-    const accessToken = this.generateAccessToken(user);
+    const accessToken = this.generateAccessToken(user, sessionId);
 
     return { accessToken };
   }
 
-  private generateAccessToken(user: User): string {
+  private generateAccessToken(user: User, sessionId: string): string {
     const expiresIn = this.jwtAccessExpiry as SignOptions['expiresIn'];
 
     return this.jwtService.sign(
-      { sub: user.id, email: user.email },
+      { sub: user.id, email: user.email, sid: sessionId },
       {
         expiresIn,
         issuer: this.jwtIssuer,
