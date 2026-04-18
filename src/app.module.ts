@@ -7,7 +7,9 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
+import { CatalogueModule } from './catalogue/catalogue.module';
 import { HealthModule } from './health/health.module';
+import { InventoryModule } from './inventory/inventory.module';
 import { SkinProfileModule } from './skin-profile/skin-profile.module';
 
 @Module({
@@ -30,6 +32,8 @@ import { SkinProfileModule } from './skin-profile/skin-profile.module';
     ]),
     HealthModule,
     AuthModule,
+    CatalogueModule,
+    InventoryModule,
     SkinProfileModule,
   ],
   providers: [

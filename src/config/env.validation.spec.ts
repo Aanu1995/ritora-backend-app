@@ -21,6 +21,23 @@ describe('envValidationSchema', () => {
     });
   });
 
+  it('disables swagger by default in production', () => {
+    const { error, value } = envValidationSchema.validate({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      MAIL_FROM: 'noreply@ritora.com',
+      FRONTEND_URL: 'https://app.ritora.com',
+    });
+
+    expect(error).toBeUndefined();
+    expect(value.SWAGGER_ENABLED).toBe(false);
+  });
+
   it('allows extra process environment variables from npm and shells', () => {
     const { error } = envValidationSchema.validate({
       NODE_ENV: 'development',

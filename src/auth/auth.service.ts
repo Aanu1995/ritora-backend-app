@@ -15,6 +15,14 @@ import { Response } from 'express';
 import type { SignOptions } from 'jsonwebtoken';
 import { IsNull, Repository } from 'typeorm';
 import { ulid } from 'ulid';
+import {
+  expiresFromDuration,
+  isAfterNow,
+  isBeforeNow,
+  nowDate,
+  toIsoString,
+  toNullableIsoString,
+} from '../common/utils/date';
 import { SkinProfileResponseDto } from '../skin-profile/dto/skin-profile-response.dto';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
@@ -135,10 +143,10 @@ export class AuthService {
       user.first_name,
     );
 
-    return {
-      message: 'Verify your email to activate your account',
-      user: UserResponseDto.fromEntity(user),
-    };
+    return new RegisterResponseDto(
+      'Verify your email to activate your account',
+      UserResponseDto.fromEntity(user),
+    );
   }
 
   async login(
@@ -167,10 +175,7 @@ export class AuthService {
 
     const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
-    return {
-      accessToken,
-      user: UserResponseDto.fromEntity(user),
-    };
+    return new AuthResponseDto(accessToken, UserResponseDto.fromEntity(user));
   }
 
   async refreshTokens(
@@ -203,7 +208,7 @@ export class AuthService {
       );
     }
 
-    if (session.expires_at < new Date()) {
+    if (isBeforeNow(session.expires_at)) {
       throw new UnauthorizedException('Refresh token expired');
     }
 
@@ -222,7 +227,7 @@ export class AuthService {
     const newSecret = randomBytes(32).toString('hex');
     const newSecretHash = this.sha256(newSecret);
     session.refresh_token_hash = newSecretHash;
-    session.last_used_at = new Date();
+    session.last_used_at = nowDate();
     if (ip) {
       session.ip_address = ip;
     }
@@ -251,7 +256,7 @@ export class AuthService {
       throw new BadRequestException('Invalid verification token');
     }
 
-    if (user.email_verification_expires < new Date()) {
+    if (isBeforeNow(user.email_verification_expires)) {
       throw new BadRequestException('Verification token has expired');
     }
 
@@ -316,7 +321,7 @@ export class AuthService {
       throw new BadRequestException('Invalid reset token');
     }
 
-    if (user.password_reset_expires < new Date()) {
+    if (isBeforeNow(user.password_reset_expires)) {
       throw new BadRequestException('Reset token has expired');
     }
 
@@ -337,7 +342,7 @@ export class AuthService {
     });
 
     if (session && !session.revoked_at) {
-      session.revoked_at = new Date();
+      session.revoked_at = nowDate();
       await this.sessionsRepository.save(session);
     }
 
@@ -364,7 +369,7 @@ export class AuthService {
     });
 
     return sessions
-      .filter((s) => s.expires_at > new Date())
+      .filter((s) => isAfterNow(s.expires_at))
       .map((session) => SessionResponseDto.fromEntity(session));
   }
 
@@ -402,17 +407,17 @@ export class AuthService {
         consentType: c.consent_type,
         consentVersion: c.consent_version,
         granted: c.granted,
-        grantedAt: c.granted_at?.toISOString() ?? null,
-        revokedAt: c.revoked_at?.toISOString() ?? null,
-        createdAt: c.created_at.toISOString(),
+        grantedAt: toNullableIsoString(c.granted_at),
+        revokedAt: toNullableIsoString(c.revoked_at),
+        createdAt: toIsoString(c.created_at),
       })),
       sessions: sessions.map((s) => ({
         id: s.id,
         userAgent: s.user_agent,
         ipAddress: s.ip_address,
-        createdAt: s.created_at.toISOString(),
-        lastUsedAt: s.last_used_at.toISOString(),
-        revokedAt: s.revoked_at?.toISOString() ?? null,
+        createdAt: toIsoString(s.created_at),
+        lastUsedAt: toIsoString(s.last_used_at),
+        revokedAt: toNullableIsoString(s.revoked_at),
       })),
     };
   }
@@ -456,7 +461,7 @@ export class AuthService {
       expires_at: this.expiresIn(this.jwtRefreshExpiry),
       user_agent: userAgent ?? null,
       ip_address: ip ?? null,
-      last_used_at: new Date(),
+      last_used_at: nowDate(),
     });
     await this.sessionsRepository.save(session);
 
@@ -526,7 +531,7 @@ export class AuthService {
   private async revokeAllSessions(userId: string): Promise<void> {
     await this.sessionsRepository.update(
       { user_id: userId, revoked_at: IsNull() },
-      { revoked_at: new Date() },
+      { revoked_at: nowDate() },
     );
   }
 
@@ -535,7 +540,7 @@ export class AuthService {
     ip: string | undefined,
     consents: { type: string; version: string }[],
   ): Promise<void> {
-    const now = new Date();
+    const now = nowDate();
     const entities = consents.map((c) =>
       this.consentsRepository.create({
         id: ulid(),
@@ -646,7 +651,7 @@ export class AuthService {
   }
 
   private expiresIn(duration: string): Date {
-    return new Date(Date.now() + this.parseExpiryMs(duration));
+    return expiresFromDuration(duration);
   }
 
   private parseExpiryMs(duration: string): number {

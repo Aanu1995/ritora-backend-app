@@ -32,14 +32,20 @@ export function configureApp(
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
   const expressApp = app.getHttpAdapter().getInstance() as Express;
+  const isProduction = configService.get<string>('NODE_ENV') === 'production';
 
-  if (configService.get<string>('NODE_ENV') === 'production') {
+  if (isProduction) {
     expressApp.set('trust proxy', 1);
   }
 
   expressApp.disable('x-powered-by');
 
-  if (configService.get<boolean>('SWAGGER_ENABLED', true)) {
+  const swaggerEnabled = configService.get<boolean>(
+    'SWAGGER_ENABLED',
+    !isProduction,
+  );
+
+  if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Ritora API')
       .setDescription(

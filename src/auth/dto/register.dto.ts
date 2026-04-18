@@ -11,7 +11,7 @@ import {
 export class RegisterDto {
   @ApiProperty({ example: 'user@example.com' })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiProperty({ minLength: 8 })
   @IsString()
@@ -20,27 +20,27 @@ export class RegisterDto {
     message:
       'password must contain at least one uppercase letter, one lowercase letter, and one number',
   })
-  password: string;
+  password!: string;
 
   @ApiProperty({ example: 'Jane' })
   @IsString()
   @MinLength(1)
-  firstName: string;
+  firstName!: string;
 
   @ApiProperty({ example: 'Doe' })
   @IsString()
   @MinLength(1)
-  lastName: string;
+  lastName!: string;
 
   @ApiProperty({ enum: ['en', 'sv'], default: 'en' })
   @IsIn(['en', 'sv'])
-  preferredLanguage: string;
+  preferredLanguage!: string;
 
   @ApiProperty({ description: 'Must be true to register' })
   @IsBoolean()
-  termsAccepted: boolean;
+  termsAccepted!: boolean;
 
   @ApiProperty({ description: 'Must be true to register' })
   @IsBoolean()
-  privacyPolicyAccepted: boolean;
+  privacyPolicyAccepted!: boolean;
 }

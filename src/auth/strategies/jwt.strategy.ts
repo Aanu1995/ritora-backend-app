@@ -4,6 +4,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { isBeforeNow } from '../../common/utils/date';
 import { UsersService } from '../../users/users.service';
 import { AuthSession } from '../entities/auth-session.entity';
 
@@ -44,7 +45,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       },
     });
 
-    if (!session || session.expires_at < new Date()) {
+    if (!session || isBeforeNow(session.expires_at)) {
       throw new UnauthorizedException();
     }
 

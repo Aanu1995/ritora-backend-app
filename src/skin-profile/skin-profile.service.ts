@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { nowDate } from '../common/utils/date';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersService } from '../users/users.service';
 import { CreateSkinProfileDto } from './dto/create-skin-profile.dto';
@@ -180,7 +181,7 @@ export class SkinProfileService {
           consent_type: 'location_processing',
           consent_version: this.privacyVersion,
           granted: true,
-          granted_at: new Date(),
+          granted_at: nowDate(),
           revoked_at: null,
           ip_address: null,
         }),
@@ -190,7 +191,7 @@ export class SkinProfileService {
 
     if (activeConsent) {
       activeConsent.granted = false;
-      activeConsent.revoked_at = new Date();
+      activeConsent.revoked_at = nowDate();
       await this.consentsRepository.save(activeConsent);
     }
   }

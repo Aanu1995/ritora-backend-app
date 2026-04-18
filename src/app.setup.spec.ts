@@ -17,6 +17,7 @@ type MockApp = {
 describe('configureApp', () => {
   const createApp = () => {
     const disable = jest.fn();
+    const set = jest.fn();
 
     const app: MockApp = {
       use: jest.fn(),
@@ -25,11 +26,11 @@ describe('configureApp', () => {
       useGlobalPipes: jest.fn(),
       useGlobalFilters: jest.fn(),
       getHttpAdapter: jest.fn(() => ({
-        getInstance: () => ({ disable }),
+        getInstance: () => ({ disable, set }),
       })),
     };
 
-    return { app, disable };
+    return { app, disable, set };
   };
 
   const createConfigService = (
@@ -89,6 +90,19 @@ describe('configureApp', () => {
 
     configureApp(app as unknown as INestApplication, configService);
 
+    expect(createDocumentSpy).not.toHaveBeenCalled();
+    expect(setupSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips swagger setup by default in production', () => {
+    const { app, set } = createApp();
+    const configService = createConfigService({ NODE_ENV: 'production' });
+    const createDocumentSpy = jest.spyOn(SwaggerModule, 'createDocument');
+    const setupSpy = jest.spyOn(SwaggerModule, 'setup');
+
+    configureApp(app as unknown as INestApplication, configService);
+
+    expect(set).toHaveBeenCalledWith('trust proxy', 1);
     expect(createDocumentSpy).not.toHaveBeenCalled();
     expect(setupSpy).not.toHaveBeenCalled();
   });

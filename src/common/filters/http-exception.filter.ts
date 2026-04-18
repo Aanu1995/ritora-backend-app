@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { nowDate, toIsoString } from '../utils/date';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -22,7 +23,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       ...this.getExceptionPayload(exception),
-      timestamp: new Date().toISOString(),
+      timestamp: toIsoString(nowDate()),
       path: request.url,
     });
   }

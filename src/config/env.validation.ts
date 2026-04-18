@@ -82,7 +82,11 @@ export const envValidationSchema = Joi.object({
       .default('http://localhost:3000'),
   }),
 
-  SWAGGER_ENABLED: Joi.boolean().default(true),
+  SWAGGER_ENABLED: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.boolean().default(false),
+    otherwise: Joi.boolean().default(true),
+  }),
 
   LEGAL_TERMS_VERSION: Joi.string().trim().default('1.0.0'),
   LEGAL_PRIVACY_VERSION: Joi.string().trim().default('1.0.0'),
