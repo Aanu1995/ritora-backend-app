@@ -63,6 +63,9 @@ describe('configureApp', () => {
     expect(app.enableCors).toHaveBeenCalledWith({
       origin: ['http://localhost:3000', 'https://ritora.com'],
       credentials: true,
+      methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      maxAge: 86400,
     });
     expect(app.setGlobalPrefix).toHaveBeenCalledWith('api/v1');
 

@@ -6,6 +6,7 @@ import {
   encodeCursor,
   type PaginatedResult,
 } from '../common/utils/cursor-pagination';
+import { assertSafeExternalHttpUrl } from '../common/utils/url-security';
 import { DataProvenance } from '../shelf/shelf.types';
 import { CatalogueSearchQueryDto } from './dto/catalogue-search-query.dto';
 import { CatalogueSuggestionResponseDto } from './dto/catalogue-suggestion-response.dto';
@@ -185,6 +186,8 @@ export class CatalogueService {
   }
 
   async resolveUrl(url: string): Promise<ResolvedLookupResponseDto | null> {
+    assertSafeExternalHttpUrl(url, 'Resolve URL');
+
     const normalizedUrl = normalizeUrl(url);
     if (!normalizedUrl) {
       return null;

@@ -6,21 +6,36 @@ import type { Express } from 'express';
 import helmet from 'helmet';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
+function parseCorsOrigins(configService: ConfigService): string[] {
+  const configuredOrigins =
+    configService.get<string>('CORS_ORIGINS')?.trim() ||
+    configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+
+  return Array.from(
+    new Set(
+      configuredOrigins
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+        .map((origin) => new URL(origin).origin),
+    ),
+  );
+}
+
 export function configureApp(
   app: INestApplication,
   configService: ConfigService,
 ): void {
-  const corsOrigins = configService
-    .get<string>('CORS_ORIGINS', 'http://localhost:3000')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const corsOrigins = parseCorsOrigins(configService);
 
   app.use(helmet());
   app.use(cookieParser());
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 86400,
   });
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(

@@ -12,7 +12,8 @@ describe('envValidationSchema', () => {
     expect(result.error).toBeUndefined();
     expect(result.value).toMatchObject({
       API_PORT: 3001,
-      CORS_ORIGINS: 'http://localhost:3000',
+      CORS_ORIGINS: '',
+      DATABASE_SSL_REJECT_UNAUTHORIZED: false,
       JWT_SECRET: 'dev-jwt-secret-change-me',
       JWT_REFRESH_SECRET: 'dev-refresh-secret-change-me',
       MAIL_FROM: 'onboarding@resend.dev',
@@ -36,6 +37,7 @@ describe('envValidationSchema', () => {
 
     expect(error).toBeUndefined();
     expect(value.SWAGGER_ENABLED).toBe(false);
+    expect(value.DATABASE_SSL_REJECT_UNAUTHORIZED).toBe(true);
   });
 
   it('allows extra process environment variables from npm and shells', () => {
@@ -70,5 +72,48 @@ describe('envValidationSchema', () => {
 
     expect(error).toBeDefined();
     expect(error?.message).toContain('"JWT_SECRET"');
+  });
+
+  it('rejects wildcard cors origins when credentials are enabled', () => {
+    const { error } = envValidationSchema.validate({
+      NODE_ENV: 'development',
+      CORS_ORIGINS: '*',
+    });
+
+    expect(error).toBeDefined();
+  });
+
+  it('rejects insecure same-site none cookies', () => {
+    const { error } = envValidationSchema.validate({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: false,
+      COOKIE_SAME_SITE: 'none',
+      RESEND_API_KEY: 're_prod_mock',
+      MAIL_FROM: 'noreply@ritora.com',
+      FRONTEND_URL: 'https://app.ritora.com',
+    });
+
+    expect(error).toBeDefined();
+  });
+
+  it('rejects non-https cors origins in production', () => {
+    const { error } = envValidationSchema.validate({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      MAIL_FROM: 'noreply@ritora.com',
+      FRONTEND_URL: 'https://app.ritora.com',
+      CORS_ORIGINS: 'http://localhost:3000',
+    });
+
+    expect(error).toBeDefined();
   });
 });

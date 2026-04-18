@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync, type ValidationError } from 'class-validator';
 import { parseUtcDate } from '../common/utils/date';
+import { assertSafeExternalHttpUrl } from '../common/utils/url-security';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 
 function firstValidationMessage(errors: ValidationError[]): string {
@@ -67,6 +68,19 @@ export function assertValidInventoryDraft(payload: unknown): void {
   if (!hasNonBlankItems(instance.guidance.steps)) {
     throw new BadRequestException('At least one guidance step is required');
   }
+
+  instance.identity.imageUrls.forEach((imageUrl, index) => {
+    assertSafeExternalHttpUrl(imageUrl, `Identity image URL ${index + 1}`);
+  });
+
+  assertSafeExternalHttpUrl(
+    instance.manufacturer.productUrl,
+    'Manufacturer product URL',
+  );
+  assertSafeExternalHttpUrl(
+    instance.manufacturer.websiteUrl,
+    'Manufacturer website URL',
+  );
 
   const openedAt = parseUtcDate(instance.userFields.openedAt);
   const expiresAt = parseUtcDate(instance.userFields.expiresAt);

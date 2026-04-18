@@ -336,16 +336,37 @@ export class AuthService {
     await this.revokeAllSessions(user.id);
   }
 
-  async logout(sessionId: string, res: Response): Promise<void> {
-    const session = await this.sessionsRepository.findOne({
-      where: { id: sessionId },
-    });
+  async logout(refreshTokenRaw: string, res: Response): Promise<void> {
+    const parsedRefreshToken = this.parseRefreshToken(refreshTokenRaw);
 
-    if (session && !session.revoked_at) {
-      session.revoked_at = nowDate();
-      await this.sessionsRepository.save(session);
+    if (!parsedRefreshToken) {
+      this.clearRefreshCookie(res);
+      return;
     }
 
+    const session = await this.sessionsRepository.findOne({
+      where: { id: parsedRefreshToken.sessionId },
+    });
+
+    if (!session || session.revoked_at || isBeforeNow(session.expires_at)) {
+      this.clearRefreshCookie(res);
+      return;
+    }
+
+    const secretHash = this.sha256(parsedRefreshToken.secret);
+    const storedHash = session.refresh_token_hash;
+    const secretsMatch = this.timingSafeCompare(
+      Buffer.from(secretHash, 'hex'),
+      Buffer.from(storedHash, 'hex'),
+    );
+
+    if (!secretsMatch) {
+      this.clearRefreshCookie(res);
+      return;
+    }
+
+    session.revoked_at = nowDate();
+    await this.sessionsRepository.save(session);
     this.clearRefreshCookie(res);
   }
 
@@ -641,6 +662,21 @@ export class AuthService {
 
   private sha256(data: string): string {
     return createHash('sha256').update(data).digest('hex');
+  }
+
+  private parseRefreshToken(
+    refreshTokenRaw: string,
+  ): { sessionId: string; secret: string } | null {
+    const dotIndex = refreshTokenRaw.indexOf('.');
+
+    if (dotIndex <= 0 || dotIndex === refreshTokenRaw.length - 1) {
+      return null;
+    }
+
+    return {
+      sessionId: refreshTokenRaw.substring(0, dotIndex),
+      secret: refreshTokenRaw.substring(dotIndex + 1),
+    };
   }
 
   private timingSafeCompare(a: Buffer, b: Buffer): boolean {

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -114,5 +115,11 @@ describe('CatalogueService', () => {
       'retinol serum',
       'catalogue-1',
     ]);
+  });
+
+  it('rejects unsafe private-network URLs during URL resolution', async () => {
+    await expect(
+      service.resolveUrl('http://127.0.0.1:3000/private-product'),
+    ).rejects.toThrow(BadRequestException);
   });
 });

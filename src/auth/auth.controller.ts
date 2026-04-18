@@ -105,6 +105,7 @@ export class AuthController {
   @Public()
   @UseGuards(OriginCheckGuard)
   @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(20))
   @ApiOkResponse({
     schema: { properties: { accessToken: { type: 'string' } } },
   })
@@ -129,6 +130,7 @@ export class AuthController {
   @Post('verify-email')
   @Public()
   @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(10))
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
     await this.authService.verifyEmail(dto.token);
     return { message: 'Email verified successfully' };
@@ -163,6 +165,7 @@ export class AuthController {
   @Post('reset-password')
   @Public()
   @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(10))
   async resetPassword(
     @Body() dto: ResetPasswordDto,
   ): Promise<{ message: string }> {
@@ -194,12 +197,8 @@ export class AuthController {
     const refreshToken = getCookieValue(req, this.cookieRefreshName);
 
     if (refreshToken) {
-      const dotIndex = refreshToken.indexOf('.');
-      if (dotIndex !== -1) {
-        const sessionId = refreshToken.substring(0, dotIndex);
-        await this.authService.logout(sessionId, res);
-        return { message: 'Logged out' };
-      }
+      await this.authService.logout(refreshToken, res);
+      return { message: 'Logged out' };
     }
 
     res.clearCookie(this.cookieRefreshName, {
@@ -222,6 +221,7 @@ export class AuthController {
 
   @Post('export')
   @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(5))
   async exportData(
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmPasswordDto,
@@ -231,6 +231,7 @@ export class AuthController {
 
   @Delete('account')
   @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(5))
   async deleteAccount(
     @CurrentUser('id') userId: string,
     @Body() dto: ConfirmPasswordDto,

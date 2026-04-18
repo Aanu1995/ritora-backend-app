@@ -424,16 +424,34 @@ describe('AuthService', () => {
   // --- logout ---
 
   describe('logout', () => {
-    it('revokes session and clears cookie', async () => {
+    it('revokes session only when the refresh token secret matches', async () => {
       const res = mockRes();
+      const secret = 'a'.repeat(64);
       sessionsRepo.findOne.mockResolvedValue({
         id: '01SESSION',
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
         revoked_at: null,
       });
 
-      await service.logout('01SESSION', asResponse(res));
+      await service.logout(`01SESSION.${secret}`, asResponse(res));
 
       expect(sessionsRepo.save).toHaveBeenCalled();
+      expect(res.clearCookie).toHaveBeenCalled();
+    });
+
+    it('clears the cookie without revoking another session on invalid token secret', async () => {
+      const res = mockRes();
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        refresh_token_hash: sha256('a'.repeat(64)),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+      });
+
+      await service.logout(`01SESSION.${'b'.repeat(64)}`, asResponse(res));
+
+      expect(sessionsRepo.save).not.toHaveBeenCalled();
       expect(res.clearCookie).toHaveBeenCalled();
     });
   });

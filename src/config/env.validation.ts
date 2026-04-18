@@ -6,6 +6,84 @@ const productionSecret = Joi.when('NODE_ENV', {
   otherwise: Joi.string().allow('').default(''),
 });
 
+function validateCorsOrigins(
+  value: string,
+  helpers: Joi.CustomHelpers<string>,
+) {
+  if (value.trim().length === 0) {
+    return value;
+  }
+
+  const origins = value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (origins.length === 0) {
+    return helpers.error('any.invalid');
+  }
+
+  for (const origin of origins) {
+    if (origin === '*') {
+      return helpers.error('any.invalid');
+    }
+
+    try {
+      const url = new URL(origin);
+      const protocol = url.protocol.toLowerCase();
+
+      if (protocol !== 'http:' && protocol !== 'https:') {
+        return helpers.error('any.invalid');
+      }
+
+      if (url.username || url.password) {
+        return helpers.error('any.invalid');
+      }
+    } catch {
+      return helpers.error('any.invalid');
+    }
+  }
+
+  return value;
+}
+
+function validateCookieSettings(
+  env: Record<string, unknown>,
+  helpers: Joi.CustomHelpers<Record<string, unknown>>,
+) {
+  if (env.COOKIE_SAME_SITE === 'none' && env.COOKIE_SECURE !== true) {
+    return helpers.error('any.invalid');
+  }
+
+  if (env.NODE_ENV === 'production') {
+    const configuredOrigins =
+      typeof env.CORS_ORIGINS === 'string' && env.CORS_ORIGINS.trim().length > 0
+        ? env.CORS_ORIGINS
+        : typeof env.FRONTEND_URL === 'string'
+          ? env.FRONTEND_URL
+          : '';
+
+    const origins = configuredOrigins
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+
+    const hasInsecureOrigin = origins.some((origin) => {
+      try {
+        return new URL(origin).protocol.toLowerCase() !== 'https:';
+      } catch {
+        return true;
+      }
+    });
+
+    if (hasInsecureOrigin) {
+      return helpers.error('any.invalid');
+    }
+  }
+
+  return env;
+}
+
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
@@ -22,8 +100,16 @@ export const envValidationSchema = Joi.object({
   DATABASE_USER: Joi.string().trim().default('postgres'),
   DATABASE_PASSWORD: productionSecret,
   DATABASE_SSL: Joi.boolean().default(false),
+  DATABASE_SSL_REJECT_UNAUTHORIZED: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.boolean().default(true),
+    otherwise: Joi.boolean().default(false),
+  }),
 
-  CORS_ORIGINS: Joi.string().trim().default('http://localhost:3000'),
+  CORS_ORIGINS: Joi.string()
+    .trim()
+    .default('')
+    .custom(validateCorsOrigins, 'CORS origin validation'),
 
   JWT_SECRET: Joi.when('NODE_ENV', {
     is: 'production',
@@ -90,4 +176,6 @@ export const envValidationSchema = Joi.object({
 
   LEGAL_TERMS_VERSION: Joi.string().trim().default('1.0.0'),
   LEGAL_PRIVACY_VERSION: Joi.string().trim().default('1.0.0'),
-}).unknown(true);
+})
+  .custom(validateCookieSettings, 'cookie security validation')
+  .unknown(true);

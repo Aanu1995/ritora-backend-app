@@ -167,7 +167,7 @@ describe('AuthController', () => {
     );
 
     expect(result.message).toBe('Logged out');
-    expect(authService.logout).toHaveBeenCalledWith('01SESSION', res);
+    expect(authService.logout).toHaveBeenCalledWith('01SESSION.secret', res);
   });
 
   it('refresh reads the configured refresh cookie name', async () => {
