@@ -8,7 +8,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { SHELF_PAGE_SIZE } from '../../shelf/shelf.constants';
+import {
+  DEFAULT_SHELF_PAGE_SIZE,
+  MAX_SHELF_PAGE_SIZE,
+} from '../../shelf/shelf.constants';
 
 export class CatalogueSearchQueryDto {
   @ApiPropertyOptional({ description: 'Search by brand and product name' })
@@ -22,13 +25,16 @@ export class CatalogueSearchQueryDto {
   @MaxLength(512)
   cursor?: string;
 
-  @ApiPropertyOptional({ default: SHELF_PAGE_SIZE, maximum: SHELF_PAGE_SIZE })
+  @ApiPropertyOptional({
+    default: DEFAULT_SHELF_PAGE_SIZE,
+    maximum: MAX_SHELF_PAGE_SIZE,
+  })
   @IsOptional()
   @Transform(({ value }) =>
-    value === undefined ? SHELF_PAGE_SIZE : Number(value),
+    value === undefined ? DEFAULT_SHELF_PAGE_SIZE : Number(value),
   )
   @IsInt()
   @Min(1)
-  @Max(SHELF_PAGE_SIZE)
-  limit = SHELF_PAGE_SIZE;
+  @Max(MAX_SHELF_PAGE_SIZE)
+  limit = DEFAULT_SHELF_PAGE_SIZE;
 }

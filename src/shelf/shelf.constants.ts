@@ -18,4 +18,5 @@ export const SHELF_SORT_VALUES = Object.values(ShelfSort);
 export const SHELF_STAT_FILTER_VALUES = Object.values(ShelfStatFilter);
 export const DATA_PROVENANCE_VALUES = Object.values(DataProvenance);
 
-export const SHELF_PAGE_SIZE = 30;
+export const DEFAULT_SHELF_PAGE_SIZE = 20;
+export const MAX_SHELF_PAGE_SIZE = 30;

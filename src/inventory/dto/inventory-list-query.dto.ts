@@ -14,7 +14,10 @@ import {
   ShelfSort,
   ShelfStatFilter,
 } from '../../shelf/shelf.types';
-import { SHELF_PAGE_SIZE } from '../../shelf/shelf.constants';
+import {
+  DEFAULT_SHELF_PAGE_SIZE,
+  MAX_SHELF_PAGE_SIZE,
+} from '../../shelf/shelf.constants';
 
 const CATEGORY_QUERY_VALUES = [...Object.values(ProductCategory), 'all'];
 
@@ -45,6 +48,6 @@ export class InventoryListQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(SHELF_PAGE_SIZE)
-  limit: number = SHELF_PAGE_SIZE;
+  @Max(MAX_SHELF_PAGE_SIZE)
+  limit: number = DEFAULT_SHELF_PAGE_SIZE;
 }
