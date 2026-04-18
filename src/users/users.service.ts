@@ -79,6 +79,15 @@ export class UsersService {
     });
   }
 
+  async updatePreferredLanguage(
+    id: string,
+    preferredLanguage: string,
+  ): Promise<User> {
+    return this.update(id, {
+      preferred_language: preferredLanguage.trim().toLowerCase(),
+    });
+  }
+
   async findByVerificationTokenHash(hash: string): Promise<User | null> {
     return this.usersRepository.findOne({
       where: { email_verification_token_hash: hash },

@@ -4,9 +4,9 @@ import * as Handlebars from 'handlebars';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { Resend } from 'resend';
+import { type AppLanguage, translate } from '../common/i18n/i18n';
 import {
   DEFAULT_MAIL_FROM,
-  MAIL_SUBJECTS,
   MailTemplateName,
   RESEND_CLIENT,
 } from './mail.constants';
@@ -15,12 +15,30 @@ type VerificationTemplateContext = {
   firstName: string;
   verificationUrl: string;
   logoUrl: string;
+  previewText: string;
+  title: string;
+  intro: string;
+  ctaLabel: string;
+  expiryNote: string;
+  fallbackIntro: string;
+  ignoreNote: string;
+  footerLineOne: string;
+  footerLineTwo: string;
 };
 
 type PasswordResetTemplateContext = {
   firstName: string;
   resetUrl: string;
   logoUrl: string;
+  previewText: string;
+  title: string;
+  intro: string;
+  ctaLabel: string;
+  expiryNote: string;
+  fallbackIntro: string;
+  unexpectedTitle: string;
+  unexpectedBody: string;
+  footerLine: string;
 };
 
 type MailTemplateContextMap = {
@@ -55,6 +73,7 @@ export class MailService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     const verificationUrl = this.buildFrontendPathActionUrl(
       'verify-email',
@@ -64,11 +83,20 @@ export class MailService {
       firstName,
       verificationUrl,
       logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      previewText: translate(language, 'mail.verification.previewText'),
+      title: translate(language, 'mail.verification.title', { firstName }),
+      intro: translate(language, 'mail.verification.intro'),
+      ctaLabel: translate(language, 'mail.verification.ctaLabel'),
+      expiryNote: translate(language, 'mail.verification.expiry'),
+      fallbackIntro: translate(language, 'mail.verification.fallbackIntro'),
+      ignoreNote: translate(language, 'mail.verification.ignore'),
+      footerLineOne: translate(language, 'mail.verification.footerLineOne'),
+      footerLineTwo: translate(language, 'mail.verification.footerLineTwo'),
     });
 
     await this.sendEmail({
       to: email,
-      subject: MAIL_SUBJECTS[MailTemplateName.Verification],
+      subject: translate(language, 'mail.subject.verification'),
       html,
     });
   }
@@ -77,17 +105,30 @@ export class MailService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     const resetUrl = this.buildFrontendPathActionUrl('reset-password', token);
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
       firstName,
       resetUrl,
       logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      previewText: translate(language, 'mail.passwordReset.previewText'),
+      title: translate(language, 'mail.passwordReset.title'),
+      intro: translate(language, 'mail.passwordReset.intro', { firstName }),
+      ctaLabel: translate(language, 'mail.passwordReset.ctaLabel'),
+      expiryNote: translate(language, 'mail.passwordReset.expiry'),
+      fallbackIntro: translate(language, 'mail.passwordReset.fallbackIntro'),
+      unexpectedTitle: translate(
+        language,
+        'mail.passwordReset.unexpectedTitle',
+      ),
+      unexpectedBody: translate(language, 'mail.passwordReset.unexpectedBody'),
+      footerLine: translate(language, 'mail.passwordReset.footerLine'),
     });
 
     await this.sendEmail({
       to: email,
-      subject: MAIL_SUBJECTS[MailTemplateName.PasswordReset],
+      subject: translate(language, 'mail.subject.passwordReset'),
       html,
     });
   }

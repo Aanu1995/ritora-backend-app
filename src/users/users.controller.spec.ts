@@ -1,4 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UsersController } from './users.controller';
@@ -8,6 +9,11 @@ import { User } from './entities/user.entity';
 const mockUsersService = () => ({
   findByIdOrFail: jest.fn(),
   updateProfile: jest.fn(),
+  updatePreferredLanguage: jest.fn(),
+});
+
+const mockRes = () => ({
+  cookie: jest.fn(),
 });
 
 describe('UsersController', () => {
@@ -19,7 +25,15 @@ describe('UsersController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UsersController],
-      providers: [{ provide: UsersService, useValue: usersService }],
+      providers: [
+        { provide: UsersService, useValue: usersService },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string, defaultValue?: unknown) => defaultValue),
+          },
+        },
+      ],
     }).compile();
 
     controller = module.get<UsersController>(UsersController);
@@ -74,6 +88,35 @@ describe('UsersController', () => {
 
     await expect(controller.getMe('missing')).rejects.toThrow(
       NotFoundException,
+    );
+  });
+
+  it('updateLanguage returns the updated user DTO', async () => {
+    const res = mockRes();
+    usersService.updatePreferredLanguage.mockResolvedValue(
+      fakeUser({ preferred_language: 'sv' }),
+    );
+
+    const result = await controller.updateLanguage(
+      '01TESTUSER',
+      {
+        preferredLanguage: 'sv',
+      },
+      res as never,
+    );
+
+    expect(usersService.updatePreferredLanguage).toHaveBeenCalledWith(
+      '01TESTUSER',
+      'sv',
+    );
+    expect(result.preferredLanguage).toBe('sv');
+    expect(res.cookie).toHaveBeenCalledWith(
+      'NEXT_LOCALE',
+      'sv',
+      expect.objectContaining({
+        httpOnly: false,
+        path: '/',
+      }),
     );
   });
 });

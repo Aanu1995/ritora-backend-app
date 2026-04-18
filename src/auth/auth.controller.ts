@@ -16,6 +16,8 @@ import { ConfigService } from '@nestjs/config';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
+import { normalizeLanguage, translate } from '../common/i18n/i18n';
+import { setLocaleCookie } from '../common/i18n/locale-cookie';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { OriginCheckGuard } from '../common/guards/origin-check.guard';
@@ -61,9 +63,9 @@ export class AuthController {
 
   constructor(
     private readonly authService: AuthService,
-    configService: ConfigService,
+    private readonly configService: ConfigService,
   ) {
-    this.cookieRefreshName = configService.get(
+    this.cookieRefreshName = this.configService.get(
       'COOKIE_REFRESH_NAME',
       'ritora_refresh',
     );
@@ -78,7 +80,13 @@ export class AuthController {
     @Body() dto: RegisterDto,
     @Req() req: Request,
   ): Promise<RegisterResponseDto> {
-    return this.authService.register(dto, req.ip);
+    const language = normalizeLanguage(dto.preferredLanguage);
+    const result = await this.authService.register(dto, req.ip);
+
+    return new RegisterResponseDto(
+      translate(language, 'messages.auth.register.verifyEmail'),
+      result.user,
+    );
   }
 
   @Post('login')
@@ -92,13 +100,18 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Req() req: Request,
   ): Promise<AuthResponseDto> {
-    return this.authService.login(
+    const authResponse = await this.authService.login(
       dto.email,
       dto.password,
       res,
       req.ip,
       getHeaderValue(req.headers, 'user-agent'),
     );
+
+    const language = normalizeLanguage(authResponse.user.preferredLanguage);
+    setLocaleCookie(res, this.configService, language);
+
+    return authResponse;
   }
 
   @Post('refresh')
@@ -119,12 +132,20 @@ export class AuthController {
       throw new UnauthorizedException('No refresh token');
     }
 
-    return this.authService.refreshTokens(
+    const refreshResponse = await this.authService.refreshTokens(
       refreshToken,
       res,
       req.ip,
       getHeaderValue(req.headers, 'user-agent'),
     );
+
+    setLocaleCookie(
+      res,
+      this.configService,
+      normalizeLanguage(refreshResponse.preferredLanguage),
+    );
+
+    return { accessToken: refreshResponse.accessToken };
   }
 
   @Post('verify-email')
@@ -133,7 +154,12 @@ export class AuthController {
   @Throttle(authThrottle(10))
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
     await this.authService.verifyEmail(dto.token);
-    return { message: 'Email verified successfully' };
+    return {
+      message: translate(
+        normalizeLanguage(dto.language),
+        'messages.auth.verifyEmail.success',
+      ),
+    };
   }
 
   @Post('resend-verification')
@@ -143,9 +169,10 @@ export class AuthController {
   async resendVerification(
     @Body() dto: ForgotPasswordDto,
   ): Promise<{ message: string }> {
-    await this.authService.resendVerification(dto.email);
+    const language = normalizeLanguage(dto.language);
+    await this.authService.resendVerification(dto.email, language);
     return {
-      message: 'If the email is registered, a verification link has been sent',
+      message: translate(language, 'messages.auth.resendVerification.success'),
     };
   }
 
@@ -156,9 +183,10 @@ export class AuthController {
   async forgotPassword(
     @Body() dto: ForgotPasswordDto,
   ): Promise<{ message: string }> {
-    await this.authService.forgotPassword(dto.email);
+    const language = normalizeLanguage(dto.language);
+    await this.authService.forgotPassword(dto.email, language);
     return {
-      message: 'If the email is registered, a reset link has been sent',
+      message: translate(language, 'messages.auth.forgotPassword.success'),
     };
   }
 
@@ -170,7 +198,12 @@ export class AuthController {
     @Body() dto: ResetPasswordDto,
   ): Promise<{ message: string }> {
     await this.authService.resetPassword(dto.token, dto.newPassword);
-    return { message: 'Password reset successfully' };
+    return {
+      message: translate(
+        normalizeLanguage(dto.language),
+        'messages.auth.resetPassword.success',
+      ),
+    };
   }
 
   @Get('me')
@@ -191,6 +224,7 @@ export class AuthController {
   @UseGuards(OriginCheckGuard)
   @HttpCode(HttpStatus.OK)
   async logout(
+    @CurrentUser('language') language: string | undefined,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
@@ -198,14 +232,24 @@ export class AuthController {
 
     if (refreshToken) {
       await this.authService.logout(refreshToken, res);
-      return { message: 'Logged out' };
+      return {
+        message: translate(
+          normalizeLanguage(language),
+          'messages.auth.logout.success',
+        ),
+      };
     }
 
     res.clearCookie(this.cookieRefreshName, {
       httpOnly: true,
       path: '/api/v1/auth',
     });
-    return { message: 'Logged out' };
+    return {
+      message: translate(
+        normalizeLanguage(language),
+        'messages.auth.logout.success',
+      ),
+    };
   }
 
   @Post('logout-all')
@@ -213,10 +257,16 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logoutAll(
     @CurrentUser('id') userId: string,
+    @CurrentUser('language') language: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
     await this.authService.logoutAll(userId, res);
-    return { message: 'All sessions revoked' };
+    return {
+      message: translate(
+        normalizeLanguage(language),
+        'messages.auth.logoutAll.success',
+      ),
+    };
   }
 
   @Post('export')
@@ -234,10 +284,16 @@ export class AuthController {
   @Throttle(authThrottle(5))
   async deleteAccount(
     @CurrentUser('id') userId: string,
+    @CurrentUser('language') language: string | undefined,
     @Body() dto: ConfirmPasswordDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
     await this.authService.deleteAccount(userId, dto.password, res);
-    return { message: 'Account deleted' };
+    return {
+      message: translate(
+        normalizeLanguage(language),
+        'messages.auth.deleteAccount.success',
+      ),
+    };
   }
 }

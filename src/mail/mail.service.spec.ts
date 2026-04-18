@@ -42,6 +42,7 @@ describe('MailService', () => {
       'test@example.com',
       'token-123',
       'Jane',
+      'en',
     );
 
     expect(sendEmail).toHaveBeenCalledWith({
@@ -66,6 +67,7 @@ describe('MailService', () => {
       'test@example.com',
       'token-456',
       'Jane',
+      'en',
     );
 
     expect(sendEmail).toHaveBeenCalledWith({
@@ -92,7 +94,12 @@ describe('MailService', () => {
     const service = new MailService(resendClient, configService);
 
     await expect(
-      service.sendVerificationEmail('test@example.com', 'token-123', 'Jane'),
+      service.sendVerificationEmail(
+        'test@example.com',
+        'token-123',
+        'Jane',
+        'en',
+      ),
     ).rejects.toThrow('Rate limit exceeded');
   });
 
@@ -115,8 +122,31 @@ describe('MailService', () => {
     const service = new MailService(resendClient, configService);
 
     await expect(
-      service.sendVerificationEmail('test@example.com', 'token-123', 'Jane'),
+      service.sendVerificationEmail(
+        'test@example.com',
+        'token-123',
+        'Jane',
+        'en',
+      ),
     ).rejects.toThrow('RESEND_API_KEY is not configured');
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('sends localized Swedish verification emails', async () => {
+    const service = new MailService(resendClient, configService);
+
+    await service.sendVerificationEmail(
+      'test@example.com',
+      'token-123',
+      'Jane',
+      'sv',
+    );
+
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: 'Verifiera ditt Ritora-konto',
+        html: expect.stringContaining('Verifiera e-post'),
+      }),
+    );
   });
 });

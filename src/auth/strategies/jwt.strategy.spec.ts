@@ -43,6 +43,7 @@ describe('JwtStrategy', () => {
     (usersService.findById as jest.Mock).mockResolvedValue({
       id: '01USER',
       email: 'test@example.com',
+      preferred_language: 'sv',
     });
 
     const strategy = new JwtStrategy(
@@ -61,6 +62,7 @@ describe('JwtStrategy', () => {
     expect(result).toEqual({
       id: '01USER',
       email: 'test@example.com',
+      language: 'sv',
       sessionId: '01SESSION',
     });
   });

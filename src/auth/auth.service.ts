@@ -15,6 +15,7 @@ import { Response } from 'express';
 import type { SignOptions } from 'jsonwebtoken';
 import { IsNull, Repository } from 'typeorm';
 import { ulid } from 'ulid';
+import { type AppLanguage, normalizeLanguage } from '../common/i18n/i18n';
 import {
   expiresFromDuration,
   isAfterNow,
@@ -141,6 +142,7 @@ export class AuthService {
       user.email,
       verificationToken,
       user.first_name,
+      normalizeLanguage(dto.preferredLanguage),
     );
 
     return new RegisterResponseDto(
@@ -183,7 +185,7 @@ export class AuthService {
     res: Response,
     ip?: string,
     userAgent?: string,
-  ): Promise<{ accessToken: string }> {
+  ): Promise<{ accessToken: string; preferredLanguage: string }> {
     const dotIndex = refreshTokenRaw.indexOf('.');
     if (dotIndex === -1) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -241,7 +243,10 @@ export class AuthService {
 
     const accessToken = this.generateAccessToken(session.user, session.id);
 
-    return { accessToken };
+    return {
+      accessToken,
+      preferredLanguage: session.user.preferred_language,
+    };
   }
 
   async verifyEmail(token: string): Promise<void> {
@@ -267,7 +272,10 @@ export class AuthService {
     });
   }
 
-  async resendVerification(email: string): Promise<void> {
+  async resendVerification(
+    email: string,
+    language?: AppLanguage,
+  ): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user || user.email_verified) {
       return;
@@ -285,10 +293,11 @@ export class AuthService {
       user.email,
       verificationToken,
       user.first_name,
+      language ?? normalizeLanguage(user.preferred_language),
     );
   }
 
-  async forgotPassword(email: string): Promise<void> {
+  async forgotPassword(email: string, language?: AppLanguage): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
       return;
@@ -306,6 +315,7 @@ export class AuthService {
       user.email,
       resetToken,
       user.first_name,
+      language ?? normalizeLanguage(user.preferred_language),
     );
   }
 
@@ -590,9 +600,15 @@ export class AuthService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     try {
-      await this.mailService.sendVerificationEmail(email, token, firstName);
+      await this.mailService.sendVerificationEmail(
+        email,
+        token,
+        firstName,
+        language,
+      );
     } catch (error) {
       this.logEmailDeliveryFailure(
         'verification',
@@ -607,9 +623,15 @@ export class AuthService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     try {
-      await this.mailService.sendPasswordResetEmail(email, token, firstName);
+      await this.mailService.sendPasswordResetEmail(
+        email,
+        token,
+        firstName,
+        language,
+      );
     } catch (error) {
       this.logEmailDeliveryFailure(
         'password reset',

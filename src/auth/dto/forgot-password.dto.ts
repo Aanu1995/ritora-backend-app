@@ -1,8 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail } from 'class-validator';
+import { IsEmail, IsIn, IsOptional } from 'class-validator';
 
 export class ForgotPasswordDto {
   @ApiProperty({ example: 'user@example.com' })
-  @IsEmail()
+  @IsEmail({}, { message: 'validation.email.invalid' })
   email!: string;
+
+  @ApiProperty({ enum: ['en', 'sv'], required: false })
+  @IsOptional()
+  @IsIn(['en', 'sv'], { message: 'validation.language.unsupported' })
+  language?: string;
 }

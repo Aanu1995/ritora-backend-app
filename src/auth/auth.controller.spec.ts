@@ -99,7 +99,10 @@ describe('AuthController', () => {
 
   it('login calls authService.login', async () => {
     const res = mockRes();
-    const authResponse = { accessToken: 'tok', user: { id: '01' } };
+    const authResponse = {
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+    };
     authService.login.mockResolvedValue(authResponse);
 
     const result = await controller.login(
@@ -109,14 +112,25 @@ describe('AuthController', () => {
     );
 
     expect(result).toEqual(authResponse);
+    expect(res.cookie).toHaveBeenCalledWith(
+      'NEXT_LOCALE',
+      'sv',
+      expect.objectContaining({
+        httpOnly: false,
+        path: '/',
+      }),
+    );
   });
 
   it('verify-email calls authService.verifyEmail', async () => {
     authService.verifyEmail.mockResolvedValue(undefined);
 
-    const result = await controller.verifyEmail({ token: 'abc' });
+    const result = await controller.verifyEmail({
+      token: 'abc',
+      language: 'sv',
+    });
 
-    expect(result.message).toBe('Email verified successfully');
+    expect(result.message).toBe('E-postadressen har verifierats');
   });
 
   it('forgot-password always returns success message', async () => {
@@ -124,9 +138,10 @@ describe('AuthController', () => {
 
     const result = await controller.forgotPassword({
       email: 'test@example.com',
+      language: 'sv',
     });
 
-    expect(result.message).toContain('If the email is registered');
+    expect(result.message).toContain('Om e-postadressen är registrerad');
   });
 
   it('reset-password calls authService.resetPassword', async () => {
@@ -135,9 +150,10 @@ describe('AuthController', () => {
     const result = await controller.resetPassword({
       token: 'abc',
       newPassword: 'NewPass1',
+      language: 'sv',
     });
 
-    expect(result.message).toBe('Password reset successfully');
+    expect(result.message).toBe('Lösenordet har återställts');
   });
 
   it('me calls authService.getMe', async () => {
@@ -162,17 +178,21 @@ describe('AuthController', () => {
     authService.logout.mockResolvedValue(undefined);
 
     const result = await controller.logout(
+      'sv',
       asRequest(mockReq({ cookies: { [cookieName]: '01SESSION.secret' } })),
       asResponse(res),
     );
 
-    expect(result.message).toBe('Logged out');
+    expect(result.message).toBe('Du har loggats ut');
     expect(authService.logout).toHaveBeenCalledWith('01SESSION.secret', res);
   });
 
   it('refresh reads the configured refresh cookie name', async () => {
     const res = mockRes();
-    authService.refreshTokens.mockResolvedValue({ accessToken: 'refreshed' });
+    authService.refreshTokens.mockResolvedValue({
+      accessToken: 'refreshed',
+      preferredLanguage: 'sv',
+    });
 
     const result = await controller.refresh(
       asRequest(mockReq({ cookies: { [cookieName]: '01SESSION.secret' } })),
@@ -186,15 +206,23 @@ describe('AuthController', () => {
       '127.0.0.1',
       'TestAgent',
     );
+    expect(res.cookie).toHaveBeenCalledWith(
+      'NEXT_LOCALE',
+      'sv',
+      expect.objectContaining({
+        httpOnly: false,
+        path: '/',
+      }),
+    );
   });
 
   it('logout-all revokes all sessions', async () => {
     const res = mockRes();
     authService.logoutAll.mockResolvedValue(undefined);
 
-    const result = await controller.logoutAll('01', asResponse(res));
+    const result = await controller.logoutAll('01', 'sv', asResponse(res));
 
-    expect(result.message).toBe('All sessions revoked');
+    expect(result.message).toBe('Alla sessioner har avslutats');
   });
 
   it('export requires password confirmation', async () => {
@@ -213,11 +241,12 @@ describe('AuthController', () => {
 
     const result = await controller.deleteAccount(
       '01',
+      'sv',
       { password: 'Password1' },
       asResponse(res),
     );
 
-    expect(result.message).toBe('Account deleted');
+    expect(result.message).toBe('Kontot har raderats');
     expect(authService.deleteAccount).toHaveBeenCalledWith(
       '01',
       'Password1',

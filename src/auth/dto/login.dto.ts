@@ -1,12 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class LoginDto {
   @ApiProperty({ example: 'user@example.com' })
-  @IsEmail()
+  @IsEmail({}, { message: 'validation.email.invalid' })
   email!: string;
 
   @ApiProperty()
   @IsString()
   password!: string;
+
+  @ApiProperty({ enum: ['en', 'sv'], required: false })
+  @IsOptional()
+  @IsIn(['en', 'sv'], { message: 'validation.language.unsupported' })
+  language?: string;
 }

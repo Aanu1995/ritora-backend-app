@@ -202,6 +202,31 @@ describe('UsersService', () => {
     });
   });
 
+  describe('updatePreferredLanguage', () => {
+    it('normalizes the preferred language before saving', async () => {
+      const existing = {
+        id: '01',
+        preferred_language: 'en',
+      } as User;
+      const updated = {
+        ...existing,
+        preferred_language: 'sv',
+      } as User;
+
+      repo.findOne.mockResolvedValue(existing);
+      repo.save.mockResolvedValue(updated);
+
+      const result = await service.updatePreferredLanguage('01', '  SV  ');
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preferred_language: 'sv',
+        }),
+      );
+      expect(result).toEqual(updated);
+    });
+  });
+
   describe('findByVerificationTokenHash', () => {
     it('finds a user by verification token hash', async () => {
       const user = { id: '01' } as User;

@@ -167,7 +167,12 @@ describe('AuthService', () => {
       expect(result.message).toContain('Verify your email');
       expect(result.user.email).toBe('test@example.com');
       expect(consentsRepo.save).toHaveBeenCalled();
-      expect(mailService.sendVerificationEmail).toHaveBeenCalled();
+      expect(mailService.sendVerificationEmail).toHaveBeenCalledWith(
+        'test@example.com',
+        expect.any(String),
+        'Jane',
+        'en',
+      );
       expect(sessionsRepo.save).not.toHaveBeenCalled();
     });
 
@@ -274,6 +279,7 @@ describe('AuthService', () => {
       );
 
       expect(result.accessToken).toBe('access-token-123');
+      expect(result.preferredLanguage).toBe('en');
       expect(sessionsRepo.save).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalled();
     });
@@ -367,7 +373,12 @@ describe('AuthService', () => {
       await service.forgotPassword('test@example.com');
 
       expect(usersService.update).toHaveBeenCalled();
-      expect(mailService.sendPasswordResetEmail).toHaveBeenCalled();
+      expect(mailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'test@example.com',
+        expect.any(String),
+        'Jane',
+        'en',
+      );
     });
 
     it('does nothing for unknown email (no info leak)', async () => {
