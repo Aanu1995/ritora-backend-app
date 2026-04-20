@@ -95,7 +95,6 @@ function createEntity(
   return {
     id,
     user_id: 'user-1',
-    catalogue_product_id: null,
     brand: snapshot.identity.brand,
     name: snapshot.identity.name,
     category: snapshot.identity.category,

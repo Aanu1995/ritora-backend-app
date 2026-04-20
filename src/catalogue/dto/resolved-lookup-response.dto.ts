@@ -11,7 +11,6 @@ import type {
   ResolvedLookup,
 } from '../../shelf/shelf.types';
 import { normalizeResolvedLookupPayload } from '../../shelf/shelf-payload-normalizer';
-import { CatalogueProduct } from '../entities/catalogue-product.entity';
 import type { ResolvedProductDraft } from '../product-discovery.types';
 
 export class ResolvedLookupResponseDto implements ResolvedLookup {
@@ -62,35 +61,6 @@ export class ResolvedLookupResponseDto implements ResolvedLookup {
     this.reviewRequired = reviewRequired;
     this.warnings = warnings;
     this.evidence = evidence;
-  }
-
-  static fromEntity(
-    product: CatalogueProduct,
-    provenance: DataProvenance,
-  ): ResolvedLookupResponseDto {
-    const normalized = normalizeResolvedLookupPayload({
-      identity: product.identity,
-      guidance: product.guidance,
-      manufacturer: product.manufacturer,
-      provenance,
-      source: product.source_type,
-      confidence: product.confidence,
-      reviewRequired: product.review_required,
-      warnings: product.warnings,
-      evidence: [],
-    });
-
-    return new ResolvedLookupResponseDto(
-      normalized.identity,
-      normalized.guidance,
-      normalized.manufacturer,
-      normalized.provenance,
-      normalized.source,
-      normalized.confidence,
-      normalized.reviewRequired,
-      normalized.warnings,
-      normalized.evidence,
-    );
   }
 
   static fromResolved(

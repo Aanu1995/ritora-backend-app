@@ -37,9 +37,6 @@ export class InventoryProduct {
   @Column({ type: 'varchar', length: 26 })
   user_id: string;
 
-  @Column({ type: 'varchar', length: 26, nullable: true })
-  catalogue_product_id: string | null;
-
   @Column({ type: 'varchar', length: 255 })
   brand: string;
 

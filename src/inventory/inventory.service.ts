@@ -761,7 +761,6 @@ export class InventoryService {
 
     return {
       user_id: userId,
-      catalogue_product_id: null,
       brand: snapshot.identity.brand,
       name: snapshot.identity.name,
       category: snapshot.identity.category,
