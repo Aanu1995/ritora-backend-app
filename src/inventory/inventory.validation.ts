@@ -2,7 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync, type ValidationError } from 'class-validator';
 import { parseUtcDate } from '../common/utils/date';
-import { assertSafeExternalHttpUrl } from '../common/utils/url-security';
+import {
+  assertSafeExternalHttpUrl,
+  assertSafeInventoryImageUrl,
+} from '../common/utils/url-security';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 
 function firstValidationMessage(errors: ValidationError[]): string {
@@ -70,7 +73,7 @@ export function assertValidInventoryDraft(payload: unknown): void {
   }
 
   instance.identity.imageUrls.forEach((imageUrl, index) => {
-    assertSafeExternalHttpUrl(imageUrl, `Identity image URL ${index + 1}`);
+    assertSafeInventoryImageUrl(imageUrl, `Identity image URL ${index + 1}`);
   });
 
   assertSafeExternalHttpUrl(

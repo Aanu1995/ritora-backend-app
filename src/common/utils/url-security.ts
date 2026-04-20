@@ -1,6 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { isIP } from 'net';
 
+const MEDIA_PATH_PREFIX = '/media/';
+
 function isPrivateIpv4Address(hostname: string): boolean {
   const segments = hostname.split('.').map((segment) => Number(segment));
 
@@ -81,6 +83,43 @@ export function isSafeExternalHttpUrl(value: string): boolean {
   }
 }
 
+function getAllowedApiMediaOrigins(): Set<string> {
+  const origins = new Set<string>();
+  const apiPort = process.env.API_PORT?.trim() || '3001';
+
+  origins.add(`http://localhost:${apiPort}`);
+  origins.add(`http://127.0.0.1:${apiPort}`);
+  origins.add(`https://localhost:${apiPort}`);
+  origins.add(`https://127.0.0.1:${apiPort}`);
+
+  const configuredPublicApiUrl = process.env.PUBLIC_API_URL?.trim();
+  if (configuredPublicApiUrl) {
+    try {
+      origins.add(new URL(configuredPublicApiUrl).origin);
+    } catch {
+      void 0;
+    }
+  }
+
+  return origins;
+}
+
+export function isSafeInventoryImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (
+      url.pathname.startsWith(MEDIA_PATH_PREFIX) &&
+      getAllowedApiMediaOrigins().has(url.origin)
+    ) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return isSafeExternalHttpUrl(value);
+}
+
 export function assertSafeExternalHttpUrl(
   value: string | null | undefined,
   fieldName: string,
@@ -92,6 +131,21 @@ export function assertSafeExternalHttpUrl(
   if (!isSafeExternalHttpUrl(value)) {
     throw new BadRequestException(
       `${fieldName} must be a safe external HTTP(S) URL`,
+    );
+  }
+}
+
+export function assertSafeInventoryImageUrl(
+  value: string | null | undefined,
+  fieldName: string,
+): void {
+  if (!value) {
+    return;
+  }
+
+  if (!isSafeInventoryImageUrl(value)) {
+    throw new BadRequestException(
+      `${fieldName} must be a safe HTTP(S) product image URL`,
     );
   }
 }

@@ -1,4 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import {
+  getPreferredBrandHostPatterns,
+  urlMatchesHostPatterns,
+} from './brand-host-registry';
 import { humanizeProductUrlSegment } from '../common/utils/product-name';
 import { CatalogueSourceRuleService } from './catalogue-source-rule.service';
 import type { ResolvedProductDraft } from './product-discovery.types';
@@ -26,6 +30,8 @@ const REQUEST_HEADERS = {
 };
 const AI_DISCOVERY_RESULT_BONUS = 60;
 const AI_DISCOVERY_HOST_BONUS = 90;
+const KNOWN_BRAND_HOST_BONUS = 180;
+const KNOWN_BRAND_HOST_MISMATCH_PENALTY = -140;
 
 function stripHtml(value: string): string {
   return value
@@ -129,6 +135,7 @@ function scoreResult(
   tokenSets: string[][],
   trustScoreAdjustment: number,
   preferredHosts: Set<string>,
+  knownBrandHosts: Set<string>,
 ): number {
   const normalizedTitle = normalizeSearchValue(result.title);
   const normalizedSnippet = normalizeSearchValue(result.snippet ?? '');
@@ -163,8 +170,16 @@ function scoreResult(
       }
 
       const hostname = getHostname(result.url);
-      if (hostname && preferredHosts.has(hostname)) {
-        score += AI_DISCOVERY_HOST_BONUS;
+      if (hostname) {
+        if (preferredHosts.has(hostname)) {
+          score += AI_DISCOVERY_HOST_BONUS;
+        }
+
+        if (knownBrandHosts.size > 0) {
+          score += urlMatchesHostPatterns(result.url, knownBrandHosts)
+            ? KNOWN_BRAND_HOST_BONUS
+            : KNOWN_BRAND_HOST_MISMATCH_PENALTY;
+        }
       }
 
       if (result.origin === 'ai') {
@@ -190,42 +205,7 @@ export class ProductPageDiscoveryProvider {
     private readonly catalogueSourceRuleService: CatalogueSourceRuleService,
   ) {}
 
-  async searchQuery(query: string): Promise<SearchResult[]> {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      return [];
-    }
-
-    const tokenSets = buildTokenSets(normalizedQuery);
-    const [genericResults, aiResults] = await Promise.all([
-      this.searchQueries(this.buildQueryVariants(normalizedQuery)),
-      this.discoverOfficialResults({
-        query: normalizedQuery,
-      }),
-    ]);
-
-    return this.rankResults(
-      this.mergeUniqueResults(genericResults, aiResults),
-      tokenSets,
-      this.buildPreferredHosts(aiResults),
-    );
-  }
-
-  async searchGenericQuery(query: string): Promise<SearchResult[]> {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      return [];
-    }
-
-    const tokenSets = buildTokenSets(normalizedQuery);
-    const genericResults = await this.searchQueries(
-      this.buildQueryVariants(normalizedQuery),
-    );
-
-    return this.rankResults(genericResults, tokenSets, new Set());
-  }
-
-  async search(draft: ResolvedProductDraft): Promise<SearchResult[]> {
+  async discover(draft: ResolvedProductDraft): Promise<SearchResult[]> {
     const brand = draft.identity.brand ?? draft.manufacturer.brand ?? '';
     const name = draft.identity.name ?? '';
     const barcode = draft.identity.barcode ?? '';
@@ -236,7 +216,9 @@ export class ProductPageDiscoveryProvider {
 
     const tokenSets = buildTokenSets(`${brand} ${name}`, name);
     const [genericResults, aiResults] = await Promise.all([
-      this.searchQueries(this.buildDraftQueryVariants(brand, name, barcode)),
+      this.searchQueries(
+        this.buildDiscoveryQueryVariants(brand, name, barcode),
+      ),
       this.discoverOfficialResults({
         query: `${brand} ${name}`,
         brand,
@@ -249,24 +231,16 @@ export class ProductPageDiscoveryProvider {
       this.mergeUniqueResults(genericResults, aiResults),
       tokenSets,
       this.buildPreferredHosts(aiResults),
+      new Set(
+        getPreferredBrandHostPatterns({
+          brand,
+          query: `${brand} ${name}`.trim(),
+        }),
+      ),
     );
   }
 
-  private buildQueryVariants(query: string): string[] {
-    const variants = new Set<string>();
-    const trimmedQuery = query.trim();
-    if (!trimmedQuery) {
-      return [];
-    }
-
-    variants.add(trimmedQuery);
-    variants.add(`${trimmedQuery} official`);
-    variants.add(`${trimmedQuery} product`);
-
-    return Array.from(variants);
-  }
-
-  private buildDraftQueryVariants(
+  private buildDiscoveryQueryVariants(
     brand: string,
     name: string,
     barcode: string,
@@ -394,6 +368,7 @@ export class ProductPageDiscoveryProvider {
     results: SearchResult[],
     tokenSets: string[][],
     preferredHosts: Set<string>,
+    knownBrandHosts: Set<string> = new Set(),
   ): Promise<SearchResult[]> {
     const scoredResults = await Promise.all(
       results.map(async (result): Promise<RankedSearchResult | null> => {
@@ -409,6 +384,7 @@ export class ProductPageDiscoveryProvider {
           tokenSets,
           trustEvaluation.scoreAdjustment,
           preferredHosts,
+          knownBrandHosts,
         );
 
         if (!Number.isFinite(score)) {

@@ -9,19 +9,6 @@ import type {
   ManufacturerInfo,
 } from '../shelf/shelf.types';
 
-export type DiscoveredSuggestion = {
-  id: string;
-  source: CatalogueSource;
-  brand: string;
-  name: string;
-  category: CatalogueIdentity['category'];
-  imageUrls: string[];
-  sizeMl: number | null;
-  barcode: string | null;
-  confidence: LookupConfidence;
-  reviewRequired: boolean;
-};
-
 export type ResolvedProductDraft = {
   identity: Partial<CatalogueIdentity>;
   guidance: Partial<ApplicationGuidance>;

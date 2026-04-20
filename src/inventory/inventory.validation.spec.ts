@@ -60,6 +60,15 @@ describe('assertValidInventoryDraft', () => {
     expect(() => assertValidInventoryDraft(draft)).toThrow(BadRequestException);
   });
 
+  it('accepts locally stored backend media URLs for product images', () => {
+    const draft = createValidDraft();
+    draft.identity.imageUrls = [
+      'http://localhost:3001/media/catalogue-front-photos/front-photo.jpg',
+    ];
+
+    expect(() => assertValidInventoryDraft(draft)).not.toThrow();
+  });
+
   it('rejects manufacturer URLs with embedded credentials', () => {
     const draft = createValidDraft();
     draft.manufacturer.productUrl = 'https://user:pass@example.com/product';

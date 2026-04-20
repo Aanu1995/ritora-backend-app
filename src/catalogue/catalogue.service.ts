@@ -5,11 +5,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
-import {
-  decodeCursor,
-  encodeCursor,
-  type PaginatedResult,
-} from '../common/utils/cursor-pagination';
 import { assertSafeExternalHttpUrl } from '../common/utils/url-security';
 import {
   normalizeApplicationGuidanceSnapshot,
@@ -21,13 +16,17 @@ import {
   DataProvenance,
   LookupConfidence,
   LookupWarningCode,
-  ProductCategory,
 } from '../shelf/shelf.types';
-import { CatalogueSearchQueryDto } from './dto/catalogue-search-query.dto';
-import { CatalogueSuggestionResponseDto } from './dto/catalogue-suggestion-response.dto';
 import { ResolveCandidateDto } from './dto/resolve-candidate.dto';
 import { ResolvedLookupResponseDto } from './dto/resolved-lookup-response.dto';
+import {
+  analyzeTextFit,
+  tokenizeNormalizedText,
+  uniqueWarnings,
+} from './catalogue-matching.utils';
+import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
 import { CatalogueSourceRuleService } from './catalogue-source-rule.service';
+import type { UploadedCatalogueImage } from './catalogue-photo.types';
 import { CatalogueProduct } from './entities/catalogue-product.entity';
 import { OfficialPageProvider } from './official-page.provider';
 import { OpenAiExtractorProvider } from './openai-extractor.provider';
@@ -38,25 +37,10 @@ import type {
   ResolvedProductDraft,
 } from './product-discovery.types';
 import {
-  analyzeSearchTextFit,
-  BARCODE_QUERY_PATTERN,
-  hasAcceptedBestMatch,
-  INTERNAL_CURSOR_FINGERPRINT,
-  type InternalCursorTuple,
-  rankSearchCandidates,
-  SEARCH_BEST_MATCH_CACHED_LIMIT,
-  SEARCH_BEST_MATCH_EXTERNAL_LIMIT,
-  type SearchCandidate,
-  type SearchStageCursorTuple,
-  shouldResolveCachedCandidateImmediately,
-  type RankedSearchCandidate,
-  tokenizeSearchValue,
-  uniqueWarnings,
-} from './catalogue-search.utils';
-import {
   fillMissingGuidance,
   fillMissingIdentity,
   fillMissingManufacturer,
+  inferCategoryFromText,
   mergeGuidance,
   mergeIdentity,
   mergeManufacturer,
@@ -64,11 +48,6 @@ import {
   normalizeSearchValue,
   normalizeUrl,
 } from './product-discovery.utils';
-
-type CachedSearchPage = {
-  items: CatalogueSuggestionResponseDto[];
-  nextCursor: string | null;
-};
 type AiCompletionResult = NonNullable<
   Awaited<ReturnType<OpenAiExtractorProvider['completeMissingFields']>>
 >;
@@ -87,14 +66,20 @@ const FULL_LOOKUP_ENRICHMENT: EnrichmentStrategy = {
   allowAiCompletion: true,
   allowAiBarcodeFallback: true,
 };
-const INTERACTIVE_SEARCH_ENRICHMENT: EnrichmentStrategy = {
-  allowKnownProductUrlEnrichment: true,
-  allowOfficialPageDiscovery: true,
+const BARCODE_SCAN_ENRICHMENT: EnrichmentStrategy = {
+  allowKnownProductUrlEnrichment: false,
+  allowOfficialPageDiscovery: false,
   allowAiNormalization: false,
   allowAiCompletion: false,
   allowAiBarcodeFallback: false,
 };
-const FAST_OFFICIAL_SEARCH_CANDIDATE_LIMIT = 2;
+const PHOTO_LOOKUP_ENRICHMENT: EnrichmentStrategy = {
+  allowKnownProductUrlEnrichment: true,
+  allowOfficialPageDiscovery: false,
+  allowAiNormalization: true,
+  allowAiCompletion: false,
+  allowAiBarcodeFallback: false,
+};
 const TRUNCATED_INGREDIENT_PREFIXES = new Set([
   'ammonium',
   'calcium',
@@ -111,6 +96,13 @@ const TRUNCATED_INGREDIENT_PREFIXES = new Set([
   'trisodium',
   'zinc',
 ]);
+const SUPPORTED_UPLOAD_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
 
 @Injectable()
 export class CatalogueService {
@@ -122,175 +114,60 @@ export class CatalogueService {
     private readonly openAiExtractorProvider: OpenAiExtractorProvider,
     private readonly productPageDiscoveryProvider: ProductPageDiscoveryProvider,
     private readonly catalogueSourceRuleService: CatalogueSourceRuleService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
-  async search(
-    query: CatalogueSearchQueryDto,
-  ): Promise<PaginatedResult<CatalogueSuggestionResponseDto>> {
-    const normalizedQuery = normalizeSearchValue(query.q);
-    const fingerprint = `catalogue:${normalizedQuery}:${query.limit}`;
-
-    if (normalizedQuery.length < 2) {
-      return {
-        items: [],
-        nextCursor: null,
-      };
-    }
-
-    let stage: SearchStageCursorTuple[0] = 'internal';
-    let internalCursor: string | null = null;
-    let externalPage = 1;
-
-    if (query.cursor) {
-      const decoded = decodeCursor(query.cursor);
-      if (decoded.fingerprint !== fingerprint) {
-        throw new BadRequestException('Cursor does not match this request');
-      }
-
-      const [nextStage, value] = decoded.tuple as SearchStageCursorTuple;
-      if (nextStage === 'internal') {
-        stage = 'internal';
-        internalCursor = String(value);
-      } else {
-        stage = 'external';
-        externalPage = Number(value);
-      }
-    }
-
-    if (stage === 'external') {
-      return this.searchOpenBeautyFacts(
-        normalizedQuery,
-        query.limit,
-        externalPage,
-        fingerprint,
-      );
-    }
-
-    const cachedPage = await this.searchCachedCatalogue(
-      normalizedQuery,
-      query.limit,
-      internalCursor,
-    );
-
-    if (cachedPage.nextCursor || cachedPage.items.length === query.limit) {
-      return {
-        items: cachedPage.items,
-        nextCursor: cachedPage.nextCursor
-          ? encodeCursor({
-              fingerprint,
-              tuple: ['internal', cachedPage.nextCursor],
-            })
-          : null,
-      };
-    }
-
-    const remaining = query.limit - cachedPage.items.length;
-    const external = await this.openBeautyFactsProvider.search(
-      normalizedQuery,
-      1,
-    );
-    const externalItems = external.items
-      .slice(0, remaining)
-      .map((item) => CatalogueSuggestionResponseDto.fromSuggestion(item));
-
-    return {
-      items: [...cachedPage.items, ...externalItems],
-      nextCursor: external.hasMore
-        ? encodeCursor({
-            fingerprint,
-            tuple: ['external', 2],
-          })
-        : null,
-    };
-  }
-
-  async searchBestMatch(
-    query: string,
+  async extractFromImages(
+    images: UploadedCatalogueImage[],
+    heroImageIndex: number,
+    publicBaseUrl: string,
   ): Promise<ResolvedLookupResponseDto | null> {
-    const rawQuery = query.trim();
-    const normalizedQuery = normalizeSearchValue(rawQuery);
-    const strategy = INTERACTIVE_SEARCH_ENRICHMENT;
-    if (normalizedQuery.length < 2) {
+    this.assertUploadedImages(images);
+    this.assertHeroImageIndex(heroImageIndex, images.length);
+
+    const photoExtraction = await this.openAiExtractorProvider.extractFromImages(
+      {
+        images: images.map((image) => ({
+          buffer: image.buffer,
+          mimetype: image.mimetype,
+        })),
+        heroImageIndex,
+      },
+    );
+    if (!photoExtraction) {
       return null;
     }
 
-    const normalizedBarcode = normalizeBarcode(rawQuery);
-    if (BARCODE_QUERY_PATTERN.test(normalizedBarcode)) {
-      return this.resolveBarcode(normalizedBarcode, strategy);
-    }
-
-    const cachedCandidates =
-      await this.searchCachedBestMatchCandidates(normalizedQuery);
-    const rankedCachedCandidates = rankSearchCandidates(
-      normalizedQuery,
-      cachedCandidates,
-    );
-    const bestCachedCandidate = rankedCachedCandidates[0];
-    const secondCachedCandidate = rankedCachedCandidates[1];
-
-    if (
-      shouldResolveCachedCandidateImmediately(
-        bestCachedCandidate,
-        secondCachedCandidate,
-      )
-    ) {
-      const resolved = await this.resolveSearchCandidate(
-        bestCachedCandidate,
-        strategy,
+    const storedHeroImageUrl =
+      await this.cataloguePhotoStorageService.saveHeroImage(
+        images[heroImageIndex],
+        publicBaseUrl,
       );
-      if (
-        resolved &&
-        this.isAcceptableSearchResult(normalizedQuery, resolved)
-      ) {
-        return this.completeAcceptedSearchResultIfNeeded(resolved);
-      }
-    }
-
-    const externalCandidates =
-      await this.searchExternalBestMatchCandidates(normalizedQuery);
-    const rankedCandidates = rankSearchCandidates(normalizedQuery, [
-      ...cachedCandidates,
-      ...externalCandidates,
-    ]);
-    const bestCandidate = rankedCandidates[0];
-    const secondBestCandidate = rankedCandidates[1];
-
-    if (
-      !hasAcceptedBestMatch(bestCandidate, secondBestCandidate, normalizedQuery)
-    ) {
-      const officialPageMatch = await this.resolveOfficialPageBestMatch(
-        normalizedQuery,
-        strategy,
-      );
-
-      if (officialPageMatch) {
-        return this.completeAcceptedSearchResultIfNeeded(officialPageMatch);
-      }
-
-      return this.resolveQueryWithAi(rawQuery);
-    }
-
-    const candidateLimit = Math.min(rankedCandidates.length, 3);
-    for (const candidate of rankedCandidates.slice(0, candidateLimit)) {
-      const resolved = await this.resolveSearchCandidate(candidate, strategy);
-      if (
-        resolved &&
-        this.isAcceptableSearchResult(normalizedQuery, resolved)
-      ) {
-        return this.completeAcceptedSearchResultIfNeeded(resolved);
-      }
-    }
-
-    const fallback = await this.resolveOfficialPageBestMatch(
-      normalizedQuery,
-      strategy,
+    let current = this.buildPhotoResolvedDraft(
+      photoExtraction,
+      storedHeroImageUrl,
     );
 
-    if (fallback) {
-      return this.completeAcceptedSearchResultIfNeeded(fallback);
+    if (this.needsDiscoveryCompletion(current)) {
+      const discoveredOfficialPage = await this.findOfficialPageExtraction(
+        current,
+        PHOTO_LOOKUP_ENRICHMENT,
+      );
+
+      if (discoveredOfficialPage) {
+        current = await this.applyOfficialPageCompletionFromPhotos(
+          current,
+          discoveredOfficialPage.extraction,
+          discoveredOfficialPage.url,
+          PHOTO_LOOKUP_ENRICHMENT,
+        );
+      }
     }
 
-    return this.resolveQueryWithAi(rawQuery);
+    current = this.finalizeResolved(current);
+    await this.stripUntrustedUrlsFromResolved(current);
+
+    return ResolvedLookupResponseDto.fromResolved(current);
   }
 
   async resolveBarcode(
@@ -360,6 +237,12 @@ export class CatalogueService {
     await this.upsertDiscoveredProduct(resolved);
 
     return ResolvedLookupResponseDto.fromResolved(resolved);
+  }
+
+  async resolveBarcodeForScan(
+    barcode: string,
+  ): Promise<ResolvedLookupResponseDto | null> {
+    return this.resolveBarcode(barcode, BARCODE_SCAN_ENRICHMENT);
   }
 
   async resolveCandidate(
@@ -448,276 +331,6 @@ export class CatalogueService {
     return ResolvedLookupResponseDto.fromResolved(resolved);
   }
 
-  private async searchCachedCatalogue(
-    normalizedQuery: string,
-    limit: number,
-    cursor: string | null,
-  ): Promise<CachedSearchPage> {
-    const fingerprint = `${INTERNAL_CURSOR_FINGERPRINT}:${normalizedQuery}:${limit}`;
-    const searchLike = `%${normalizedQuery}%`;
-    const prefixQuery = `${normalizedQuery}%`;
-    const brandExpression = `LOWER(COALESCE(product.brand_search, product.brand))`;
-    const nameExpression = `LOWER(COALESCE(product.name_search, product.name))`;
-    const combinedExpression = `LOWER(TRIM(CONCAT(COALESCE(product.brand_search, product.brand), ' ', COALESCE(product.name_search, product.name))))`;
-    const sourcePriorityExpression = `CASE
-      WHEN product.source_type = '${CatalogueSource.RitoraCatalogue}' THEN 0
-      WHEN product.source_type = '${CatalogueSource.OfficialPage}' THEN 1
-      ELSE 2
-    END`;
-    const relevanceExpression = `CASE
-      WHEN ${combinedExpression} = :exactQuery OR ${brandExpression} = :exactQuery OR ${nameExpression} = :exactQuery THEN 0
-      WHEN ${combinedExpression} LIKE :prefixQuery OR ${brandExpression} LIKE :prefixQuery OR ${nameExpression} LIKE :prefixQuery THEN 1
-      ELSE 2
-    END`;
-
-    const queryBuilder = this.catalogueRepository
-      .createQueryBuilder('product')
-      .addSelect(relevanceExpression, 'relevance')
-      .addSelect(sourcePriorityExpression, 'source_priority')
-      .where(
-        new Brackets((qb) => {
-          qb.where(`${combinedExpression} LIKE :searchLike`)
-            .orWhere(`${brandExpression} LIKE :searchLike`)
-            .orWhere(`${nameExpression} LIKE :searchLike`);
-        }),
-      )
-      .setParameters({
-        exactQuery: normalizedQuery,
-        prefixQuery,
-        searchLike,
-      });
-
-    if (cursor) {
-      const decoded = decodeCursor(cursor);
-      if (decoded.fingerprint !== fingerprint) {
-        throw new BadRequestException('Cursor does not match this request');
-      }
-
-      const [relevance, priority, brand, name, id] =
-        decoded.tuple as InternalCursorTuple;
-
-      queryBuilder.andWhere(
-        new Brackets((qb) => {
-          qb.where(`${relevanceExpression} > :cursorRelevance`, {
-            cursorRelevance: Number(relevance),
-          })
-            .orWhere(
-              new Brackets((inner) => {
-                inner
-                  .where(`${relevanceExpression} = :cursorRelevance`, {
-                    cursorRelevance: Number(relevance),
-                  })
-                  .andWhere(`${sourcePriorityExpression} > :cursorPriority`, {
-                    cursorPriority: Number(priority),
-                  });
-              }),
-            )
-            .orWhere(
-              new Brackets((inner) => {
-                inner
-                  .where(`${relevanceExpression} = :cursorRelevance`, {
-                    cursorRelevance: Number(relevance),
-                  })
-                  .andWhere(`${sourcePriorityExpression} = :cursorPriority`, {
-                    cursorPriority: Number(priority),
-                  })
-                  .andWhere(`${brandExpression} > :cursorBrand`, {
-                    cursorBrand: String(brand),
-                  });
-              }),
-            )
-            .orWhere(
-              new Brackets((inner) => {
-                inner
-                  .where(`${relevanceExpression} = :cursorRelevance`, {
-                    cursorRelevance: Number(relevance),
-                  })
-                  .andWhere(`${sourcePriorityExpression} = :cursorPriority`, {
-                    cursorPriority: Number(priority),
-                  })
-                  .andWhere(`${brandExpression} = :cursorBrand`, {
-                    cursorBrand: String(brand),
-                  })
-                  .andWhere(`${nameExpression} > :cursorName`, {
-                    cursorName: String(name),
-                  });
-              }),
-            )
-            .orWhere(
-              new Brackets((inner) => {
-                inner
-                  .where(`${relevanceExpression} = :cursorRelevance`, {
-                    cursorRelevance: Number(relevance),
-                  })
-                  .andWhere(`${sourcePriorityExpression} = :cursorPriority`, {
-                    cursorPriority: Number(priority),
-                  })
-                  .andWhere(`${brandExpression} = :cursorBrand`, {
-                    cursorBrand: String(brand),
-                  })
-                  .andWhere(`${nameExpression} = :cursorName`, {
-                    cursorName: String(name),
-                  })
-                  .andWhere(`product.id > :cursorId`, {
-                    cursorId: String(id),
-                  });
-              }),
-            );
-        }),
-      );
-    }
-
-    const { entities, raw } = await queryBuilder
-      .orderBy('relevance', 'ASC')
-      .addOrderBy('source_priority', 'ASC')
-      .addOrderBy(brandExpression, 'ASC')
-      .addOrderBy(nameExpression, 'ASC')
-      .addOrderBy('product.id', 'ASC')
-      .take(limit + 1)
-      .getRawAndEntities();
-
-    const hasMore = entities.length > limit;
-    const pageEntities = hasMore ? entities.slice(0, limit) : entities;
-    const pageRaw = hasMore
-      ? (raw.slice(0, limit) as Array<Record<string, unknown>>)
-      : (raw as Array<Record<string, unknown>>);
-    const lastEntity = pageEntities.at(-1);
-    const lastRaw = pageRaw.at(-1);
-
-    let nextCursor: string | null = null;
-    if (hasMore && lastEntity && lastRaw) {
-      const relevance =
-        typeof lastRaw.relevance === 'number'
-          ? lastRaw.relevance
-          : Number(lastRaw.relevance ?? 2);
-      const priority =
-        typeof lastRaw.source_priority === 'number'
-          ? lastRaw.source_priority
-          : Number(lastRaw.source_priority ?? 2);
-
-      nextCursor = encodeCursor({
-        fingerprint,
-        tuple: [
-          relevance,
-          priority,
-          normalizeSearchValue(lastEntity.brand),
-          normalizeSearchValue(lastEntity.name),
-          lastEntity.id,
-        ],
-      });
-    }
-
-    return {
-      items: pageEntities.map((product) =>
-        CatalogueSuggestionResponseDto.fromEntity(product),
-      ),
-      nextCursor,
-    };
-  }
-
-  private async searchOpenBeautyFacts(
-    normalizedQuery: string,
-    limit: number,
-    page: number,
-    fingerprint: string,
-  ): Promise<PaginatedResult<CatalogueSuggestionResponseDto>> {
-    const result = await this.openBeautyFactsProvider.search(
-      normalizedQuery,
-      page,
-    );
-    const items = result.items
-      .slice(0, limit)
-      .map((item) => CatalogueSuggestionResponseDto.fromSuggestion(item));
-
-    let nextCursor: string | null = null;
-    if (result.hasMore) {
-      nextCursor = encodeCursor({
-        fingerprint,
-        tuple: ['external', page + 1],
-      });
-    }
-
-    return { items, nextCursor };
-  }
-
-  private async searchCachedBestMatchCandidates(
-    normalizedQuery: string,
-  ): Promise<SearchCandidate[]> {
-    const cachedPage = await this.searchCachedCatalogue(
-      normalizedQuery,
-      SEARCH_BEST_MATCH_CACHED_LIMIT,
-      null,
-    );
-
-    return cachedPage.items
-      .filter((item) => item.source !== CatalogueSource.OfficialPage)
-      .map((item) => ({
-        ...item,
-        origin: 'cached',
-      }));
-  }
-
-  private async searchExternalBestMatchCandidates(
-    normalizedQuery: string,
-  ): Promise<SearchCandidate[]> {
-    const result = await this.openBeautyFactsProvider.search(
-      normalizedQuery,
-      1,
-    );
-    const suggestions = result.items.slice(0, SEARCH_BEST_MATCH_EXTERNAL_LIMIT);
-
-    return suggestions.map((suggestion) => ({
-      ...CatalogueSuggestionResponseDto.fromSuggestion(suggestion),
-      origin: 'external',
-    }));
-  }
-
-  private async resolveSearchCandidate(
-    candidate: RankedSearchCandidate,
-    strategy: EnrichmentStrategy,
-  ): Promise<ResolvedLookupResponseDto | null> {
-    if (candidate.origin === 'cached') {
-      const product = await this.catalogueRepository.findOne({
-        where: { id: candidate.id },
-      });
-
-      if (!product) {
-        return null;
-      }
-
-      return this.resolveCachedProduct(
-        product,
-        DataProvenance.Catalogue,
-        strategy,
-      );
-    }
-
-    if (!candidate.barcode) {
-      return null;
-    }
-
-    if (candidate.source === CatalogueSource.OpenBeautyFacts) {
-      const openBeautyFactsResult =
-        await this.openBeautyFactsProvider.resolveBarcode(
-          candidate.barcode,
-          DataProvenance.Catalogue,
-        );
-      if (!openBeautyFactsResult) {
-        return null;
-      }
-
-      const resolved = await this.enrichExternalResult(
-        openBeautyFactsResult,
-        strategy,
-      );
-      await this.upsertDiscoveredProduct(resolved);
-
-      return ResolvedLookupResponseDto.fromResolved(resolved);
-    }
-
-    return this.resolveBarcode(candidate.barcode, strategy);
-  }
-
   private async enrichExternalResult(
     base: ResolvedProductDraft,
     strategy: EnrichmentStrategy,
@@ -788,7 +401,7 @@ export class CatalogueService {
       : null;
 
     if (aiExtraction) {
-      current = this.applyAiCompletion(
+      current = this.applyAiNormalizedOfficialPageExtraction(
         current,
         aiExtraction,
         'aiNormalizedOfficialPage',
@@ -803,6 +416,57 @@ export class CatalogueService {
     }
 
     return this.finalizeResolved(current);
+  }
+
+  private buildPhotoResolvedDraft(
+    completion: AiCompletionResult,
+    storedHeroImageUrl: string,
+  ): ResolvedProductDraft {
+    const identity = mergeIdentity(completion.data.identity ?? {}, {
+      imageUrls: [storedHeroImageUrl],
+    });
+    const manufacturer = {
+      brand: completion.data.identity?.brand ?? undefined,
+      ...(completion.data.manufacturer ?? {}),
+    };
+
+    if (
+      !identity.category &&
+      (identity.name || identity.description || manufacturer.brand)
+    ) {
+      identity.category = inferCategoryFromText(
+        manufacturer.brand,
+        identity.name,
+        identity.description,
+      );
+    }
+
+    if (identity.inciIngredients?.length && !identity.inciLastConfirmedAt) {
+      identity.inciLastConfirmedAt = new Date().toISOString();
+    }
+
+    return {
+      identity,
+      guidance: completion.data.guidance ?? {},
+      manufacturer,
+      provenance: DataProvenance.PhotoLookup,
+      source: CatalogueSource.UserPhotos,
+      confidence: LookupConfidence.Low,
+      reviewRequired: true,
+      warnings: uniqueWarnings([
+        LookupWarningCode.ReviewRequired,
+        ...completion.warnings,
+      ]),
+      evidence: [],
+      cacheKey: {
+        source: CatalogueSource.UserPhotos,
+        id: null,
+        url: null,
+      },
+      rawSource: {
+        photoExtraction: completion.data,
+      },
+    };
   }
 
   private async buildAiBarcodeFallback(
@@ -912,6 +576,59 @@ export class CatalogueService {
       : null;
 
     if (aiExtraction) {
+      current = this.applyAiNormalizedOfficialPageExtraction(
+        current,
+        aiExtraction,
+        'aiNormalizedOfficialPage',
+      );
+    }
+
+    return current;
+  }
+
+  private async applyOfficialPageCompletionFromPhotos(
+    base: ResolvedProductDraft,
+    extraction: OfficialPageExtraction,
+    productUrl: string,
+    strategy: EnrichmentStrategy,
+  ): Promise<ResolvedProductDraft> {
+    let current: ResolvedProductDraft = {
+      ...base,
+      identity: this.fillMissingOfficialPageIdentity(
+        base.identity,
+        extraction.identity,
+      ),
+      manufacturer: fillMissingManufacturer(
+        base.manufacturer,
+        extraction.manufacturer,
+      ),
+      guidance: fillMissingGuidance(base.guidance, extraction.guidance),
+      evidence: [...base.evidence, ...extraction.evidence],
+      warnings: uniqueWarnings([
+        ...base.warnings,
+        ...(extraction.guidance.steps?.length ||
+        extraction.guidance.cautions?.length
+          ? [LookupWarningCode.GuidanceUnverified]
+          : []),
+        ...(extraction.identity.inciIngredients?.length
+          ? [LookupWarningCode.IngredientsUnverified]
+          : []),
+      ]),
+      cacheKey: {
+        source: base.cacheKey.source,
+        id: base.cacheKey.id,
+        url: productUrl,
+      },
+      rawSource: {
+        ...base.rawSource,
+        officialPage: extraction.rawSource,
+      },
+    };
+    const aiExtraction = strategy.allowAiNormalization
+      ? await this.openAiExtractorProvider.extract(extraction)
+      : null;
+
+    if (aiExtraction) {
       current = this.applyAiCompletion(
         current,
         aiExtraction,
@@ -944,7 +661,7 @@ export class CatalogueService {
       return null;
     }
 
-    const candidates = await this.productPageDiscoveryProvider.search(base);
+    const candidates = await this.productPageDiscoveryProvider.discover(base);
     for (const candidate of candidates) {
       const extraction = await this.officialPageProvider.extract(candidate.url);
       if (!extraction) {
@@ -1000,16 +717,16 @@ export class CatalogueService {
       return Boolean(extractedBrand);
     }
 
-    const searchFit = analyzeSearchTextFit(baseName, extractedName);
+    const textFit = analyzeTextFit(baseName, extractedName);
 
-    if (searchFit.candidateLooksLikeBundle && !searchFit.queryHasBundleIntent) {
+    if (textFit.candidateLooksLikeBundle && !textFit.queryHasBundleIntent) {
       return false;
     }
 
     if (
-      searchFit.hasUnexpectedProductType &&
-      !searchFit.queryHasBundleIntent &&
-      searchFit.tokenCoverage < 1
+      textFit.hasUnexpectedProductType &&
+      !textFit.queryHasBundleIntent &&
+      textFit.tokenCoverage < 1
     ) {
       return false;
     }
@@ -1018,8 +735,8 @@ export class CatalogueService {
       return true;
     }
 
-    const baseTokens = tokenizeSearchValue(baseName);
-    const extractedTokens = new Set(tokenizeSearchValue(extractedName));
+    const baseTokens = tokenizeNormalizedText(baseName);
+    const extractedTokens = new Set(tokenizeNormalizedText(extractedName));
     const matchedTokenCount = baseTokens.filter((token) =>
       extractedTokens.has(token),
     ).length;
@@ -1027,43 +744,6 @@ export class CatalogueService {
       baseTokens.length === 0 ? 0 : matchedTokenCount / baseTokens.length;
 
     return tokenCoverage >= 0.6;
-  }
-
-  private isAcceptableSearchResult(
-    normalizedQuery: string,
-    resolved: ResolvedLookupResponseDto,
-  ): boolean {
-    const brand = normalizeSearchValue(resolved.identity.brand ?? '');
-    const name = normalizeSearchValue(resolved.identity.name ?? '');
-    const combined = normalizeSearchValue(`${brand} ${name}`);
-    const {
-      tokenCoverage,
-      queryHasBundleIntent,
-      candidateLooksLikeBundle,
-      hasUnexpectedProductType,
-    } = analyzeSearchTextFit(normalizedQuery, combined);
-
-    if (!brand || !name) {
-      return false;
-    }
-
-    if (tokenCoverage < 0.75) {
-      return false;
-    }
-
-    if (candidateLooksLikeBundle && !queryHasBundleIntent) {
-      return false;
-    }
-
-    if (
-      hasUnexpectedProductType &&
-      !queryHasBundleIntent &&
-      tokenCoverage < 1
-    ) {
-      return false;
-    }
-
-    return true;
   }
 
   private async completeMissingFields(
@@ -1122,6 +802,46 @@ export class CatalogueService {
     };
   }
 
+  private applyAiNormalizedOfficialPageExtraction(
+    base: ResolvedProductDraft,
+    completion: AiCompletionResult,
+    rawSourceKey: string,
+  ): ResolvedProductDraft {
+    const identity = mergeIdentity(base.identity, completion.data.identity ?? {});
+    const manufacturer = mergeManufacturer(
+      base.manufacturer,
+      completion.data.manufacturer ?? {},
+    );
+    const guidance = mergeGuidance(base.guidance, completion.data.guidance ?? {});
+
+    if (
+      completion.data.identity?.inciIngredients?.length &&
+      !identity.inciLastConfirmedAt
+    ) {
+      identity.inciLastConfirmedAt = new Date().toISOString();
+    }
+
+    return {
+      ...base,
+      identity,
+      manufacturer,
+      guidance,
+      warnings: uniqueWarnings([...base.warnings, ...completion.warnings]),
+      evidence: [...base.evidence, ...completion.evidence],
+      cacheKey: {
+        source: manufacturer.productUrl
+          ? CatalogueSource.OfficialPage
+          : base.cacheKey.source,
+        id: base.cacheKey.id,
+        url: manufacturer.productUrl ?? base.cacheKey.url,
+      },
+      rawSource: {
+        ...base.rawSource,
+        [rawSourceKey]: completion.data,
+      },
+    };
+  }
+
   private needsDiscoveryCompletion(resolved: ResolvedProductDraft): boolean {
     return (
       !resolved.identity.brand ||
@@ -1156,361 +876,6 @@ export class CatalogueService {
     }
 
     return TRUNCATED_INGREDIENT_PREFIXES.has(normalized);
-  }
-
-  private async resolveOfficialPageBestMatch(
-    normalizedQuery: string,
-    strategy: EnrichmentStrategy = FULL_LOOKUP_ENRICHMENT,
-  ): Promise<ResolvedLookupResponseDto | null> {
-    const candidates =
-      await this.productPageDiscoveryProvider.searchQuery(normalizedQuery);
-    const resolvedCandidates: Array<{
-      resolved: ResolvedLookupResponseDto;
-      candidate: SearchCandidate;
-    }> = [];
-
-    const candidateLimit = strategy.allowAiCompletion
-      ? 3
-      : FAST_OFFICIAL_SEARCH_CANDIDATE_LIMIT;
-
-    for (const candidate of candidates.slice(0, candidateLimit)) {
-      const extraction = await this.officialPageProvider.extract(candidate.url);
-      if (!extraction) {
-        continue;
-      }
-
-      const draft = await this.buildOfficialPageResult(
-        extraction,
-        candidate.url,
-        DataProvenance.Catalogue,
-        strategy,
-      );
-      const resolved = ResolvedLookupResponseDto.fromResolved(draft);
-      if (!resolved) {
-        continue;
-      }
-
-      resolvedCandidates.push({
-        resolved,
-        candidate: {
-          id: candidate.url,
-          source: resolved.source,
-          brand: resolved.identity.brand ?? '',
-          name: resolved.identity.name ?? '',
-          category: resolved.identity.category ?? ProductCategory.Other,
-          imageUrls: resolved.identity.imageUrls ?? [],
-          sizeMl: resolved.identity.sizeMl ?? null,
-          barcode: resolved.identity.barcode ?? null,
-          confidence: resolved.confidence,
-          reviewRequired: resolved.reviewRequired,
-          origin: 'external',
-        },
-      });
-    }
-
-    const rankedCandidates = rankSearchCandidates(
-      normalizedQuery,
-      resolvedCandidates.map((entry) => entry.candidate),
-    );
-
-    for (const rankedCandidate of rankedCandidates) {
-      if (rankedCandidate.tokenCoverage < 0.6) {
-        continue;
-      }
-
-      const resolved = resolvedCandidates.find(
-        (entry) => entry.candidate.id === rankedCandidate.id,
-      )?.resolved;
-
-      if (
-        resolved &&
-        this.isAcceptableSearchResult(normalizedQuery, resolved)
-      ) {
-        return resolved;
-      }
-    }
-
-    return null;
-  }
-
-  private async completeAcceptedSearchResultIfNeeded(
-    resolved: ResolvedLookupResponseDto,
-  ): Promise<ResolvedLookupResponseDto> {
-    const draft = this.toResolvedDraftFromLookup(resolved);
-    let completedDraft = this.cloneResolvedDraft(draft);
-
-    if (!this.needsInteractiveSearchCompletion(completedDraft)) {
-      return resolved;
-    }
-
-    await this.fillMissingIngredientsFromSearchResults(completedDraft);
-
-    if (!this.needsBlockingInteractiveSearchCompletion(completedDraft)) {
-      return this.persistCompletedInteractiveSearchResult(
-        completedDraft,
-        draft,
-      );
-    }
-
-    const completionSeed =
-      this.toInteractiveSearchCompletionSeed(completedDraft);
-    const completion =
-      await this.openAiExtractorProvider.completeInteractiveMissingFields(
-        completionSeed,
-      );
-
-    if (completion) {
-      completedDraft = this.applyAiCompletion(
-        completedDraft,
-        completion,
-        'aiInteractiveSearch',
-      );
-    }
-    if (!completedDraft.identity.inciIngredients?.length) {
-      const ingredientCompletion =
-        await this.openAiExtractorProvider.discoverIngredients(completionSeed);
-      if (ingredientCompletion) {
-        const ingredientDraft = this.applyAiCompletion(
-          completedDraft,
-          ingredientCompletion,
-          'aiIngredientDiscovery',
-        );
-        completedDraft.identity.inciLastConfirmedAt = ingredientDraft.identity
-          .inciIngredients?.length
-          ? new Date().toISOString()
-          : completedDraft.identity.inciLastConfirmedAt;
-        completedDraft.identity.inciIngredients =
-          ingredientDraft.identity.inciIngredients;
-        completedDraft.warnings = uniqueWarnings([
-          ...completedDraft.warnings,
-          ...ingredientDraft.warnings,
-        ]);
-        completedDraft.evidence = [
-          ...completedDraft.evidence,
-          ...ingredientDraft.evidence,
-        ];
-      }
-    }
-
-    if (
-      !completion &&
-      this.needsBlockingInteractiveSearchCompletion(completedDraft)
-    ) {
-      return resolved;
-    }
-
-    return this.persistCompletedInteractiveSearchResult(completedDraft, draft);
-  }
-
-  private async persistCompletedInteractiveSearchResult(
-    completedDraft: ResolvedProductDraft,
-    originalDraft: ResolvedProductDraft,
-  ): Promise<ResolvedLookupResponseDto> {
-    completedDraft.manufacturer.productUrl =
-      originalDraft.manufacturer.productUrl;
-    completedDraft.manufacturer.websiteUrl =
-      originalDraft.manufacturer.websiteUrl;
-
-    const completed = this.finalizeResolved(completedDraft);
-    await this.stripUntrustedUrlsFromResolved(completed);
-    await this.upsertDiscoveredProduct(completed);
-
-    return ResolvedLookupResponseDto.fromResolved(completed);
-  }
-
-  private cloneResolvedDraft(
-    draft: ResolvedProductDraft,
-  ): ResolvedProductDraft {
-    return {
-      ...draft,
-      identity: {
-        ...draft.identity,
-        imageUrls: [...(draft.identity.imageUrls ?? [])],
-        benefits: [...(draft.identity.benefits ?? [])],
-        suitedFor: [...(draft.identity.suitedFor ?? [])],
-        inciIngredients: [...(draft.identity.inciIngredients ?? [])],
-      },
-      guidance: {
-        ...draft.guidance,
-        steps: [...(draft.guidance.steps ?? [])],
-        cautions: [...(draft.guidance.cautions ?? [])],
-      },
-      manufacturer: {
-        ...draft.manufacturer,
-      },
-      warnings: [...draft.warnings],
-      evidence: [...draft.evidence],
-      cacheKey: {
-        ...draft.cacheKey,
-      },
-      rawSource: {
-        ...draft.rawSource,
-      },
-    };
-  }
-
-  private async fillMissingIngredientsFromSearchResults(
-    resolved: ResolvedProductDraft,
-  ): Promise<void> {
-    if (resolved.identity.inciIngredients?.length) {
-      return;
-    }
-
-    const query = [
-      resolved.identity.brand,
-      resolved.identity.name,
-      'ingredients',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    if (!query.trim()) {
-      return;
-    }
-
-    const candidates =
-      await this.productPageDiscoveryProvider.searchGenericQuery(query);
-    const extractionResults = await Promise.all(
-      candidates.slice(0, 5).map(async (candidate, index) => {
-        const extraction = await this.officialPageProvider.extract(candidate.url);
-        const ingredients = extraction?.identity.inciIngredients ?? [];
-
-        return {
-          candidate,
-          extraction,
-          ingredients,
-          index,
-        };
-      }),
-    );
-
-    const bestIngredientResult = extractionResults
-      .filter((entry) => entry.ingredients.length > 0)
-      .sort((left, right) => {
-        if (right.ingredients.length !== left.ingredients.length) {
-          return right.ingredients.length - left.ingredients.length;
-        }
-
-        return left.index - right.index;
-      })[0];
-
-    if (!bestIngredientResult) {
-      return;
-    }
-
-    resolved.identity.inciIngredients = bestIngredientResult.ingredients;
-    resolved.identity.inciLastConfirmedAt =
-      bestIngredientResult.extraction?.identity.inciLastConfirmedAt ??
-      new Date().toISOString();
-    resolved.warnings = uniqueWarnings([
-      ...resolved.warnings,
-      LookupWarningCode.IngredientsUnverified,
-    ]);
-    resolved.evidence = [
-      ...resolved.evidence,
-      ...(bestIngredientResult.extraction?.evidence ?? []),
-    ];
-  }
-
-  private async resolveQueryWithAi(
-    query: string,
-  ): Promise<ResolvedLookupResponseDto | null> {
-    const completion = await this.openAiExtractorProvider.searchByQuery(query);
-    if (!completion) {
-      return null;
-    }
-
-    const seed: ResolvedProductDraft = {
-      identity: {},
-      guidance: {},
-      manufacturer: {},
-      provenance: DataProvenance.Catalogue,
-      source: CatalogueSource.OfficialPage,
-      confidence: LookupConfidence.Low,
-      reviewRequired: true,
-      warnings: [LookupWarningCode.ReviewRequired],
-      evidence: [],
-      cacheKey: {
-        source: CatalogueSource.OfficialPage,
-        id: null,
-        url: null,
-      },
-      rawSource: {},
-    };
-    const completed = this.finalizeResolved(
-      this.applyAiCompletion(seed, completion, 'aiSearchByQuery'),
-    );
-    await this.stripUntrustedUrlsFromResolved(completed);
-
-    const resolved = ResolvedLookupResponseDto.fromResolved(completed);
-    if (!this.isAcceptableSearchResult(normalizeSearchValue(query), resolved)) {
-      return null;
-    }
-
-    await this.upsertDiscoveredProduct(completed);
-    return resolved;
-  }
-
-  private toResolvedDraftFromLookup(
-    resolved: ResolvedLookupResponseDto,
-  ): ResolvedProductDraft {
-    return {
-      identity: resolved.identity,
-      guidance: resolved.guidance,
-      manufacturer: resolved.manufacturer,
-      provenance: resolved.provenance,
-      source: resolved.source,
-      confidence: resolved.confidence,
-      reviewRequired: resolved.reviewRequired,
-      warnings: resolved.warnings,
-      evidence: resolved.evidence,
-      cacheKey: {
-        source: resolved.source,
-        id: resolved.identity.barcode ?? null,
-        url: resolved.manufacturer.productUrl ?? null,
-      },
-      rawSource: {},
-    };
-  }
-
-  private needsInteractiveSearchCompletion(
-    resolved: ResolvedProductDraft,
-  ): boolean {
-    return (
-      !resolved.identity.description ||
-      !resolved.identity.benefits?.length ||
-      !resolved.identity.suitedFor?.length ||
-      !resolved.identity.inciIngredients?.length ||
-      !resolved.manufacturer.parentCompany ||
-      !resolved.manufacturer.countryOfManufacture ||
-      !resolved.manufacturer.supportEmail
-    );
-  }
-
-  private needsBlockingInteractiveSearchCompletion(
-    resolved: ResolvedProductDraft,
-  ): boolean {
-    return (
-      !resolved.identity.description ||
-      !resolved.identity.inciIngredients?.length
-    );
-  }
-
-  private toInteractiveSearchCompletionSeed(
-    resolved: ResolvedProductDraft,
-  ): ResolvedProductDraft {
-    return {
-      ...resolved,
-      manufacturer: {
-        ...resolved.manufacturer,
-        productUrl: null,
-        websiteUrl: null,
-      },
-      cacheKey: {
-        ...resolved.cacheKey,
-        url: null,
-      },
-      rawSource: {},
-    };
   }
 
   private async stripUntrustedUrlsFromResolved(
@@ -1565,6 +930,10 @@ export class CatalogueService {
       Boolean(resolved.manufacturer.countryOfOrigin) ||
       Boolean(resolved.manufacturer.countryOfManufacture);
     const hasOfficialSource = resolved.source === CatalogueSource.OfficialPage;
+    const hasPhotoIdentity =
+      resolved.source === CatalogueSource.UserPhotos &&
+      Boolean(resolved.identity.brand?.trim()) &&
+      Boolean(resolved.identity.name?.trim());
     const hasRichData =
       hasDescription ||
       hasIngredients ||
@@ -1576,7 +945,7 @@ export class CatalogueService {
       ? hasRichData
         ? LookupConfidence.High
         : LookupConfidence.Medium
-      : hasRichData
+      : hasRichData || hasPhotoIdentity
         ? LookupConfidence.Medium
         : LookupConfidence.Low;
     const warnings = uniqueWarnings([
@@ -1777,6 +1146,72 @@ export class CatalogueService {
               mergedIdentity.inciLastConfirmedAt)
           : mergedIdentity.inciLastConfirmedAt,
     };
+  }
+
+  private fillMissingOfficialPageIdentity(
+    base: ResolvedProductDraft['identity'],
+    extraction: OfficialPageExtraction['identity'],
+  ): ResolvedProductDraft['identity'] {
+    const filledIdentity = fillMissingIdentity(base, extraction);
+    const baseIngredients = base.inciIngredients ?? [];
+    const extractedIngredients = extraction.inciIngredients ?? [];
+    const preferredIngredients =
+      baseIngredients.length > 0 ? baseIngredients : extractedIngredients;
+
+    return {
+      ...filledIdentity,
+      brand: base.brand ?? extraction.brand ?? filledIdentity.brand,
+      name: base.name ?? extraction.name ?? filledIdentity.name,
+      category: base.category ?? extraction.category ?? filledIdentity.category,
+      barcode: base.barcode ?? extraction.barcode ?? filledIdentity.barcode,
+      imageUrls: base.imageUrls ?? filledIdentity.imageUrls,
+      inciIngredients:
+        preferredIngredients.length > 0 ? preferredIngredients : undefined,
+      inciLastConfirmedAt:
+        preferredIngredients.length > 0
+          ? baseIngredients.length > 0
+            ? (base.inciLastConfirmedAt ?? filledIdentity.inciLastConfirmedAt)
+            : (extraction.inciLastConfirmedAt ??
+              base.inciLastConfirmedAt ??
+              filledIdentity.inciLastConfirmedAt)
+          : filledIdentity.inciLastConfirmedAt,
+    };
+  }
+
+  private assertUploadedImages(images: UploadedCatalogueImage[]): void {
+    if (images.length < 2 || images.length > 6) {
+      throw new BadRequestException('Upload between 2 and 6 images');
+    }
+
+    images.forEach((image, index) => {
+      this.assertUploadedImage(image, `images[${index}]`);
+    });
+  }
+
+  private assertHeroImageIndex(
+    heroImageIndex: number,
+    imageCount: number,
+  ): void {
+    if (
+      !Number.isInteger(heroImageIndex) ||
+      heroImageIndex < 0 ||
+      heroImageIndex >= imageCount
+    ) {
+      throw new BadRequestException('Invalid heroImageIndex');
+    }
+  }
+
+  private assertUploadedImage(
+    file: UploadedCatalogueImage | null | undefined,
+    fieldName: string,
+  ): asserts file is UploadedCatalogueImage {
+    if (!file || !file.buffer?.length) {
+      throw new BadRequestException(`${fieldName} is required`);
+    }
+
+    if (!SUPPORTED_UPLOAD_IMAGE_TYPES.has(file.mimetype)) {
+      throw new BadRequestException(`${fieldName} must be a supported image`);
+    }
   }
 
   private choosePreferredIngredientList(

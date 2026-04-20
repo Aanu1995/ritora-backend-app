@@ -18,6 +18,7 @@ describe('configureApp', () => {
   const createApp = () => {
     const disable = jest.fn();
     const set = jest.fn();
+    const expressUse = jest.fn();
 
     const app: MockApp = {
       use: jest.fn(),
@@ -26,11 +27,11 @@ describe('configureApp', () => {
       useGlobalPipes: jest.fn(),
       useGlobalFilters: jest.fn(),
       getHttpAdapter: jest.fn(() => ({
-        getInstance: () => ({ disable, set }),
+        getInstance: () => ({ disable, set, use: expressUse }),
       })),
     };
 
-    return { app, disable, set };
+    return { app, disable, set, expressUse };
   };
 
   const createConfigService = (
@@ -47,7 +48,7 @@ describe('configureApp', () => {
   });
 
   it('configures middleware, cors, prefix, validation, filters, and swagger', () => {
-    const { app, disable } = createApp();
+    const { app, disable, expressUse } = createApp();
     const configService = createConfigService({
       CORS_ORIGINS: 'http://localhost:3000, https://ritora.com',
       SWAGGER_ENABLED: true,
@@ -76,6 +77,7 @@ describe('configureApp', () => {
     expect(filter).toBeInstanceOf(GlobalExceptionFilter);
 
     expect(disable).toHaveBeenCalledWith('x-powered-by');
+    expect(expressUse).toHaveBeenCalledWith('/media', expect.any(Function));
     expect(createDocumentSpy).toHaveBeenCalled();
     expect(setupSpy).toHaveBeenCalledWith(
       'api/docs',

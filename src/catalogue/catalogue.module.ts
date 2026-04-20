@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogueController } from './catalogue.controller';
+import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
 import { CatalogueSourceRuleService } from './catalogue-source-rule.service';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueSourceRule } from './entities/catalogue-source-rule.entity';
@@ -15,6 +16,7 @@ import { ProductPageDiscoveryProvider } from './product-page-discovery.provider'
   controllers: [CatalogueController],
   providers: [
     CatalogueSourceRuleService,
+    CataloguePhotoStorageService,
     CatalogueService,
     OpenBeautyFactsProvider,
     OfficialPageProvider,

@@ -42,6 +42,7 @@ export class CreateCatalogueIdentityDto {
     {
       protocols: ['http', 'https'],
       require_protocol: true,
+      require_tld: false,
     },
     { each: true },
   )

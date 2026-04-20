@@ -4,7 +4,8 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueProduct } from './entities/catalogue-product.entity';
-import { decodeCursor } from '../common/utils/cursor-pagination';
+import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
+import type { UploadedCatalogueImage } from './catalogue-photo.types';
 import { OfficialPageProvider } from './official-page.provider';
 import { OpenAiExtractorProvider } from './openai-extractor.provider';
 import { OpenBeautyFactsProvider } from './open-beauty-facts.provider';
@@ -115,12 +116,20 @@ function createSparseProduct(id: string, name: string): CatalogueProduct {
   return product;
 }
 
+function createUploadedImage(name: string): UploadedCatalogueImage {
+  return {
+    originalname: `${name}.jpg`,
+    mimetype: 'image/jpeg',
+    size: name.length,
+    buffer: Buffer.from(name),
+  };
+}
+
 describe('CatalogueService', () => {
   let service: CatalogueService;
   let repo: jest.Mocked<Repository<CatalogueProduct>>;
   let queryBuilder: ReturnType<typeof createMockQueryBuilder>;
   const openBeautyFactsProvider = {
-    search: jest.fn(),
     resolveBarcode: jest.fn(),
   };
   const officialPageProvider = {
@@ -128,43 +137,39 @@ describe('CatalogueService', () => {
   };
   const openAiExtractorProvider = {
     extract: jest.fn(),
+    extractFromImages: jest.fn(),
     completeMissingFields: jest.fn(),
-    completeInteractiveMissingFields: jest.fn(),
-    discoverIngredients: jest.fn(),
-    searchByQuery: jest.fn(),
   };
   const productPageDiscoveryProvider = {
-    search: jest.fn(),
-    searchQuery: jest.fn(),
-    searchGenericQuery: jest.fn(),
+    discover: jest.fn(),
   };
   const catalogueSourceRuleService = {
     evaluateUrl: jest.fn(),
   };
+  const cataloguePhotoStorageService = {
+    saveHeroImage: jest.fn(),
+  };
 
   beforeEach(async () => {
     queryBuilder = createMockQueryBuilder();
-    openBeautyFactsProvider.search.mockReset();
     openBeautyFactsProvider.resolveBarcode.mockReset();
     officialPageProvider.extract.mockReset();
     openAiExtractorProvider.extract.mockReset();
+    openAiExtractorProvider.extractFromImages.mockReset();
     openAiExtractorProvider.completeMissingFields.mockReset();
-    openAiExtractorProvider.completeInteractiveMissingFields.mockReset();
-    openAiExtractorProvider.discoverIngredients.mockReset();
-    openAiExtractorProvider.searchByQuery.mockReset();
-    productPageDiscoveryProvider.search.mockReset();
-    productPageDiscoveryProvider.searchQuery.mockReset();
-    productPageDiscoveryProvider.searchGenericQuery.mockReset();
+    productPageDiscoveryProvider.discover.mockReset();
     catalogueSourceRuleService.evaluateUrl.mockReset();
-    productPageDiscoveryProvider.search.mockResolvedValue([]);
-    productPageDiscoveryProvider.searchQuery.mockResolvedValue([]);
-    productPageDiscoveryProvider.searchGenericQuery.mockResolvedValue([]);
+    cataloguePhotoStorageService.saveHeroImage.mockReset();
+    productPageDiscoveryProvider.discover.mockResolvedValue([]);
     catalogueSourceRuleService.evaluateUrl.mockResolvedValue({
       blocked: false,
       scoreAdjustment: 0,
       matchedRuleId: null,
       labels: [],
     });
+    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(
+      'http://localhost:3001/media/catalogue-front-photos/front-photo.jpg',
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -193,6 +198,10 @@ describe('CatalogueService', () => {
           provide: CatalogueSourceRuleService,
           useValue: catalogueSourceRuleService,
         },
+        {
+          provide: CataloguePhotoStorageService,
+          useValue: cataloguePhotoStorageService,
+        },
       ],
     }).compile();
 
@@ -201,90 +210,189 @@ describe('CatalogueService', () => {
     repo.createQueryBuilder.mockReturnValue(queryBuilder as never);
   });
 
-  it('builds a stable next cursor that includes the product id', async () => {
-    const first = createProduct('catalogue-1', 'Retinol Serum');
-    const second = createProduct('catalogue-2', 'Retinol Serum');
+  it('rejects unsafe private-network URLs during URL resolution', async () => {
+    await expect(
+      service.resolveUrl('http://127.0.0.1:3000/private-product'),
+    ).rejects.toThrow(BadRequestException);
+  });
 
-    queryBuilder.getRawAndEntities.mockResolvedValue({
-      entities: [first, second],
-      raw: [
-        { relevance: 1, source_priority: 0 },
-        { relevance: 1, source_priority: 0 },
+  it('uses ai-normalized official page fields to clean noisy parsed output', async () => {
+    queryBuilder.getOne.mockResolvedValue(null);
+    repo.findOne.mockResolvedValue(null);
+    repo.create.mockReturnValue({} as CatalogueProduct);
+    repo.save.mockImplementation(
+      async (product) => product as CatalogueProduct,
+    );
+    officialPageProvider.extract.mockResolvedValue({
+      identity: {
+        brand: 'CeraVe',
+        name: 'SA Smoothing Cleanser',
+        category: ProductCategory.Cleanser,
+        barcode: '3337875795456',
+        description:
+          'Product Features & Benefits Salicylic Acid Helps exfoliate and soften. View Product.',
+        benefits: ['Fragrance-free', 'View Product'],
+        suitedFor: ['Sensitive skin'],
+        inciIngredients: [
+          'Salicylic Acid',
+          'Free of physical exfoliants',
+          'Aqua / Water',
+          'Sodium Lauroyl Sarcosinate',
+          'Massage cleanser onto wet skin',
+        ],
+      },
+      guidance: {
+        steps: ['Massage cleanser onto wet skin', 'View Product'],
+        cautions: ['Avoid direct contact with the eyes'],
+      },
+      manufacturer: {
+        brand: 'CeraVe',
+        productUrl: 'https://example.com/sa-smoothing-cleanser',
+        websiteUrl: 'https://example.com',
+        supportEmail: null,
+        parentCompany: null,
+        countryOfOrigin: null,
+        countryOfManufacture: null,
+      },
+      evidence: [
+        {
+          source: CatalogueSource.OfficialPage,
+          url: 'https://example.com/sa-smoothing-cleanser',
+          title: 'SA Smoothing Cleanser',
+        },
+      ],
+      rawSource: {},
+      textExcerpt:
+        'Noisy product page excerpt with ingredients, claims, footer links, and retailer cards.',
+    });
+    openAiExtractorProvider.extract.mockResolvedValue({
+      data: {
+        identity: {
+          brand: 'CeraVe',
+          name: 'SA Smoothing Cleanser',
+          category: ProductCategory.Cleanser,
+          description: 'A salicylic acid cleanser that smooths rough skin.',
+          benefits: ['gently exfoliates', 'smooths texture'],
+          suitedFor: ['rough skin', 'sensitive skin'],
+          inciIngredients: [
+            'Aqua / Water',
+            'Sodium Lauroyl Sarcosinate',
+            'Cocamidopropyl Hydroxysultaine',
+            'Glycerin',
+            'Niacinamide',
+            'Salicylic Acid',
+          ],
+        },
+        guidance: {
+          steps: ['Massage onto wet skin', 'Rinse thoroughly'],
+          cautions: ['Avoid direct contact with eyes'],
+        },
+        manufacturer: {
+          supportEmail: 'support@example.com',
+          countryOfOrigin: 'US',
+          countryOfManufacture: 'FR',
+          parentCompany: "L'Oréal",
+          productUrl: 'https://example.com/sa-smoothing-cleanser',
+          websiteUrl: 'https://example.com',
+        },
+      },
+      warnings: [
+        LookupWarningCode.AiNormalized,
+        LookupWarningCode.GuidanceUnverified,
+        LookupWarningCode.IngredientsUnverified,
+      ],
+      evidence: [
+        {
+          source: CatalogueSource.OfficialPage,
+          url: 'https://example.com/sa-smoothing-cleanser',
+          title: 'SA Smoothing Cleanser',
+        },
       ],
     });
+    openAiExtractorProvider.completeMissingFields.mockResolvedValue(null);
 
-    const result = await service.search({
-      q: 'ret',
-      limit: 1,
-    });
+    const result = await service.resolveUrl(
+      'https://example.com/sa-smoothing-cleanser',
+    );
 
-    expect(result.items).toHaveLength(1);
-    expect(result.nextCursor).toBeTruthy();
-
-    const outerCursor = decodeCursor(result.nextCursor as string);
-    expect(outerCursor.tuple[0]).toBe('internal');
-
-    const internalCursor = decodeCursor(String(outerCursor.tuple[1]));
-    expect(internalCursor.tuple).toEqual([
-      1,
-      0,
-      'cerave',
-      'retinol serum',
-      'catalogue-1',
+    expect(result?.identity.description).toBe(
+      'A salicylic acid cleanser that smooths rough skin.',
+    );
+    expect(result?.identity.benefits).toEqual([
+      'gently exfoliates',
+      'smooths texture',
     ]);
+    expect(result?.identity.suitedFor).toEqual([
+      'rough skin',
+      'sensitive skin',
+    ]);
+    expect(result?.identity.inciIngredients).toEqual([
+      'Aqua / Water',
+      'Sodium Lauroyl Sarcosinate',
+      'Cocamidopropyl Hydroxysultaine',
+      'Glycerin',
+      'Niacinamide',
+      'Salicylic Acid',
+    ]);
+    expect(result?.guidance.steps).toEqual([
+      'Massage onto wet skin',
+      'Rinse thoroughly',
+    ]);
+    expect(result?.guidance.cautions).toEqual([
+      'Avoid direct contact with eyes',
+    ]);
+    expect(result?.manufacturer.supportEmail).toBe('support@example.com');
+    expect(result?.manufacturer.parentCompany).toBe("L'Oréal");
+    expect(result?.manufacturer.countryOfOrigin).toBe('US');
+    expect(result?.manufacturer.countryOfManufacture).toBe('FR');
   });
 
-  it('resolves an exact cached match without calling external search', async () => {
-    const cached = createProduct('catalogue-1', 'Resurfacing Retinol Serum');
+  it('extracts a product from multiple photos and persists the selected hero image', async () => {
+    const heroImage = createUploadedImage('heroImage');
+    const ingredientImage = createUploadedImage('ingredientImage');
+    const directionsImage = createUploadedImage('directionsImage');
 
-    queryBuilder.getRawAndEntities.mockResolvedValue({
-      entities: [cached],
-      raw: [{ relevance: 0, source_priority: 0 }],
+    openAiExtractorProvider.extractFromImages.mockResolvedValue({
+      data: {
+        identity: {
+          brand: 'CeraVe',
+          name: 'Resurfacing Retinol Serum',
+          category: ProductCategory.Serum,
+          sizeMl: 30,
+          description: 'A resurfacing serum for smoother-looking skin.',
+          benefits: ['smoother texture'],
+          suitedFor: ['sensitive skin'],
+          inciIngredients: ['Aqua', 'Glycerin'],
+        },
+        guidance: {
+          steps: ['Apply at night after cleansing.'],
+          cautions: ['Use sunscreen during the day.'],
+        },
+        manufacturer: {
+          productUrl: 'https://example.com/resurfacing-retinol-serum',
+          websiteUrl: 'https://example.com',
+        },
+      },
+      warnings: [
+        LookupWarningCode.AiNormalized,
+        LookupWarningCode.GuidanceUnverified,
+        LookupWarningCode.IngredientsUnverified,
+      ],
+      evidence: [],
     });
-    repo.findOne.mockResolvedValue(cached);
-
-    const result = await service.searchBestMatch(
-      'CeraVe Resurfacing Retinol Serum',
-    );
-
-    expect(openBeautyFactsProvider.search).not.toHaveBeenCalled();
-    expect(result?.identity.brand).toBe('CeraVe');
-    expect(result?.identity.name).toBe('Resurfacing Retinol Serum');
-  });
-
-  it('fully enriches an exact cached match for search best match', async () => {
-    const cached = createSparseProduct(
-      'catalogue-1',
-      'Resurfacing Retinol Serum',
-    );
-    cached.manufacturer = {
-      ...cached.manufacturer,
-      productUrl: 'https://example.com/resurfacing-retinol-serum',
-      websiteUrl: 'https://example.com',
-    };
-
-    queryBuilder.getRawAndEntities.mockResolvedValue({
-      entities: [cached],
-      raw: [{ relevance: 0, source_priority: 0 }],
-    });
-    repo.findOne.mockResolvedValue(cached);
     officialPageProvider.extract.mockResolvedValue({
       identity: {
         brand: 'CeraVe',
         name: 'Resurfacing Retinol Serum',
         category: ProductCategory.Serum,
-        barcode: 'barcode-catalogue-1',
-        imageUrls: [],
         sizeMl: 30,
-        description: 'A resurfacing serum for smoother-looking skin.',
-        benefits: ['smoother texture'],
-        suitedFor: ['combination skin'],
-        inciIngredients: ['Aqua', 'Niacinamide'],
-        inciLastConfirmedAt: new Date('2026-04-20T00:00:00.000Z').toISOString(),
+        description: 'Official description',
+        benefits: ['official benefit'],
+        suitedFor: ['official skin'],
+        inciIngredients: ['Official Ingredient'],
       },
       guidance: {
-        steps: ['Apply to clean skin.'],
-        cautions: ['Use sunscreen during the day.'],
+        cautions: ['Avoid contact with eyes.'],
       },
       manufacturer: {
         brand: 'CeraVe',
@@ -302,247 +410,109 @@ describe('CatalogueService', () => {
         },
       ],
       rawSource: {},
-      textExcerpt:
-        'Benefits: smoother texture. Suitable for: combination skin. How to use: Apply to clean skin.',
+      textExcerpt: 'Official product page excerpt',
     });
     openAiExtractorProvider.extract.mockResolvedValue(null);
-    openAiExtractorProvider.completeMissingFields.mockResolvedValue(null);
 
-    const result = await service.searchBestMatch(
-      'CeraVe Resurfacing Retinol Serum',
+    const result = await service.extractFromImages(
+      [heroImage, ingredientImage, directionsImage],
+      2,
+      'http://localhost:3001',
     );
 
+    expect(openAiExtractorProvider.extractFromImages).toHaveBeenCalledWith({
+      images: [
+        {
+          buffer: heroImage.buffer,
+          mimetype: 'image/jpeg',
+        },
+        {
+          buffer: ingredientImage.buffer,
+          mimetype: 'image/jpeg',
+        },
+        {
+          buffer: directionsImage.buffer,
+          mimetype: 'image/jpeg',
+        },
+      ],
+      heroImageIndex: 2,
+    });
+    expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
+      directionsImage,
+      'http://localhost:3001',
+    );
+    expect(productPageDiscoveryProvider.discover).not.toHaveBeenCalled();
     expect(officialPageProvider.extract).toHaveBeenCalledWith(
       'https://example.com/resurfacing-retinol-serum',
     );
+    expect(result?.provenance).toBe('photo-lookup');
+    expect(result?.source).toBe(CatalogueSource.UserPhotos);
+    expect(result?.identity.imageUrls).toEqual([
+      'http://localhost:3001/media/catalogue-front-photos/front-photo.jpg',
+    ]);
     expect(result?.identity.description).toBe(
       'A resurfacing serum for smoother-looking skin.',
     );
-    expect(result?.identity.benefits).toEqual(['smoother texture']);
-    expect(result?.identity.suitedFor).toEqual(['combination skin']);
-    expect(result?.guidance.cautions).toEqual([
-      'Use sunscreen during the day.',
-    ]);
+    expect(result?.identity.inciIngredients).toEqual(['Aqua', 'Glycerin']);
     expect(result?.manufacturer.parentCompany).toBe("L'Oréal");
     expect(result?.manufacturer.supportEmail).toBe('support@example.com');
     expect(result?.manufacturer.productUrl).toBe(
       'https://example.com/resurfacing-retinol-serum',
     );
+    expect(result?.confidence).toBe(LookupConfidence.Medium);
   });
 
-  it('returns null for an ambiguous broad query', async () => {
-    const first = createProduct('catalogue-1', 'Hydrating Cleanser');
-    const second = createProduct('catalogue-2', 'Foaming Cleanser');
+  it('returns a partial but usable photo lookup when only the product photo yields core identity details', async () => {
+    const heroImage = createUploadedImage('heroImage');
+    const labelImage = createUploadedImage('labelImage');
 
-    queryBuilder.getRawAndEntities.mockResolvedValue({
-      entities: [first, second],
-      raw: [
-        { relevance: 0, source_priority: 0 },
-        { relevance: 0, source_priority: 0 },
-      ],
-    });
-    openBeautyFactsProvider.search.mockResolvedValue({
-      items: [],
-      hasMore: false,
-    });
-    productPageDiscoveryProvider.searchQuery.mockResolvedValue([]);
-
-    const result = await service.searchBestMatch('cerave');
-
-    expect(result).toBeNull();
-  });
-
-  it('falls back to external search when cached matches are not decisive', async () => {
-    const cached = createProduct('catalogue-1', 'Moisturizing Lotion');
-
-    queryBuilder.getRawAndEntities.mockResolvedValue({
-      entities: [cached],
-      raw: [{ relevance: 2, source_priority: 0 }],
-    });
-    queryBuilder.getOne.mockResolvedValue(null);
-    openBeautyFactsProvider.search.mockResolvedValue({
-      items: [
-        {
-          id: '3337875684118',
-          source: CatalogueSource.OpenBeautyFacts,
-          brand: 'CeraVe',
-          name: 'Resurfacing Retinol Serum',
-          category: ProductCategory.Serum,
-          imageUrls: [],
-          sizeMl: 30,
-          barcode: '3337875684118',
-          confidence: LookupConfidence.Low,
-          reviewRequired: true,
+    openAiExtractorProvider.extractFromImages.mockResolvedValue({
+      data: {
+        identity: {
+          brand: 'Beauty of Joseon',
+          name: 'Relief Sun',
+          category: ProductCategory.SunProtection,
+          sizeMl: 50,
         },
-      ],
-      hasMore: false,
-    });
-    openBeautyFactsProvider.resolveBarcode.mockResolvedValue({
-      identity: {
-        brand: 'CeraVe',
-        name: 'Resurfacing Retinol Serum',
-        category: ProductCategory.Serum,
-        barcode: '3337875684118',
-        imageUrls: [],
-        sizeMl: 30,
-        description: 'A resurfacing serum for smoother-looking skin.',
-        benefits: ['smoother texture'],
-        suitedFor: ['combination'],
-        inciIngredients: [],
-        inciLastConfirmedAt: null,
+        guidance: {},
+        manufacturer: {},
       },
-      guidance: {},
-      manufacturer: {
-        brand: 'CeraVe',
-        productUrl: 'https://example.com/product',
-        websiteUrl: 'https://example.com',
-      },
-      provenance: 'catalogue',
-      source: CatalogueSource.OpenBeautyFacts,
-      confidence: LookupConfidence.Low,
-      reviewRequired: true,
-      warnings: [LookupWarningCode.ReviewRequired],
+      warnings: [LookupWarningCode.AiNormalized],
       evidence: [],
-      cacheKey: {
-        source: CatalogueSource.OpenBeautyFacts,
-        id: '3337875684118',
-        url: 'https://example.com/product',
-      },
-      rawSource: {},
     });
-    repo.findOne.mockResolvedValue(null);
-    repo.create.mockReturnValue({} as CatalogueProduct);
-    repo.save.mockImplementation(
-      async (product) => product as CatalogueProduct,
-    );
-    officialPageProvider.extract.mockResolvedValue(null);
-    openAiExtractorProvider.completeMissingFields.mockResolvedValue(null);
-    productPageDiscoveryProvider.search.mockResolvedValue([]);
 
-    const result = await service.searchBestMatch('retinol serum');
+    const result = await service.extractFromImages(
+      [heroImage, labelImage],
+      0,
+      'http://localhost:3001',
+    );
 
-    expect(openBeautyFactsProvider.search).toHaveBeenCalledWith(
-      'retinol serum',
-      1,
+    expect(productPageDiscoveryProvider.discover).not.toHaveBeenCalled();
+    expect(result?.identity.brand).toBe('Beauty of Joseon');
+    expect(result?.identity.name).toBe('Relief Sun');
+    expect(result?.identity.inciIngredients).toBeUndefined();
+    expect(result?.warnings).toEqual(
+      expect.arrayContaining([
+        LookupWarningCode.ReviewRequired,
+        LookupWarningCode.PartialData,
+      ]),
     );
-    expect(openBeautyFactsProvider.resolveBarcode).toHaveBeenCalledWith(
-      '3337875684118',
-      'catalogue',
-    );
-    expect(result?.identity.name).toBe('Resurfacing Retinol Serum');
+    expect(result?.confidence).toBe(LookupConfidence.Medium);
   });
 
-  it('fills missing ingredients from deterministic search results even when AI completion returns nothing', async () => {
-    queryBuilder.getRawAndEntities.mockResolvedValue({
-      entities: [],
-      raw: [],
-    });
-    openBeautyFactsProvider.search.mockResolvedValue({
-      items: [],
-      hasMore: false,
-    });
-    productPageDiscoveryProvider.searchQuery.mockResolvedValue([
-      {
-        url: 'https://theordinary.com/en-us/azelaic-acid-suspension-10-100407.html',
-        title: 'Azelaic Acid Suspension 10% - The Ordinary',
-        snippet: 'Official The Ordinary product page',
-      },
-    ]);
-    officialPageProvider.extract
-      .mockResolvedValueOnce({
-        identity: {
-          brand: 'The Ordinary',
-          name: 'Azelaic Acid Suspension 10%',
-          category: ProductCategory.Exfoliant,
-          description:
-            'A cream-like formula that visibly improves brightness and texture.',
-          benefits: ['brightening'],
-          suitedFor: ['blemish-prone skin'],
-          inciIngredients: [],
-        },
-        guidance: {},
-        manufacturer: {
-          brand: 'The Ordinary',
-          productUrl:
-            'https://theordinary.com/en-us/azelaic-acid-suspension-10-100407.html',
-          websiteUrl: 'https://theordinary.com',
-        },
-        evidence: [],
-        rawSource: {},
-        textExcerpt: 'Official product page excerpt',
-      })
-      .mockResolvedValueOnce({
-        identity: {
-          brand: 'The Ordinary',
-          name: 'The Ordinary Azelaic Acid Suspension 10%',
-          category: ProductCategory.Exfoliant,
-          inciIngredients: [
-            'Aqua (Water)',
-            'Isodecyl Neopentanoate',
-            'Dimethicone',
-            'Azelaic Acid',
-          ],
-          inciLastConfirmedAt: new Date(
-            '2026-04-20T00:00:00.000Z',
-          ).toISOString(),
-        },
-        guidance: {},
-        manufacturer: {
-          brand: 'The Ordinary',
-          websiteUrl: 'https://incidecoder.com',
-        },
-        evidence: [
-          {
-            source: CatalogueSource.OfficialPage,
-            url: 'https://incidecoder.com/products/the-ordinary-azelaic-acid-suspension-10',
-            title: 'The Ordinary Azelaic Acid Suspension 10% ingredients',
-          },
-        ],
-        rawSource: {},
-        textExcerpt:
-          'Ingredients: Aqua (Water), Isodecyl Neopentanoate, Dimethicone, Azelaic Acid.',
-      });
-    openAiExtractorProvider.completeInteractiveMissingFields.mockResolvedValue(
-      null,
-    );
-    openAiExtractorProvider.discoverIngredients.mockResolvedValue(null);
-    productPageDiscoveryProvider.searchGenericQuery.mockResolvedValue([
-      {
-        url: 'https://incidecoder.com/products/the-ordinary-azelaic-acid-suspension-10',
-        title:
-          'The Ordinary Azelaic Acid Suspension 10% ingredients (Explained)',
-        snippet: 'Ingredients explained',
-      },
-    ]);
-    repo.create.mockReturnValue({} as CatalogueProduct);
-    repo.save.mockImplementation(
-      async (product) => product as CatalogueProduct,
-    );
-
-    const result = await service.searchBestMatch(
-      'The Ordinary Azelaic Acid Suspension 10%',
-    );
-
-    expect(
-      productPageDiscoveryProvider.searchGenericQuery,
-    ).toHaveBeenCalledWith(
-      'The Ordinary Azelaic Acid Suspension 10% ingredients',
-    );
-    expect(
-      openAiExtractorProvider.completeInteractiveMissingFields,
-    ).not.toHaveBeenCalled();
-    expect(result?.identity.inciIngredients).toEqual([
-      'Aqua (Water)',
-      'Isodecyl Neopentanoate',
-      'Dimethicone',
-      'Azelaic Acid',
-    ]);
-    expect(result?.warnings).toContain(LookupWarningCode.IngredientsUnverified);
-  });
-
-  it('rejects unsafe private-network URLs during URL resolution', async () => {
+  it('rejects photo extraction requests with fewer than two images', async () => {
     await expect(
-      service.resolveUrl('http://127.0.0.1:3000/private-product'),
+      service.extractFromImages([createUploadedImage('heroImage')], 0, 'http://localhost:3001'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects photo extraction requests with an invalid hero image index', async () => {
+    await expect(
+      service.extractFromImages(
+        [createUploadedImage('heroImage'), createUploadedImage('labelImage')],
+        3,
+        'http://localhost:3001',
+      ),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -585,7 +555,7 @@ describe('CatalogueService', () => {
         },
       ],
     });
-    productPageDiscoveryProvider.search.mockResolvedValue([]);
+    productPageDiscoveryProvider.discover.mockResolvedValue([]);
 
     const result = await service.resolveBarcode('3337875684118');
 
@@ -594,6 +564,78 @@ describe('CatalogueService', () => {
     expect(result?.identity.name).toBe('Resurfacing Retinol Serum');
     expect(result?.manufacturer.productUrl).toBe('https://example.com/product');
     expect(result?.confidence).toBe(LookupConfidence.High);
+  });
+
+  it('skips slow AI barcode fallback for the scan endpoint when open beauty facts has no match', async () => {
+    queryBuilder.getOne.mockResolvedValue(null);
+    repo.findOne.mockResolvedValue(null);
+    openBeautyFactsProvider.resolveBarcode.mockResolvedValue(null);
+
+    const result = await service.resolveBarcodeForScan('3337875684118');
+
+    expect(openAiExtractorProvider.completeMissingFields).not.toHaveBeenCalled();
+    expect(officialPageProvider.extract).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+  });
+
+  it('returns open beauty facts barcode hits for the scan endpoint without official-page enrichment', async () => {
+    queryBuilder.getOne.mockResolvedValue(null);
+    repo.findOne.mockResolvedValue(null);
+    repo.create.mockReturnValue({} as CatalogueProduct);
+    repo.save.mockImplementation(
+      async (product) => product as CatalogueProduct,
+    );
+    openBeautyFactsProvider.resolveBarcode.mockResolvedValue({
+      identity: {
+        brand: 'The Ordinary',
+        name: 'Azelaic Acid Suspension 10%',
+        category: ProductCategory.Exfoliant,
+        barcode: '769915195854',
+        imageUrls: [],
+        sizeMl: 30,
+        description: null,
+        benefits: [],
+        suitedFor: [],
+        inciIngredients: ['Aqua (Water)', 'Dimethicone', 'Azelaic Acid'],
+        inciLastConfirmedAt: new Date('2026-04-20T00:00:00.000Z').toISOString(),
+      },
+      guidance: {},
+      manufacturer: {
+        brand: 'The Ordinary',
+        productUrl:
+          'https://theordinary.com/en-us/azelaic-acid-suspension-10-100407.html',
+        websiteUrl: 'https://theordinary.com',
+      },
+      provenance: 'barcode-lookup',
+      source: CatalogueSource.OpenBeautyFacts,
+      confidence: LookupConfidence.Low,
+      reviewRequired: true,
+      warnings: [
+        LookupWarningCode.ReviewRequired,
+        LookupWarningCode.CommunityData,
+        LookupWarningCode.IngredientsUnverified,
+      ],
+      evidence: [],
+      cacheKey: {
+        source: CatalogueSource.OpenBeautyFacts,
+        id: '769915195854',
+        url: 'https://theordinary.com/en-us/azelaic-acid-suspension-10-100407.html',
+      },
+      rawSource: {},
+    });
+
+    const result = await service.resolveBarcodeForScan('769915195854');
+
+    expect(officialPageProvider.extract).not.toHaveBeenCalled();
+    expect(productPageDiscoveryProvider.discover).not.toHaveBeenCalled();
+    expect(openAiExtractorProvider.completeMissingFields).not.toHaveBeenCalled();
+    expect(result?.identity.brand).toBe('The Ordinary');
+    expect(result?.identity.description ?? null).toBeNull();
+    expect(result?.identity.inciIngredients).toEqual([
+      'Aqua (Water)',
+      'Dimethicone',
+      'Azelaic Acid',
+    ]);
   });
 
   it('re-enriches sparse cached catalogue products before returning them', async () => {
@@ -630,7 +672,7 @@ describe('CatalogueService', () => {
         },
       ],
     });
-    productPageDiscoveryProvider.search.mockResolvedValue([]);
+    productPageDiscoveryProvider.discover.mockResolvedValue([]);
 
     const result = await service.resolveCandidate({
       id: cached.id,
@@ -975,7 +1017,7 @@ describe('CatalogueService', () => {
       },
       rawSource: {},
     });
-    productPageDiscoveryProvider.search.mockResolvedValue([
+    productPageDiscoveryProvider.discover.mockResolvedValue([
       {
         url: 'https://www.cerave.co.uk/skincare/cleansers/sa-smoothing-cleanser',
         title: 'SA Smoothing Cleanser | CeraVe',
@@ -1027,7 +1069,7 @@ describe('CatalogueService', () => {
 
     const result = await service.resolveBarcode('3337875795456');
 
-    expect(productPageDiscoveryProvider.search).toHaveBeenCalled();
+    expect(productPageDiscoveryProvider.discover).toHaveBeenCalled();
     expect(result?.identity.description).toBe(
       'A smoothing cleanser for rough and bumpy skin.',
     );

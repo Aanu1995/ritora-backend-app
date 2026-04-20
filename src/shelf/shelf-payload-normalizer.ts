@@ -1,4 +1,7 @@
-import { assertSafeExternalHttpUrl } from '../common/utils/url-security';
+import {
+  assertSafeExternalHttpUrl,
+  assertSafeInventoryImageUrl,
+} from '../common/utils/url-security';
 import {
   normalizeImportedTextList,
   normalizeImportedTextToNull,
@@ -221,11 +224,27 @@ function normalizeOptionalUrl(value: string | null | undefined): string | null {
   }
 }
 
+function normalizeOptionalImageUrl(
+  value: string | null | undefined,
+): string | null {
+  const trimmed = normalizeImportedTextToNull(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    assertSafeInventoryImageUrl(trimmed, 'Shelf payload image URL');
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeUrlList(values: string[] | null | undefined): string[] {
   return Array.from(
     new Set(
       (values ?? [])
-        .map((value) => normalizeOptionalUrl(value))
+        .map((value) => normalizeOptionalImageUrl(value))
         .filter((value): value is string => Boolean(value)),
     ),
   );

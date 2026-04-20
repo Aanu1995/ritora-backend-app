@@ -2,9 +2,13 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
-import type { Express } from 'express';
+import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import {
+  CATALOGUE_MEDIA_ROUTE,
+  resolveCatalogueMediaRootDir,
+} from './catalogue/catalogue-media.constants';
 
 function parseCorsOrigins(configService: ConfigService): string[] {
   const configuredOrigins =
@@ -54,6 +58,10 @@ export function configureApp(
   }
 
   expressApp.disable('x-powered-by');
+  expressApp.use(
+    CATALOGUE_MEDIA_ROUTE,
+    express.static(resolveCatalogueMediaRootDir()),
+  );
 
   const swaggerEnabled = configService.get<boolean>(
     'SWAGGER_ENABLED',

@@ -5,10 +5,7 @@ import {
   LookupConfidence,
   LookupWarningCode,
 } from '../shelf/shelf.types';
-import type {
-  DiscoveredSuggestion,
-  ResolvedProductDraft,
-} from './product-discovery.types';
+import type { ResolvedProductDraft } from './product-discovery.types';
 import {
   inferCategoryFromText,
   normalizeBarcode,
@@ -41,19 +38,11 @@ type OpenBeautyFactsProduct = {
   product_web_page_url?: string;
 };
 
-type SearchResponse = {
-  products?: OpenBeautyFactsProduct[];
-  page?: number;
-  page_count?: number;
-};
-
 type ProductResponse = {
   product?: OpenBeautyFactsProduct;
   status?: number;
 };
 
-const SEARCH_PAGE_SIZE = 20;
-const SEARCH_ENDPOINT = 'https://world.openbeautyfacts.org/cgi/search.pl';
 const PRODUCT_ENDPOINT = 'https://world.openbeautyfacts.org/api/v2/product';
 const REQUEST_TIMEOUT_MS = 8000;
 const REQUEST_HEADERS = {
@@ -140,31 +129,6 @@ function pickImageUrls(product: OpenBeautyFactsProduct): string[] {
   ]);
 }
 
-function toSuggestion(
-  product: OpenBeautyFactsProduct,
-): DiscoveredSuggestion | null {
-  const barcode = normalizeBarcode(product.code ?? '');
-  const name = pickProductName(product);
-  const brand = pickBrand(product);
-
-  if (!barcode || !name || !brand) {
-    return null;
-  }
-
-  return {
-    id: barcode,
-    source: CatalogueSource.OpenBeautyFacts,
-    brand,
-    name,
-    category: inferCategoryFromText(name, product.categories),
-    imageUrls: pickImageUrls(product),
-    sizeMl: parseSizeMl(product.quantity),
-    barcode,
-    confidence: LookupConfidence.Low,
-    reviewRequired: true,
-  };
-}
-
 function toResolvedDraft(
   product: OpenBeautyFactsProduct,
   provenance: DataProvenance,
@@ -238,52 +202,6 @@ function toResolvedDraft(
 @Injectable()
 export class OpenBeautyFactsProvider {
   private readonly logger = new Logger(OpenBeautyFactsProvider.name);
-
-  async search(
-    query: string,
-    page: number,
-  ): Promise<{
-    items: DiscoveredSuggestion[];
-    hasMore: boolean;
-  }> {
-    const params = new URLSearchParams({
-      search_terms: query,
-      search_simple: '1',
-      action: 'process',
-      json: '1',
-      page: String(page),
-      page_size: String(SEARCH_PAGE_SIZE),
-      fields: [
-        'code',
-        'product_name',
-        'product_name_en',
-        'generic_name',
-        'generic_name_en',
-        'brands',
-        'brands_owner',
-        'quantity',
-        'image_front_small_url',
-        'image_front_url',
-        'image_url',
-        'categories',
-      ].join(','),
-    });
-
-    const response = await this.fetchJson<SearchResponse>(
-      `${SEARCH_ENDPOINT}?${params.toString()}`,
-    );
-    const products = response?.products ?? [];
-    const items = products
-      .map((product) => toSuggestion(product))
-      .filter((product): product is DiscoveredSuggestion => product !== null);
-    const currentPage = response?.page ?? page;
-    const pageCount = response?.page_count ?? currentPage;
-
-    return {
-      items,
-      hasMore: currentPage < pageCount,
-    };
-  }
 
   async resolveBarcode(
     barcode: string,

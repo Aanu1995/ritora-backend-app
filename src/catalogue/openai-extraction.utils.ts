@@ -15,6 +15,7 @@ export type ExtractedGroundedData = {
     brand?: string;
     name?: string;
     category?: ProductCategory;
+    sizeMl?: number | null;
     description?: string | null;
     benefits?: string[];
     suitedFor?: string[];
@@ -113,6 +114,7 @@ export function toExtractionResult(
   );
   const brand = sanitizeOptionalString(identity.brand);
   const name = sanitizeOptionalString(identity.name);
+  const sizeMl = sanitizeSizeMl(identity.sizeMl);
   const description = sanitizeConciseDescription(identity.description);
   const supportEmail = sanitizeOptionalString(manufacturer.supportEmail);
   const countryOfOrigin = sanitizeOptionalString(manufacturer.countryOfOrigin);
@@ -126,6 +128,7 @@ export function toExtractionResult(
       ...(brand ? { brand } : {}),
       ...(name ? { name } : {}),
       ...(inferredCategory ? { category: inferredCategory } : {}),
+      ...(sizeMl !== null ? { sizeMl } : {}),
       ...(description ? { description } : {}),
       benefits: sanitizeConciseList(identity.benefits, {
         maxItems: 4,
@@ -166,6 +169,7 @@ export function toExtractionResult(
     Boolean(sanitized.identity?.brand) ||
     Boolean(sanitized.identity?.name) ||
     Boolean(sanitized.identity?.category) ||
+    typeof sanitized.identity?.sizeMl === 'number' ||
     Boolean(sanitized.identity?.description) ||
     Boolean(sanitized.identity?.benefits?.length) ||
     Boolean(sanitized.identity?.suitedFor?.length) ||
@@ -202,6 +206,41 @@ export function toExtractionResult(
   };
 }
 
+const NON_INGREDIENT_PATTERNS = [
+  /\bfree of\b/i,
+  /\bfragrance[- ]?free\b/i,
+  /\bnon[- ]?(irritating|comedogenic|greasy|drying)\b/i,
+  /\brecommended use\b/i,
+  /\bproduct features?\b/i,
+  /\bbenefits?\b/i,
+  /\bmassage\b/i,
+  /\brinse\b/i,
+  /\bavoid\b/i,
+  /\bsuitable for\b/i,
+  /\bgentle on skin\b/i,
+  /\bno microbeads?\b/i,
+  /\bdeveloped with dermatologists\b/i,
+  /\blearn more\b/i,
+  /\bproducts? you may like\b/i,
+  /\bview product\b/i,
+  /\bbuy online\b/i,
+  /\bcontact us\b/i,
+  /\bfaq\b/i,
+  /\bcookie(?:-| )settings\b/i,
+  /\bprivacy policy\b/i,
+  /\bterms?(?: &| and)? conditions\b/i,
+  /\bcountries?(?: &| and)? regions?\b/i,
+  /\byou are now leaving\b/i,
+  /\bnot responsible for the content\b/i,
+  /\bclicks\b/i,
+  /\bdermastore\b/i,
+  /\bdis-chem\b/i,
+  /\bmydawa\b/i,
+  /\bskinmiles\b/i,
+  /\b\d+\s*ml\b/i,
+  /©/,
+];
+
 function sanitizeStringList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -210,6 +249,24 @@ function sanitizeStringList(value: unknown): string[] {
   return normalizeImportedTextList(
     value.map((item) => (typeof item === 'string' ? item : null)),
   );
+}
+
+function sanitizeSizeMl(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const match = value.match(/(\d+(?:[.,]\d+)?)/);
+    if (!match) {
+      return null;
+    }
+
+    const parsed = Number(match[1].replace(',', '.'));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return null;
 }
 
 function sanitizeIngredientList(value: unknown): string[] {
@@ -243,6 +300,10 @@ function sanitizeOptionalString(value: unknown): string | null {
 function looksLikeIngredientName(value: string): boolean {
   const normalized = value.trim();
   if (!normalized) {
+    return false;
+  }
+
+  if (NON_INGREDIENT_PATTERNS.some((pattern) => pattern.test(normalized))) {
     return false;
   }
 
