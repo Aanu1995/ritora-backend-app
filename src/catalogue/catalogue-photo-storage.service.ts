@@ -3,9 +3,9 @@ import { mkdir, writeFile } from 'fs/promises';
 import { extname } from 'path';
 import { ulid } from 'ulid';
 import {
-  CATALOGUE_FRONT_IMAGE_DIRECTORY,
+  CATALOGUE_PRODUCT_IMAGE_DIRECTORY,
   CATALOGUE_MEDIA_ROUTE,
-  resolveCatalogueFrontImageDir,
+  resolveCatalogueProductImageDir,
 } from './catalogue-media.constants';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
 
@@ -23,7 +23,7 @@ export class CataloguePhotoStorageService {
     file: UploadedCatalogueImage,
     publicBaseUrl: string,
   ): Promise<string> {
-    const directory = resolveCatalogueFrontImageDir();
+    const directory = resolveCatalogueProductImageDir();
     await mkdir(directory, { recursive: true });
 
     const extension = this.resolveFileExtension(file);
@@ -33,7 +33,7 @@ export class CataloguePhotoStorageService {
     await writeFile(absolutePath, file.buffer);
 
     return new URL(
-      `${CATALOGUE_MEDIA_ROUTE}/${CATALOGUE_FRONT_IMAGE_DIRECTORY}/${fileName}`,
+      `${CATALOGUE_MEDIA_ROUTE}/${CATALOGUE_PRODUCT_IMAGE_DIRECTORY}/${fileName}`,
       publicBaseUrl,
     ).toString();
   }

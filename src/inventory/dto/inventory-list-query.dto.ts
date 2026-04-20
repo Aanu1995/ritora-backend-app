@@ -15,11 +15,15 @@ import {
   ShelfStatFilter,
 } from '../../shelf/shelf.types';
 import {
+  PRODUCT_CATEGORY_VALUES,
   DEFAULT_SHELF_PAGE_SIZE,
   MAX_SHELF_PAGE_SIZE,
 } from '../../shelf/shelf.constants';
 
-const CATEGORY_QUERY_VALUES = [...Object.values(ProductCategory), 'all'];
+const CATEGORY_QUERY_VALUES: Array<ProductCategory | 'all'> = [
+  ...PRODUCT_CATEGORY_VALUES,
+  'all',
+];
 
 export class InventoryListQueryDto {
   @IsOptional()

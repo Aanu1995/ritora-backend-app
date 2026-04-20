@@ -3,6 +3,7 @@ import {
   normalizeImportedTextList,
   normalizeImportedTextToNull,
 } from '../common/utils/imported-text';
+import { PRODUCT_CATEGORY_VALUES } from '../shelf/shelf.constants';
 import {
   CatalogueSource,
   LookupWarningCode,
@@ -422,7 +423,7 @@ function sanitizeProductCategory(value: unknown): ProductCategory | undefined {
     return undefined;
   }
 
-  return Object.values(ProductCategory).includes(value as ProductCategory)
+  return PRODUCT_CATEGORY_VALUES.includes(value as ProductCategory)
     ? (value as ProductCategory)
     : undefined;
 }

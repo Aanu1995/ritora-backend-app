@@ -8,12 +8,17 @@ import {
 } from '../common/utils/imported-text';
 import { sanitizeProductNameCandidate } from '../common/utils/product-name';
 import {
-  ApplicationMethod,
+  APPLICATION_METHOD_VALUES,
+  CATALOGUE_SOURCE_VALUES,
+  LOOKUP_CONFIDENCE_VALUES,
+  PRODUCT_CATEGORY_VALUES,
+  QUANTITY_VALUES,
+} from './shelf.constants';
+import {
   CatalogueSource,
   LookupConfidence,
   type LookupEvidence,
   ProductCategory,
-  Quantity,
   type ApplicationGuidance,
   type CatalogueIdentity,
   type CatalogueSuggestion,
@@ -128,13 +133,11 @@ const COUNTRY_NAME_TO_CODE: Record<string, string> = {
   vietnam: 'VN',
 };
 
-const CATEGORY_VALUES = new Set<string>(Object.values(ProductCategory));
-const APPLICATION_METHOD_VALUES = new Set<string>(
-  Object.values(ApplicationMethod),
-);
-const QUANTITY_VALUES = new Set<string>(Object.values(Quantity));
-const SOURCE_VALUES = new Set<string>(Object.values(CatalogueSource));
-const CONFIDENCE_VALUES = new Set<string>(Object.values(LookupConfidence));
+const CATEGORY_VALUES = new Set<string>(PRODUCT_CATEGORY_VALUES);
+const APPLICATION_METHOD_VALUE_SET = new Set<string>(APPLICATION_METHOD_VALUES);
+const QUANTITY_VALUE_SET = new Set<string>(QUANTITY_VALUES);
+const SOURCE_VALUES = new Set<string>(CATALOGUE_SOURCE_VALUES);
+const CONFIDENCE_VALUES = new Set<string>(LOOKUP_CONFIDENCE_VALUES);
 
 function trimToNull(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -341,12 +344,12 @@ export function normalizePartialApplicationGuidance(
 
   if (
     guidance.applicationMethod &&
-    APPLICATION_METHOD_VALUES.has(guidance.applicationMethod)
+    APPLICATION_METHOD_VALUE_SET.has(guidance.applicationMethod)
   ) {
     normalized.applicationMethod = guidance.applicationMethod;
   }
 
-  if (guidance.quantity && QUANTITY_VALUES.has(guidance.quantity)) {
+  if (guidance.quantity && QUANTITY_VALUE_SET.has(guidance.quantity)) {
     normalized.quantity = guidance.quantity;
   }
 
@@ -438,11 +441,11 @@ export function normalizeApplicationGuidanceSnapshot(
   return {
     applicationMethod:
       guidance.applicationMethod &&
-      APPLICATION_METHOD_VALUES.has(guidance.applicationMethod)
+      APPLICATION_METHOD_VALUE_SET.has(guidance.applicationMethod)
         ? guidance.applicationMethod
         : null,
     quantity:
-      guidance.quantity && QUANTITY_VALUES.has(guidance.quantity)
+      guidance.quantity && QUANTITY_VALUE_SET.has(guidance.quantity)
         ? guidance.quantity
         : null,
     steps: normalizeStringList(guidance.steps),

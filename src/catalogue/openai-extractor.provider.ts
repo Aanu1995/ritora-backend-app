@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isSafeExternalHttpUrl } from '../common/utils/url-security';
-import { ProductCategory } from '../shelf/shelf.types';
+import { PRODUCT_CATEGORY_VALUES } from '../shelf/shelf.constants';
+import type { CataloguePhotoExtractionInput } from './catalogue-photo.types';
 import type {
   OfficialPageExtraction,
   ResolvedProductDraft,
@@ -43,13 +44,9 @@ export class OpenAiExtractorProvider {
     });
   }
 
-  async extractFromImages(input: {
-    images: Array<{
-      buffer: Buffer;
-      mimetype: string;
-    }>;
-    heroImageIndex: number;
-  }): Promise<ExtractionResult | null> {
+  async extractFromImages(
+    input: CataloguePhotoExtractionInput,
+  ): Promise<ExtractionResult | null> {
     const imageContent = input.images.flatMap((image, index) => {
       const imageNumber = index + 1;
       const imageLabel =
@@ -301,7 +298,7 @@ export class OpenAiExtractorProvider {
           identity: {
             brand: 'string|null',
             name: 'string|null',
-            category: Object.values(ProductCategory),
+            category: PRODUCT_CATEGORY_VALUES,
             description: 'string|null',
             benefits: ['string'],
             suitedFor: ['string'],
@@ -368,7 +365,7 @@ export class OpenAiExtractorProvider {
           identity: {
             brand: 'string|null',
             name: 'string|null',
-            category: Object.values(ProductCategory),
+            category: PRODUCT_CATEGORY_VALUES,
             sizeMl: 'number|null',
             description: 'string|null',
             benefits: ['string'],
@@ -426,7 +423,7 @@ export class OpenAiExtractorProvider {
           identity: {
             brand: 'string|null',
             name: 'string|null',
-            category: Object.values(ProductCategory),
+            category: PRODUCT_CATEGORY_VALUES,
             description: 'string|null',
             benefits: ['string'],
             suitedFor: ['string'],

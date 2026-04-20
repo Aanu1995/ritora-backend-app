@@ -1,26 +1,24 @@
 import {
-  BadRequestException,
   Body,
   Controller,
-  Get,
-  Param,
   Post,
   Req,
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import {
-  ApiBody,
-  ApiConsumes,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
+import {
+  CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
+  CATALOGUE_PHOTO_MAX_IMAGES,
+  CATALOGUE_PHOTO_MIN_IMAGES,
+  CATALOGUE_PHOTO_UPLOAD_FIELD,
+} from './catalogue-photo.constants';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
+import { parseHeroImageIndex } from './catalogue-photo.utils';
 import { CatalogueService } from './catalogue.service';
-import { ResolveCandidateDto } from './dto/resolve-candidate.dto';
-import { ResolveUrlDto } from './dto/resolve-url.dto';
 import { ResolvedLookupResponseDto } from './dto/resolved-lookup-response.dto';
 
 const catalogueThrottle = {
@@ -38,16 +36,12 @@ export class CatalogueController {
   @Post('extract-from-images')
   @Throttle(catalogueThrottle)
   @UseInterceptors(
-    FilesInterceptor(
-      'images',
-      6,
-      {
-        limits: {
-          fileSize: 10 * 1024 * 1024,
-          files: 6,
-        },
+    FilesInterceptor(CATALOGUE_PHOTO_UPLOAD_FIELD, CATALOGUE_PHOTO_MAX_IMAGES, {
+      limits: {
+        fileSize: CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
+        files: CATALOGUE_PHOTO_MAX_IMAGES,
       },
-    ),
+    }),
   )
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -61,8 +55,8 @@ export class CatalogueController {
         },
         images: {
           type: 'array',
-          minItems: 2,
-          maxItems: 6,
+          minItems: CATALOGUE_PHOTO_MIN_IMAGES,
+          maxItems: CATALOGUE_PHOTO_MAX_IMAGES,
           items: {
             type: 'string',
             format: 'binary',
@@ -77,44 +71,12 @@ export class CatalogueController {
     @Req() request: Request,
   ): Promise<ResolvedLookupResponseDto | null> {
     const publicBaseUrl = `${request.protocol}://${request.get('host')}`;
-    const normalizedHeroImageIndex = heroImageIndexValue?.trim() ?? '';
-    const heroImageIndex = Number(normalizedHeroImageIndex);
-
-    if (
-      !Number.isInteger(heroImageIndex) ||
-      normalizedHeroImageIndex !== String(heroImageIndex)
-    ) {
-      throw new BadRequestException('Invalid heroImageIndex');
-    }
+    const heroImageIndex = parseHeroImageIndex(heroImageIndexValue);
 
     return this.catalogueService.extractFromImages(
       files ?? [],
       heroImageIndex,
       publicBaseUrl,
     );
-  }
-
-  @Get('barcode/:barcode')
-  @Throttle(catalogueThrottle)
-  async resolveBarcode(
-    @Param('barcode') barcode: string,
-  ): Promise<ResolvedLookupResponseDto | null> {
-    return this.catalogueService.resolveBarcodeForScan(barcode);
-  }
-
-  @Post('resolve-url')
-  @Throttle(catalogueThrottle)
-  async resolveUrl(
-    @Body() dto: ResolveUrlDto,
-  ): Promise<ResolvedLookupResponseDto | null> {
-    return this.catalogueService.resolveUrl(dto.url);
-  }
-
-  @Post('resolve-candidate')
-  @Throttle(catalogueThrottle)
-  async resolveCandidate(
-    @Body() dto: ResolveCandidateDto,
-  ): Promise<ResolvedLookupResponseDto | null> {
-    return this.catalogueService.resolveCandidate(dto);
   }
 }
