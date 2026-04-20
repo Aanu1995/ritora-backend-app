@@ -13,6 +13,12 @@ import {
 import { nowDate, toDateOrNull, toIsoString } from '../common/utils/date';
 import { computeEffectiveExpiresAt } from '../shelf/shelf-life';
 import {
+  normalizeApplicationGuidanceSnapshot,
+  normalizeCatalogueIdentitySnapshot,
+  normalizeManufacturerInfoSnapshot,
+  normalizeUserFieldsSnapshot,
+} from '../shelf/shelf-payload-normalizer';
+import {
   type ApplicationGuidance,
   type CatalogueIdentity,
   DataProvenance,
@@ -151,34 +157,26 @@ function toSnapshotFromCreateDto(
 }
 
 function normalizeDraft(draft: ShelfProductSnapshot): ShelfProductSnapshot {
-  const manufacturerBrand =
-    trimOrNull(draft.manufacturer.brand) ?? draft.identity.brand.trim();
-
-  return {
-    identity: {
-      ...draft.identity,
-      brand: draft.identity.brand.trim(),
-      name: draft.identity.name.trim(),
-      barcode: trimOrNull(draft.identity.barcode),
-      imageUrls: [...(draft.identity.imageUrls ?? [])],
-      sizeMl: draft.identity.sizeMl,
-      description: trimOrNull(draft.identity.description),
-      benefits: normalizeStringList(draft.identity.benefits),
-      suitedFor: normalizeStringList(draft.identity.suitedFor),
-      inciIngredients: normalizeStringList(draft.identity.inciIngredients),
-      inciLastConfirmedAt: trimOrNull(draft.identity.inciLastConfirmedAt),
-    },
-    guidance: {
-      ...draft.guidance,
-      applicationMethod: draft.guidance.applicationMethod ?? null,
-      quantity: draft.guidance.quantity ?? null,
-      steps: normalizeStringList(draft.guidance.steps),
-      cautions: normalizeStringList(draft.guidance.cautions),
-      waitMinutes: draft.guidance.waitMinutes ?? null,
-    },
-    manufacturer: {
+  const identity = normalizeCatalogueIdentitySnapshot({
+    ...draft.identity,
+    brand: draft.identity.brand.trim(),
+    name: draft.identity.name.trim(),
+    barcode: trimOrNull(draft.identity.barcode),
+    description: trimOrNull(draft.identity.description),
+    benefits: normalizeStringList(draft.identity.benefits),
+    suitedFor: normalizeStringList(draft.identity.suitedFor),
+    inciIngredients: normalizeStringList(draft.identity.inciIngredients),
+    inciLastConfirmedAt: trimOrNull(draft.identity.inciLastConfirmedAt),
+  });
+  const guidance = normalizeApplicationGuidanceSnapshot({
+    ...draft.guidance,
+    steps: normalizeStringList(draft.guidance.steps),
+    cautions: normalizeStringList(draft.guidance.cautions),
+  });
+  const manufacturer = normalizeManufacturerInfoSnapshot(
+    {
       ...draft.manufacturer,
-      brand: manufacturerBrand,
+      brand: trimOrNull(draft.manufacturer.brand) ?? identity.brand,
       parentCompany: trimOrNull(draft.manufacturer.parentCompany),
       countryOfOrigin: trimOrNull(draft.manufacturer.countryOfOrigin),
       countryOfManufacture: trimOrNull(draft.manufacturer.countryOfManufacture),
@@ -186,18 +184,22 @@ function normalizeDraft(draft: ShelfProductSnapshot): ShelfProductSnapshot {
       productUrl: trimOrNull(draft.manufacturer.productUrl),
       websiteUrl: trimOrNull(draft.manufacturer.websiteUrl),
     },
-    userFields: {
-      ...draft.userFields,
-      openedAt: trimOrNull(draft.userFields.openedAt),
-      expiresAt: trimOrNull(draft.userFields.expiresAt),
-      periodAfterOpeningMonths:
-        draft.userFields.periodAfterOpeningMonths ?? null,
-      pricePaid: draft.userFields.pricePaid ?? null,
-      pricePaidCurrency: trimOrNull(draft.userFields.pricePaidCurrency),
-      purchasedFrom: trimOrNull(draft.userFields.purchasedFrom),
-      personalNotes: trimOrNull(draft.userFields.personalNotes),
-      preferredTimeOfDay: draft.userFields.preferredTimeOfDay ?? null,
-    },
+    identity.brand,
+  );
+  const userFields = normalizeUserFieldsSnapshot({
+    ...draft.userFields,
+    openedAt: trimOrNull(draft.userFields.openedAt),
+    expiresAt: trimOrNull(draft.userFields.expiresAt),
+    pricePaidCurrency: trimOrNull(draft.userFields.pricePaidCurrency),
+    purchasedFrom: trimOrNull(draft.userFields.purchasedFrom),
+    personalNotes: trimOrNull(draft.userFields.personalNotes),
+  });
+
+  return {
+    identity,
+    guidance,
+    manufacturer,
+    userFields,
     status: draft.status ?? ShelfStatus.Active,
     provenance: draft.provenance ?? DataProvenance.UserEntered,
   };

@@ -9,7 +9,10 @@ import {
 import { ulid } from 'ulid';
 import type {
   ApplicationGuidance,
+  CatalogueSource,
   CatalogueIdentity,
+  LookupConfidence,
+  LookupWarningCode,
   ManufacturerInfo,
   ProductCategory,
 } from '../../shelf/shelf.types';
@@ -37,6 +40,27 @@ export class CatalogueProduct {
   @Column({ type: 'varchar', length: 255, nullable: true })
   name_search: string | null;
 
+  @Column({ type: 'varchar', length: 50, default: 'ritora-catalogue' })
+  source_type: CatalogueSource;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  source_id: string | null;
+
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  source_url: string | null;
+
+  @Column({ type: 'varchar', length: 20, default: 'high' })
+  confidence: LookupConfidence;
+
+  @Column({ type: 'boolean', default: false })
+  review_required: boolean;
+
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  warnings: LookupWarningCode[];
+
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  raw_source: Record<string, unknown>;
+
   @Column({ type: 'jsonb', default: () => "'[]'" })
   identity: CatalogueIdentity;
 
@@ -51,6 +75,9 @@ export class CatalogueProduct {
 
   @UpdateDateColumn({ type: 'timestamptz' })
   updated_at: Date;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  last_synced_at: Date | null;
 
   @BeforeInsert()
   generateId() {

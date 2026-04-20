@@ -1,6 +1,8 @@
 import {
   ApplicationMethod,
+  CatalogueSource,
   DataProvenance,
+  LookupConfidence,
   ProductCategory,
   Quantity,
   type ApplicationGuidance,
@@ -379,8 +381,14 @@ export const BARCODE_LOOKUP_SEED: Record<string, ResolvedLookup> =
         product.identity.barcode as string,
         {
           identity: product.identity,
+          guidance: product.guidance,
           manufacturer: product.manufacturer,
           provenance: DataProvenance.BarcodeLookup,
+          source: CatalogueSource.RitoraCatalogue,
+          confidence: LookupConfidence.High,
+          reviewRequired: false,
+          warnings: [],
+          evidence: [],
         },
       ],
     ),
@@ -394,8 +402,14 @@ export const URL_LOOKUP_SEED: Record<string, ResolvedLookup> =
       product.manufacturer.productUrl as string,
       {
         identity: product.identity,
+        guidance: product.guidance,
         manufacturer: product.manufacturer,
         provenance: DataProvenance.UrlFetch,
+        source: CatalogueSource.RitoraCatalogue,
+        confidence: LookupConfidence.High,
+        reviewRequired: false,
+        warnings: [],
+        evidence: [],
       },
     ]),
   );

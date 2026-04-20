@@ -1,5 +1,11 @@
 import { InventoryProduct } from '../entities/inventory-product.entity';
 import { toIsoString } from '../../common/utils/date';
+import {
+  normalizeApplicationGuidanceSnapshot,
+  normalizeCatalogueIdentitySnapshot,
+  normalizeManufacturerInfoSnapshot,
+  normalizeUserFieldsSnapshot,
+} from '../../shelf/shelf-payload-normalizer';
 
 export class InventoryProductResponseDto {
   id: string;
@@ -35,12 +41,20 @@ export class InventoryProductResponseDto {
   }
 
   static fromEntity(entity: InventoryProduct): InventoryProductResponseDto {
+    const identity = normalizeCatalogueIdentitySnapshot(entity.identity);
+    const guidance = normalizeApplicationGuidanceSnapshot(entity.guidance);
+    const manufacturer = normalizeManufacturerInfoSnapshot(
+      entity.manufacturer,
+      identity.brand,
+    );
+    const userFields = normalizeUserFieldsSnapshot(entity.user_fields);
+
     return new InventoryProductResponseDto(
       entity.id,
-      entity.identity,
-      entity.guidance,
-      entity.manufacturer,
-      entity.user_fields,
+      identity,
+      guidance,
+      manufacturer,
+      userFields,
       entity.status,
       entity.provenance,
       toIsoString(entity.created_at),

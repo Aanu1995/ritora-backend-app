@@ -152,6 +152,8 @@ export const envValidationSchema = Joi.object({
     then: Joi.string().trim().default('re_test_mock'),
     otherwise: productionSecret,
   }),
+  OPENAI_API_KEY: Joi.string().trim().allow('').default(''),
+  OPENAI_PRODUCT_DISCOVERY_MODEL: Joi.string().trim().default('gpt-5'),
   MAIL_FROM: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().email().required(),

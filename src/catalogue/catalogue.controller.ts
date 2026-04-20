@@ -4,8 +4,10 @@ import { Throttle } from '@nestjs/throttler';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueSearchQueryDto } from './dto/catalogue-search-query.dto';
 import { CatalogueSuggestionResponseDto } from './dto/catalogue-suggestion-response.dto';
+import { ResolveCandidateDto } from './dto/resolve-candidate.dto';
 import { ResolveUrlDto } from './dto/resolve-url.dto';
 import { ResolvedLookupResponseDto } from './dto/resolved-lookup-response.dto';
+import { SearchBestMatchDto } from './dto/search-best-match.dto';
 
 const catalogueThrottle = {
   default: {
@@ -26,6 +28,14 @@ export class CatalogueController {
     return this.catalogueService.search(query);
   }
 
+  @Post('search-best-match')
+  @Throttle(catalogueThrottle)
+  async searchBestMatch(
+    @Body() dto: SearchBestMatchDto,
+  ): Promise<ResolvedLookupResponseDto | null> {
+    return this.catalogueService.searchBestMatch(dto.q);
+  }
+
   @Get('barcode/:barcode')
   @Throttle(catalogueThrottle)
   async resolveBarcode(
@@ -40,5 +50,13 @@ export class CatalogueController {
     @Body() dto: ResolveUrlDto,
   ): Promise<ResolvedLookupResponseDto | null> {
     return this.catalogueService.resolveUrl(dto.url);
+  }
+
+  @Post('resolve-candidate')
+  @Throttle(catalogueThrottle)
+  async resolveCandidate(
+    @Body() dto: ResolveCandidateDto,
+  ): Promise<ResolvedLookupResponseDto | null> {
+    return this.catalogueService.resolveCandidate(dto);
   }
 }
