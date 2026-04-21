@@ -48,7 +48,7 @@ type MailTemplateContextMap = {
 
 @Injectable()
 export class MailService {
-  private readonly frontendUrl: string;
+  private readonly webAppUrl: string;
   private readonly from: string;
   private readonly apiKey: string;
   private readonly templateDir = join(__dirname, 'templates');
@@ -61,8 +61,8 @@ export class MailService {
     @Inject(RESEND_CLIENT) private readonly resend: Resend,
     private readonly configService: ConfigService,
   ) {
-    this.frontendUrl = this.configService.get<string>(
-      'FRONTEND_URL',
+    this.webAppUrl = this.configService.get<string>(
+      'WEB_APP_URL',
       'http://localhost:3000',
     );
     this.apiKey = this.configService.get<string>('RESEND_API_KEY', '');
@@ -184,13 +184,13 @@ export class MailService {
   }
 
   private buildFrontendActionUrl(path: string, token: string): string {
-    const url = new URL(path, `${this.frontendUrl}/`);
+    const url = new URL(path, `${this.webAppUrl}/`);
     url.searchParams.set('token', token);
     return url.toString();
   }
 
   private buildFrontendPathActionUrl(path: string, token: string): string {
-    const base = new URL(this.frontendUrl);
+    const base = new URL(this.webAppUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
     base.search = '';
@@ -199,7 +199,7 @@ export class MailService {
   }
 
   private buildBrandAssetUrl(fileName: string): string {
-    const base = new URL(this.frontendUrl);
+    const base = new URL(this.webAppUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/brand/${fileName}`;
     base.search = '';

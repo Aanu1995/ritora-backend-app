@@ -1,8 +1,20 @@
 import { envValidationSchema } from './env.validation';
 
+function validateEnv(input: Record<string, unknown>): {
+  error?: Error;
+  value: Record<string, unknown>;
+} {
+  const result = envValidationSchema.validate(input);
+
+  return {
+    error: result.error,
+    value: result.value as Record<string, unknown>,
+  };
+}
+
 describe('envValidationSchema', () => {
   it('applies development defaults and allows empty dev-only fields', () => {
-    const result = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'development',
       DATABASE_PASSWORD: '',
       RESEND_API_KEY: '',
@@ -23,7 +35,7 @@ describe('envValidationSchema', () => {
   });
 
   it('disables swagger by default in production', () => {
-    const { error, value } = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'production',
       DATABASE_PASSWORD: 'postgres-password',
       JWT_SECRET: 'a'.repeat(32),
@@ -32,35 +44,35 @@ describe('envValidationSchema', () => {
       COOKIE_SECURE: true,
       RESEND_API_KEY: 're_prod_mock',
       MAIL_FROM: 'noreply@ritora.com',
-      FRONTEND_URL: 'https://app.ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
     });
 
-    expect(error).toBeUndefined();
-    expect(value.SWAGGER_ENABLED).toBe(false);
-    expect(value.DATABASE_SSL_REJECT_UNAUTHORIZED).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.value.SWAGGER_ENABLED).toBe(false);
+    expect(result.value.DATABASE_SSL_REJECT_UNAUTHORIZED).toBe(true);
   });
 
   it('allows extra process environment variables from npm and shells', () => {
-    const { error } = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'development',
       npm_package_name: 'ritora-backend-app',
     });
 
-    expect(error).toBeUndefined();
+    expect(result.error).toBeUndefined();
   });
 
   it('allows lower bcrypt rounds in test', () => {
-    const { error, value } = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'test',
       BCRYPT_SALT_ROUNDS: 4,
     });
 
-    expect(error).toBeUndefined();
-    expect(value.BCRYPT_SALT_ROUNDS).toBe(4);
+    expect(result.error).toBeUndefined();
+    expect(result.value.BCRYPT_SALT_ROUNDS).toBe(4);
   });
 
   it('requires production secrets and cookie domain', () => {
-    const { error } = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'production',
       DATABASE_PASSWORD: 'postgres',
       JWT_SECRET: '',
@@ -70,21 +82,21 @@ describe('envValidationSchema', () => {
       MAIL_FROM: 'noreply@ritora.com',
     });
 
-    expect(error).toBeDefined();
-    expect(error?.message).toContain('"JWT_SECRET"');
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('"JWT_SECRET"');
   });
 
   it('rejects wildcard cors origins when credentials are enabled', () => {
-    const { error } = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'development',
       CORS_ORIGINS: '*',
     });
 
-    expect(error).toBeDefined();
+    expect(result.error).toBeDefined();
   });
 
   it('rejects insecure same-site none cookies', () => {
-    const { error } = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'production',
       DATABASE_PASSWORD: 'postgres-password',
       JWT_SECRET: 'a'.repeat(32),
@@ -94,14 +106,14 @@ describe('envValidationSchema', () => {
       COOKIE_SAME_SITE: 'none',
       RESEND_API_KEY: 're_prod_mock',
       MAIL_FROM: 'noreply@ritora.com',
-      FRONTEND_URL: 'https://app.ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
     });
 
-    expect(error).toBeDefined();
+    expect(result.error).toBeDefined();
   });
 
   it('rejects non-https cors origins in production', () => {
-    const { error } = envValidationSchema.validate({
+    const result = validateEnv({
       NODE_ENV: 'production',
       DATABASE_PASSWORD: 'postgres-password',
       JWT_SECRET: 'a'.repeat(32),
@@ -110,10 +122,10 @@ describe('envValidationSchema', () => {
       COOKIE_SECURE: true,
       RESEND_API_KEY: 're_prod_mock',
       MAIL_FROM: 'noreply@ritora.com',
-      FRONTEND_URL: 'https://app.ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
       CORS_ORIGINS: 'http://localhost:3000',
     });
 
-    expect(error).toBeDefined();
+    expect(result.error).toBeDefined();
   });
 });

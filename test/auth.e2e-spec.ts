@@ -1,6 +1,5 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { createTestApp, MockMailService, truncateTables } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
@@ -16,11 +15,36 @@ const TEST_USER = {
 };
 
 describe('Auth (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: INestApplication;
   let mockMail: MockMailService;
   let accessToken: string;
   let refreshCookie: string;
   let currentPassword = TEST_USER.password;
+
+  function getAccessTokenFromResponse(res: request.Response): string {
+    const body = res.body as { accessToken?: unknown };
+
+    if (typeof body.accessToken !== 'string') {
+      throw new Error('Auth response did not include a string accessToken');
+    }
+
+    return body.accessToken;
+  }
+
+  function getFirstSetCookieHeader(res: request.Response): string {
+    const headers = res.headers as Record<string, unknown>;
+    const cookies = headers['set-cookie'];
+
+    if (Array.isArray(cookies) && typeof cookies[0] === 'string') {
+      return cookies[0];
+    }
+
+    if (typeof cookies === 'string') {
+      return cookies;
+    }
+
+    throw new Error('Auth response did not include a set-cookie header');
+  }
 
   beforeAll(async () => {
     mockMail = new MockMailService();
@@ -77,12 +101,8 @@ describe('Auth (e2e)', () => {
   }
 
   function storeSessionFromAuthResponse(res: request.Response): void {
-    expect(res.body.accessToken).toBeDefined();
-    accessToken = res.body.accessToken;
-
-    const cookies = res.headers['set-cookie'];
-    expect(cookies).toBeDefined();
-    refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+    accessToken = getAccessTokenFromResponse(res);
+    refreshCookie = getFirstSetCookieHeader(res);
     expect(refreshCookie).toContain('ritora_refresh');
   }
 
@@ -90,14 +110,11 @@ describe('Auth (e2e)', () => {
     accessToken: string;
     refreshCookie: string;
   } {
-    expect(res.body.accessToken).toBeDefined();
-    const cookies = res.headers['set-cookie'];
-    expect(cookies).toBeDefined();
-    const cookie = Array.isArray(cookies) ? cookies[0] : cookies;
+    const cookie = getFirstSetCookieHeader(res);
     expect(cookie).toContain('ritora_refresh');
 
     return {
-      accessToken: res.body.accessToken,
+      accessToken: getAccessTokenFromResponse(res),
       refreshCookie: cookie,
     };
   }
@@ -292,11 +309,8 @@ describe('Auth (e2e)', () => {
         .set('Cookie', refreshCookie)
         .expect(200);
 
-      expect(res.body.accessToken).toBeDefined();
-      accessToken = res.body.accessToken;
-
-      const cookies = res.headers['set-cookie'];
-      refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+      accessToken = getAccessTokenFromResponse(res);
+      refreshCookie = getFirstSetCookieHeader(res);
       expect(refreshCookie).toContain('ritora_refresh');
     });
 

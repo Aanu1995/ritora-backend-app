@@ -6,12 +6,10 @@ import {
   LookupWarningCode,
 } from '../shelf/shelf.types';
 import { uniqueWarnings } from './catalogue-matching.utils';
+import { CataloguePhotoProcessorService } from './catalogue-photo-processor.service';
 import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
-import {
-  assertValidCataloguePhotoRequest,
-  toCataloguePhotoExtractionInput,
-} from './catalogue-photo.utils';
+import { assertValidCataloguePhotoRequest } from './catalogue-photo.utils';
 import { CatalogueSourceRuleService } from './catalogue-source-rule.service';
 import { ResolvedLookupResponseDto } from './dto/resolved-lookup-response.dto';
 import { OfficialPageProvider } from './official-page.provider';
@@ -55,19 +53,24 @@ export class CatalogueService {
     private readonly officialPageProvider: OfficialPageProvider,
     private readonly openAiExtractorProvider: OpenAiExtractorProvider,
     private readonly catalogueSourceRuleService: CatalogueSourceRuleService,
+    private readonly cataloguePhotoProcessorService: CataloguePhotoProcessorService,
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async extractFromImages(
     images: UploadedCatalogueImage[],
     heroImageIndex: number,
-    publicBaseUrl: string,
   ): Promise<ResolvedLookupResponseDto | null> {
     assertValidCataloguePhotoRequest(images, heroImageIndex);
+    const processedPhotoBatch =
+      await this.cataloguePhotoProcessorService.prepareForExtraction(
+        images,
+        heroImageIndex,
+      );
 
     const photoExtraction =
       await this.openAiExtractorProvider.extractFromImages(
-        toCataloguePhotoExtractionInput(images, heroImageIndex),
+        processedPhotoBatch.extractionInput,
       );
     if (!photoExtraction) {
       return null;
@@ -75,8 +78,7 @@ export class CatalogueService {
 
     const storedHeroImageUrl =
       await this.cataloguePhotoStorageService.saveHeroImage(
-        images[heroImageIndex],
-        publicBaseUrl,
+        processedPhotoBatch.heroStorageImage,
       );
     let current = this.buildPhotoResolvedDraft(
       photoExtraction,
@@ -103,11 +105,12 @@ export class CatalogueService {
 
   private buildPhotoResolvedDraft(
     completion: ExtractionResult,
-    storedHeroImageUrl: string,
+    storedHeroImageUrl: string | null,
   ): ResolvedProductDraft {
-    const identity = mergeIdentity(completion.data.identity ?? {}, {
-      imageUrls: [storedHeroImageUrl],
-    });
+    const identity = mergeIdentity(
+      completion.data.identity ?? {},
+      storedHeroImageUrl ? { imageUrls: [storedHeroImageUrl] } : {},
+    );
     const manufacturer = {
       brand: completion.data.identity?.brand ?? undefined,
       ...(completion.data.manufacturer ?? {}),

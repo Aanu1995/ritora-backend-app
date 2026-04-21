@@ -48,7 +48,7 @@ const mockConfigValues: Record<string, string | number | boolean> = {
   PASSWORD_RESET_EXPIRY: '1h',
   LEGAL_TERMS_VERSION: '1.0.0',
   LEGAL_PRIVACY_VERSION: '1.0.0',
-  FRONTEND_URL: 'http://localhost:3000',
+  WEB_APP_URL: 'http://localhost:3000',
   NODE_ENV: 'development',
   RESEND_API_KEY: 're_test_mock',
 };

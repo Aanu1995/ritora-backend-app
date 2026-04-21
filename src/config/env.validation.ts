@@ -59,8 +59,8 @@ function validateCookieSettings(
     const configuredOrigins =
       typeof env.CORS_ORIGINS === 'string' && env.CORS_ORIGINS.trim().length > 0
         ? env.CORS_ORIGINS
-        : typeof env.FRONTEND_URL === 'string'
-          ? env.FRONTEND_URL
+        : typeof env.WEB_APP_URL === 'string'
+          ? env.WEB_APP_URL
           : '';
 
     const origins = configuredOrigins
@@ -160,7 +160,7 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().email().default('onboarding@resend.dev'),
   }),
 
-  FRONTEND_URL: Joi.when('NODE_ENV', {
+  WEB_APP_URL: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string()
       .uri({ scheme: ['https'] })
@@ -175,6 +175,35 @@ export const envValidationSchema = Joi.object({
     then: Joi.boolean().default(false),
     otherwise: Joi.boolean().default(true),
   }),
+
+  AWS_REGION: Joi.string().trim().default('eu-west-1'),
+  PRODUCT_MEDIA_BUCKET: Joi.string().trim().allow('').default(''),
+  PRODUCT_MEDIA_CLOUDFRONT_URL: Joi.string()
+    .trim()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .default(''),
+  PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID: Joi.string()
+    .trim()
+    .allow('')
+    .default(''),
+  PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY: Joi.string().allow('').default(''),
+  PRODUCT_MEDIA_S3_KMS_KEY_ID: Joi.string().trim().allow('').default(''),
+  PRODUCT_MEDIA_SIGNED_URL_TTL_SECONDS: Joi.number()
+    .integer()
+    .min(300)
+    .max(86400)
+    .default(3600),
+  PRODUCT_MEDIA_PROCESSED_MAX_DIMENSION: Joi.number()
+    .integer()
+    .min(512)
+    .max(4096)
+    .default(1600),
+  PRODUCT_MEDIA_WEBP_QUALITY: Joi.number()
+    .integer()
+    .min(60)
+    .max(95)
+    .default(82),
 
   LEGAL_TERMS_VERSION: Joi.string().trim().default('1.0.0'),
   LEGAL_PRIVACY_VERSION: Joi.string().trim().default('1.0.0'),

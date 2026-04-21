@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import { InventoryService } from './inventory.service';
 import { InventoryProduct } from './entities/inventory-product.entity';
 import {
@@ -124,15 +125,25 @@ describe('InventoryService', () => {
   let service: InventoryService;
   let repo: jest.Mocked<Repository<InventoryProduct>>;
   let queryBuilder: ReturnType<typeof createMockQueryBuilder>;
+  const cataloguePhotoStorageService = {
+    toPersistentImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+    resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  };
 
   beforeEach(async () => {
     queryBuilder = createMockQueryBuilder();
+    cataloguePhotoStorageService.toPersistentImageUrls.mockClear();
+    cataloguePhotoStorageService.resolvePublicImageUrls.mockClear();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventoryService,
         {
           provide: getRepositoryToken(InventoryProduct),
           useFactory: mockRepository,
+        },
+        {
+          provide: CataloguePhotoStorageService,
+          useValue: cataloguePhotoStorageService,
         },
       ],
     }).compile();
@@ -159,19 +170,58 @@ describe('InventoryService', () => {
     repo.save.mockResolvedValue(saved);
 
     const result = await service.create('user-1', draft as never);
+    const createPayload = repo.create.mock.calls[0]?.[0] as
+      | Partial<InventoryProduct>
+      | undefined;
 
-    expect(repo.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        user_id: 'user-1',
-        status: ShelfStatus.Active,
-        provenance: DataProvenance.UserEntered,
-        search_document: expect.stringContaining('cerave'),
-        manufacturer: expect.objectContaining({
-          brand: 'CeraVe',
-        }),
-      }),
-    );
+    expect(createPayload).toBeDefined();
+    expect(createPayload?.user_id).toBe('user-1');
+    expect(createPayload?.status).toBe(ShelfStatus.Active);
+    expect(createPayload?.provenance).toBe(DataProvenance.UserEntered);
+    expect(createPayload?.search_document).toContain('cerave');
+    expect(createPayload?.manufacturer?.brand).toBe('CeraVe');
+    expect(
+      cataloguePhotoStorageService.toPersistentImageUrls,
+    ).toHaveBeenCalled();
     expect(result.id).toBe('inventory-1');
+  });
+
+  it('stores managed media as stable refs and re-signs them for responses', async () => {
+    const managedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp?Policy=test&Signature=test&Key-Pair-Id=test';
+    const persistedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp';
+    const signedUrl = `${persistedUrl}?Policy=fresh`;
+    const draft = createSnapshot({
+      identity: {
+        ...createSnapshot().identity,
+        imageUrls: [managedUrl],
+      },
+    });
+    const saved = createEntity('inventory-2', {
+      identity: {
+        ...draft.identity,
+        imageUrls: [persistedUrl],
+      },
+    });
+
+    cataloguePhotoStorageService.toPersistentImageUrls.mockReturnValueOnce([
+      persistedUrl,
+    ]);
+    cataloguePhotoStorageService.resolvePublicImageUrls.mockReturnValueOnce([
+      signedUrl,
+    ]);
+    repo.save.mockResolvedValue(saved);
+
+    const result = await service.create('user-1', draft as never);
+
+    expect(
+      cataloguePhotoStorageService.toPersistentImageUrls,
+    ).toHaveBeenCalledWith([managedUrl]);
+    expect(
+      cataloguePhotoStorageService.resolvePublicImageUrls,
+    ).toHaveBeenCalledWith([persistedUrl]);
+    expect(result.identity.imageUrls).toEqual([signedUrl]);
   });
 
   it('archives, restores, and marks products as finished', async () => {

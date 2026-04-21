@@ -14,3 +14,13 @@ export type CataloguePhotoExtractionInput = {
   images: CataloguePhotoAsset[];
   heroImageIndex: number;
 };
+
+export type ProcessedCatalogueImage = UploadedCatalogueImage & {
+  width: number;
+  height: number;
+};
+
+export type ProcessedCataloguePhotoBatch = {
+  extractionInput: CataloguePhotoExtractionInput;
+  heroStorageImage: ProcessedCatalogueImage;
+};

@@ -1,6 +1,5 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { createTestApp, MockMailService, truncateTables } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
@@ -16,9 +15,19 @@ const TEST_USER = {
 };
 
 describe('Skin Profile (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: INestApplication;
   let mockMail: MockMailService;
   let accessToken: string;
+
+  function getAccessTokenFromResponse(res: request.Response): string {
+    const body = res.body as { accessToken?: unknown };
+
+    if (typeof body.accessToken !== 'string') {
+      throw new Error('Auth response did not include a string accessToken');
+    }
+
+    return body.accessToken;
+  }
 
   beforeAll(async () => {
     mockMail = new MockMailService();
@@ -73,7 +82,7 @@ describe('Skin Profile (e2e)', () => {
       })
       .expect(200);
 
-    accessToken = res.body.accessToken;
+    accessToken = getAccessTokenFromResponse(res);
     expect(accessToken).toBeDefined();
   }
 

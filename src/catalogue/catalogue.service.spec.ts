@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { CataloguePhotoProcessorService } from './catalogue-photo-processor.service';
 import { CatalogueService } from './catalogue.service';
 import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
@@ -30,6 +31,9 @@ describe('CatalogueService', () => {
     extract: jest.fn(),
     extractFromImages: jest.fn(),
   };
+  const cataloguePhotoProcessorService = {
+    prepareForExtraction: jest.fn(),
+  };
   const catalogueSourceRuleService = {
     evaluateUrl: jest.fn(),
   };
@@ -41,6 +45,7 @@ describe('CatalogueService', () => {
     officialPageProvider.extract.mockReset();
     openAiExtractorProvider.extract.mockReset();
     openAiExtractorProvider.extractFromImages.mockReset();
+    cataloguePhotoProcessorService.prepareForExtraction.mockReset();
     catalogueSourceRuleService.evaluateUrl.mockReset();
     cataloguePhotoStorageService.saveHeroImage.mockReset();
 
@@ -49,14 +54,31 @@ describe('CatalogueService', () => {
       scoreAdjustment: 0,
       matchedLabels: [],
     });
+    cataloguePhotoProcessorService.prepareForExtraction.mockImplementation(
+      async (images: UploadedCatalogueImage[], heroImageIndex: number) => ({
+        extractionInput: {
+          images: images.map((image) => ({
+            buffer: image.buffer,
+            mimetype: image.mimetype,
+          })),
+          heroImageIndex,
+        },
+        heroStorageImage: {
+          ...images[heroImageIndex],
+          width: 600,
+          height: 600,
+        },
+      }),
+    );
     cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(
-      'http://localhost:3001/media/catalogue-front-photos/front-photo.jpg',
+      'https://signed.example.com/product-images/processed/front-photo.webp',
     );
 
     service = new CatalogueService(
       officialPageProvider as unknown as OfficialPageProvider,
       openAiExtractorProvider as unknown as OpenAiExtractorProvider,
       catalogueSourceRuleService as unknown as CatalogueSourceRuleService,
+      cataloguePhotoProcessorService as unknown as CataloguePhotoProcessorService,
       cataloguePhotoStorageService as unknown as CataloguePhotoStorageService,
     );
   });
@@ -131,7 +153,6 @@ describe('CatalogueService', () => {
     const result = await service.extractFromImages(
       [heroImage, ingredientImage, directionsImage],
       2,
-      'http://localhost:3001',
     );
 
     expect(openAiExtractorProvider.extractFromImages).toHaveBeenCalledWith({
@@ -151,9 +172,14 @@ describe('CatalogueService', () => {
       ],
       heroImageIndex: 2,
     });
+    expect(
+      cataloguePhotoProcessorService.prepareForExtraction,
+    ).toHaveBeenCalledWith([heroImage, ingredientImage, directionsImage], 2);
     expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
-      directionsImage,
-      'http://localhost:3001',
+      expect.objectContaining({
+        buffer: directionsImage.buffer,
+        mimetype: 'image/jpeg',
+      }),
     );
     expect(officialPageProvider.extract).toHaveBeenCalledWith(
       'https://example.com/resurfacing-retinol-serum',
@@ -161,7 +187,7 @@ describe('CatalogueService', () => {
     expect(result?.provenance).toBe('photo-lookup');
     expect(result?.source).toBe(CatalogueSource.UserPhotos);
     expect(result?.identity.imageUrls).toEqual([
-      'http://localhost:3001/media/catalogue-front-photos/front-photo.jpg',
+      'https://signed.example.com/product-images/processed/front-photo.webp',
     ]);
     expect(result?.identity.description).toBe(
       'A resurfacing serum for smoother-looking skin.',
@@ -273,11 +299,7 @@ describe('CatalogueService', () => {
       ],
     });
 
-    const result = await service.extractFromImages(
-      [heroImage, labelImage],
-      0,
-      'http://localhost:3001',
-    );
+    const result = await service.extractFromImages([heroImage, labelImage], 0);
 
     expect(result?.identity.description).toBe(
       'A salicylic acid cleanser that smooths rough skin.',
@@ -323,11 +345,7 @@ describe('CatalogueService', () => {
       evidence: [],
     });
 
-    const result = await service.extractFromImages(
-      [heroImage, labelImage],
-      0,
-      'http://localhost:3001',
-    );
+    const result = await service.extractFromImages([heroImage, labelImage], 0);
 
     expect(officialPageProvider.extract).not.toHaveBeenCalled();
     expect(result?.identity.brand).toBe('Beauty of Joseon');
@@ -374,24 +392,43 @@ describe('CatalogueService', () => {
       matchedLabels: ['blocked'],
     });
 
-    const result = await service.extractFromImages(
-      [heroImage, labelImage],
-      0,
-      'http://localhost:3001',
-    );
+    const result = await service.extractFromImages([heroImage, labelImage], 0);
 
     expect(result?.manufacturer.productUrl).toBeUndefined();
     expect(result?.manufacturer.websiteUrl).toBeUndefined();
     expect(result?.evidence).toEqual([]);
   });
 
+  it('returns a usable photo lookup without image urls when remote storage is unavailable', async () => {
+    const heroImage = createUploadedImage('heroImage');
+    const labelImage = createUploadedImage('labelImage');
+
+    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(null);
+    openAiExtractorProvider.extractFromImages.mockResolvedValue({
+      data: {
+        identity: {
+          brand: 'Round Lab',
+          name: 'Birch Juice Moisturizing Sunscreen',
+          category: ProductCategory.SunProtection,
+          sizeMl: 50,
+        },
+        guidance: {},
+        manufacturer: {},
+      },
+      warnings: [LookupWarningCode.AiNormalized],
+      evidence: [],
+    });
+
+    const result = await service.extractFromImages([heroImage, labelImage], 0);
+
+    expect(result?.identity.imageUrls).toBeUndefined();
+    expect(result?.identity.brand).toBe('Round Lab');
+    expect(result?.source).toBe(CatalogueSource.UserPhotos);
+  });
+
   it('rejects photo extraction requests with fewer than two images', async () => {
     await expect(
-      service.extractFromImages(
-        [createUploadedImage('heroImage')],
-        0,
-        'http://localhost:3001',
-      ),
+      service.extractFromImages([createUploadedImage('heroImage')], 0),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -400,7 +437,6 @@ describe('CatalogueService', () => {
       service.extractFromImages(
         [createUploadedImage('heroImage'), createUploadedImage('labelImage')],
         3,
-        'http://localhost:3001',
       ),
     ).rejects.toThrow(BadRequestException);
   });

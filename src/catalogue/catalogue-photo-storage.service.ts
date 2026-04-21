@@ -1,49 +1,189 @@
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl as getSignedCloudFrontUrl } from '@aws-sdk/cloudfront-signer';
 import { Injectable } from '@nestjs/common';
-import { mkdir, writeFile } from 'fs/promises';
-import { extname } from 'path';
+import { ConfigService } from '@nestjs/config';
+import { getNumberConfig } from '../config/config-value.utils';
 import { ulid } from 'ulid';
-import {
-  CATALOGUE_PRODUCT_IMAGE_DIRECTORY,
-  CATALOGUE_MEDIA_ROUTE,
-  resolveCatalogueProductImageDir,
-} from './catalogue-media.constants';
+import { CATALOGUE_PRODUCT_IMAGE_PROCESSED_PREFIX } from './catalogue-media.constants';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
 
-const FILE_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-  'image/webp': '.webp',
-  'image/heic': '.heic',
-  'image/heif': '.heif',
+type MediaRuntimeConfig = {
+  bucketName: string;
+  cloudFrontBaseUrl: string;
+  signedUrlTtlSeconds: number;
+  cloudFrontKeyPairId: string;
+  cloudFrontPrivateKey: string;
+  kmsKeyId: string | null;
 };
 
 @Injectable()
 export class CataloguePhotoStorageService {
-  async saveHeroImage(
-    file: UploadedCatalogueImage,
-    publicBaseUrl: string,
-  ): Promise<string> {
-    const directory = resolveCatalogueProductImageDir();
-    await mkdir(directory, { recursive: true });
+  private readonly s3Client: S3Client;
 
-    const extension = this.resolveFileExtension(file);
-    const fileName = `${ulid()}${extension}`;
-    const absolutePath = `${directory}/${fileName}`;
+  constructor(private readonly configService: ConfigService) {
+    this.s3Client = new S3Client({
+      region: this.configService.get<string>('AWS_REGION', 'eu-west-1'),
+    });
+  }
 
-    await writeFile(absolutePath, file.buffer);
+  async saveHeroImage(file: UploadedCatalogueImage): Promise<string | null> {
+    const runtimeConfig = this.getRuntimeConfig();
+    if (!runtimeConfig) {
+      return null;
+    }
 
+    const objectKey = `${CATALOGUE_PRODUCT_IMAGE_PROCESSED_PREFIX}/${ulid()}.webp`;
+    await this.s3Client.send(
+      new PutObjectCommand({
+        Bucket: runtimeConfig.bucketName,
+        Key: objectKey,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        CacheControl: 'private, max-age=31536000, immutable',
+        ServerSideEncryption: 'aws:kms',
+        ...(runtimeConfig.kmsKeyId
+          ? {
+              SSEKMSKeyId: runtimeConfig.kmsKeyId,
+            }
+          : {}),
+      }),
+    );
+
+    return this.createSignedManagedUrl(objectKey, runtimeConfig);
+  }
+
+  toPersistentImageUrls(imageUrls: string[]): string[] {
+    return imageUrls.map((imageUrl) => this.toPersistentImageUrl(imageUrl));
+  }
+
+  resolvePublicImageUrls(imageUrls: string[]): string[] {
+    return imageUrls.map((imageUrl) => this.resolvePublicImageUrl(imageUrl));
+  }
+
+  private toPersistentImageUrl(imageUrl: string): string {
+    const objectKey = this.toManagedObjectKey(imageUrl);
+    if (!objectKey) {
+      return imageUrl;
+    }
+
+    const runtimeConfig = this.getRuntimeConfig();
+    if (!runtimeConfig) {
+      return imageUrl;
+    }
+
+    return this.createManagedBaseUrl(objectKey, runtimeConfig);
+  }
+
+  private resolvePublicImageUrl(imageUrl: string): string {
+    const objectKey = this.toManagedObjectKey(imageUrl);
+    if (!objectKey) {
+      return imageUrl;
+    }
+
+    const runtimeConfig = this.getRuntimeConfig();
+    if (!runtimeConfig) {
+      return imageUrl;
+    }
+
+    return this.createSignedManagedUrl(objectKey, runtimeConfig);
+  }
+
+  private createSignedManagedUrl(
+    objectKey: string,
+    runtimeConfig: MediaRuntimeConfig,
+  ): string {
+    const canonicalUrl = this.createManagedBaseUrl(objectKey, runtimeConfig);
+
+    return getSignedCloudFrontUrl({
+      url: canonicalUrl,
+      keyPairId: runtimeConfig.cloudFrontKeyPairId,
+      privateKey: runtimeConfig.cloudFrontPrivateKey,
+      dateLessThan: new Date(
+        Date.now() + runtimeConfig.signedUrlTtlSeconds * 1000,
+      ).toISOString(),
+    });
+  }
+
+  private createManagedBaseUrl(
+    objectKey: string,
+    runtimeConfig: MediaRuntimeConfig,
+  ): string {
     return new URL(
-      `${CATALOGUE_MEDIA_ROUTE}/${CATALOGUE_PRODUCT_IMAGE_DIRECTORY}/${fileName}`,
-      publicBaseUrl,
+      objectKey,
+      runtimeConfig.cloudFrontBaseUrl.endsWith('/')
+        ? runtimeConfig.cloudFrontBaseUrl
+        : `${runtimeConfig.cloudFrontBaseUrl}/`,
     ).toString();
   }
 
-  private resolveFileExtension(file: UploadedCatalogueImage): string {
-    const originalExtension = extname(file.originalname ?? '').toLowerCase();
-    if (originalExtension) {
-      return originalExtension;
+  private toManagedObjectKey(imageUrl: string): string | null {
+    const runtimeConfig = this.getRuntimeConfig();
+    if (!runtimeConfig) {
+      return null;
     }
 
-    return FILE_EXTENSION_BY_MIME_TYPE[file.mimetype] ?? '.jpg';
+    try {
+      const parsed = new URL(imageUrl);
+      const configuredOrigin = new URL(runtimeConfig.cloudFrontBaseUrl).origin;
+      if (parsed.origin !== configuredOrigin) {
+        return null;
+      }
+
+      const objectKey = parsed.pathname.replace(/^\/+/, '');
+      if (
+        !objectKey.startsWith(`${CATALOGUE_PRODUCT_IMAGE_PROCESSED_PREFIX}/`)
+      ) {
+        return null;
+      }
+
+      return objectKey;
+    } catch {
+      return null;
+    }
+  }
+
+  private getRuntimeConfig(): MediaRuntimeConfig | null {
+    const bucketName = this.getBucketName();
+    const cloudFrontBaseUrl = this.getCloudFrontBaseUrl();
+    const cloudFrontKeyPairId = this.configService
+      .get<string>('PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID', '')
+      .trim();
+    const cloudFrontPrivateKey = this.configService
+      .get<string>('PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY', '')
+      .replace(/\\n/g, '\n')
+      .trim();
+
+    if (
+      !bucketName ||
+      !cloudFrontBaseUrl ||
+      !cloudFrontKeyPairId ||
+      !cloudFrontPrivateKey
+    ) {
+      return null;
+    }
+
+    return {
+      bucketName,
+      cloudFrontBaseUrl,
+      signedUrlTtlSeconds: getNumberConfig(
+        this.configService,
+        'PRODUCT_MEDIA_SIGNED_URL_TTL_SECONDS',
+        3600,
+      ),
+      cloudFrontKeyPairId,
+      cloudFrontPrivateKey,
+      kmsKeyId:
+        this.configService
+          .get<string>('PRODUCT_MEDIA_S3_KMS_KEY_ID', '')
+          .trim() || null,
+    };
+  }
+
+  private getBucketName(): string {
+    return this.configService.get<string>('PRODUCT_MEDIA_BUCKET', '');
+  }
+
+  private getCloudFrontBaseUrl(): string {
+    return this.configService.get<string>('PRODUCT_MEDIA_CLOUDFRONT_URL', '');
   }
 }

@@ -13,7 +13,7 @@ import {
 function parseCorsOrigins(configService: ConfigService): string[] {
   const configuredOrigins =
     configService.get<string>('CORS_ORIGINS')?.trim() ||
-    configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+    configService.get<string>('WEB_APP_URL', 'http://localhost:3000');
 
   return Array.from(
     new Set(

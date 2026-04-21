@@ -14,7 +14,7 @@ export class OriginCheckGuard implements CanActivate {
   constructor(private readonly configService: ConfigService) {
     const configuredOrigins =
       this.configService.get<string>('CORS_ORIGINS') ??
-      this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+      this.configService.get<string>('WEB_APP_URL', 'http://localhost:3000');
 
     this.allowedOrigins = new Set(
       configuredOrigins

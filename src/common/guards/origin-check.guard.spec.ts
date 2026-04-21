@@ -48,7 +48,7 @@ describe('OriginCheckGuard', () => {
   it('rejects disallowed origins', () => {
     const configService = {
       get: jest.fn((key: string, fallback?: string) =>
-        key === 'FRONTEND_URL' ? 'http://localhost:3000' : fallback,
+        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
       ),
     } as unknown as ConfigService;
     const guard = new OriginCheckGuard(configService);
@@ -63,7 +63,7 @@ describe('OriginCheckGuard', () => {
   it('rejects malformed origin values', () => {
     const configService = {
       get: jest.fn((key: string, fallback?: string) =>
-        key === 'FRONTEND_URL' ? 'http://localhost:3000' : fallback,
+        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
       ),
     } as unknown as ConfigService;
     const guard = new OriginCheckGuard(configService);

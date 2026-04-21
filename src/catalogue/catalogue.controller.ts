@@ -2,14 +2,12 @@ import {
   Body,
   Controller,
   Post,
-  Req,
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import type { Request } from 'express';
 import {
   CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
   CATALOGUE_PHOTO_MAX_IMAGES,
@@ -68,15 +66,9 @@ export class CatalogueController {
   async extractFromImages(
     @UploadedFiles() files: UploadedCatalogueImage[],
     @Body('heroImageIndex') heroImageIndexValue: string | undefined,
-    @Req() request: Request,
   ): Promise<ResolvedLookupResponseDto | null> {
-    const publicBaseUrl = `${request.protocol}://${request.get('host')}`;
     const heroImageIndex = parseHeroImageIndex(heroImageIndexValue);
 
-    return this.catalogueService.extractFromImages(
-      files ?? [],
-      heroImageIndex,
-      publicBaseUrl,
-    );
+    return this.catalogueService.extractFromImages(files ?? [], heroImageIndex);
   }
 }

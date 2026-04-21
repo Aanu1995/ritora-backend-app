@@ -54,12 +54,12 @@ Important groups:
 - Cookie policy: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
 - Mail delivery: `RESEND_API_KEY`, `MAIL_FROM`
-- Frontend origin: `FRONTEND_URL`
+- Web app origin: `WEB_APP_URL`
 - Legal consent versions: `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`
 
 Production validation is intentionally strict:
 
-- `FRONTEND_URL` must be HTTPS
+- `WEB_APP_URL` must be HTTPS
 - `COOKIE_SECURE` must be `true`
 - JWT secrets must be set and long enough
 - `MAIL_FROM` must be a valid email address
@@ -89,7 +89,7 @@ DATABASE_PORT=5432
 DATABASE_NAME=ritora
 DATABASE_USER=postgres
 DATABASE_PASSWORD=your-local-password
-FRONTEND_URL=http://localhost:3000
+WEB_APP_URL=http://localhost:3000
 CORS_ORIGINS=http://localhost:3000
 ```
 

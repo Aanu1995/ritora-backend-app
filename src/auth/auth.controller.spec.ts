@@ -61,7 +61,7 @@ describe('AuthController', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string, def?: unknown) => {
-              if (key === 'FRONTEND_URL') return 'http://localhost:3000';
+              if (key === 'WEB_APP_URL') return 'http://localhost:3000';
               if (key === 'COOKIE_REFRESH_NAME') return cookieName;
               return def;
             }),

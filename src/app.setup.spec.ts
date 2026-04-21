@@ -9,8 +9,8 @@ type MockApp = {
   use: jest.Mock;
   enableCors: jest.Mock;
   setGlobalPrefix: jest.Mock;
-  useGlobalPipes: jest.Mock;
-  useGlobalFilters: jest.Mock;
+  useGlobalPipes: jest.Mock<void, [unknown]>;
+  useGlobalFilters: jest.Mock<void, [unknown]>;
   getHttpAdapter: jest.Mock;
 };
 
@@ -24,8 +24,8 @@ describe('configureApp', () => {
       use: jest.fn(),
       enableCors: jest.fn(),
       setGlobalPrefix: jest.fn(),
-      useGlobalPipes: jest.fn(),
-      useGlobalFilters: jest.fn(),
+      useGlobalPipes: jest.fn<void, [unknown]>(),
+      useGlobalFilters: jest.fn<void, [unknown]>(),
       getHttpAdapter: jest.fn(() => ({
         getInstance: () => ({ disable, set, use: expressUse }),
       })),

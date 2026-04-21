@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository, SelectQueryBuilder } from 'typeorm';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import {
   decodeCursor,
   encodeCursor,
@@ -217,6 +218,7 @@ export class InventoryService {
   constructor(
     @InjectRepository(InventoryProduct)
     private readonly inventoryRepository: Repository<InventoryProduct>,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async list(
@@ -232,9 +234,7 @@ export class InventoryService {
     const entities = await queryBuilder.take(query.limit + 1).getMany();
     const hasMore = entities.length > query.limit;
     const pageEntities = hasMore ? entities.slice(0, query.limit) : entities;
-    const items = pageEntities.map((product) =>
-      InventoryProductResponseDto.fromEntity(product),
-    );
+    const items = pageEntities.map((product) => this.toResponseDto(product));
     const nextCursor = this.buildNextCursor(
       pageEntities.at(-1),
       query.sort,
@@ -255,7 +255,7 @@ export class InventoryService {
     id: string,
   ): Promise<InventoryProductResponseDto> {
     const product = await this.findByIdOrFail(userId, id);
-    return InventoryProductResponseDto.fromEntity(product);
+    return this.toResponseDto(product);
   }
 
   async create(
@@ -266,10 +266,10 @@ export class InventoryService {
     const normalized = normalizeDraft(toSnapshotFromCreateDto(dto));
 
     const entity = this.inventoryRepository.create(
-      this.toEntityPayload(userId, normalized),
+      this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
     );
     const saved = await this.inventoryRepository.save(entity);
-    return InventoryProductResponseDto.fromEntity(saved);
+    return this.toResponseDto(saved);
   }
 
   async update(
@@ -282,9 +282,12 @@ export class InventoryService {
     assertValidInventoryDraft(merged);
     const normalized = normalizeDraft(merged);
 
-    Object.assign(product, this.toEntityPayload(userId, normalized));
+    Object.assign(
+      product,
+      this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
+    );
     const saved = await this.inventoryRepository.save(product);
-    return InventoryProductResponseDto.fromEntity(saved);
+    return this.toResponseDto(saved);
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -344,7 +347,31 @@ export class InventoryService {
     const product = await this.findByIdOrFail(userId, id);
     product.status = status;
     const saved = await this.inventoryRepository.save(product);
-    return InventoryProductResponseDto.fromEntity(saved);
+    return this.toResponseDto(saved);
+  }
+
+  private normalizeManagedMediaRefs(
+    draft: ShelfProductSnapshot,
+  ): ShelfProductSnapshot {
+    return {
+      ...draft,
+      identity: {
+        ...draft.identity,
+        imageUrls: this.cataloguePhotoStorageService.toPersistentImageUrls(
+          draft.identity.imageUrls,
+        ),
+      },
+    };
+  }
+
+  private toResponseDto(entity: InventoryProduct): InventoryProductResponseDto {
+    const response = InventoryProductResponseDto.fromEntity(entity);
+    response.identity.imageUrls =
+      this.cataloguePhotoStorageService.resolvePublicImageUrls(
+        response.identity.imageUrls,
+      );
+
+    return response;
   }
 
   private async updateManyStatuses(

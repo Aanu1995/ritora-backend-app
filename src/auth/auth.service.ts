@@ -54,7 +54,7 @@ export class AuthService {
   private readonly passwordResetExpiry: string;
   private readonly termsVersion: string;
   private readonly privacyVersion: string;
-  private readonly frontendUrl: string;
+  private readonly webAppUrl: string;
   private readonly nodeEnv: string;
 
   constructor(
@@ -89,10 +89,7 @@ export class AuthService {
     this.passwordResetExpiry = configService.get('PASSWORD_RESET_EXPIRY', '1h');
     this.termsVersion = configService.get('LEGAL_TERMS_VERSION', '1.0.0');
     this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
-    this.frontendUrl = configService.get(
-      'FRONTEND_URL',
-      'http://localhost:3000',
-    );
+    this.webAppUrl = configService.get('WEB_APP_URL', 'http://localhost:3000');
     this.nodeEnv = configService.get('NODE_ENV', 'development');
   }
 
@@ -668,13 +665,13 @@ export class AuthService {
   }
 
   private buildFrontendActionUrl(path: string, token: string): string {
-    const url = new URL(path, `${this.frontendUrl}/`);
+    const url = new URL(path, `${this.webAppUrl}/`);
     url.searchParams.set('token', token);
     return url.toString();
   }
 
   private buildFrontendPathActionUrl(path: string, token: string): string {
-    const base = new URL(this.frontendUrl);
+    const base = new URL(this.webAppUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
     base.search = '';
