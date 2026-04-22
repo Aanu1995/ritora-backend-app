@@ -76,6 +76,16 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'errors.inventory.expiryBeforeOpened':
       'Expiry date cannot be earlier than opened date',
     'errors.inventory.notFound': 'Inventory product not found',
+    'errors.schedule.slotConflict':
+      'A slot already exists at that day and time',
+    'errors.schedule.moveConflict':
+      'A slot already exists at the destination day and time',
+    'errors.schedule.tooManySteps': 'Cannot add more than 10 steps',
+    'errors.schedule.customLabelRequired':
+      'Custom step labels must include a name',
+    'errors.schedule.productsNotOwned':
+      'Some selected products are not on your shelf',
+    'errors.schedule.slotNotFound': 'Slot not found',
     'errors.cursor.invalid': 'Invalid cursor',
     'errors.cursor.requestMismatch': 'Cursor does not match this request',
     'errors.cursor.missingItem': 'Cursor no longer points to a valid item',
@@ -170,6 +180,14 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'errors.inventory.expiryBeforeOpened':
       'Utgångsdatum kan inte vara tidigare än öppningsdatum',
     'errors.inventory.notFound': 'Lagerprodukten hittades inte',
+    'errors.schedule.slotConflict':
+      'En tid finns redan för den dagen och tiden',
+    'errors.schedule.moveConflict': 'En tid finns redan på målplatsen',
+    'errors.schedule.tooManySteps': 'Du kan inte lägga till fler än 10 steg',
+    'errors.schedule.customLabelRequired': 'Anpassade steg måste ha ett namn',
+    'errors.schedule.productsNotOwned':
+      'Några valda produkter finns inte på din hylla',
+    'errors.schedule.slotNotFound': 'Tiden hittades inte',
     'errors.cursor.invalid': 'Ogiltig markör',
     'errors.cursor.requestMismatch': 'Markören matchar inte den här förfrågan',
     'errors.cursor.missingItem':
@@ -206,6 +224,12 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
 
 const codeKeyMap: Record<string, string> = {
   EMAIL_NOT_VERIFIED: 'errors.auth.emailNotVerified',
+  SCHEDULE_CUSTOM_LABEL_REQUIRED: 'errors.schedule.customLabelRequired',
+  SCHEDULE_MOVE_CONFLICT: 'errors.schedule.moveConflict',
+  SCHEDULE_PRODUCTS_NOT_OWNED: 'errors.schedule.productsNotOwned',
+  SCHEDULE_SLOT_CONFLICT: 'errors.schedule.slotConflict',
+  SCHEDULE_SLOT_NOT_FOUND: 'errors.schedule.slotNotFound',
+  SCHEDULE_TOO_MANY_STEPS: 'errors.schedule.tooManySteps',
 };
 
 const messageKeyMap: Record<string, string> = {
@@ -291,6 +315,11 @@ export function resolveRequestLanguage(request: Request): AppLanguage {
   const requestUser = request.user as { language?: string | null } | undefined;
   const requestBody = request.body as Record<string, unknown> | undefined;
   const requestQuery = request.query as Record<string, unknown> | undefined;
+  const acceptLanguage = readHeaderValue(request.headers['accept-language']);
+
+  if (acceptLanguage?.toLowerCase().startsWith('sv')) {
+    return 'sv';
+  }
 
   const preferredLanguage =
     requestUser?.language ??
@@ -302,11 +331,6 @@ export function resolveRequestLanguage(request: Request): AppLanguage {
 
   if (preferredLanguage) {
     return normalizeLanguage(preferredLanguage);
-  }
-
-  const acceptLanguage = readHeaderValue(request.headers['accept-language']);
-  if (acceptLanguage?.toLowerCase().startsWith('sv')) {
-    return 'sv';
   }
 
   return DEFAULT_LANGUAGE;

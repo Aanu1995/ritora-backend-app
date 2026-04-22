@@ -10,6 +10,7 @@ import { AuthModule } from './auth/auth.module';
 import { CatalogueModule } from './catalogue/catalogue.module';
 import { HealthModule } from './health/health.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { ScheduleModule } from './schedule/schedule.module';
 import { SkinProfileModule } from './skin-profile/skin-profile.module';
 
 @Module({
@@ -34,6 +35,7 @@ import { SkinProfileModule } from './skin-profile/skin-profile.module';
     AuthModule,
     CatalogueModule,
     InventoryModule,
+    ScheduleModule,
     SkinProfileModule,
   ],
   providers: [

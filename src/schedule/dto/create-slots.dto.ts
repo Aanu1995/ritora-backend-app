@@ -1,0 +1,44 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
+import {
+  DAYS_OF_WEEK,
+  type DayOfWeek,
+  MAX_SLOT_NOTES_LENGTH,
+  SLOT_MODES,
+  type SlotMode,
+  TIME_REGEX,
+} from './schedule.constants';
+
+export class CreateSlotsDto {
+  @ApiProperty({ enum: DAYS_OF_WEEK, isArray: true })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(DAYS_OF_WEEK.length)
+  @IsIn([...DAYS_OF_WEEK], { each: true })
+  daysOfWeek!: DayOfWeek[];
+
+  @ApiProperty({ example: '07:30', description: 'HH:MM, 24-hour' })
+  @IsString()
+  @Matches(TIME_REGEX, { message: 'slotTime must be in HH:MM 24-hour format' })
+  slotTime!: string;
+
+  @ApiPropertyOptional({ enum: SLOT_MODES, default: 'ai' })
+  @IsOptional()
+  @IsIn([...SLOT_MODES])
+  mode?: SlotMode;
+
+  @ApiPropertyOptional({ maxLength: MAX_SLOT_NOTES_LENGTH })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_SLOT_NOTES_LENGTH)
+  slotNotes?: string;
+}

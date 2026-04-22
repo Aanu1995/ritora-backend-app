@@ -37,8 +37,8 @@ export function configureApp(
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
-    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Timezone'],
     maxAge: 86400,
   });
   app.setGlobalPrefix('api/v1');
