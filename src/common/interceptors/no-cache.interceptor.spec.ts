@@ -3,7 +3,7 @@ import { of } from 'rxjs';
 import { NoCacheInterceptor } from './no-cache.interceptor';
 
 describe('NoCacheInterceptor', () => {
-  it('sets Cache-Control to no-store and forwards the handler response', (done) => {
+  it('sets strict no-cache headers and forwards the handler response', (done) => {
     const setHeader = jest.fn();
     const context = {
       switchToHttp: () => ({
@@ -17,7 +17,12 @@ describe('NoCacheInterceptor', () => {
 
     interceptor.intercept(context, next).subscribe((value) => {
       expect(value).toBe('ok');
-      expect(setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+      expect(setHeader).toHaveBeenCalledWith(
+        'Cache-Control',
+        'private, no-store, max-age=0',
+      );
+      expect(setHeader).toHaveBeenCalledWith('Pragma', 'no-cache');
+      expect(setHeader).toHaveBeenCalledWith('Expires', '0');
       expect(next.handle).toHaveBeenCalled();
       done();
     });

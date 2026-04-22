@@ -112,6 +112,39 @@ describe('envValidationSchema', () => {
     expect(result.error).toBeDefined();
   });
 
+  it('rejects malformed cookie domains', () => {
+    const result = validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'https://ritora.com/app',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      MAIL_FROM: 'noreply@ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
+    });
+
+    expect(result.error).toBeDefined();
+  });
+
+  it('rejects using the same secret for access and refresh tokens', () => {
+    const sharedSecret = 'a'.repeat(32);
+    const result = validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: sharedSecret,
+      JWT_REFRESH_SECRET: sharedSecret,
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      MAIL_FROM: 'noreply@ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
+    });
+
+    expect(result.error).toBeDefined();
+  });
+
   it('rejects non-https cors origins in production', () => {
     const result = validateEnv({
       NODE_ENV: 'production',

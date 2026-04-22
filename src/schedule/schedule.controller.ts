@@ -25,6 +25,7 @@ import { ScheduleSlotResponseDto } from './dto/schedule-slot-response.dto';
 import { UpdateSlotDto } from './dto/update-slot.dto';
 import { UpsertRoutineStepsDto } from './dto/upsert-routine-steps.dto';
 import { ScheduleService } from './schedule.service';
+import { ScheduleSlot } from './entities/schedule-slot.entity';
 
 @ApiTags('schedule')
 @Controller('schedule')
@@ -35,20 +36,31 @@ export class ScheduleController {
   @ApiOkResponse({ type: ScheduleResponseDto })
   async getSchedule(
     @CurrentUser('id') userId: string,
+    @CurrentUser('timeZone') timeZone: string | null,
+    @Headers('x-timezone') requestTimeZone?: string,
   ): Promise<ScheduleResponseDto> {
     const slots = await this.scheduleService.getForUser(userId);
-    return ScheduleResponseDto.fromEntities(slots);
+    return this.toScheduleResponse(slots, timeZone, requestTimeZone);
   }
 
   @Get('today')
   @ApiOkResponse({ type: TodaysScheduleResponseDto })
   async getTodaysSchedule(
     @CurrentUser('id') userId: string,
-    @Headers('x-timezone') timezone?: string,
+    @CurrentUser('timeZone') timeZone: string | null,
+    @Headers('x-timezone') requestTimeZone?: string,
   ): Promise<TodaysScheduleResponseDto> {
-    const day = this.scheduleService.resolveTodayDay(timezone);
+    const effectiveTimeZone = this.scheduleService.resolveEffectiveTimeZone(
+      timeZone,
+      requestTimeZone,
+    );
+    const day = this.scheduleService.resolveTodayDay(timeZone, requestTimeZone);
     const slots = await this.scheduleService.getTodaysSchedule(userId, day);
-    return TodaysScheduleResponseDto.fromEntities(day, slots);
+    return TodaysScheduleResponseDto.fromEntities(
+      day,
+      effectiveTimeZone,
+      slots,
+    );
   }
 
   @Post('slots')
@@ -65,20 +77,24 @@ export class ScheduleController {
   @ApiOkResponse({ type: ScheduleResponseDto })
   async createSlots(
     @CurrentUser('id') userId: string,
+    @CurrentUser('timeZone') timeZone: string | null,
+    @Headers('x-timezone') requestTimeZone: string | undefined,
     @Body() dto: CreateSlotsDto,
   ): Promise<ScheduleResponseDto> {
     const slots = await this.scheduleService.createSlots(userId, dto);
-    return ScheduleResponseDto.fromEntities(slots);
+    return this.toScheduleResponse(slots, timeZone, requestTimeZone);
   }
 
   @Post('apply-preset')
   @ApiOkResponse({ type: ScheduleResponseDto })
   async applyPreset(
     @CurrentUser('id') userId: string,
+    @CurrentUser('timeZone') timeZone: string | null,
+    @Headers('x-timezone') requestTimeZone: string | undefined,
     @Body() dto: ApplyPresetDto,
   ): Promise<ScheduleResponseDto> {
     const slots = await this.scheduleService.applyEveryDayPreset(userId, dto);
-    return ScheduleResponseDto.fromEntities(slots);
+    return this.toScheduleResponse(slots, timeZone, requestTimeZone);
   }
 
   @Patch('slots/:id')
@@ -121,5 +137,19 @@ export class ScheduleController {
   ): Promise<ScheduleSlotResponseDto> {
     const slot = await this.scheduleService.moveSlot(userId, id, dto);
     return ScheduleSlotResponseDto.fromEntity(slot);
+  }
+
+  private toScheduleResponse(
+    slots: ScheduleSlot[],
+    savedTimeZone: string | null,
+    requestTimeZone?: string,
+  ): ScheduleResponseDto {
+    return ScheduleResponseDto.fromEntities(
+      slots,
+      this.scheduleService.resolveEffectiveTimeZone(
+        savedTimeZone,
+        requestTimeZone,
+      ),
+    );
   }
 }

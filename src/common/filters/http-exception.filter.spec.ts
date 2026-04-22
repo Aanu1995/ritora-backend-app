@@ -66,6 +66,30 @@ describe('GlobalExceptionFilter', () => {
     );
   });
 
+  it('translates structured field errors when present', () => {
+    const exception = new HttpException(
+      {
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: ['validation.email.invalid'],
+        fieldErrors: {
+          email: ['validation.email.invalid'],
+        },
+      },
+      HttpStatus.BAD_REQUEST,
+    );
+
+    filter.catch(exception, mockHost);
+
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: ['Enter a valid email address'],
+        fieldErrors: {
+          email: ['Enter a valid email address'],
+        },
+      }),
+    );
+  });
+
   it('preserves structured error codes when present', () => {
     const exception = new HttpException(
       {

@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -10,6 +10,7 @@ const mockUsersService = () => ({
   findByIdOrFail: jest.fn(),
   updateProfile: jest.fn(),
   updatePreferredLanguage: jest.fn(),
+  updateTimeZone: jest.fn(),
 });
 
 const mockRes = () => ({
@@ -47,6 +48,7 @@ describe('UsersController', () => {
       last_name: 'Doe',
       email_verified: true,
       preferred_language: 'en',
+      time_zone: 'Europe/Stockholm',
       created_at: new Date('2024-01-01T00:00:00.000Z'),
       updated_at: new Date('2024-01-01T00:00:00.000Z'),
       generateId: jest.fn(),
@@ -117,6 +119,39 @@ describe('UsersController', () => {
         httpOnly: false,
         path: '/',
       }),
+    );
+  });
+
+  it('updateTimeZone returns the updated user DTO', async () => {
+    usersService.updateTimeZone.mockResolvedValue(
+      fakeUser({ time_zone: 'America/New_York' }),
+    );
+
+    const result = await controller.updateTimeZone('01TESTUSER', {
+      timeZone: 'America/New_York',
+    });
+
+    expect(usersService.updateTimeZone).toHaveBeenCalledWith(
+      '01TESTUSER',
+      'America/New_York',
+    );
+    expect(result.timeZone).toBe('America/New_York');
+  });
+
+  it('rejects unsupported explicit timezones', async () => {
+    usersService.updateTimeZone.mockRejectedValue(
+      new BadRequestException('validation.timeZone.unsupported'),
+    );
+
+    await expect(
+      controller.updateTimeZone('01TESTUSER', {
+        timeZone: '+01:00',
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(usersService.updateTimeZone).toHaveBeenCalledWith(
+      '01TESTUSER',
+      '+01:00',
     );
   });
 });

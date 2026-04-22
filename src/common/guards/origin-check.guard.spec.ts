@@ -74,4 +74,23 @@ describe('OriginCheckGuard', () => {
       ),
     ).toThrow(ForbiddenException);
   });
+
+  it('rejects cross-site browser requests before origin fallback', () => {
+    const configService = {
+      get: jest.fn((key: string, fallback?: string) =>
+        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
+      ),
+    } as unknown as ConfigService;
+    const guard = new OriginCheckGuard(configService);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          origin: 'http://localhost:3000',
+          referer: undefined,
+          'sec-fetch-site': 'cross-site',
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
 });

@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
+import {
+  resolveDayOfWeekForTimeZone,
+  resolveTimeZoneContext,
+  type ResolvedTimeZoneContext,
+} from '../common/timezone/timezone.utils';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { ApplyPresetDto } from './dto/apply-preset.dto';
 import { CreateSlotDto } from './dto/create-slot.dto';
@@ -10,12 +15,21 @@ import {
   DAYS_OF_WEEK,
   DayOfWeek,
   MAX_STEPS_PER_SLOT,
-  SlotMode,
 } from './dto/schedule.constants';
 import { UpdateSlotDto } from './dto/update-slot.dto';
 import { UpsertRoutineStepsDto } from './dto/upsert-routine-steps.dto';
 import { RoutineStep } from './entities/routine-step.entity';
 import { ScheduleSlot } from './entities/schedule-slot.entity';
+import {
+  buildRoutineStepWriteData,
+  buildScheduleSlotData,
+  collectReferencedProductIds,
+  getMissingDays,
+  hasMissingCustomLabel,
+  type NormalizedCreateSlotsInput,
+  normalizeCreateSlotsInput,
+  normalizeSlotInput,
+} from './schedule.service.utils';
 import {
   scheduleCustomLabelRequired,
   scheduleMoveConflict,
@@ -24,12 +38,7 @@ import {
   scheduleSlotNotFound,
   scheduleTooManySteps,
 } from './schedule.errors';
-import {
-  compareSlots,
-  normaliseTime,
-  resolveDayFromTimezone,
-  uniqueDays,
-} from './schedule.utils';
+import { compareSlots, normaliseTime } from './schedule.utils';
 
 @Injectable()
 export class ScheduleService {
@@ -62,22 +71,39 @@ export class ScheduleService {
     return slots.sort(compareSlots);
   }
 
-  resolveTodayDay(timezoneHeader?: string): DayOfWeek {
-    return resolveDayFromTimezone(timezoneHeader);
+  resolveEffectiveTimeZone(
+    savedTimeZone?: string | null,
+    requestTimeZone?: string,
+  ): string {
+    return this.resolveTimeZoneContext(savedTimeZone, requestTimeZone).timeZone;
+  }
+
+  resolveTimeZoneContext(
+    savedTimeZone?: string | null,
+    requestTimeZone?: string,
+  ): ResolvedTimeZoneContext {
+    return resolveTimeZoneContext(savedTimeZone, requestTimeZone);
+  }
+
+  resolveTodayDay(
+    savedTimeZone?: string | null,
+    requestTimeZone?: string,
+  ): DayOfWeek {
+    return resolveDayOfWeekForTimeZone(
+      this.resolveTimeZoneContext(savedTimeZone, requestTimeZone).timeZone,
+    );
   }
 
   async createSlot(userId: string, dto: CreateSlotDto): Promise<ScheduleSlot> {
-    const slotTime = normaliseTime(dto.slotTime);
-    await this.assertSlotAvailable(userId, dto.dayOfWeek, slotTime);
+    const slotInput = normalizeSlotInput(dto);
+    await this.assertSlotAvailable(
+      userId,
+      slotInput.dayOfWeek,
+      slotInput.slotTime,
+    );
 
     const slot = this.slotsRepository.create(
-      this.buildSlotData(
-        userId,
-        dto.dayOfWeek,
-        slotTime,
-        dto.mode,
-        dto.slotNotes,
-      ),
+      buildScheduleSlotData(userId, slotInput),
     );
     await this.slotsRepository.save(slot);
     return this.loadSlot(userId, slot.id);
@@ -87,28 +113,16 @@ export class ScheduleService {
     userId: string,
     dto: CreateSlotsDto,
   ): Promise<ScheduleSlot[]> {
-    const daysOfWeek = uniqueDays(dto.daysOfWeek);
-    const slotTime = normaliseTime(dto.slotTime);
+    const slotInput = normalizeCreateSlotsInput(dto);
     const existing = await this.findExistingSlotsForTime(
       userId,
-      daysOfWeek,
-      slotTime,
+      slotInput.daysOfWeek,
+      slotInput.slotTime,
     );
     const existingDays = new Set(existing.map((slot) => slot.day_of_week));
-    const missingDays = daysOfWeek.filter((day) => !existingDays.has(day));
+    const missingDays = getMissingDays(slotInput.daysOfWeek, existingDays);
 
-    if (missingDays.length > 0) {
-      await this.dataSource.transaction(async (manager) => {
-        const repository = manager.getRepository(ScheduleSlot);
-        const nextSlots = missingDays.map((day) =>
-          repository.create(
-            this.buildSlotData(userId, day, slotTime, dto.mode, dto.slotNotes),
-          ),
-        );
-
-        await repository.save(nextSlots);
-      });
-    }
+    await this.createMissingSlots(userId, missingDays, slotInput);
 
     return this.getForUser(userId);
   }
@@ -202,53 +216,9 @@ export class ScheduleService {
       throw scheduleTooManySteps(MAX_STEPS_PER_SLOT);
     }
 
-    // Validate product ownership for any referenced products.
-    const productIds = dto.steps
-      .map((s) => s.inventoryProductId)
-      .filter((id): id is string => Boolean(id));
-
-    if (productIds.length > 0) {
-      const ownedProducts = await this.productsRepository.find({
-        where: {
-          id: In(productIds),
-          user_id: userId,
-        },
-        select: ['id'],
-      });
-      const ownedIds = new Set(ownedProducts.map((p) => p.id));
-      const foreign = productIds.filter((id) => !ownedIds.has(id));
-      if (foreign.length > 0) {
-        throw scheduleProductsNotOwned(foreign);
-      }
-    }
-
-    // Validate custom labels.
-    for (const step of dto.steps) {
-      if (step.stepLabel === 'custom' && !step.customLabel?.trim()) {
-        throw scheduleCustomLabelRequired();
-      }
-    }
-
-    await this.dataSource.transaction(async (manager) => {
-      const stepsRepo = manager.getRepository(RoutineStep);
-      await stepsRepo.delete({ slot_id: slot.id });
-
-      const sorted = [...dto.steps].sort((a, b) => a.stepOrder - b.stepOrder);
-
-      for (let i = 0; i < sorted.length; i++) {
-        const input = sorted[i];
-        const entity = stepsRepo.create({
-          slot_id: slot.id,
-          step_order: i,
-          inventory_product_id: input.inventoryProductId ?? null,
-          step_label: input.stepLabel,
-          custom_label: input.customLabel ?? null,
-          notes: input.notes ?? null,
-          optional: input.optional ?? false,
-        });
-        await stepsRepo.save(entity);
-      }
-    });
+    await this.assertProductsOwned(userId, dto.steps);
+    this.assertCustomLabels(dto.steps);
+    await this.replaceSteps(slot.id, dto.steps);
 
     return this.loadSlot(userId, slot.id);
   }
@@ -299,20 +269,88 @@ export class ScheduleService {
     }
   }
 
-  private buildSlotData(
+  private async createMissingSlots(
     userId: string,
-    dayOfWeek: DayOfWeek,
-    slotTime: string,
-    mode?: SlotMode,
-    slotNotes?: string | null,
-  ) {
-    return {
-      user_id: userId,
-      day_of_week: dayOfWeek,
-      slot_time: slotTime,
-      mode: mode ?? 'ai',
-      slot_notes: slotNotes ?? null,
-    };
+    missingDays: readonly DayOfWeek[],
+    slotInput: NormalizedCreateSlotsInput,
+  ): Promise<void> {
+    if (missingDays.length === 0) {
+      return;
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(ScheduleSlot);
+      const nextSlots = missingDays.map((dayOfWeek) =>
+        repository.create(
+          buildScheduleSlotData(
+            userId,
+            normalizeSlotInput({
+              dayOfWeek,
+              slotTime: slotInput.slotTime,
+              mode: slotInput.mode,
+              slotNotes: slotInput.slotNotes,
+            }),
+          ),
+        ),
+      );
+
+      await repository.save(nextSlots);
+    });
+  }
+
+  private async assertProductsOwned(
+    userId: string,
+    steps: UpsertRoutineStepsDto['steps'],
+  ): Promise<void> {
+    const referencedProductIds = collectReferencedProductIds(steps);
+
+    if (referencedProductIds.length === 0) {
+      return;
+    }
+
+    const ownedProducts = await this.productsRepository.find({
+      where: {
+        id: In(referencedProductIds),
+        user_id: userId,
+      },
+      select: ['id'],
+    });
+    const ownedIds = new Set(ownedProducts.map((product) => product.id));
+    const foreignProductIds = referencedProductIds.filter(
+      (productId) => !ownedIds.has(productId),
+    );
+
+    if (foreignProductIds.length > 0) {
+      throw scheduleProductsNotOwned(foreignProductIds);
+    }
+  }
+
+  private assertCustomLabels(steps: UpsertRoutineStepsDto['steps']): void {
+    if (hasMissingCustomLabel(steps)) {
+      throw scheduleCustomLabelRequired();
+    }
+  }
+
+  private async replaceSteps(
+    slotId: string,
+    steps: UpsertRoutineStepsDto['steps'],
+  ): Promise<void> {
+    const stepWriteData = buildRoutineStepWriteData(slotId, steps);
+
+    await this.dataSource.transaction(async (manager) => {
+      const stepsRepository = manager.getRepository(RoutineStep);
+      await stepsRepository.delete({ slot_id: slotId });
+
+      if (stepWriteData.length === 0) {
+        return;
+      }
+
+      const stepEntities = stepWriteData.map((step) =>
+        stepsRepository.create(step),
+      );
+
+      await stepsRepository.save(stepEntities);
+    });
   }
 
   private async findExistingSlotsForTime(

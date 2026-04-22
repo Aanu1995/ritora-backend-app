@@ -13,12 +13,14 @@ export type DayOfWeek = (typeof DAYS_OF_WEEK)[number];
 
 export const SLOT_MODES = ['manual', 'ai'] as const;
 export type SlotMode = (typeof SLOT_MODES)[number];
+export const DEFAULT_SLOT_MODE: SlotMode = 'ai';
 
 export const STEP_LABELS = [
   ...Object.values(ProductCategory),
   'custom',
 ] as const;
 export type StepLabel = (typeof STEP_LABELS)[number];
+export const CUSTOM_STEP_LABEL: StepLabel = 'custom';
 
 export const SCHEDULE_PRESETS = ['every_day'] as const;
 export type SchedulePreset = (typeof SCHEDULE_PRESETS)[number];

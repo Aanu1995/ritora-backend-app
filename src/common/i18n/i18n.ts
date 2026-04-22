@@ -115,6 +115,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'validation.token.hex64': 'Token must be a 64-character hexadecimal string',
     'validation.language.unsupported': 'Choose English or Swedish',
     'validation.name.required': 'This field is required',
+    'validation.timeZone.unsupported': 'Choose a supported timezone',
   },
   sv: {
     'messages.auth.register.verifyEmail':
@@ -219,6 +220,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Token måste vara en hexadecimal sträng med 64 tecken',
     'validation.language.unsupported': 'Välj engelska eller svenska',
     'validation.name.required': 'Det här fältet är obligatoriskt',
+    'validation.timeZone.unsupported': 'Välj en giltig tidszon',
   },
 };
 
@@ -279,6 +281,7 @@ const messageKeyMap: Record<string, string> = {
   'validation.token.hex64': 'validation.token.hex64',
   'validation.language.unsupported': 'validation.language.unsupported',
   'validation.name.required': 'validation.name.required',
+  'validation.timeZone.unsupported': 'validation.timeZone.unsupported',
   'email must be an email': 'validation.email.invalid',
 };
 

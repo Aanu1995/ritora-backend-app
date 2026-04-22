@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import { createValidationException } from './common/validation/validation-exception';
 import {
   CATALOGUE_MEDIA_ROUTE,
   resolveCatalogueMediaRootDir,
@@ -47,6 +48,7 @@ export function configureApp(
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: (errors) => createValidationException(errors),
     }),
   );
   app.useGlobalFilters(new GlobalExceptionFilter());

@@ -118,22 +118,10 @@ describe('ScheduleService', () => {
     expect(result.map((slot) => slot.day_of_week)).toEqual(['mon', 'wed']);
   });
 
-  it('resolves the current weekday from the provided timezone header', () => {
-    const formatToParts = jest
-      .fn()
-      .mockReturnValue([{ type: 'weekday', value: 'Tue' }]);
-    const dateTimeFormatSpy = jest
-      .spyOn(Intl, 'DateTimeFormat')
-      .mockImplementation(
-        () =>
-          ({
-            formatToParts,
-          }) as unknown as Intl.DateTimeFormat,
-      );
-
-    expect(service.resolveTodayDay('Europe/Stockholm')).toBe('tue');
-
-    dateTimeFormatSpy.mockRestore();
+  it('prefers the saved timezone over the request timezone', () => {
+    expect(
+      service.resolveEffectiveTimeZone('Europe/Stockholm', 'America/New_York'),
+    ).toBe('Europe/Stockholm');
   });
 
   it('hides non-owned slots behind a not-found error code', async () => {

@@ -33,6 +33,33 @@ function resolveWeekdayForTimezone(timezone: string): string {
   return map[weekday];
 }
 
+function findTimezonePairWithDifferentWeekdays(): {
+  savedTimeZone: string;
+  requestTimeZone: string;
+} {
+  const candidates = [
+    'Pacific/Kiritimati',
+    'Europe/Stockholm',
+    'UTC',
+    'America/New_York',
+    'Pacific/Honolulu',
+  ];
+
+  for (const savedTimeZone of candidates) {
+    for (const requestTimeZone of candidates) {
+      if (
+        savedTimeZone !== requestTimeZone &&
+        resolveWeekdayForTimezone(savedTimeZone) !==
+          resolveWeekdayForTimezone(requestTimeZone)
+      ) {
+        return { savedTimeZone, requestTimeZone };
+      }
+    }
+  }
+
+  throw new Error('Expected at least one timezone pair with distinct weekdays');
+}
+
 describe('Schedule (e2e)', () => {
   let app: INestApplication;
   let mockMail: MockMailService;
@@ -71,31 +98,54 @@ describe('Schedule (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (!app) {
+      return;
+    }
+
     await truncateTables(app);
     await app.close();
   });
 
-  function authGet(path: string) {
-    return request(app.getHttpServer())
+  function authGet(path: string, timeZone?: string) {
+    const req = request(app.getHttpServer())
       .get(`/api/v1${path}`)
       .set('Authorization', `Bearer ${accessToken}`);
+
+    return timeZone ? req.set('X-Timezone', timeZone) : req;
   }
 
-  function authPost(path: string, body?: Record<string, unknown>) {
+  function authPost(
+    path: string,
+    body?: Record<string, unknown>,
+    timeZone?: string,
+  ) {
     const req = request(app.getHttpServer())
       .post(`/api/v1${path}`)
       .set('Authorization', `Bearer ${accessToken}`)
       .set('Origin', ORIGIN);
 
+    if (timeZone) {
+      req.set('X-Timezone', timeZone);
+    }
+
     return body ? req.send(body) : req;
   }
 
-  function authPatch(path: string, body: Record<string, unknown>) {
-    return request(app.getHttpServer())
+  function authPatch(
+    path: string,
+    body: Record<string, unknown>,
+    timeZone?: string,
+  ) {
+    const req = request(app.getHttpServer())
       .patch(`/api/v1${path}`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .set('Origin', ORIGIN)
-      .send(body);
+      .set('Origin', ORIGIN);
+
+    if (timeZone) {
+      req.set('X-Timezone', timeZone);
+    }
+
+    return req.send(body);
   }
 
   function authDelete(path: string) {
@@ -108,7 +158,15 @@ describe('Schedule (e2e)', () => {
   it('returns an empty schedule before setup', async () => {
     const response = await authGet('/schedule').expect(200);
 
-    expect(response.body).toEqual({ slots: [] });
+    expect(response.body).toEqual({ slots: [], timeZone: 'UTC' });
+  });
+
+  it('captures timezone once on the first authenticated request and does not silently overwrite it later', async () => {
+    const authMe = await authGet('/auth/me', 'Europe/Stockholm').expect(200);
+    expect(authMe.body.timeZone).toBe('Europe/Stockholm');
+
+    const usersMe = await authGet('/users/me', 'America/New_York').expect(200);
+    expect(usersMe.body.timeZone).toBe('Europe/Stockholm');
   });
 
   it('creates a subset batch and skips duplicates that already exist', async () => {
@@ -123,6 +181,7 @@ describe('Schedule (e2e)', () => {
         (slot: { dayOfWeek: string }) => slot.dayOfWeek,
       ),
     ).toEqual(['mon', 'wed']);
+    expect(firstBatch.body.timeZone).toBe('Europe/Stockholm');
 
     const secondBatch = await authPost('/schedule/slots/batch', {
       daysOfWeek: ['wed', 'fri'],
@@ -164,30 +223,48 @@ describe('Schedule (e2e)', () => {
     ).toBeUndefined();
   });
 
-  it('resolves today from the X-Timezone header', async () => {
-    const timezone = 'Europe/Stockholm';
-    const today = resolveWeekdayForTimezone(timezone);
+  it('updates the saved timezone explicitly and keeps today anchored to it across device changes', async () => {
+    const { savedTimeZone, requestTimeZone } =
+      findTimezonePairWithDifferentWeekdays();
+    const savedDay = resolveWeekdayForTimezone(savedTimeZone);
 
-    await authPost('/schedule/slots', {
-      dayOfWeek: today,
-      slotTime: '06:30',
-      mode: 'ai',
-    }).expect(201);
+    const updatedUser = await authPatch('/users/me/time-zone', {
+      timeZone: savedTimeZone,
+    }).expect(200);
 
-    const response = await request(app.getHttpServer())
-      .get('/api/v1/schedule/today')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .set('X-Timezone', timezone)
-      .expect(200);
+    expect(updatedUser.body.timeZone).toBe(savedTimeZone);
 
-    expect(response.body.dayOfWeek).toBe(today);
+    await authPost(
+      '/schedule/slots',
+      {
+        dayOfWeek: savedDay,
+        slotTime: '06:30',
+        mode: 'ai',
+      },
+      savedTimeZone,
+    ).expect(201);
+
+    const response = await authGet('/schedule/today', requestTimeZone).expect(
+      200,
+    );
+
+    expect(response.body.dayOfWeek).toBe(savedDay);
+    expect(response.body.timeZone).toBe(savedTimeZone);
     expect(
       response.body.slots.some(
         (slot: { dayOfWeek: string; slotTime: string }) => {
-          return slot.dayOfWeek === today && slot.slotTime === '06:30';
+          return slot.dayOfWeek === savedDay && slot.slotTime === '06:30';
         },
       ),
     ).toBe(true);
+  });
+
+  it('rejects invalid explicit timezone updates', async () => {
+    const response = await authPatch('/users/me/time-zone', {
+      timeZone: '+01:00',
+    }).expect(400);
+
+    expect(response.body.message).toBeDefined();
   });
 
   it('returns coded Swedish conflict errors for move collisions', async () => {
