@@ -20,27 +20,26 @@ const MIN_TRIMMED_AREA_RATIO = 0.2;
 export class CataloguePhotoProcessorService {
   constructor(private readonly configService: ConfigService) {}
 
+  async prepareHeroImageForStorage(
+    image: UploadedCatalogueImage,
+  ): Promise<ProcessedCatalogueImage> {
+    return this.processImage(image, {
+      isHero: true,
+      ...this.getProcessingConfig(),
+    });
+  }
+
   async prepareForExtraction(
     images: UploadedCatalogueImage[],
     heroImageIndex: number,
   ): Promise<ProcessedCataloguePhotoBatch> {
-    const maxDimension = getNumberConfig(
-      this.configService,
-      'PRODUCT_MEDIA_PROCESSED_MAX_DIMENSION',
-      CATALOGUE_PRODUCT_IMAGE_MAX_DIMENSION,
-    );
-    const quality = getNumberConfig(
-      this.configService,
-      'PRODUCT_MEDIA_WEBP_QUALITY',
-      CATALOGUE_PRODUCT_IMAGE_WEBP_QUALITY,
-    );
+    const processingConfig = this.getProcessingConfig();
 
     const processedImages = await Promise.all(
       images.map((image, index) =>
         this.processImage(image, {
           isHero: index === heroImageIndex,
-          maxDimension,
-          quality,
+          ...processingConfig,
         }),
       ),
     );
@@ -110,6 +109,24 @@ export class CataloguePhotoProcessorService {
         },
       );
     }
+  }
+
+  private getProcessingConfig(): {
+    maxDimension: number;
+    quality: number;
+  } {
+    return {
+      maxDimension: getNumberConfig(
+        this.configService,
+        'PRODUCT_MEDIA_PROCESSED_MAX_DIMENSION',
+        CATALOGUE_PRODUCT_IMAGE_MAX_DIMENSION,
+      ),
+      quality: getNumberConfig(
+        this.configService,
+        'PRODUCT_MEDIA_WEBP_QUALITY',
+        CATALOGUE_PRODUCT_IMAGE_WEBP_QUALITY,
+      ),
+    };
   }
 
   private async cropToSubject(

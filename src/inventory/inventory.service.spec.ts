@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CataloguePhotoProcessorService } from '../catalogue/catalogue-photo-processor.service';
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
+import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
+import { decodeCursor } from '../common/utils/cursor-pagination';
 import { InventoryService } from './inventory.service';
 import { InventoryProduct } from './entities/inventory-product.entity';
 import {
@@ -125,13 +128,19 @@ describe('InventoryService', () => {
   let service: InventoryService;
   let repo: jest.Mocked<Repository<InventoryProduct>>;
   let queryBuilder: ReturnType<typeof createMockQueryBuilder>;
+  const cataloguePhotoProcessorService = {
+    prepareHeroImageForStorage: jest.fn(),
+  };
   const cataloguePhotoStorageService = {
+    saveHeroImage: jest.fn(),
     toPersistentImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
     resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
   };
 
   beforeEach(async () => {
     queryBuilder = createMockQueryBuilder();
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockClear();
+    cataloguePhotoStorageService.saveHeroImage.mockClear();
     cataloguePhotoStorageService.toPersistentImageUrls.mockClear();
     cataloguePhotoStorageService.resolvePublicImageUrls.mockClear();
     const module: TestingModule = await Test.createTestingModule({
@@ -140,6 +149,10 @@ describe('InventoryService', () => {
         {
           provide: getRepositoryToken(InventoryProduct),
           useFactory: mockRepository,
+        },
+        {
+          provide: CataloguePhotoProcessorService,
+          useValue: cataloguePhotoProcessorService,
         },
         {
           provide: CataloguePhotoStorageService,
@@ -151,6 +164,10 @@ describe('InventoryService', () => {
     service = module.get<InventoryService>(InventoryService);
     repo = module.get(getRepositoryToken(InventoryProduct));
     repo.createQueryBuilder.mockReturnValue(queryBuilder as never);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('creates an inventory product with normalized snapshot fields', async () => {
@@ -224,6 +241,40 @@ describe('InventoryService', () => {
     expect(result.identity.imageUrls).toEqual([signedUrl]);
   });
 
+  it('processes and uploads a product image for edit flows', async () => {
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const imageUrl =
+      'https://signed.example.com/product-images/processed/photo.webp';
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
+
+    const result = await service.uploadProductImage(uploadedImage);
+
+    expect(
+      cataloguePhotoProcessorService.prepareHeroImageForStorage,
+    ).toHaveBeenCalledWith(uploadedImage);
+    expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
+      processedImage,
+    );
+    expect(result).toBe(imageUrl);
+  });
+
   it('archives, restores, and marks products as finished', async () => {
     const entity = createEntity('inventory-1');
     repo.findOne.mockResolvedValue(entity);
@@ -271,6 +322,133 @@ describe('InventoryService', () => {
     expect(repo.find).not.toHaveBeenCalled();
   });
 
+  it('uses the saved timezone ahead of the request timezone for date-based inventory filters', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-02T03:00:00.000Z'));
+    queryBuilder.getMany.mockResolvedValue([]);
+
+    await service.list(
+      'user-1',
+      {
+        stat: ShelfStatFilter.Expired,
+        category: 'all',
+        search: '',
+        sort: ShelfSort.RecentlyAdded,
+        limit: 30,
+      },
+      'Europe/Stockholm',
+      'America/New_York',
+    );
+
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'inventory.effective_expires_at <= :todayStartUtc',
+      ),
+      expect.objectContaining({
+        todayStartUtc: '2026-04-02T00:00:00.000Z',
+      }),
+    );
+  });
+
+  it('keeps non-date-sensitive list cursor fingerprints stable across day rollover', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-23T21:59:59.000Z'));
+    queryBuilder.getMany.mockResolvedValue([
+      createEntity('inventory-1'),
+      createEntity('inventory-2'),
+    ]);
+
+    const firstPage = await service.list(
+      'user-1',
+      {
+        stat: ShelfStatFilter.All,
+        category: 'all',
+        search: '',
+        sort: ShelfSort.RecentlyAdded,
+        limit: 1,
+      },
+      'Europe/Stockholm',
+    );
+
+    jest.setSystemTime(new Date('2026-04-23T22:00:01.000Z'));
+    queryBuilder.getMany.mockResolvedValue([
+      createEntity('inventory-1'),
+      createEntity('inventory-2'),
+    ]);
+
+    const secondPage = await service.list(
+      'user-1',
+      {
+        stat: ShelfStatFilter.All,
+        category: 'all',
+        search: '',
+        sort: ShelfSort.RecentlyAdded,
+        limit: 1,
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(firstPage.nextCursor).toBeTruthy();
+    expect(secondPage.nextCursor).toBeTruthy();
+    expect(decodeCursor(firstPage.nextCursor as string).fingerprint).toBe(
+      decodeCursor(secondPage.nextCursor as string).fingerprint,
+    );
+  });
+
+  it('changes date-sensitive list cursor fingerprints across day rollover', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-23T21:59:59.000Z'));
+    queryBuilder.getMany.mockResolvedValue([
+      createEntity('inventory-1', {
+        opened_at: new Date('2026-04-01T00:00:00.000Z'),
+        effective_expires_at: new Date('2026-04-24T00:00:00.000Z'),
+      }),
+      createEntity('inventory-2', {
+        opened_at: new Date('2026-04-01T00:00:00.000Z'),
+        effective_expires_at: new Date('2026-04-25T00:00:00.000Z'),
+      }),
+    ]);
+
+    const firstPage = await service.list(
+      'user-1',
+      {
+        stat: ShelfStatFilter.Expired,
+        category: 'all',
+        search: '',
+        sort: ShelfSort.RecentlyAdded,
+        limit: 1,
+      },
+      'Europe/Stockholm',
+    );
+
+    jest.setSystemTime(new Date('2026-04-23T22:00:01.000Z'));
+    queryBuilder.getMany.mockResolvedValue([
+      createEntity('inventory-1', {
+        opened_at: new Date('2026-04-01T00:00:00.000Z'),
+        effective_expires_at: new Date('2026-04-24T00:00:00.000Z'),
+      }),
+      createEntity('inventory-2', {
+        opened_at: new Date('2026-04-01T00:00:00.000Z'),
+        effective_expires_at: new Date('2026-04-25T00:00:00.000Z'),
+      }),
+    ]);
+
+    const secondPage = await service.list(
+      'user-1',
+      {
+        stat: ShelfStatFilter.Expired,
+        category: 'all',
+        search: '',
+        sort: ShelfSort.RecentlyAdded,
+        limit: 1,
+      },
+      'Europe/Stockholm',
+    );
+
+    expect(firstPage.nextCursor).toBeTruthy();
+    expect(secondPage.nextCursor).toBeTruthy();
+    expect(decodeCursor(firstPage.nextCursor as string).fingerprint).not.toBe(
+      decodeCursor(secondPage.nextCursor as string).fingerprint,
+    );
+  });
+
   it('derives shelf stats from user inventory', async () => {
     const statsBuilder = createMockQueryBuilder();
     statsBuilder.getRawOne.mockResolvedValue({
@@ -290,5 +468,28 @@ describe('InventoryService', () => {
     expect(stats[ShelfStatFilter.InUse]).toBe(1);
     expect(stats[ShelfStatFilter.Archived]).toBe(1);
     expect(statsBuilder.getRawOne).toHaveBeenCalled();
+  });
+
+  it('falls back to the request timezone for stats when no saved timezone exists', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-02T03:00:00.000Z'));
+    const statsBuilder = createMockQueryBuilder();
+    statsBuilder.getRawOne.mockResolvedValue({
+      [ShelfStatFilter.All]: '0',
+      [ShelfStatFilter.InUse]: '0',
+      [ShelfStatFilter.Unopened]: '0',
+      [ShelfStatFilter.NearingExpiry]: '0',
+      [ShelfStatFilter.Expired]: '0',
+      [ShelfStatFilter.Archived]: '0',
+    });
+
+    repo.createQueryBuilder.mockReturnValueOnce(statsBuilder as never);
+
+    await service.getStats('user-1', null, 'America/New_York');
+
+    expect(statsBuilder.setParameters).toHaveBeenCalledWith(
+      expect.objectContaining({
+        todayStartUtc: '2026-04-01T00:00:00.000Z',
+      }),
+    );
   });
 });

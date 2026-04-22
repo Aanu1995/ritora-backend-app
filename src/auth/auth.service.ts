@@ -212,10 +212,7 @@ export class AuthService {
     }
 
     if (session.revoked_at) {
-      await this.revokeAllSessions(session.user_id);
-      throw new UnauthorizedException(
-        'Refresh token has been revoked — all sessions invalidated',
-      );
+      throw new UnauthorizedException('Refresh token has been revoked');
     }
 
     if (isBeforeNow(session.expires_at)) {

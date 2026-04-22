@@ -20,6 +20,10 @@ import { OpenAiExtractorProvider } from './openai-extractor.provider';
     OfficialPageProvider,
     OpenAiExtractorProvider,
   ],
-  exports: [CataloguePhotoStorageService, CatalogueService],
+  exports: [
+    CataloguePhotoProcessorService,
+    CataloguePhotoStorageService,
+    CatalogueService,
+  ],
 })
 export class CatalogueModule {}

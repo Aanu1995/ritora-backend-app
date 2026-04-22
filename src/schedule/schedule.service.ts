@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import {
   resolveDayOfWeekForTimeZone,
   resolveTimeZoneContext,
@@ -53,22 +53,14 @@ export class ScheduleService {
   ) {}
 
   async getForUser(userId: string): Promise<ScheduleSlot[]> {
-    const slots = await this.slotsRepository.find({
-      where: { user_id: userId },
-      relations: { steps: { product: true } },
-    });
-    return slots.sort(compareSlots);
+    return this.findSlotsForUser(userId);
   }
 
   async getTodaysSchedule(
     userId: string,
     day: DayOfWeek,
   ): Promise<ScheduleSlot[]> {
-    const slots = await this.slotsRepository.find({
-      where: { user_id: userId, day_of_week: day },
-      relations: { steps: { product: true } },
-    });
-    return slots.sort(compareSlots);
+    return this.findSlotsForUser(userId, { day_of_week: day });
   }
 
   resolveEffectiveTimeZone(
@@ -240,14 +232,32 @@ export class ScheduleService {
     userId: string,
     slotId: string,
   ): Promise<ScheduleSlot> {
-    const slot = await this.slotsRepository.findOne({
-      where: { id: slotId, user_id: userId },
-      relations: { steps: { product: true } },
-    });
+    const slot = await this.slotsRepository.findOne(
+      this.buildSlotQuery({
+        id: slotId,
+        user_id: userId,
+      }),
+    );
     if (!slot) {
       throw scheduleSlotNotFound();
     }
     return slot;
+  }
+
+  private findSlotsForUser(
+    userId: string,
+    where: FindOptionsWhere<ScheduleSlot> = {},
+  ): Promise<ScheduleSlot[]> {
+    return this.slotsRepository
+      .find(this.buildSlotQuery({ user_id: userId, ...where }))
+      .then((slots) => slots.sort(compareSlots));
+  }
+
+  private buildSlotQuery(where: FindOptionsWhere<ScheduleSlot>) {
+    return {
+      where,
+      relations: { steps: { product: true } },
+    } as const;
   }
 
   private async assertSlotAvailable(

@@ -2,209 +2,49 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, In, Repository, SelectQueryBuilder } from 'typeorm';
+import { CataloguePhotoProcessorService } from '../catalogue/catalogue-photo-processor.service';
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
+import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import {
   decodeCursor,
   encodeCursor,
   type PaginatedResult,
 } from '../common/utils/cursor-pagination';
-import { nowDate, toDateOrNull, toIsoString } from '../common/utils/date';
+import { toDateOrNull, toIsoString } from '../common/utils/date';
 import { computeEffectiveExpiresAt } from '../shelf/shelf-life';
 import {
-  normalizeApplicationGuidanceSnapshot,
-  normalizeCatalogueIdentitySnapshot,
-  normalizeManufacturerInfoSnapshot,
-  normalizeUserFieldsSnapshot,
-} from '../shelf/shelf-payload-normalizer';
-import {
-  type ApplicationGuidance,
-  type CatalogueIdentity,
-  DataProvenance,
-  type ManufacturerInfo,
   ShelfSort,
   ShelfStatFilter,
   ShelfStatus,
   type ShelfProductSnapshot,
-  type UserFields,
 } from '../shelf/shelf.types';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
 import { UpdateInventoryProductDto } from './dto/update-inventory-product.dto';
 import { InventoryProduct } from './entities/inventory-product.entity';
+import {
+  applyInventorySearchFilter,
+  applyInventoryStatFilter,
+  buildInventoryListFingerprint,
+  buildInventoryStatsParameters,
+  type InventoryShelfDateContext,
+  INVENTORY_EXPIRED_SQL,
+  INVENTORY_NEARING_EXPIRY_SQL,
+  resolveInventoryShelfDateContext,
+} from './inventory-list.utils';
+import {
+  buildInventorySearchDocument,
+  mergeInventorySnapshot,
+  normalizeInventorySearchValue,
+  normalizeInventorySnapshot,
+  toInventorySnapshotFromCreateDto,
+} from './inventory-snapshot.utils';
 import { assertValidInventoryDraft } from './inventory.validation';
-
-function normalizeSearchValue(value: string | null | undefined): string {
-  return value?.trim().toLowerCase() ?? '';
-}
-
-function trimOrNull(value: string | null | undefined): string | null {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
-
-function normalizeStringList(values: string[] | undefined): string[] {
-  return (values ?? []).map((value) => value.trim()).filter(Boolean);
-}
-
-function buildSearchDocument(snapshot: ShelfProductSnapshot): string {
-  const parts = [
-    snapshot.identity.brand,
-    snapshot.identity.name,
-    snapshot.identity.category,
-    snapshot.identity.description,
-    ...snapshot.identity.benefits,
-    ...snapshot.identity.suitedFor,
-    ...snapshot.identity.inciIngredients,
-    snapshot.manufacturer.brand,
-    snapshot.manufacturer.parentCompany,
-    snapshot.userFields.purchasedFrom,
-  ];
-
-  return parts
-    .map((value) => value?.trim())
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-}
-
-function mergeDraft(
-  existing: ShelfProductSnapshot,
-  patch: UpdateInventoryProductDto,
-): ShelfProductSnapshot {
-  return {
-    identity: {
-      ...existing.identity,
-      ...(patch.identity ?? {}),
-    },
-    guidance: {
-      ...existing.guidance,
-      ...(patch.guidance ?? {}),
-    },
-    manufacturer: {
-      ...existing.manufacturer,
-      ...(patch.manufacturer ?? {}),
-      brand:
-        patch.manufacturer?.brand ??
-        existing.manufacturer.brand ??
-        existing.identity.brand,
-    },
-    userFields: {
-      ...existing.userFields,
-      ...(patch.userFields ?? {}),
-    },
-    status: patch.status ?? existing.status,
-    provenance: patch.provenance ?? existing.provenance,
-  };
-}
-
-function toSnapshotFromCreateDto(
-  dto: CreateInventoryProductDto,
-): ShelfProductSnapshot {
-  const identity: CatalogueIdentity = {
-    brand: dto.identity.brand,
-    name: dto.identity.name,
-    category: dto.identity.category,
-    barcode: dto.identity.barcode ?? null,
-    imageUrls: [...dto.identity.imageUrls],
-    sizeMl: dto.identity.sizeMl,
-    description: dto.identity.description,
-    benefits: [...dto.identity.benefits],
-    suitedFor: [...dto.identity.suitedFor],
-    inciIngredients: [...dto.identity.inciIngredients],
-    inciLastConfirmedAt: dto.identity.inciLastConfirmedAt ?? null,
-  };
-
-  const guidance: ApplicationGuidance = {
-    applicationMethod: dto.guidance.applicationMethod ?? null,
-    quantity: dto.guidance.quantity ?? null,
-    steps: [...dto.guidance.steps],
-    cautions: [...dto.guidance.cautions],
-    waitMinutes: dto.guidance.waitMinutes ?? null,
-  };
-
-  const manufacturer: ManufacturerInfo = {
-    brand: dto.manufacturer.brand ?? dto.identity.brand,
-    parentCompany: dto.manufacturer.parentCompany ?? null,
-    countryOfOrigin: dto.manufacturer.countryOfOrigin ?? null,
-    countryOfManufacture: dto.manufacturer.countryOfManufacture ?? null,
-    supportEmail: dto.manufacturer.supportEmail ?? null,
-    productUrl: dto.manufacturer.productUrl ?? null,
-    websiteUrl: dto.manufacturer.websiteUrl ?? null,
-  };
-
-  const userFields: UserFields = {
-    openedAt: dto.userFields.openedAt ?? null,
-    expiresAt: dto.userFields.expiresAt ?? null,
-    periodAfterOpeningMonths: dto.userFields.periodAfterOpeningMonths ?? null,
-    pricePaid: dto.userFields.pricePaid ?? null,
-    pricePaidCurrency: dto.userFields.pricePaidCurrency ?? null,
-    purchasedFrom: dto.userFields.purchasedFrom ?? null,
-    personalNotes: dto.userFields.personalNotes ?? null,
-    preferredTimeOfDay: dto.userFields.preferredTimeOfDay ?? null,
-  };
-
-  return {
-    identity,
-    guidance,
-    manufacturer,
-    userFields,
-    status: dto.status ?? ShelfStatus.Active,
-    provenance: dto.provenance ?? DataProvenance.UserEntered,
-  };
-}
-
-function normalizeDraft(draft: ShelfProductSnapshot): ShelfProductSnapshot {
-  const identity = normalizeCatalogueIdentitySnapshot({
-    ...draft.identity,
-    brand: draft.identity.brand.trim(),
-    name: draft.identity.name.trim(),
-    barcode: trimOrNull(draft.identity.barcode),
-    description: trimOrNull(draft.identity.description),
-    benefits: normalizeStringList(draft.identity.benefits),
-    suitedFor: normalizeStringList(draft.identity.suitedFor),
-    inciIngredients: normalizeStringList(draft.identity.inciIngredients),
-    inciLastConfirmedAt: trimOrNull(draft.identity.inciLastConfirmedAt),
-  });
-  const guidance = normalizeApplicationGuidanceSnapshot({
-    ...draft.guidance,
-    steps: normalizeStringList(draft.guidance.steps),
-    cautions: normalizeStringList(draft.guidance.cautions),
-  });
-  const manufacturer = normalizeManufacturerInfoSnapshot(
-    {
-      ...draft.manufacturer,
-      brand: trimOrNull(draft.manufacturer.brand) ?? identity.brand,
-      parentCompany: trimOrNull(draft.manufacturer.parentCompany),
-      countryOfOrigin: trimOrNull(draft.manufacturer.countryOfOrigin),
-      countryOfManufacture: trimOrNull(draft.manufacturer.countryOfManufacture),
-      supportEmail: trimOrNull(draft.manufacturer.supportEmail),
-      productUrl: trimOrNull(draft.manufacturer.productUrl),
-      websiteUrl: trimOrNull(draft.manufacturer.websiteUrl),
-    },
-    identity.brand,
-  );
-  const userFields = normalizeUserFieldsSnapshot({
-    ...draft.userFields,
-    openedAt: trimOrNull(draft.userFields.openedAt),
-    expiresAt: trimOrNull(draft.userFields.expiresAt),
-    pricePaidCurrency: trimOrNull(draft.userFields.pricePaidCurrency),
-    purchasedFrom: trimOrNull(draft.userFields.purchasedFrom),
-    personalNotes: trimOrNull(draft.userFields.personalNotes),
-  });
-
-  return {
-    identity,
-    guidance,
-    manufacturer,
-    userFields,
-    status: draft.status ?? ShelfStatus.Active,
-    provenance: draft.provenance ?? DataProvenance.UserEntered,
-  };
-}
 
 type InventorySortTuple =
   | [string, string]
@@ -218,15 +58,30 @@ export class InventoryService {
   constructor(
     @InjectRepository(InventoryProduct)
     private readonly inventoryRepository: Repository<InventoryProduct>,
+    private readonly cataloguePhotoProcessorService: CataloguePhotoProcessorService,
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async list(
     userId: string,
     query: InventoryListQueryDto,
+    savedTimeZone?: string | null,
+    requestTimeZone?: string,
   ): Promise<PaginatedResult<InventoryProductResponseDto>> {
-    const fingerprint = this.buildFingerprint(userId, query);
-    const queryBuilder = this.createListQueryBuilder(userId, query);
+    const shelfDateContext = resolveInventoryShelfDateContext(
+      savedTimeZone,
+      requestTimeZone,
+    );
+    const fingerprint = buildInventoryListFingerprint(
+      userId,
+      query,
+      shelfDateContext,
+    );
+    const queryBuilder = this.createListQueryBuilder(
+      userId,
+      query,
+      shelfDateContext,
+    );
 
     this.applySort(queryBuilder, query.sort);
     this.applyCursor(queryBuilder, query.sort, query.cursor, fingerprint);
@@ -245,9 +100,17 @@ export class InventoryService {
     return { items, nextCursor };
   }
 
-  async getStats(userId: string): Promise<Record<ShelfStatFilter, number>> {
-    const now = nowDate();
-    return this.countStats(userId, now);
+  async getStats(
+    userId: string,
+    savedTimeZone?: string | null,
+    requestTimeZone?: string,
+  ): Promise<Record<ShelfStatFilter, number>> {
+    const shelfDateContext = resolveInventoryShelfDateContext(
+      savedTimeZone,
+      requestTimeZone,
+    );
+
+    return this.countStats(userId, shelfDateContext);
   }
 
   async getOne(
@@ -263,7 +126,9 @@ export class InventoryService {
     dto: CreateInventoryProductDto,
   ): Promise<InventoryProductResponseDto> {
     assertValidInventoryDraft(dto);
-    const normalized = normalizeDraft(toSnapshotFromCreateDto(dto));
+    const normalized = normalizeInventorySnapshot(
+      toInventorySnapshotFromCreateDto(dto),
+    );
 
     const entity = this.inventoryRepository.create(
       this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
@@ -278,9 +143,9 @@ export class InventoryService {
     dto: UpdateInventoryProductDto,
   ): Promise<InventoryProductResponseDto> {
     const product = await this.findByIdOrFail(userId, id);
-    const merged = mergeDraft(this.toSnapshot(product), dto);
+    const merged = mergeInventorySnapshot(this.toSnapshot(product), dto);
     assertValidInventoryDraft(merged);
-    const normalized = normalizeDraft(merged);
+    const normalized = normalizeInventorySnapshot(merged);
 
     Object.assign(
       product,
@@ -288,6 +153,23 @@ export class InventoryService {
     );
     const saved = await this.inventoryRepository.save(product);
     return this.toResponseDto(saved);
+  }
+
+  async uploadProductImage(file: UploadedCatalogueImage): Promise<string> {
+    const processed =
+      await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
+        file,
+      );
+    const imageUrl =
+      await this.cataloguePhotoStorageService.saveHeroImage(processed);
+
+    if (!imageUrl) {
+      throw new ServiceUnavailableException(
+        'Product image storage is not configured',
+      );
+    }
+
+    return imageUrl;
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -394,21 +276,6 @@ export class InventoryService {
     );
   }
 
-  private buildFingerprint(
-    userId: string,
-    query: InventoryListQueryDto,
-  ): string {
-    return [
-      'inventory',
-      userId,
-      query.stat,
-      query.category,
-      normalizeSearchValue(query.search),
-      query.sort,
-      query.limit,
-    ].join(':');
-  }
-
   private buildNextCursor(
     item: InventoryProduct | undefined,
     sort: ShelfSort,
@@ -451,12 +318,13 @@ export class InventoryService {
   private createListQueryBuilder(
     userId: string,
     query: InventoryListQueryDto,
+    shelfDateContext: InventoryShelfDateContext,
   ): SelectQueryBuilder<InventoryProduct> {
     const queryBuilder = this.inventoryRepository
       .createQueryBuilder('inventory')
       .where('inventory.user_id = :userId', { userId });
 
-    this.applyStatFilter(queryBuilder, query.stat);
+    applyInventoryStatFilter(queryBuilder, query.stat, shelfDateContext);
 
     if (query.category !== 'all') {
       queryBuilder.andWhere('inventory.category = :category', {
@@ -464,25 +332,12 @@ export class InventoryService {
       });
     }
 
-    const normalizedSearch = normalizeSearchValue(query.search);
-    this.applySearchFilter(queryBuilder, normalizedSearch);
+    applyInventorySearchFilter(
+      queryBuilder,
+      normalizeInventorySearchValue(query.search),
+    );
 
     return queryBuilder;
-  }
-
-  private applySearchFilter(
-    queryBuilder: SelectQueryBuilder<InventoryProduct>,
-    normalizedSearch: string,
-  ) {
-    if (!normalizedSearch) {
-      return;
-    }
-
-    const searchLike = `%${normalizedSearch}%`;
-
-    queryBuilder.andWhere('inventory.search_document LIKE :searchLike', {
-      searchLike,
-    });
   }
 
   private applySort(
@@ -643,66 +498,10 @@ export class InventoryService {
     }
   }
 
-  private applyStatFilter(
-    queryBuilder: SelectQueryBuilder<InventoryProduct>,
-    stat: ShelfStatFilter,
-    now: Date = nowDate(),
-  ) {
-    const params = {
-      archived: ShelfStatus.Archived,
-      active: ShelfStatus.Active,
-      now: toIsoString(now),
-    };
-
-    switch (stat) {
-      case ShelfStatFilter.Archived:
-        queryBuilder.andWhere('inventory.status = :archived', params);
-        return;
-      case ShelfStatFilter.InUse:
-        queryBuilder
-          .andWhere('inventory.status = :active', params)
-          .andWhere('inventory.opened_at IS NOT NULL');
-        return;
-      case ShelfStatFilter.Unopened:
-        queryBuilder
-          .andWhere('inventory.status = :active', params)
-          .andWhere('inventory.opened_at IS NULL');
-        return;
-      case ShelfStatFilter.Expired:
-        queryBuilder
-          .andWhere('inventory.status != :archived', params)
-          .andWhere('inventory.opened_at IS NOT NULL')
-          .andWhere('inventory.effective_expires_at IS NOT NULL')
-          .andWhere('inventory.effective_expires_at <= :now', params);
-        return;
-      case ShelfStatFilter.NearingExpiry:
-        queryBuilder
-          .andWhere('inventory.status != :archived', params)
-          .andWhere('inventory.opened_at IS NOT NULL')
-          .andWhere('inventory.effective_expires_at IS NOT NULL')
-          .andWhere(
-            new Brackets((qb) => {
-              qb.where(
-                'inventory.effective_expires_at <= :now',
-                params,
-              ).orWhere(
-                ':now >= inventory.opened_at + ((inventory.effective_expires_at - inventory.opened_at) / 2.0)',
-                params,
-              );
-            }),
-          );
-        return;
-      case ShelfStatFilter.All:
-      default:
-        queryBuilder.andWhere('inventory.status != :archived', params);
-    }
-  }
-
   private async countStats(
     userId: string,
-    now: Date,
+    shelfDateContext: InventoryShelfDateContext,
   ): Promise<Record<ShelfStatFilter, number>> {
-    const nowIso = toIsoString(now);
     const rawCounts = await this.inventoryRepository
       .createQueryBuilder('inventory')
       .select(
@@ -722,10 +521,7 @@ export class InventoryService {
           WHERE inventory.status != :archived
             AND inventory.opened_at IS NOT NULL
             AND inventory.effective_expires_at IS NOT NULL
-            AND (
-              inventory.effective_expires_at <= :now
-              OR :now >= inventory.opened_at + ((inventory.effective_expires_at - inventory.opened_at) / 2.0)
-            )
+            AND ${INVENTORY_NEARING_EXPIRY_SQL}
         )`,
         ShelfStatFilter.NearingExpiry,
       )
@@ -734,7 +530,7 @@ export class InventoryService {
           WHERE inventory.status != :archived
             AND inventory.opened_at IS NOT NULL
             AND inventory.effective_expires_at IS NOT NULL
-            AND inventory.effective_expires_at <= :now
+            AND ${INVENTORY_EXPIRED_SQL}
         )`,
         ShelfStatFilter.Expired,
       )
@@ -743,11 +539,7 @@ export class InventoryService {
         ShelfStatFilter.Archived,
       )
       .where('inventory.user_id = :userId', { userId })
-      .setParameters({
-        active: ShelfStatus.Active,
-        archived: ShelfStatus.Archived,
-        now: nowIso,
-      })
+      .setParameters(buildInventoryStatsParameters(shelfDateContext))
       .getRawOne<Record<ShelfStatFilter, string | null>>();
 
     return {
@@ -784,7 +576,7 @@ export class InventoryService {
     snapshot: ShelfProductSnapshot,
   ): Partial<InventoryProduct> {
     const effectiveExpiresAt = computeEffectiveExpiresAt(snapshot);
-    const searchDocument = buildSearchDocument(snapshot);
+    const searchDocument = buildInventorySearchDocument(snapshot);
 
     return {
       user_id: userId,
@@ -794,8 +586,8 @@ export class InventoryService {
       barcode: snapshot.identity.barcode,
       status: snapshot.status,
       provenance: snapshot.provenance,
-      brand_search: normalizeSearchValue(snapshot.identity.brand),
-      name_search: normalizeSearchValue(snapshot.identity.name),
+      brand_search: normalizeInventorySearchValue(snapshot.identity.brand),
+      name_search: normalizeInventorySearchValue(snapshot.identity.name),
       search_document: searchDocument,
       opened_at: toDateOrNull(snapshot.userFields.openedAt),
       expires_at: toDateOrNull(snapshot.userFields.expiresAt),

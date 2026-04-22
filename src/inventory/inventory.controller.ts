@@ -1,22 +1,30 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES } from '../catalogue/catalogue-photo.constants';
+import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
 import { ProductIdListDto } from './dto/product-id-list.dto';
 import { UpdateInventoryProductDto } from './dto/update-inventory-product.dto';
+import { UploadInventoryProductImageResponseDto } from './dto/upload-inventory-product-image-response.dto';
 import { InventoryService } from './inventory.service';
 
 @ApiTags('inventory')
@@ -25,16 +33,22 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get('stats')
-  getStats(@CurrentUser('id') userId: string) {
-    return this.inventoryService.getStats(userId);
+  getStats(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('timeZone') timeZone: string | null,
+    @Headers('x-timezone') requestTimeZone?: string,
+  ) {
+    return this.inventoryService.getStats(userId, timeZone, requestTimeZone);
   }
 
   @Get()
   list(
     @CurrentUser('id') userId: string,
+    @CurrentUser('timeZone') timeZone: string | null,
+    @Headers('x-timezone') requestTimeZone: string | undefined,
     @Query() query: InventoryListQueryDto,
   ) {
-    return this.inventoryService.list(userId, query);
+    return this.inventoryService.list(userId, query, timeZone, requestTimeZone);
   }
 
   @Post()
@@ -43,6 +57,40 @@ export class InventoryController {
     @Body() dto: CreateInventoryProductDto,
   ): Promise<InventoryProductResponseDto> {
     return this.inventoryService.create(userId, dto);
+  }
+
+  @Post('upload-image')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      limits: {
+        fileSize: CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
+        files: 1,
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['image'],
+      properties: {
+        image: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  async uploadImage(
+    @CurrentUser('id') _userId: string,
+    @UploadedFile() file: UploadedCatalogueImage | undefined,
+  ): Promise<UploadInventoryProductImageResponseDto> {
+    if (!file) {
+      throw new BadRequestException('Product image is required');
+    }
+
+    const imageUrl = await this.inventoryService.uploadProductImage(file);
+    return UploadInventoryProductImageResponseDto.fromImageUrl(imageUrl);
   }
 
   @Post('bulk/archive')

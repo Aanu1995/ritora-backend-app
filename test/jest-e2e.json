@@ -8,8 +8,12 @@
   "transform": {
     "^.+\\.(t|j)s$": [
       "ts-jest",
-      { "diagnostics": { "ignoreCodes": [151002] } }
+      {
+        "tsconfig": { "allowJs": true },
+        "diagnostics": { "ignoreCodes": [151002] }
+      }
     ]
   },
+  "transformIgnorePatterns": ["/node_modules/(?!uuid/)"],
   "setupFiles": ["./env-setup.ts"]
 }

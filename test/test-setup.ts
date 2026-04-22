@@ -6,6 +6,11 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { MailService } from '../src/mail/mail.service';
 
+type TestAppProviderOverride = {
+  provider: unknown;
+  useValue: unknown;
+};
+
 export class MockMailService {
   verificationTokens = new Map<string, string>();
   resetTokens = new Map<string, string>();
@@ -42,13 +47,21 @@ export class MockMailService {
 
 export async function createTestApp(
   mockMailService: MockMailService,
+  providerOverrides: TestAppProviderOverride[] = [],
 ): Promise<INestApplication> {
-  const moduleFixture = await Test.createTestingModule({
+  let moduleBuilder = Test.createTestingModule({
     imports: [AppModule],
   })
     .overrideProvider(MailService)
-    .useValue(mockMailService)
-    .compile();
+    .useValue(mockMailService);
+
+  for (const override of providerOverrides) {
+    moduleBuilder = moduleBuilder
+      .overrideProvider(override.provider as never)
+      .useValue(override.useValue);
+  }
+
+  const moduleFixture = await moduleBuilder.compile();
 
   const app = moduleFixture.createNestApplication();
   const configService = app.get(ConfigService);

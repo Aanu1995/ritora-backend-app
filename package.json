@@ -62,6 +62,10 @@
     "typeorm": "^0.3.28",
     "ulid": "^3.0.2"
   },
+  "overrides": {
+    "fast-xml-parser": "5.7.0",
+    "uuid": "14.0.0"
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
@@ -103,6 +107,9 @@
       "^.+\\.(t|j)s$": [
         "ts-jest",
         {
+          "tsconfig": {
+            "allowJs": true
+          },
           "diagnostics": {
             "ignoreCodes": [
               151002
@@ -111,6 +118,9 @@
         }
       ]
     },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!uuid/)"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s",
       "!main.ts",

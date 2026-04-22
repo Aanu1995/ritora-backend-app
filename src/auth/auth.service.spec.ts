@@ -350,7 +350,7 @@ describe('AuthService', () => {
       );
     });
 
-    it('revokes all sessions if revoked token is reused', async () => {
+    it('rejects revoked refresh tokens without revoking other sessions', async () => {
       const res = mockRes();
 
       sessionsRepo.findOne.mockResolvedValue({
@@ -363,7 +363,7 @@ describe('AuthService', () => {
         service.refreshTokens('01SESSION.fakesecret', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
 
-      expect(sessionsRepo.update).toHaveBeenCalled();
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
     });
 
     it('rejects expired session', async () => {

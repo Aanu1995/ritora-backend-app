@@ -1,14 +1,17 @@
+import { Temporal } from '@js-temporal/polyfill';
 import {
   ShelfStatFilter,
   ShelfStatus,
   type ShelfProductSnapshot,
 } from './shelf.types';
 import {
-  addMonths,
-  diffInDaysRounded,
-  nowDate,
-  parseUtcDate,
-} from '../common/utils/date';
+  diffShelfCalendarDays,
+  parseShelfPlainDate,
+  resolveShelfToday,
+  toShelfStoredUtcDate,
+  type ShelfNowInput,
+} from './shelf-date.utils';
+import { DEFAULT_TIME_ZONE } from '../common/timezone/timezone.utils';
 
 export enum ShelfLifeState {
   Unopened = 'unopened',
@@ -25,26 +28,38 @@ export type ShelfLifeSnapshot = {
   remainingDays: number | null;
 };
 
-export function computeEffectiveExpiresAt(
+export type ShelfLifeOptions = {
+  now?: ShelfNowInput;
+  timeZone?: string;
+};
+
+function computeEffectiveExpiresPlainDate(
   snapshot: Pick<ShelfProductSnapshot, 'userFields'>,
-): Date | null {
-  const explicit = parseUtcDate(snapshot.userFields.expiresAt);
+): Temporal.PlainDate | null {
+  const explicit = parseShelfPlainDate(snapshot.userFields.expiresAt);
   if (explicit) {
-    return explicit.toDate();
+    return explicit;
   }
 
-  const opened = parseUtcDate(snapshot.userFields.openedAt);
+  const opened = parseShelfPlainDate(snapshot.userFields.openedAt);
   const pao = snapshot.userFields.periodAfterOpeningMonths;
   if (opened && pao && pao > 0) {
-    return addMonths(opened, pao);
+    return opened.add({ months: pao });
   }
 
   return null;
 }
 
+export function computeEffectiveExpiresAt(
+  snapshot: Pick<ShelfProductSnapshot, 'userFields'>,
+): Date | null {
+  const effectiveExpiresAt = computeEffectiveExpiresPlainDate(snapshot);
+  return effectiveExpiresAt ? toShelfStoredUtcDate(effectiveExpiresAt) : null;
+}
+
 export function deriveShelfLife(
   snapshot: Pick<ShelfProductSnapshot, 'status' | 'userFields'>,
-  now: Date = nowDate(),
+  options: ShelfLifeOptions = {},
 ): ShelfLifeSnapshot {
   if (snapshot.status === ShelfStatus.Archived) {
     return {
@@ -62,7 +77,7 @@ export function deriveShelfLife(
     };
   }
 
-  const opened = parseUtcDate(snapshot.userFields.openedAt);
+  const opened = parseShelfPlainDate(snapshot.userFields.openedAt);
   if (!opened) {
     return {
       state: ShelfLifeState.Unopened,
@@ -71,7 +86,7 @@ export function deriveShelfLife(
     };
   }
 
-  const effectiveExpiresAt = computeEffectiveExpiresAt(snapshot);
+  const effectiveExpiresAt = computeEffectiveExpiresPlainDate(snapshot);
   if (!effectiveExpiresAt) {
     return {
       state: ShelfLifeState.Fresh,
@@ -80,8 +95,12 @@ export function deriveShelfLife(
     };
   }
 
-  const totalDays = diffInDaysRounded(opened.toDate(), effectiveExpiresAt);
-  const elapsedDays = diffInDaysRounded(opened.toDate(), now);
+  const totalDays = diffShelfCalendarDays(opened, effectiveExpiresAt);
+  const today = resolveShelfToday(
+    options.timeZone ?? DEFAULT_TIME_ZONE,
+    options.now,
+  );
+  const elapsedDays = Math.max(0, diffShelfCalendarDays(opened, today));
   const remainingDays = totalDays - elapsedDays;
 
   if (remainingDays <= 0) {
@@ -93,13 +112,11 @@ export function deriveShelfLife(
   }
 
   const remainingFraction =
-    totalDays > 0 ? Math.max(0, Math.min(1, remainingDays / totalDays)) : null;
+    totalDays > 0 ? Math.max(0, Math.min(1, remainingDays / totalDays)) : 0;
 
   return {
     state:
-      remainingFraction !== null && remainingFraction > 0.5
-        ? ShelfLifeState.Fresh
-        : ShelfLifeState.Aging,
+      remainingFraction > 0.5 ? ShelfLifeState.Fresh : ShelfLifeState.Aging,
     remainingFraction,
     remainingDays,
   };
@@ -108,7 +125,7 @@ export function deriveShelfLife(
 export function matchesInventoryStat(
   snapshot: Pick<ShelfProductSnapshot, 'status' | 'userFields'>,
   stat: ShelfStatFilter,
-  now: Date = nowDate(),
+  options: ShelfLifeOptions = {},
 ): boolean {
   if (stat === ShelfStatFilter.All) {
     return snapshot.status !== ShelfStatus.Archived;
@@ -122,7 +139,7 @@ export function matchesInventoryStat(
     return false;
   }
 
-  const life = deriveShelfLife(snapshot, now);
+  const life = deriveShelfLife(snapshot, options);
 
   switch (stat) {
     case ShelfStatFilter.InUse:
