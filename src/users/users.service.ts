@@ -2,6 +2,12 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import {
+  buildTimeZonePatch,
+  normalizeEmail,
+  normalizePreferredLanguage,
+  normalizeProfileName,
+} from './users.service.utils';
 
 @Injectable()
 export class UsersService {
@@ -11,17 +17,21 @@ export class UsersService {
   ) {}
 
   async findByEmail(email: string): Promise<User | null> {
+    const normalizedEmail = normalizeEmail(email);
+
     return this.usersRepository.findOne({
-      where: { email: email.toLowerCase().trim() },
+      where: { email: normalizedEmail },
     });
   }
 
   async findByEmailForAuth(email: string): Promise<User | null> {
+    const normalizedEmail = normalizeEmail(email);
+
     return this.usersRepository
       .createQueryBuilder('user')
       .addSelect('user.password_hash')
       .where('LOWER(user.email) = :email', {
-        email: email.toLowerCase().trim(),
+        email: normalizedEmail,
       })
       .getOne();
   }
@@ -58,7 +68,7 @@ export class UsersService {
   }): Promise<User> {
     const user = this.usersRepository.create({
       ...data,
-      email: data.email.toLowerCase().trim(),
+      email: normalizeEmail(data.email),
     });
     return this.usersRepository.save(user);
   }
@@ -74,8 +84,8 @@ export class UsersService {
     data: { firstName: string; lastName: string },
   ): Promise<User> {
     return this.update(id, {
-      first_name: data.firstName.trim(),
-      last_name: data.lastName.trim(),
+      first_name: normalizeProfileName(data.firstName),
+      last_name: normalizeProfileName(data.lastName),
     });
   }
 
@@ -84,8 +94,26 @@ export class UsersService {
     preferredLanguage: string,
   ): Promise<User> {
     return this.update(id, {
-      preferred_language: preferredLanguage.trim().toLowerCase(),
+      preferred_language: normalizePreferredLanguage(preferredLanguage),
     });
+  }
+
+  async updateTimeZone(id: string, timeZone: string): Promise<User> {
+    return this.update(id, buildTimeZonePatch(timeZone));
+  }
+
+  async captureTimeZoneIfMissing(id: string, timeZone: string): Promise<User> {
+    const timeZonePatch = buildTimeZonePatch(timeZone);
+
+    await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set(timeZonePatch)
+      .where('id = :id', { id })
+      .andWhere('time_zone IS NULL')
+      .execute();
+
+    return this.findByIdOrFail(id);
   }
 
   async findByVerificationTokenHash(hash: string): Promise<User | null> {

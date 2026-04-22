@@ -44,6 +44,7 @@ describe('JwtStrategy', () => {
       id: '01USER',
       email: 'test@example.com',
       preferred_language: 'sv',
+      time_zone: 'Europe/Stockholm',
     });
 
     const strategy = new JwtStrategy(
@@ -63,6 +64,7 @@ describe('JwtStrategy', () => {
       id: '01USER',
       email: 'test@example.com',
       language: 'sv',
+      timeZone: 'Europe/Stockholm',
       sessionId: '01SESSION',
     });
   });

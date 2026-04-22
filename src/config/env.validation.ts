@@ -1,5 +1,8 @@
 import * as Joi from 'joi';
 
+const COOKIE_DOMAIN_PATTERN =
+  /^(?:\.[a-z0-9-]+(?:\.[a-z0-9-]+)*|localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)*)$/i;
+
 const productionSecret = Joi.when('NODE_ENV', {
   is: 'production',
   then: Joi.string().trim().min(1).required(),
@@ -47,11 +50,37 @@ function validateCorsOrigins(
   return value;
 }
 
+function validateCookieDomain(
+  value: string,
+  helpers: Joi.CustomHelpers<string>,
+) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (!COOKIE_DOMAIN_PATTERN.test(trimmed)) {
+    return helpers.error('any.invalid');
+  }
+
+  return trimmed;
+}
+
 function validateCookieSettings(
   env: Record<string, unknown>,
   helpers: Joi.CustomHelpers<Record<string, unknown>>,
 ) {
   if (env.COOKIE_SAME_SITE === 'none' && env.COOKIE_SECURE !== true) {
+    return helpers.error('any.invalid');
+  }
+
+  if (
+    typeof env.JWT_SECRET === 'string' &&
+    typeof env.JWT_REFRESH_SECRET === 'string' &&
+    env.JWT_SECRET.length > 0 &&
+    env.JWT_SECRET === env.JWT_REFRESH_SECRET
+  ) {
     return helpers.error('any.invalid');
   }
 
@@ -128,8 +157,15 @@ export const envValidationSchema = Joi.object({
 
   COOKIE_DOMAIN: Joi.when('NODE_ENV', {
     is: 'production',
-    then: Joi.string().trim().min(1).required(),
-    otherwise: Joi.string().allow('').default(''),
+    then: Joi.string()
+      .trim()
+      .min(1)
+      .custom(validateCookieDomain, 'cookie domain validation')
+      .required(),
+    otherwise: Joi.string()
+      .allow('')
+      .custom(validateCookieDomain, 'cookie domain validation')
+      .default(''),
   }),
   COOKIE_SECURE: Joi.when('NODE_ENV', {
     is: 'production',

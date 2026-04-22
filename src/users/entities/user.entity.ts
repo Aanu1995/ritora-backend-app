@@ -45,6 +45,9 @@ export class User {
   @Column({ type: 'varchar', length: 5, default: 'en' })
   preferred_language: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  time_zone: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

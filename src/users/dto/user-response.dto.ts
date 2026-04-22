@@ -21,6 +21,9 @@ export class UserResponseDto {
   @ApiProperty()
   preferredLanguage: string;
 
+  @ApiProperty({ nullable: true })
+  timeZone: string | null;
+
   @ApiProperty()
   createdAt: string;
 
@@ -31,6 +34,7 @@ export class UserResponseDto {
     lastName: string,
     emailVerified: boolean,
     preferredLanguage: string,
+    timeZone: string | null,
     createdAt: string,
   ) {
     this.id = id;
@@ -39,6 +43,7 @@ export class UserResponseDto {
     this.lastName = lastName;
     this.emailVerified = emailVerified;
     this.preferredLanguage = preferredLanguage;
+    this.timeZone = timeZone;
     this.createdAt = createdAt;
   }
 
@@ -50,6 +55,7 @@ export class UserResponseDto {
       user.last_name,
       user.email_verified,
       user.preferred_language,
+      user.time_zone,
       toIsoString(user.created_at),
     );
   }

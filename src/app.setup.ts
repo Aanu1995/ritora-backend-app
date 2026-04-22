@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import { createValidationException } from './common/validation/validation-exception';
 import {
   CATALOGUE_MEDIA_ROUTE,
   resolveCatalogueMediaRootDir,
@@ -37,8 +38,8 @@ export function configureApp(
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
-    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Timezone'],
     maxAge: 86400,
   });
   app.setGlobalPrefix('api/v1');
@@ -47,6 +48,7 @@ export function configureApp(
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: (errors) => createValidationException(errors),
     }),
   );
   app.useGlobalFilters(new GlobalExceptionFilter());

@@ -57,6 +57,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       id: user.id,
       email: user.email,
       language: user.preferred_language,
+      timeZone: user.time_zone,
       sessionId: session.id,
     };
   }

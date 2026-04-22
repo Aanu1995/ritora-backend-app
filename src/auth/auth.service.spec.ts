@@ -193,8 +193,8 @@ describe('AuthService', () => {
     });
 
     it('rejects if terms not accepted', async () => {
-      await expect(
-        service.register({
+      try {
+        await service.register({
           email: 'test@example.com',
           password: 'Password1',
           firstName: 'Jane',
@@ -202,8 +202,23 @@ describe('AuthService', () => {
           preferredLanguage: 'en',
           termsAccepted: false,
           privacyPolicyAccepted: true,
-        }),
-      ).rejects.toThrow(BadRequestException);
+        });
+        fail('Expected registration to reject');
+      } catch (error) {
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect((error as BadRequestException).getResponse()).toEqual(
+          expect.objectContaining({
+            message: [
+              'You must accept the terms of service and privacy policy',
+            ],
+            fieldErrors: {
+              termsAccepted: [
+                'You must accept the terms of service and privacy policy',
+              ],
+            },
+          }),
+        );
+      }
     });
   });
 
@@ -224,6 +239,27 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('access-token-123');
       expect(result.user.email).toBe('test@example.com');
       expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('sanitizes stored session metadata from request headers', async () => {
+      const res = mockRes();
+      const user = fakeUser({ email_verified: true });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
+
+      await service.login(
+        'test@example.com',
+        'Password1',
+        asResponse(res),
+        'not-an-ip-address',
+        'Bad\r\nAgent\tValue',
+      );
+
+      expect(sessionsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ip_address: null,
+          user_agent: 'Bad Agent Value',
+        }),
+      );
     });
 
     it('rejects invalid password with generic message', async () => {
@@ -282,6 +318,36 @@ describe('AuthService', () => {
       expect(result.preferredLanguage).toBe('en');
       expect(sessionsRepo.save).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('sanitizes refreshed session metadata before saving', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser();
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        ip_address: '127.0.0.1',
+        user_agent: 'Existing Agent',
+        user,
+      });
+
+      await service.refreshTokens(
+        `01SESSION.${secret}`,
+        asResponse(res),
+        'invalid-ip',
+        'Next\r\nAgent',
+      );
+
+      expect(sessionsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ip_address: '127.0.0.1',
+          user_agent: 'Next Agent',
+        }),
+      );
     });
 
     it('revokes all sessions if revoked token is reused', async () => {
@@ -477,6 +543,34 @@ describe('AuthService', () => {
 
       expect(sessionsRepo.update).toHaveBeenCalled();
       expect(res.clearCookie).toHaveBeenCalled();
+    });
+  });
+
+  // --- getSessions ---
+
+  describe('getSessions', () => {
+    it('masks ip addresses in the routine session list', async () => {
+      sessionsRepo.find.mockResolvedValue([
+        {
+          id: '01SESSION',
+          user_agent: 'Browser',
+          ip_address: '127.0.0.1',
+          created_at: new Date('2024-01-01'),
+          last_used_at: new Date(Date.now() + 60_000),
+          expires_at: new Date(Date.now() + 60_000),
+          revoked_at: null,
+        },
+      ]);
+
+      const result = await service.getSessions('01TESTUSER');
+
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: '01SESSION',
+          ipAddress: '127.0.0.0',
+          userAgent: 'Browser',
+        }),
+      ]);
     });
   });
 

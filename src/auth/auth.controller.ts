@@ -240,10 +240,7 @@ export class AuthController {
       };
     }
 
-    res.clearCookie(this.cookieRefreshName, {
-      httpOnly: true,
-      path: '/api/v1/auth',
-    });
+    this.authService.clearRefreshCookie(res);
     return {
       message: translate(
         normalizeLanguage(language),

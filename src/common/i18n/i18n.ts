@@ -76,6 +76,16 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'errors.inventory.expiryBeforeOpened':
       'Expiry date cannot be earlier than opened date',
     'errors.inventory.notFound': 'Inventory product not found',
+    'errors.schedule.slotConflict':
+      'A slot already exists at that day and time',
+    'errors.schedule.moveConflict':
+      'A slot already exists at the destination day and time',
+    'errors.schedule.tooManySteps': 'Cannot add more than 10 steps',
+    'errors.schedule.customLabelRequired':
+      'Custom step labels must include a name',
+    'errors.schedule.productsNotOwned':
+      'Some selected products are not on your shelf',
+    'errors.schedule.slotNotFound': 'Slot not found',
     'errors.cursor.invalid': 'Invalid cursor',
     'errors.cursor.requestMismatch': 'Cursor does not match this request',
     'errors.cursor.missingItem': 'Cursor no longer points to a valid item',
@@ -105,6 +115,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'validation.token.hex64': 'Token must be a 64-character hexadecimal string',
     'validation.language.unsupported': 'Choose English or Swedish',
     'validation.name.required': 'This field is required',
+    'validation.timeZone.unsupported': 'Choose a supported timezone',
   },
   sv: {
     'messages.auth.register.verifyEmail':
@@ -170,6 +181,14 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'errors.inventory.expiryBeforeOpened':
       'Utgångsdatum kan inte vara tidigare än öppningsdatum',
     'errors.inventory.notFound': 'Lagerprodukten hittades inte',
+    'errors.schedule.slotConflict':
+      'En tid finns redan för den dagen och tiden',
+    'errors.schedule.moveConflict': 'En tid finns redan på målplatsen',
+    'errors.schedule.tooManySteps': 'Du kan inte lägga till fler än 10 steg',
+    'errors.schedule.customLabelRequired': 'Anpassade steg måste ha ett namn',
+    'errors.schedule.productsNotOwned':
+      'Några valda produkter finns inte på din hylla',
+    'errors.schedule.slotNotFound': 'Tiden hittades inte',
     'errors.cursor.invalid': 'Ogiltig markör',
     'errors.cursor.requestMismatch': 'Markören matchar inte den här förfrågan',
     'errors.cursor.missingItem':
@@ -201,11 +220,18 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Token måste vara en hexadecimal sträng med 64 tecken',
     'validation.language.unsupported': 'Välj engelska eller svenska',
     'validation.name.required': 'Det här fältet är obligatoriskt',
+    'validation.timeZone.unsupported': 'Välj en giltig tidszon',
   },
 };
 
 const codeKeyMap: Record<string, string> = {
   EMAIL_NOT_VERIFIED: 'errors.auth.emailNotVerified',
+  SCHEDULE_CUSTOM_LABEL_REQUIRED: 'errors.schedule.customLabelRequired',
+  SCHEDULE_MOVE_CONFLICT: 'errors.schedule.moveConflict',
+  SCHEDULE_PRODUCTS_NOT_OWNED: 'errors.schedule.productsNotOwned',
+  SCHEDULE_SLOT_CONFLICT: 'errors.schedule.slotConflict',
+  SCHEDULE_SLOT_NOT_FOUND: 'errors.schedule.slotNotFound',
+  SCHEDULE_TOO_MANY_STEPS: 'errors.schedule.tooManySteps',
 };
 
 const messageKeyMap: Record<string, string> = {
@@ -255,6 +281,7 @@ const messageKeyMap: Record<string, string> = {
   'validation.token.hex64': 'validation.token.hex64',
   'validation.language.unsupported': 'validation.language.unsupported',
   'validation.name.required': 'validation.name.required',
+  'validation.timeZone.unsupported': 'validation.timeZone.unsupported',
   'email must be an email': 'validation.email.invalid',
 };
 
@@ -291,6 +318,11 @@ export function resolveRequestLanguage(request: Request): AppLanguage {
   const requestUser = request.user as { language?: string | null } | undefined;
   const requestBody = request.body as Record<string, unknown> | undefined;
   const requestQuery = request.query as Record<string, unknown> | undefined;
+  const acceptLanguage = readHeaderValue(request.headers['accept-language']);
+
+  if (acceptLanguage?.toLowerCase().startsWith('sv')) {
+    return 'sv';
+  }
 
   const preferredLanguage =
     requestUser?.language ??
@@ -302,11 +334,6 @@ export function resolveRequestLanguage(request: Request): AppLanguage {
 
   if (preferredLanguage) {
     return normalizeLanguage(preferredLanguage);
-  }
-
-  const acceptLanguage = readHeaderValue(request.headers['accept-language']);
-  if (acceptLanguage?.toLowerCase().startsWith('sv')) {
-    return 'sv';
   }
 
   return DEFAULT_LANGUAGE;

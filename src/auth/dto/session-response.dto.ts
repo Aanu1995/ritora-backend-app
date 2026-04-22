@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { toIsoString } from '../../common/utils/date';
 import { AuthSession } from '../entities/auth-session.entity';
+import { maskIpAddress } from '../auth-session.utils';
 
 export class SessionResponseDto {
   @ApiProperty()
@@ -36,7 +37,7 @@ export class SessionResponseDto {
     return new SessionResponseDto(
       session.id,
       session.user_agent,
-      session.ip_address,
+      maskIpAddress(session.ip_address),
       toIsoString(session.created_at),
       toIsoString(session.last_used_at),
     );

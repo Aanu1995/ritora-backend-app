@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpStatus,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -32,6 +33,7 @@ import { UserResponseDto } from '../users/dto/user-response.dto';
 import { UsersService } from '../users/users.service';
 import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
+import { sanitizeIpAddress, sanitizeUserAgent } from './auth-session.utils';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
@@ -106,9 +108,18 @@ export class AuthService {
     ip?: string,
   ): Promise<RegisterResponseDto> {
     if (!dto.termsAccepted || !dto.privacyPolicyAccepted) {
-      throw new BadRequestException(
-        'You must accept the terms of service and privacy policy',
-      );
+      const message = 'You must accept the terms of service and privacy policy';
+
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: [message],
+        fieldErrors: {
+          ...(!dto.termsAccepted ? { termsAccepted: [message] } : {}),
+          ...(!dto.privacyPolicyAccepted
+            ? { privacyPolicyAccepted: [message] }
+            : {}),
+        },
+      });
     }
 
     const existing = await this.usersService.findByEmail(dto.email);
@@ -227,12 +238,8 @@ export class AuthService {
     const newSecretHash = this.sha256(newSecret);
     session.refresh_token_hash = newSecretHash;
     session.last_used_at = nowDate();
-    if (ip) {
-      session.ip_address = ip;
-    }
-    if (userAgent) {
-      session.user_agent = userAgent;
-    }
+    session.ip_address = sanitizeIpAddress(ip) ?? session.ip_address;
+    session.user_agent = sanitizeUserAgent(userAgent) ?? session.user_agent;
     await this.sessionsRepository.save(session);
 
     const newRefreshToken = `${session.id}.${newSecret}`;
@@ -487,8 +494,8 @@ export class AuthService {
       user_id: user.id,
       refresh_token_hash: secretHash,
       expires_at: this.expiresIn(this.jwtRefreshExpiry),
-      user_agent: userAgent ?? null,
-      ip_address: ip ?? null,
+      user_agent: sanitizeUserAgent(userAgent),
+      ip_address: sanitizeIpAddress(ip),
       last_used_at: nowDate(),
     });
     await this.sessionsRepository.save(session);
@@ -513,47 +520,15 @@ export class AuthService {
   }
 
   private setRefreshCookie(res: Response, token: string): void {
-    const cookieOptions: {
-      httpOnly: boolean;
-      secure: boolean;
-      sameSite: 'lax' | 'strict' | 'none';
-      path: string;
-      maxAge: number;
-      domain?: string;
-    } = {
-      httpOnly: true,
-      secure: this.cookieSecure,
-      sameSite: this.cookieSameSite,
-      path: '/api/v1/auth',
-      maxAge: this.parseExpiryMs(this.jwtRefreshExpiry),
-    };
-
-    if (this.cookieDomain) {
-      cookieOptions.domain = this.cookieDomain;
-    }
-
-    res.cookie(this.cookieRefreshName, token, cookieOptions);
+    res.cookie(
+      this.cookieRefreshName,
+      token,
+      this.getRefreshCookieOptions(this.parseExpiryMs(this.jwtRefreshExpiry)),
+    );
   }
 
-  private clearRefreshCookie(res: Response): void {
-    const cookieOptions: {
-      httpOnly: boolean;
-      secure: boolean;
-      sameSite: 'lax' | 'strict' | 'none';
-      path: string;
-      domain?: string;
-    } = {
-      httpOnly: true,
-      secure: this.cookieSecure,
-      sameSite: this.cookieSameSite,
-      path: '/api/v1/auth',
-    };
-
-    if (this.cookieDomain) {
-      cookieOptions.domain = this.cookieDomain;
-    }
-
-    res.clearCookie(this.cookieRefreshName, cookieOptions);
+  clearRefreshCookie(res: Response): void {
+    res.clearCookie(this.cookieRefreshName, this.getRefreshCookieOptions());
   }
 
   private async revokeAllSessions(userId: string): Promise<void> {
@@ -569,6 +544,7 @@ export class AuthService {
     consents: { type: string; version: string }[],
   ): Promise<void> {
     const now = nowDate();
+    const sanitizedIp = sanitizeIpAddress(ip);
     const entities = consents.map((c) =>
       this.consentsRepository.create({
         id: ulid(),
@@ -577,7 +553,7 @@ export class AuthService {
         consent_version: c.version,
         granted: true,
         granted_at: now,
-        ip_address: ip ?? null,
+        ip_address: sanitizedIp,
       }),
     );
     await this.consentsRepository.save(entities);
@@ -730,5 +706,38 @@ export class AuthService {
       default:
         return 15 * 60 * 1000;
     }
+  }
+
+  private getRefreshCookieOptions(maxAge?: number): {
+    domain?: string;
+    httpOnly: boolean;
+    maxAge?: number;
+    path: string;
+    sameSite: 'lax' | 'strict' | 'none';
+    secure: boolean;
+  } {
+    const cookieOptions: {
+      domain?: string;
+      httpOnly: boolean;
+      maxAge?: number;
+      path: string;
+      sameSite: 'lax' | 'strict' | 'none';
+      secure: boolean;
+    } = {
+      httpOnly: true,
+      secure: this.cookieSecure,
+      sameSite: this.cookieSameSite,
+      path: '/api/v1/auth',
+    };
+
+    if (maxAge !== undefined) {
+      cookieOptions.maxAge = maxAge;
+    }
+
+    if (this.cookieDomain) {
+      cookieOptions.domain = this.cookieDomain;
+    }
+
+    return cookieOptions;
   }
 }

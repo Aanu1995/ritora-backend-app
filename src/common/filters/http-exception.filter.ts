@@ -9,6 +9,22 @@ import { Request, Response } from 'express';
 import { resolveRequestLanguage, translateErrorMessage } from '../i18n/i18n';
 import { nowDate, toIsoString } from '../utils/date';
 
+type StructuredFieldErrors = Record<string, string[]>;
+
+function isStructuredFieldErrors(
+  value: unknown,
+): value is StructuredFieldErrors {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  return Object.values(value).every(
+    (entry) =>
+      Array.isArray(entry) &&
+      entry.every((message) => typeof message === 'string'),
+  );
+}
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -33,7 +49,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
   private getExceptionPayload(
     exception: unknown,
     language: ReturnType<typeof resolveRequestLanguage>,
-  ): Record<string, string | string[] | number> {
+  ): Record<string, string | string[] | number | StructuredFieldErrors> {
     if (!(exception instanceof HttpException)) {
       return {
         message: translateErrorMessage(language, 'Internal server error'),
@@ -49,11 +65,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
-      const payload: Record<string, string | string[] | number> = {};
+      const payload: Record<
+        string,
+        string | string[] | number | StructuredFieldErrors
+      > = {};
       const code =
         'code' in exceptionResponse &&
         typeof exceptionResponse.code === 'string'
           ? exceptionResponse.code
+          : undefined;
+      const fieldErrors =
+        'fieldErrors' in exceptionResponse
+          ? exceptionResponse.fieldErrors
           : undefined;
 
       if ('message' in exceptionResponse) {
@@ -74,6 +97,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       if (code) {
         payload.code = code;
+      }
+
+      if (isStructuredFieldErrors(fieldErrors)) {
+        payload.fieldErrors = Object.fromEntries(
+          Object.entries(fieldErrors).map(([field, messages]) => [
+            field,
+            messages.map((message) => translateErrorMessage(language, message)),
+          ]),
+        );
       }
 
       return payload;
