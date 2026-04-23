@@ -10,7 +10,7 @@ describe('buildValidationExceptionPayload', () => {
           isEmail: 'validation.email.invalid',
         },
         children: [],
-      } as ValidationError,
+      },
       {
         property: 'profile',
         constraints: undefined,
@@ -21,9 +21,9 @@ describe('buildValidationExceptionPayload', () => {
               maxLength: 'validation.timeZone.unsupported',
             },
             children: [],
-          } as ValidationError,
+          },
         ],
-      } as ValidationError,
+      },
     ];
 
     expect(buildValidationExceptionPayload(errors)).toEqual({

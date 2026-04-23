@@ -44,7 +44,7 @@ describe('CatalogueSourceRuleService', () => {
         created_at: new Date(),
         updated_at: new Date(),
         generateId: jest.fn(),
-      } as CatalogueSourceRule,
+      },
     ]);
 
     const evaluation = await service.evaluateUrl(
@@ -69,7 +69,7 @@ describe('CatalogueSourceRuleService', () => {
         created_at: new Date(),
         updated_at: new Date(),
         generateId: jest.fn(),
-      } as CatalogueSourceRule,
+      },
     ]);
 
     const evaluation = await service.evaluateUrl(

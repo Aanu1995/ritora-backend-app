@@ -315,7 +315,10 @@ function readHeaderValue(header: string | string[] | undefined): string | null {
 }
 
 export function resolveRequestLanguage(request: Request): AppLanguage {
-  const requestUser = request.user as { language?: string | null } | undefined;
+  const requestUser =
+    typeof request.user === 'object' && request.user !== null
+      ? (request.user as { language?: unknown })
+      : null;
   const requestBody = request.body as Record<string, unknown> | undefined;
   const requestQuery = request.query as Record<string, unknown> | undefined;
   const acceptLanguage = readHeaderValue(request.headers['accept-language']);
@@ -325,7 +328,7 @@ export function resolveRequestLanguage(request: Request): AppLanguage {
   }
 
   const preferredLanguage =
-    requestUser?.language ??
+    (typeof requestUser?.language === 'string' ? requestUser.language : null) ??
     (typeof requestBody?.preferredLanguage === 'string'
       ? requestBody.preferredLanguage
       : null) ??

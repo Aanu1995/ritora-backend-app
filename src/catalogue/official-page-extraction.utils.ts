@@ -117,7 +117,7 @@ function flattenJsonLd(node: unknown): JsonLdProduct[] {
     (type) => typeof type === 'string' && type.toLowerCase() === 'product',
   );
 
-  return isProduct ? [object as JsonLdProduct] : [];
+  return isProduct ? [object] : [];
 }
 
 function extractJsonLdProducts(html: string): JsonLdProduct[] {

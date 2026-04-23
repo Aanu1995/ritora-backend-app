@@ -5,7 +5,6 @@ import { RoutineStepResponseDto } from './routine-step-response.dto';
 
 function formatSlotTime(value: string | Date): string {
   if (typeof value === 'string') {
-    // PostgreSQL time type comes back as 'HH:MM:SS'; trim seconds.
     return value.slice(0, 5);
   }
   const pad = (n: number) => n.toString().padStart(2, '0');

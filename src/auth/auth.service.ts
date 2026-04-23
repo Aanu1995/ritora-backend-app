@@ -473,8 +473,6 @@ export class AuthService {
     this.clearRefreshCookie(res);
   }
 
-  // --- Private helpers ---
-
   private async createSession(
     user: User,
     res: Response,

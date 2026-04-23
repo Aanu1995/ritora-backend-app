@@ -3,7 +3,7 @@ import { InventoryProduct } from '../inventory/entities/inventory-product.entity
 import { ScheduleService } from './schedule.service';
 import { RoutineStep } from './entities/routine-step.entity';
 import { ScheduleSlot } from './entities/schedule-slot.entity';
-import type { DayOfWeek, SlotMode, StepLabel } from './dto/schedule.constants';
+import type { DayOfWeek, StepLabel } from './dto/schedule.constants';
 
 type MockRepo<T> = {
   create: jest.Mock<T, [Partial<T>]>;
@@ -29,9 +29,9 @@ function buildSlot(overrides: Partial<ScheduleSlot> = {}): ScheduleSlot {
   return {
     id: 'slot-1',
     user_id: 'user-1',
-    day_of_week: 'mon' as DayOfWeek,
+    day_of_week: 'mon',
     slot_time: '08:00:00',
-    mode: 'ai' as SlotMode,
+    mode: 'ai',
     slot_notes: null,
     created_at: new Date('2026-04-17T00:00:00.000Z'),
     updated_at: new Date('2026-04-17T00:00:00.000Z'),
@@ -39,7 +39,7 @@ function buildSlot(overrides: Partial<ScheduleSlot> = {}): ScheduleSlot {
     steps: [],
     ...overrides,
     generateId: jest.fn(),
-  } as ScheduleSlot;
+  };
 }
 
 describe('ScheduleService', () => {
@@ -97,16 +97,16 @@ describe('ScheduleService', () => {
     slotsRepository.create.mockImplementation((value) =>
       buildSlot({
         id: 'slot-wed',
-        day_of_week: value.day_of_week ?? ('wed' as DayOfWeek),
+        day_of_week: value.day_of_week ?? 'wed',
         slot_time: value.slot_time ?? '08:00:00',
-        mode: value.mode ?? ('ai' as SlotMode),
+        mode: value.mode ?? 'ai',
       }),
     );
 
     const result = await service.createSlots('user-1', {
-      daysOfWeek: ['mon' as DayOfWeek, 'wed' as DayOfWeek, 'wed' as DayOfWeek],
+      daysOfWeek: ['mon', 'wed', 'wed'],
       slotTime: '08:00',
-      mode: 'ai' as SlotMode,
+      mode: 'ai',
     });
 
     expect(slotsRepository.save).toHaveBeenCalledWith([
@@ -166,7 +166,7 @@ describe('ScheduleService', () => {
           {
             stepOrder: 0,
             inventoryProductId: null,
-            stepLabel: 'custom' as StepLabel,
+            stepLabel: 'custom',
           },
         ],
       }),

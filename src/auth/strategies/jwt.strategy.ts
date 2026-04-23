@@ -33,7 +33,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       secretOrKey: configService.get<string>('JWT_SECRET')!,
       issuer,
       audience,
-    } as ConstructorParameters<typeof Strategy>[0]);
+    });
   }
 
   async validate(payload: JwtPayload) {

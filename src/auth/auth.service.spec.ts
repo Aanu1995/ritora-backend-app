@@ -73,16 +73,16 @@ describe('AuthService', () => {
       remove: jest.fn(),
       findByVerificationTokenHash: jest.fn(),
       findByResetTokenHash: jest.fn(),
-    } as Record<string, jest.Mock>;
+    };
 
     jwtService = {
       sign: jest.fn().mockReturnValue('access-token-123'),
-    } as Record<string, jest.Mock>;
+    };
 
     mailService = {
       sendVerificationEmail: jest.fn().mockResolvedValue(undefined),
       sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
-    } as Record<string, jest.Mock>;
+    };
 
     sessionsRepo = {
       create: jest.fn().mockImplementation((data) => data),
@@ -142,8 +142,6 @@ describe('AuthService', () => {
       updated_at: new Date('2024-01-01'),
       ...overrides,
     }) as User;
-
-  // --- register ---
 
   describe('register', () => {
     it('creates user, records consents, sends email, and does not create a session', async () => {
@@ -222,8 +220,6 @@ describe('AuthService', () => {
     });
   });
 
-  // --- login ---
-
   describe('login', () => {
     it('returns auth response on valid credentials', async () => {
       const res = mockRes();
@@ -290,8 +286,6 @@ describe('AuthService', () => {
       expect(res.cookie).not.toHaveBeenCalled();
     });
   });
-
-  // --- refreshTokens ---
 
   describe('refreshTokens', () => {
     it('rotates token and returns new access token', async () => {
@@ -382,8 +376,6 @@ describe('AuthService', () => {
     });
   });
 
-  // --- verifyEmail ---
-
   describe('verifyEmail', () => {
     it('marks email as verified on valid token', async () => {
       const rawToken = 'a'.repeat(64);
@@ -430,8 +422,6 @@ describe('AuthService', () => {
     });
   });
 
-  // --- forgotPassword ---
-
   describe('forgotPassword', () => {
     it('sends reset email for existing user', async () => {
       usersService.findByEmail.mockResolvedValue(fakeUser());
@@ -456,8 +446,6 @@ describe('AuthService', () => {
       expect(mailService.sendPasswordResetEmail).not.toHaveBeenCalled();
     });
   });
-
-  // --- resetPassword ---
 
   describe('resetPassword', () => {
     it('updates password and revokes all sessions', async () => {
@@ -498,8 +486,6 @@ describe('AuthService', () => {
     });
   });
 
-  // --- logout ---
-
   describe('logout', () => {
     it('revokes session only when the refresh token secret matches', async () => {
       const res = mockRes();
@@ -533,8 +519,6 @@ describe('AuthService', () => {
     });
   });
 
-  // --- logoutAll ---
-
   describe('logoutAll', () => {
     it('revokes all sessions and clears cookie', async () => {
       const res = mockRes();
@@ -545,8 +529,6 @@ describe('AuthService', () => {
       expect(res.clearCookie).toHaveBeenCalled();
     });
   });
-
-  // --- getSessions ---
 
   describe('getSessions', () => {
     it('masks ip addresses in the routine session list', async () => {
@@ -573,8 +555,6 @@ describe('AuthService', () => {
       ]);
     });
   });
-
-  // --- exportData ---
 
   describe('exportData', () => {
     it('returns user, skin profile, consents, and sessions', async () => {
@@ -639,8 +619,6 @@ describe('AuthService', () => {
       ).rejects.toThrow(UnauthorizedException);
     });
   });
-
-  // --- deleteAccount ---
 
   describe('deleteAccount', () => {
     it('deletes user after password confirmation', async () => {
