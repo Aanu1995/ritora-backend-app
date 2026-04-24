@@ -65,7 +65,12 @@ describe('configureApp', () => {
       origin: ['http://localhost:3000', 'https://ritora.com'],
       credentials: true,
       methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Timezone'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Accept-Language',
+        'X-Timezone',
+      ],
       maxAge: 86400,
     });
     expect(app.setGlobalPrefix).toHaveBeenCalledWith('api/v1');

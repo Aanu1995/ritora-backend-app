@@ -1,0 +1,149 @@
+import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { AnalysisSeverity } from './ingredients.types';
+import { OpenAiExplanationProvider } from './openai-explanation.provider';
+
+type ExplainInput = Parameters<OpenAiExplanationProvider['explainFindings']>[0];
+
+function buildInput(overrides: Partial<ExplainInput> = {}): ExplainInput {
+  return {
+    language: 'en',
+    conflicts: [
+      {
+        id: 'RETINOID_AHA:a:b:retinol:glycolic-acid',
+        code: 'RETINOID_AHA',
+        severity: AnalysisSeverity.High,
+        ingredientA: 'Retinol',
+        ingredientB: 'Glycolic acid',
+        description:
+          'Retinoids and AHAs can irritate skin in the same routine.',
+        mitigation: 'Alternate nights.',
+      },
+    ],
+    overlaps: [],
+    ...overrides,
+  };
+}
+
+function buildConfig(
+  values: Record<string, string | undefined>,
+): ConfigService {
+  return {
+    get: jest.fn((key: string) => values[key]),
+  } as unknown as ConfigService;
+}
+
+describe('OpenAiExplanationProvider', () => {
+  const originalFetch = global.fetch;
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    // Stub the logger at the prototype level so the in-class logger stays silent.
+    warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('returns null and skips the network when the api key is missing', async () => {
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_API_KEY: '',
+        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+      }),
+    );
+    global.fetch = jest.fn();
+
+    const result = await provider.explainFindings(buildInput());
+
+    expect(result).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null and skips the network when the model env var is missing', async () => {
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        OPENAI_INGREDIENT_EXPLANATION_MODEL: undefined,
+      }),
+    );
+    global.fetch = jest.fn();
+
+    const result = await provider.explainFindings(buildInput());
+
+    expect(result).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null on a non-ok http response and logs a structured event', async () => {
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+      }),
+    );
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    });
+
+    const result = await provider.explainFindings(buildInput());
+
+    expect(result).toBeNull();
+    const loggedPayloads = warnSpy.mock.calls.map(([message]) => {
+      try {
+        return JSON.parse(String(message));
+      } catch {
+        return { raw: message };
+      }
+    });
+    expect(loggedPayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'explanation_failed',
+          reason: 'http_error',
+          status: 503,
+          model: 'some-model',
+        }),
+      ]),
+    );
+  });
+
+  it('warnIfMisconfigured logs once when the model env var is unset', () => {
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_INGREDIENT_EXPLANATION_MODEL: undefined,
+      }),
+    );
+
+    provider.warnIfMisconfigured();
+
+    expect(warnSpy).toHaveBeenCalled();
+    const warned = warnSpy.mock.calls.some(([message]) =>
+      String(message).includes('OPENAI_INGREDIENT_EXPLANATION_MODEL'),
+    );
+    expect(warned).toBe(true);
+  });
+
+  it('short-circuits with null when there are no findings', async () => {
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+      }),
+    );
+    global.fetch = jest.fn();
+
+    const result = await provider.explainFindings(
+      buildInput({ conflicts: [], overlaps: [] }),
+    );
+
+    expect(result).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});

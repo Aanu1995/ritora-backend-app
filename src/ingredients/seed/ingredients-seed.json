@@ -1,0 +1,1098 @@
+{
+  "ingredients": [
+    {
+      "slug": "retinol",
+      "category": "retinoid",
+      "displayNameEn": "Retinol",
+      "summaryEn": "A retinoid that speeds cell turnover, smooths fine lines, and evens tone.",
+      "aliases": ["all-trans-retinol", "vitamin-a"],
+      "categoryPatterns": ["\\\\bretinol\\\\b"],
+      "phMin": 5, "phMax": 7,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "tretinoin",
+      "category": "retinoid",
+      "displayNameEn": "Tretinoin",
+      "summaryEn": "A prescription retinoid; more potent than retinol and strongly active at lower concentrations.",
+      "aliases": ["retinoic-acid", "all-trans-retinoic-acid"],
+      "categoryPatterns": ["\\\\btretinoin\\\\b"],
+      "phMin": 5, "phMax": 7,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "retinaldehyde",
+      "category": "retinoid",
+      "displayNameEn": "Retinaldehyde",
+      "summaryEn": "A mid-potency retinoid that sits between retinol and tretinoin in strength.",
+      "aliases": ["retinal", "retinal-aldehyde"],
+      "categoryPatterns": ["\\\\bretin(?:al|aldehyde)\\\\b"],
+      "phMin": 5, "phMax": 7,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "retinyl-palmitate",
+      "category": "retinoid",
+      "displayNameEn": "Retinyl palmitate",
+      "summaryEn": "A gentle ester form of vitamin A; less potent than retinol but also less irritating.",
+      "aliases": ["retinyl-palmitate-vitamin-a"],
+      "categoryPatterns": ["\\\\bretinyl(?:-palmitate)?\\\\b"],
+      "phMin": 5, "phMax": 7,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "adapalene",
+      "category": "retinoid",
+      "displayNameEn": "Adapalene",
+      "summaryEn": "A synthetic retinoid widely used for acne; more stable and often better tolerated than tretinoin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\badapalene\\\\b"],
+      "phMin": 5, "phMax": 7,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "glycolic-acid",
+      "category": "aha",
+      "displayNameEn": "Glycolic acid",
+      "summaryEn": "A small-molecule AHA that exfoliates, brightens, and smooths texture.",
+      "aliases": ["hydroxyacetic-acid"],
+      "categoryPatterns": ["\\\\bglycolic-acid\\\\b"],
+      "phMin": 3, "phMax": 4,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "lactic-acid",
+      "category": "aha",
+      "displayNameEn": "Lactic acid",
+      "summaryEn": "A gentler AHA that exfoliates while supporting hydration.",
+      "aliases": ["2-hydroxypropanoic-acid"],
+      "categoryPatterns": ["\\\\blactic-acid\\\\b"],
+      "phMin": 3, "phMax": 4,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "mandelic-acid",
+      "category": "aha",
+      "displayNameEn": "Mandelic acid",
+      "summaryEn": "A large-molecule AHA that tends to be calmer on sensitive skin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bmandelic-acid\\\\b"],
+      "phMin": 3, "phMax": 4,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "citric-acid",
+      "category": "aha",
+      "displayNameEn": "Citric acid",
+      "summaryEn": "Often used at low levels to adjust pH; can mildly exfoliate at higher concentrations.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bcitric-acid\\\\b"],
+      "phMin": 3, "phMax": 4,
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "salicylic-acid",
+      "category": "bha",
+      "displayNameEn": "Salicylic acid",
+      "summaryEn": "An oil-soluble BHA that clears pores and calms blemishes.",
+      "aliases": ["2-hydroxybenzoic-acid", "bha"],
+      "categoryPatterns": ["\\\\bsalicylic-acid\\\\b"],
+      "phMin": 3, "phMax": 4,
+      "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "gluconolactone",
+      "category": "pha",
+      "displayNameEn": "Gluconolactone",
+      "summaryEn": "A polyhydroxy acid that gently exfoliates while supporting the skin barrier.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bgluconolactone\\\\b"],
+      "phMin": 3.5, "phMax": 5,
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "lactobionic-acid",
+      "category": "pha",
+      "displayNameEn": "Lactobionic acid",
+      "summaryEn": "A large-molecule PHA; exfoliates slowly and is well tolerated by most skin types.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\blactobionic-acid\\\\b"],
+      "phMin": 3.5, "phMax": 5,
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "benzoyl-peroxide",
+      "category": "benzoyl-peroxide",
+      "displayNameEn": "Benzoyl peroxide",
+      "summaryEn": "An antibacterial active used in acne treatment; oxidises on contact with some other ingredients.",
+      "aliases": ["bpo"],
+      "categoryPatterns": ["\\\\bbenzoyl-peroxide\\\\b"],
+      "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "ascorbic-acid",
+      "category": "vitamin-c",
+      "displayNameEn": "Vitamin C",
+      "summaryEn": "Pure L-ascorbic acid; a potent antioxidant that brightens and evens skin tone at low pH.",
+      "aliases": ["l-ascorbic-acid", "pure-vitamin-c"],
+      "categoryPatterns": ["\\\\b(?:l-)?ascorbic-acid\\\\b"],
+      "phMin": 2.5, "phMax": 3.5,
+      "phSensitive": true, "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "sodium-ascorbyl-phosphate",
+      "category": "vitamin-c",
+      "displayNameEn": "Vitamin C (SAP)",
+      "summaryEn": "A stable, buffered vitamin C derivative that works at skin-neutral pH.",
+      "aliases": ["sap", "sodium-ascorbyl-phosphate-vitamin-c"],
+      "categoryPatterns": ["\\\\bsodium-ascorbyl-phosphate\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "magnesium-ascorbyl-phosphate",
+      "category": "vitamin-c",
+      "displayNameEn": "Vitamin C (MAP)",
+      "summaryEn": "A buffered vitamin C derivative; brightens without the sting of pure ascorbic acid.",
+      "aliases": ["map", "magnesium-ascorbyl-phosphate-vitamin-c"],
+      "categoryPatterns": ["\\\\bmagnesium-ascorbyl-phosphate\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "ascorbyl-glucoside",
+      "category": "vitamin-c",
+      "displayNameEn": "Ascorbyl glucoside",
+      "summaryEn": "A stable vitamin C derivative that the skin converts to active ascorbic acid over time.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bascorbyl-glucoside\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "tetrahexyldecyl-ascorbate",
+      "category": "vitamin-c",
+      "displayNameEn": "Tetrahexyldecyl ascorbate",
+      "summaryEn": "An oil-soluble vitamin C derivative; pairs well with oils and creams without crystallising.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\btetrahexyldecyl-ascorbate\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "ethyl-ascorbic-acid",
+      "category": "vitamin-c",
+      "displayNameEn": "3-O-Ethyl ascorbic acid",
+      "summaryEn": "A stable, quick-converting vitamin C derivative; lower pH-sensitivity than pure ascorbic acid.",
+      "aliases": ["3-o-ethyl-ascorbic-acid"],
+      "categoryPatterns": ["\\\\b(?:3-o-)?ethyl-ascorbic-acid\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "niacinamide",
+      "category": "niacinamide",
+      "displayNameEn": "Niacinamide",
+      "summaryEn": "Vitamin B3; supports the skin barrier, reduces visible pores and redness.",
+      "aliases": ["nicotinamide", "vitamin-b3"],
+      "categoryPatterns": ["\\\\bniacinamide\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "hydroquinone",
+      "category": "hydroquinone",
+      "displayNameEn": "Hydroquinone",
+      "summaryEn": "A strong tyrosinase inhibitor used for hyperpigmentation; typically used for limited courses.",
+      "aliases": ["quinol"],
+      "categoryPatterns": ["\\\\bhydroquinone\\\\b"],
+      "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "azelaic-acid",
+      "category": "azelaic-acid",
+      "displayNameEn": "Azelaic acid",
+      "summaryEn": "A gentle active for acne, redness, and uneven tone; safer option for sensitive skin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bazelaic-acid\\\\b"],
+      "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "arbutin",
+      "category": "tyrosinase-inhibitor",
+      "displayNameEn": "Arbutin",
+      "summaryEn": "A plant-derived tyrosinase inhibitor that gradually evens tone and fades dark spots.",
+      "aliases": ["alpha-arbutin", "beta-arbutin"],
+      "categoryPatterns": ["\\\\b(?:alpha-|beta-)?arbutin\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "kojic-acid",
+      "category": "tyrosinase-inhibitor",
+      "displayNameEn": "Kojic acid",
+      "summaryEn": "A brightener derived from fermentation; can be sensitising at higher concentrations.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bkojic-acid\\\\b"],
+      "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "tranexamic-acid",
+      "category": "tyrosinase-inhibitor",
+      "displayNameEn": "Tranexamic acid",
+      "summaryEn": "A newer brightener that targets melasma and persistent hyperpigmentation.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\btranexamic-acid\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "resorcinol",
+      "category": "tyrosinase-inhibitor",
+      "displayNameEn": "Resorcinol",
+      "summaryEn": "A phenolic brightener; often in combination treatments, can sting on sensitive skin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bresorcinol\\\\b"],
+      "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "bakuchiol",
+      "category": "bakuchiol",
+      "displayNameEn": "Bakuchiol",
+      "summaryEn": "A plant-based ingredient often used as a gentler alternative to retinoids.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bbakuchiol\\\\b"],
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "sulphur",
+      "category": "sulphur",
+      "displayNameEn": "Sulphur",
+      "summaryEn": "An antimicrobial keratolytic used for acne; can be drying when layered with other exfoliants.",
+      "aliases": ["sulfur"],
+      "categoryPatterns": ["\\\\bsulp?hur\\\\b"],
+      "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "matrixyl",
+      "category": "peptide",
+      "displayNameEn": "Matrixyl peptide",
+      "summaryEn": "A signalling peptide that supports collagen and elasticity over time.",
+      "aliases": ["palmitoyl-pentapeptide-4", "palmitoyl-oligopeptide"],
+      "categoryPatterns": [
+        "\\\\bmatrixyl\\\\b",
+        "\\\\bpalmitoyl-(?:oligo|penta)peptide\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "copper-peptides",
+      "category": "peptide",
+      "displayNameEn": "Copper peptides",
+      "summaryEn": "Copper-bound peptides that support healing and collagen production.",
+      "aliases": ["ghk-cu"],
+      "categoryPatterns": ["\\\\bcopper-peptides?\\\\b", "\\\\bghk-cu\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "ceramides",
+      "category": "barrier",
+      "displayNameEn": "Ceramides",
+      "summaryEn": "Lipid molecules that rebuild the skin barrier and reduce transepidermal water loss.",
+      "aliases": ["ceramide-np", "ceramide-ap", "ceramide-eop"],
+      "categoryPatterns": ["\\\\bceramides?\\\\b", "\\\\bceramide-[a-z]+\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "cholesterol",
+      "category": "barrier",
+      "displayNameEn": "Cholesterol",
+      "summaryEn": "One of three core barrier lipids alongside ceramides and fatty acids.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bcholesterol\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "hyaluronic-acid",
+      "category": "humectant",
+      "displayNameEn": "Hyaluronic acid",
+      "summaryEn": "A humectant that holds water in the upper layers of the skin for plumpness.",
+      "aliases": ["sodium-hyaluronate"],
+      "categoryPatterns": [
+        "\\\\bhyaluronic-acid\\\\b",
+        "\\\\bsodium-hyaluronate\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "glycerin",
+      "category": "humectant",
+      "displayNameEn": "Glycerin",
+      "summaryEn": "A classic humectant that draws and holds moisture in the skin.",
+      "aliases": ["glycerol"],
+      "categoryPatterns": ["\\\\bglycerin\\\\b", "\\\\bglycerol\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "urea",
+      "category": "humectant",
+      "displayNameEn": "Urea",
+      "summaryEn": "A humectant that also softens rough skin; higher concentrations are mildly keratolytic.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\burea\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "panthenol",
+      "category": "humectant",
+      "displayNameEn": "Panthenol",
+      "summaryEn": "Pro-vitamin B5; calms, hydrates, and supports barrier recovery.",
+      "aliases": ["d-panthenol", "pro-vitamin-b5"],
+      "categoryPatterns": ["\\\\bpanthenol\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "resveratrol",
+      "category": "antioxidant",
+      "displayNameEn": "Resveratrol",
+      "summaryEn": "A plant antioxidant that helps neutralise free radicals from sun and pollution.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bresveratrol\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "ferulic-acid",
+      "category": "antioxidant",
+      "displayNameEn": "Ferulic acid",
+      "summaryEn": "An antioxidant that stabilises vitamin C and vitamin E for stronger daytime protection.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bferulic-acid\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "vitamin-e",
+      "category": "antioxidant",
+      "displayNameEn": "Vitamin E",
+      "summaryEn": "A fat-soluble antioxidant that supports the barrier and pairs well with vitamin C.",
+      "aliases": ["tocopherol", "tocopheryl-acetate"],
+      "categoryPatterns": [
+        "\\\\btocopherol\\\\b",
+        "\\\\btocopheryl-acetate\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "allantoin",
+      "category": "antioxidant",
+      "displayNameEn": "Allantoin",
+      "summaryEn": "Soothes and supports skin repair; often used to buffer stronger actives.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\ballantoin\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "centella-asiatica",
+      "category": "antioxidant",
+      "displayNameEn": "Centella asiatica",
+      "summaryEn": "A botanical that soothes redness and supports post-procedure healing.",
+      "aliases": ["cica", "madecassoside", "asiaticoside"],
+      "categoryPatterns": [
+        "\\\\bcentella-asiatica\\\\b",
+        "\\\\bmadecassoside\\\\b",
+        "\\\\basiaticoside\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "zinc-oxide",
+      "category": "mineral-spf",
+      "displayNameEn": "Zinc oxide",
+      "summaryEn": "A mineral sunscreen filter with broad UVB and UVA coverage; gentle for sensitive skin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bzinc-oxide\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "titanium-dioxide",
+      "category": "mineral-spf",
+      "displayNameEn": "Titanium dioxide",
+      "summaryEn": "A mineral sunscreen filter, strong against UVB and shorter UVA wavelengths.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\btitanium-dioxide\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "avobenzone",
+      "category": "chemical-spf",
+      "displayNameEn": "Avobenzone",
+      "summaryEn": "A chemical sunscreen filter with strong UVA coverage; stabilised by other filters.",
+      "aliases": ["butyl-methoxydibenzoylmethane"],
+      "categoryPatterns": [
+        "\\\\bavobenzone\\\\b",
+        "\\\\bbutyl-methoxydibenzoylmethane\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "squalane",
+      "category": "barrier",
+      "displayNameEn": "Squalane",
+      "summaryEn": "A skin-like emollient that softens and smooths without clogging pores.",
+      "aliases": ["hydrogenated-squalane"],
+      "categoryPatterns": ["\\\\bsqualane\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "fatty-acids",
+      "category": "barrier",
+      "displayNameEn": "Fatty acids",
+      "summaryEn": "Lipid building blocks (linoleic, oleic) that complete the ceramide-cholesterol trio.",
+      "aliases": ["linoleic-acid", "oleic-acid", "palmitic-acid"],
+      "categoryPatterns": [
+        "\\\\blinoleic-acid\\\\b",
+        "\\\\boleic-acid\\\\b",
+        "\\\\bpalmitic-acid\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "shea-butter",
+      "category": "barrier",
+      "displayNameEn": "Shea butter",
+      "summaryEn": "A rich occlusive that seals in moisture; can feel heavy on oilier skin.",
+      "aliases": ["butyrospermum-parkii"],
+      "categoryPatterns": [
+        "\\\\bshea-butter\\\\b",
+        "\\\\bbutyrospermum-parkii\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "octinoxate",
+      "category": "chemical-spf",
+      "displayNameEn": "Octinoxate",
+      "summaryEn": "A common UVB chemical filter; widely used globally, less permitted in some regions.",
+      "aliases": ["ethylhexyl-methoxycinnamate"],
+      "categoryPatterns": [
+        "\\\\boctinoxate\\\\b",
+        "\\\\bethylhexyl-methoxycinnamate\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "octocrylene",
+      "category": "chemical-spf",
+      "displayNameEn": "Octocrylene",
+      "summaryEn": "A chemical filter that also stabilises avobenzone against UV degradation.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\boctocrylene\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "homosalate",
+      "category": "chemical-spf",
+      "displayNameEn": "Homosalate",
+      "summaryEn": "A chemical UVB filter often combined with other filters for broader coverage.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bhomosalate\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "tinosorb-s",
+      "category": "chemical-spf",
+      "displayNameEn": "Tinosorb S",
+      "summaryEn": "A modern broad-spectrum filter widely used in EU/Asia sunscreens.",
+      "aliases": ["bemotrizinol", "bis-ethylhexyloxyphenol-methoxyphenyl-triazine"],
+      "categoryPatterns": [
+        "\\\\btinosorb-s\\\\b",
+        "\\\\bbemotrizinol\\\\b",
+        "\\\\bbis-ethylhexyloxyphenol-methoxyphenyl-triazine\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "tinosorb-m",
+      "category": "chemical-spf",
+      "displayNameEn": "Tinosorb M",
+      "summaryEn": "A hybrid filter offering strong UVA and UVB coverage and good photostability.",
+      "aliases": ["bisoctrizole", "methylene-bis-benzotriazolyl-tetramethylbutylphenol"],
+      "categoryPatterns": [
+        "\\\\btinosorb-m\\\\b",
+        "\\\\bbisoctrizole\\\\b",
+        "\\\\bmethylene-bis-benzotriazolyl-tetramethylbutylphenol\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "green-tea-extract",
+      "category": "antioxidant",
+      "displayNameEn": "Green tea extract",
+      "summaryEn": "Polyphenol-rich antioxidant that calms redness and supports sun-damage defence.",
+      "aliases": ["camellia-sinensis-leaf-extract", "egcg"],
+      "categoryPatterns": [
+        "\\\\bcamellia-sinensis(?:-leaf-extract)?\\\\b",
+        "\\\\begcg\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "coenzyme-q10",
+      "category": "antioxidant",
+      "displayNameEn": "Coenzyme Q10",
+      "summaryEn": "A fat-soluble antioxidant that supports skin-cell energy and pairs well with vitamin E.",
+      "aliases": ["ubiquinone"],
+      "categoryPatterns": ["\\\\bubiquinone\\\\b", "\\\\bcoenzyme-q10\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "polyglutamic-acid",
+      "category": "humectant",
+      "displayNameEn": "Polyglutamic acid",
+      "summaryEn": "A large humectant peptide that holds water at the skin surface for long-lasting hydration.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bpolyglutamic-acid\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "snail-secretion",
+      "category": "humectant",
+      "displayNameEn": "Snail secretion filtrate",
+      "summaryEn": "A hydrating ingredient popular in Korean skincare; supports smooth, plump skin.",
+      "aliases": ["snail-mucin", "snail-filtrate"],
+      "categoryPatterns": [
+        "\\\\bsnail-(?:secretion|mucin|filtrate)\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "beta-glucan",
+      "category": "humectant",
+      "displayNameEn": "Beta-glucan",
+      "summaryEn": "A soothing humectant from oats/yeasts; calming on compromised skin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bbeta-glucan\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "licorice-extract",
+      "category": "antioxidant",
+      "displayNameEn": "Licorice extract",
+      "summaryEn": "A gentle botanical brightener that also calms redness.",
+      "aliases": ["glycyrrhiza-glabra-root-extract", "licorice-root"],
+      "categoryPatterns": [
+        "\\\\blicorice(?:-root)?(?:-extract)?\\\\b",
+        "\\\\bglycyrrhiza-glabra(?:-root-extract)?\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "willow-bark-extract",
+      "category": "bha",
+      "displayNameEn": "Willow bark extract",
+      "summaryEn": "A plant-derived source of salicin; milder than pure salicylic acid.",
+      "aliases": ["salix-alba-bark-extract"],
+      "categoryPatterns": [
+        "\\\\bwillow-bark(?:-extract)?\\\\b",
+        "\\\\bsalix-alba(?:-bark-extract)?\\\\b"
+      ],
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "alpha-lipoic-acid",
+      "category": "antioxidant",
+      "displayNameEn": "Alpha lipoic acid",
+      "summaryEn": "A potent antioxidant and mild exfoliant; can be sensitising for some users.",
+      "aliases": ["thioctic-acid"],
+      "categoryPatterns": [
+        "\\\\balpha-lipoic-acid\\\\b",
+        "\\\\bthioctic-acid\\\\b"
+      ],
+      "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "green-tea-seed-oil",
+      "category": "barrier",
+      "displayNameEn": "Green tea seed oil",
+      "summaryEn": "An emollient oil with antioxidant polyphenols; lightweight on the skin.",
+      "aliases": ["camellia-sinensis-seed-oil"],
+      "categoryPatterns": [
+        "\\\\bcamellia-sinensis-seed-oil\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "rosehip-oil",
+      "category": "barrier",
+      "displayNameEn": "Rosehip oil",
+      "summaryEn": "An emollient oil rich in fatty acids and vitamin A precursors.",
+      "aliases": ["rosa-canina-fruit-oil", "rosa-rubiginosa-seed-oil"],
+      "categoryPatterns": [
+        "\\\\brosehip-oil\\\\b",
+        "\\\\brosa-(?:canina|rubiginosa)(?:-fruit|-seed)-oil\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "zinc-pca",
+      "category": "niacinamide",
+      "displayNameEn": "Zinc PCA",
+      "summaryEn": "A zinc salt that helps regulate sebum and calm blemishes; often paired with niacinamide.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bzinc-pca\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "dimethicone",
+      "category": "barrier",
+      "displayNameEn": "Dimethicone",
+      "summaryEn": "A silicone that forms a breathable, protective film over the skin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bdimethicone\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "petrolatum",
+      "category": "barrier",
+      "displayNameEn": "Petrolatum",
+      "summaryEn": "A heavyweight occlusive that dramatically reduces water loss; excellent for dry or compromised skin.",
+      "aliases": ["petroleum-jelly"],
+      "categoryPatterns": [
+        "\\\\bpetrolatum\\\\b",
+        "\\\\bpetroleum-jelly\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "phytic-acid",
+      "category": "aha",
+      "displayNameEn": "Phytic acid",
+      "summaryEn": "A gentle alpha-hydroxy acid and antioxidant; often found in multi-acid formulas.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bphytic-acid\\\\b"],
+      "phMin": 3, "phMax": 4,
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "azelamide-mea",
+      "category": "azelaic-acid",
+      "displayNameEn": "Potassium azeloyl diglycinate",
+      "summaryEn": "A water-soluble azelaic-acid derivative; gentler to formulate with than pure azelaic acid.",
+      "aliases": ["potassium-azeloyl-diglycinate"],
+      "categoryPatterns": ["\\\\bpotassium-azeloyl-diglycinate\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "mandelic-ferulic",
+      "category": "antioxidant",
+      "displayNameEn": "Ferulic-mandelic complex",
+      "summaryEn": "A pairing that pairs mild AHA exfoliation with antioxidant support.",
+      "aliases": [],
+      "categoryPatterns": [],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "alpha-arbutin",
+      "category": "tyrosinase-inhibitor",
+      "displayNameEn": "Alpha-arbutin",
+      "summaryEn": "The alpha isomer of arbutin; binds tyrosinase more effectively than the beta form.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\balpha-arbutin\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "4-butylresorcinol",
+      "category": "tyrosinase-inhibitor",
+      "displayNameEn": "4-Butylresorcinol",
+      "summaryEn": "A newer brightener with strong tyrosinase inhibition; found in targeted dark-spot serums.",
+      "aliases": ["4-n-butylresorcinol"],
+      "categoryPatterns": [
+        "\\\\b4-n?-?butylresorcinol\\\\b"
+      ],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "mandelic-salicylic",
+      "category": "aha",
+      "displayNameEn": "Mandelic + salicylic blend",
+      "summaryEn": "A blend of gentle AHA and BHA used in combination exfoliants.",
+      "aliases": [],
+      "categoryPatterns": [],
+      "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "aha-bha-blend",
+      "category": "aha",
+      "displayNameEn": "AHA/BHA blend",
+      "summaryEn": "A mixed-acid blend; potency depends on concentration and pH.",
+      "aliases": [],
+      "categoryPatterns": [],
+      "irritationRisk": true,
+      "overlapSeverity": "medium"
+    },
+    {
+      "slug": "phenoxyethanol",
+      "category": "humectant",
+      "displayNameEn": "Phenoxyethanol",
+      "summaryEn": "A widely used preservative at low levels; not an active ingredient on its own.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bphenoxyethanol\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "polysilicone-11",
+      "category": "barrier",
+      "displayNameEn": "Polysilicone-11",
+      "summaryEn": "A filming silicone that blurs texture and locks in earlier steps.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bpolysilicone-11\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "sodium-pca",
+      "category": "humectant",
+      "displayNameEn": "Sodium PCA",
+      "summaryEn": "A humectant naturally present in skin's own moisturising factor.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bsodium-pca\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "retinyl-retinoate",
+      "category": "retinoid",
+      "displayNameEn": "Retinyl retinoate",
+      "summaryEn": "A hybrid retinoid; more active than retinol, generally better tolerated than tretinoin.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\bretinyl-retinoate\\\\b"],
+      "phMin": 5, "phMax": 7,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "hydroxypinacolone-retinoate",
+      "category": "retinoid",
+      "displayNameEn": "Hydroxypinacolone retinoate",
+      "summaryEn": "A retinoid ester that binds retinoid receptors directly; marketed as gentler than tretinoin.",
+      "aliases": ["hpr", "granactive-retinoid"],
+      "categoryPatterns": [
+        "\\\\bhydroxypinacolone-retinoate\\\\b",
+        "\\\\bhpr\\\\b",
+        "\\\\bgranactive-retinoid\\\\b"
+      ],
+      "phMin": 5, "phMax": 7,
+      "photosensitizing": true, "requiresSpf": true, "irritationRisk": true,
+      "overlapSeverity": "high"
+    },
+    {
+      "slug": "trehalose",
+      "category": "humectant",
+      "displayNameEn": "Trehalose",
+      "summaryEn": "A sugar-based humectant that protects cell membranes during dehydration stress.",
+      "aliases": [],
+      "categoryPatterns": ["\\\\btrehalose\\\\b"],
+      "overlapSeverity": "low"
+    },
+    {
+      "slug": "galactomyces",
+      "category": "antioxidant",
+      "displayNameEn": "Galactomyces ferment",
+      "summaryEn": "A yeast ferment that supports a balanced, radiant complexion.",
+      "aliases": ["galactomyces-ferment-filtrate"],
+      "categoryPatterns": [
+        "\\\\bgalactomyces(?:-ferment(?:-filtrate)?)?\\\\b"
+      ],
+      "overlapSeverity": "low"
+    }
+  ],
+  "conflictRules": [
+    {
+      "code": "RETINOID_AHA",
+      "severity": "high",
+      "leftCategories": ["retinoid"],
+      "rightCategories": ["aha"],
+      "descriptionEn": "Retinoids and alpha hydroxy acids in the same routine can raise the risk of irritation, dryness, and barrier stress.",
+      "mitigationEn": "Use them on alternate nights or separate them into different routines.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "RETINOID_BHA",
+      "severity": "high",
+      "leftCategories": ["retinoid"],
+      "rightCategories": ["bha"],
+      "descriptionEn": "Pairing a retinoid with salicylic acid can be too aggressive for many skin types.",
+      "mitigationEn": "Alternate use and watch closely for dryness or peeling.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "BENZOYL_PEROXIDE_RETINOID",
+      "severity": "high",
+      "leftCategories": ["benzoyl-peroxide"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Benzoyl peroxide and retinoids can be very irritating together and may reduce tolerance.",
+      "mitigationEn": "Use them at different times of day or on alternate days.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "VITAMIN_C_NIACINAMIDE",
+      "severity": "medium",
+      "leftCategories": ["vitamin-c"],
+      "rightCategories": ["niacinamide"],
+      "descriptionEn": "Pure low-pH vitamin C may be less comfortable alongside niacinamide in the same routine.",
+      "mitigationEn": "Split them between morning and evening if your skin gets reactive.",
+      "conditions": { "lowPhVitaminC": true },
+      "onlyWhenVitaminCIsPhSensitive": true
+    },
+    {
+      "code": "HYDROQUINONE_AHA",
+      "severity": "high",
+      "leftCategories": ["hydroquinone"],
+      "rightCategories": ["aha"],
+      "descriptionEn": "Hydroquinone with strong exfoliating acids can intensify irritation and over-exfoliation.",
+      "mitigationEn": "Keep usage simple and alternate nights unless a clinician has advised otherwise.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "HYDROQUINONE_BHA",
+      "severity": "medium",
+      "leftCategories": ["hydroquinone"],
+      "rightCategories": ["bha"],
+      "descriptionEn": "Hydroquinone layered with salicylic acid can stack barrier stress in the same step.",
+      "mitigationEn": "Separate them by a few hours or use on alternate evenings.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "HYDROQUINONE_RETINOID",
+      "severity": "medium",
+      "leftCategories": ["hydroquinone"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Hydroquinone and retinoids can work together clinically, but they also raise irritation risk for many users.",
+      "mitigationEn": "Introduce slowly and reduce frequency if stinging or flaking shows up.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "AZELAIC_AHA",
+      "severity": "medium",
+      "leftCategories": ["azelaic-acid"],
+      "rightCategories": ["aha"],
+      "descriptionEn": "Azelaic acid layered with AHAs can tip a routine toward dryness or stinging.",
+      "mitigationEn": "Space them out if your skin feels tight or reactive.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "AHA_BHA",
+      "severity": "medium",
+      "leftCategories": ["aha"],
+      "rightCategories": ["bha"],
+      "descriptionEn": "Stacking multiple exfoliating acids in one routine can be more intense than intended.",
+      "mitigationEn": "Keep frequency modest and pair with a simple moisturizer.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "PHA_RETINOID",
+      "severity": "low",
+      "leftCategories": ["pha"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "PHAs are gentler than AHAs, but layering them with a retinoid can still tip sensitive skin toward irritation.",
+      "mitigationEn": "Introduce one at a time and watch how your skin reacts.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "MULTIPLE_RETINOIDS",
+      "severity": "high",
+      "leftCategories": ["retinoid"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Stacking multiple retinoids in the same routine rarely adds benefit and often adds irritation.",
+      "mitigationEn": "Pick one retinoid and pause the others.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "BAKUCHIOL_RETINOID",
+      "severity": "low",
+      "leftCategories": ["bakuchiol"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Bakuchiol is often used as a retinoid alternative. Using both at once is usually redundant and can build up irritation.",
+      "mitigationEn": "Pick one or alternate between them across the week.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "SULPHUR_RETINOID",
+      "severity": "medium",
+      "leftCategories": ["sulphur"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Sulphur and retinoids are both drying; using them together can strip the barrier.",
+      "mitigationEn": "Keep them in different routines or different days.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "BPO_AHA",
+      "severity": "medium",
+      "leftCategories": ["benzoyl-peroxide"],
+      "rightCategories": ["aha"],
+      "descriptionEn": "Benzoyl peroxide with AHAs can over-dry skin and compound barrier stress.",
+      "mitigationEn": "Keep one for the morning and one for the evening, not both together.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "BPO_VITAMIN_C",
+      "severity": "high",
+      "leftCategories": ["benzoyl-peroxide"],
+      "rightIngredientSlugs": ["ascorbic-acid"],
+      "descriptionEn": "Benzoyl peroxide oxidises pure vitamin C, cancelling most of its effect and potentially staining skin.",
+      "mitigationEn": "Use vitamin C in the morning and benzoyl peroxide in the evening, or vice versa.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "TYROSINASE_INHIBITOR_AHA",
+      "severity": "low",
+      "leftCategories": ["tyrosinase-inhibitor"],
+      "rightCategories": ["aha"],
+      "descriptionEn": "Brighteners with AHAs can increase sun sensitivity noticeably.",
+      "mitigationEn": "Use daily SPF and watch for any new redness.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "AZELAIC_BHA",
+      "severity": "low",
+      "leftCategories": ["azelaic-acid"],
+      "rightCategories": ["bha"],
+      "descriptionEn": "Azelaic acid with salicylic acid can be useful for acne but may feel harsh on dry or sensitive skin.",
+      "mitigationEn": "Reduce frequency if your skin starts to feel tight.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "PEPTIDE_LOW_PH_ACID",
+      "severity": "low",
+      "leftCategories": ["peptide"],
+      "rightIngredientSlugs": ["ascorbic-acid", "glycolic-acid"],
+      "descriptionEn": "Some peptides lose bioactivity in very low-pH environments right after an acid or pure vitamin C step.",
+      "mitigationEn": "Leave a few minutes between steps or apply peptides in a different routine.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "PEPTIDE_RETINOID",
+      "severity": "low",
+      "leftCategories": ["peptide"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Peptides and retinoids coexist fine for most users; just watch for compounded dryness on sensitive skin.",
+      "mitigationEn": "Buffer with a moisturizer in between if your skin starts to feel tight.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "VITAMIN_C_COPPER_PEPTIDES",
+      "severity": "medium",
+      "leftIngredientSlugs": ["ascorbic-acid"],
+      "rightIngredientSlugs": ["copper-peptides"],
+      "descriptionEn": "Copper peptides and pure vitamin C can deactivate each other when applied in the same step.",
+      "mitigationEn": "Use them at different times of day; vitamin C in the morning, copper peptides in the evening is a common split.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "AHA_VITAMIN_C",
+      "severity": "medium",
+      "leftCategories": ["aha"],
+      "rightIngredientSlugs": ["ascorbic-acid"],
+      "descriptionEn": "Pure vitamin C stacked with AHAs in the same step can over-exfoliate and sting.",
+      "mitigationEn": "Split between morning and evening.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "RETINOID_VITAMIN_C",
+      "severity": "medium",
+      "leftCategories": ["retinoid"],
+      "rightIngredientSlugs": ["ascorbic-acid"],
+      "descriptionEn": "Pure vitamin C on retinoid nights can stack barrier stress for sensitive skin.",
+      "mitigationEn": "Use vitamin C in the morning, retinoid in the evening.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "SULPHUR_AHA",
+      "severity": "medium",
+      "leftCategories": ["sulphur"],
+      "rightCategories": ["aha"],
+      "descriptionEn": "Sulphur and AHAs are both drying; combining them can over-exfoliate.",
+      "mitigationEn": "Keep them on separate days.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "SULPHUR_BHA",
+      "severity": "medium",
+      "leftCategories": ["sulphur"],
+      "rightCategories": ["bha"],
+      "descriptionEn": "Sulphur and salicylic acid together can aggressively dry out the skin.",
+      "mitigationEn": "Alternate them across the week.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "KOJIC_AHA",
+      "severity": "low",
+      "leftIngredientSlugs": ["kojic-acid"],
+      "rightCategories": ["aha"],
+      "descriptionEn": "Kojic acid with AHAs can be sensitising on dry or reactive skin.",
+      "mitigationEn": "Reduce frequency if irritation shows up.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "RESORCINOL_RETINOID",
+      "severity": "medium",
+      "leftIngredientSlugs": ["resorcinol"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Resorcinol and retinoids can compound irritation and flaking.",
+      "mitigationEn": "Use them on alternate nights.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "MULTIPLE_BRIGHTENERS",
+      "severity": "low",
+      "leftCategories": ["tyrosinase-inhibitor"],
+      "rightCategories": ["tyrosinase-inhibitor"],
+      "descriptionEn": "Several brighteners in the same routine rarely add more effect and can build up sensitivity.",
+      "mitigationEn": "Pick one lead brightener per routine.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "ALPHA_LIPOIC_RETINOID",
+      "severity": "medium",
+      "leftIngredientSlugs": ["alpha-lipoic-acid"],
+      "rightCategories": ["retinoid"],
+      "descriptionEn": "Alpha lipoic acid can add sting on retinoid evenings for sensitive users.",
+      "mitigationEn": "Alternate use if your skin feels reactive.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "WILLOW_BARK_BHA_STACK",
+      "severity": "low",
+      "leftIngredientSlugs": ["willow-bark-extract"],
+      "rightIngredientSlugs": ["salicylic-acid"],
+      "descriptionEn": "Willow bark shares salicin with salicylic acid; using both together doubles the BHA load.",
+      "mitigationEn": "Pick one and keep the other for alternate days.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "MINERAL_CHEMICAL_SPF",
+      "severity": "low",
+      "leftCategories": ["mineral-spf"],
+      "rightCategories": ["chemical-spf"],
+      "descriptionEn": "Mixing mineral and chemical sunscreens is fine and common; just don't double-dose SPF layers for pore comfort.",
+      "mitigationEn": "Apply one sunscreen; reapply throughout the day as needed.",
+      "conditions": { "sameRoutine": true }
+    },
+    {
+      "code": "TINOSORB_AVOBENZONE",
+      "severity": "low",
+      "leftIngredientSlugs": ["tinosorb-s", "tinosorb-m"],
+      "rightIngredientSlugs": ["avobenzone"],
+      "descriptionEn": "Tinosorb filters actually help stabilise avobenzone; this pairing is considered a strength, not a conflict.",
+      "mitigationEn": "No action needed.",
+      "conditions": { "sameRoutine": true }
+    }
+  ]
+}
