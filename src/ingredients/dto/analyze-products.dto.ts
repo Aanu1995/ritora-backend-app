@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
@@ -21,6 +22,7 @@ export class AnalyzeProductsDto {
   @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(30)
   @IsString({ each: true })
   @MaxLength(26, { each: true })
   productIds?: string[];

@@ -90,6 +90,7 @@ export class AnalysisService {
     const actives = buildActives(
       match.matchedIngredients,
       this.catalog.getConflictRules(),
+      (slug) => this.catalog.getIngredientBySlug(slug),
     );
 
     return {

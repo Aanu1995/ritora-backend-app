@@ -14,10 +14,26 @@ const SOURCE_LANG_ENV_KEY = 'INGREDIENT_TRANSLATION_SOURCE_LANGUAGE';
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_LRU_ENTRIES = 2000;
 const MAX_OUTPUT_TOKENS = 220;
+const MAX_BATCH_OUTPUT_TOKENS = 1600;
+const MAX_OUTPUT_TOKENS_PER_TRANSLATION = 120;
+const TRANSLATION_BATCH_SIZE = 20;
+const TRANSLATION_CONCURRENCY = 2;
 
 type TranslationCacheRow = {
   source_hash: string;
   translated_text: string;
+};
+
+type TranslationMiss = {
+  index: number;
+  text: string;
+  sourceHash: string;
+};
+
+type TranslationGroup = {
+  sourceHash: string;
+  text: string;
+  misses: TranslationMiss[];
 };
 
 /**
@@ -63,14 +79,15 @@ export class TranslationService {
       return dbCached;
     }
 
-    const translated = await this.callLlm(sourceText, target);
-    if (translated === null) {
+    const translated = await this.callLlmBatch([sourceText], target);
+    const firstTranslation = translated?.[0];
+    if (!firstTranslation) {
       return sourceText;
     }
 
-    await this.writeToDb(sourceHash, target, translated);
-    this.writeLru(lruKey, translated);
-    return translated;
+    await this.writeToDb(sourceHash, target, firstTranslation);
+    this.writeLru(lruKey, firstTranslation);
+    return firstTranslation;
   }
 
   /**
@@ -131,28 +148,60 @@ export class TranslationService {
 
     if (llmMisses.length > 0) {
       const missesByHash = groupBy(llmMisses, (miss) => miss.sourceHash);
-      await Promise.all(
-        Array.from(missesByHash.values()).map(async ([firstMiss, ...rest]) => {
-          const translated = await this.callLlm(firstMiss.text, target);
-          const sameTextMisses = [firstMiss, ...rest];
+      const groups: TranslationGroup[] = Array.from(
+        missesByHash.entries(),
+      ).map(([sourceHash, misses]) => ({
+        sourceHash,
+        text: misses[0].text,
+        misses,
+      }));
+      const chunks = chunkArray(groups, TRANSLATION_BATCH_SIZE);
 
-          if (translated === null) {
-            for (const miss of sameTextMisses) {
-              results[miss.index] = miss.text;
+      await runWithConcurrency(
+        chunks,
+        TRANSLATION_CONCURRENCY,
+        async (chunk) => {
+          const translated = await this.callLlmBatch(
+            chunk.map((group) => group.text),
+            target,
+          );
+
+          if (!translated || translated.length !== chunk.length) {
+            for (const group of chunk) {
+              this.applyTranslationFallback(results, group);
             }
             return;
           }
 
-          await this.writeToDb(firstMiss.sourceHash, target, translated);
-          this.writeLru(`${firstMiss.sourceHash}:${target}`, translated);
-          for (const miss of sameTextMisses) {
-            results[miss.index] = translated;
-          }
-        }),
+          await Promise.all(
+            chunk.map(async (group, index) => {
+              const value = translated[index].trim();
+              if (!value) {
+                this.applyTranslationFallback(results, group);
+                return;
+              }
+
+              await this.writeToDb(group.sourceHash, target, value);
+              this.writeLru(`${group.sourceHash}:${target}`, value);
+              for (const miss of group.misses) {
+                results[miss.index] = value;
+              }
+            }),
+          );
+        },
       );
     }
 
     return results;
+  }
+
+  private applyTranslationFallback(
+    results: string[],
+    group: TranslationGroup,
+  ): void {
+    for (const miss of group.misses) {
+      results[miss.index] = miss.text;
+    }
   }
 
   private getSourceLanguage(): string {
@@ -247,10 +296,10 @@ export class TranslationService {
     }
   }
 
-  private async callLlm(
-    sourceText: string,
+  private async callLlmBatch(
+    sourceTexts: string[],
     targetLanguage: string,
-  ): Promise<string | null> {
+  ): Promise<string[] | null> {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
       this.logStructured({
@@ -270,6 +319,13 @@ export class TranslationService {
     }
 
     const startedAt = Date.now();
+    const maxOutputTokens = Math.max(
+      MAX_OUTPUT_TOKENS,
+      Math.min(
+        MAX_BATCH_OUTPUT_TOKENS,
+        sourceTexts.length * MAX_OUTPUT_TOKENS_PER_TRANSLATION,
+      ),
+    );
 
     try {
       const response = await fetch('https://api.openai.com/v1/responses', {
@@ -282,7 +338,7 @@ export class TranslationService {
           model,
           reasoning: { effort: 'low' },
           text: { verbosity: 'low' },
-          max_output_tokens: MAX_OUTPUT_TOKENS,
+          max_output_tokens: maxOutputTokens,
           input: [
             {
               role: 'system',
@@ -299,8 +355,8 @@ export class TranslationService {
                 {
                   type: 'input_text',
                   text: JSON.stringify({
-                    schema: { translation: 'string' },
-                    source: sourceText,
+                    schema: { translations: ['string'] },
+                    sources: sourceTexts,
                   }),
                 },
               ],
@@ -336,9 +392,29 @@ export class TranslationService {
       }
 
       const parsed = JSON.parse(extractJsonObject(outputText)) as {
+        translations?: unknown;
         translation?: unknown;
       };
-      if (typeof parsed.translation !== 'string') {
+
+      if (
+        Array.isArray(parsed.translations) &&
+        parsed.translations.every((item) => typeof item === 'string')
+      ) {
+        return parsed.translations.map((item) => item.trim());
+      }
+
+      if (
+        sourceTexts.length === 1 &&
+        typeof parsed.translation === 'string'
+      ) {
+        return [parsed.translation.trim()];
+      }
+
+      if (sourceTexts.length === 1 && typeof parsed.translations === 'string') {
+        return [parsed.translations.trim()];
+      }
+
+      if (sourceTexts.length > 1) {
         this.logStructured({
           event: 'translation_failed',
           reason: 'invalid_shape',
@@ -348,8 +424,7 @@ export class TranslationService {
         return null;
       }
 
-      const trimmed = parsed.translation.trim();
-      return trimmed.length > 0 ? trimmed : null;
+      return null;
     } catch (error) {
       this.logStructured({
         event: 'translation_failed',
@@ -367,7 +442,7 @@ export class TranslationService {
 - Keep ingredient names (retinol, niacinamide, salicylic acid, etc.) in their original scientific form unless an established local lay name exists.
 - Preserve register: calm, professional, non-alarmist, short.
 - Do not add new risk information or instructions beyond the source.
-- Return only JSON: {"translation": "<translated text>"}`;
+- Return only JSON: {"translations": ["<translated text>"]} with the translations in the same order as the input sources.`;
   }
 
   private logStructured(payload: Record<string, unknown>): void {
@@ -387,4 +462,31 @@ function groupBy<T, K>(items: T[], keyFn: (item: T) => K): Map<K, T[]> {
     }
   }
   return map;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        await task(items[currentIndex]);
+      }
+    }),
+  );
 }

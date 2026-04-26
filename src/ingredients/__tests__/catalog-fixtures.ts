@@ -202,6 +202,14 @@ const DEFAULT_RULES: Partial<ConflictRule>[] = [
     mitigationEn: 'Use them at different times.',
   },
   {
+    code: 'RETINOID_VITAMIN_C',
+    severity: AnalysisSeverity.Medium,
+    left: { categories: [IngredientCategory.Retinoid] },
+    right: { ingredientSlugs: ['ascorbic-acid'] },
+    descriptionEn: 'Pure vitamin C can stack barrier stress on retinoid nights.',
+    mitigationEn: 'Use vitamin C in the morning and retinoids in the evening.',
+  },
+  {
     code: 'VITAMIN_C_NIACINAMIDE',
     severity: AnalysisSeverity.Medium,
     left: { categories: [IngredientCategory.VitaminC] },

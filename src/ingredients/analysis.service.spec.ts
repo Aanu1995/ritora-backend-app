@@ -180,6 +180,12 @@ describe('AnalysisService', () => {
             displayName: 'Retinol',
             category: 'retinoid',
             avoidCategories: expect.arrayContaining(['aha', 'bha']),
+            avoidIngredients: expect.arrayContaining([
+              expect.objectContaining({
+                slug: 'ascorbic-acid',
+                displayName: 'Vitamin C',
+              }),
+            ]),
           }),
         ]),
       );

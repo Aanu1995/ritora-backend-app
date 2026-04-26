@@ -208,6 +208,12 @@ describe('Ingredients (e2e)', () => {
           category: 'retinoid',
           summary: expect.any(String),
           avoidCategories: expect.arrayContaining(['aha', 'bha']),
+          avoidIngredients: expect.arrayContaining([
+            expect.objectContaining({
+              slug: 'ascorbic-acid',
+              displayName: 'Vitamin C',
+            }),
+          ]),
         }),
       ]),
     );
@@ -240,5 +246,42 @@ describe('Ingredients (e2e)', () => {
     );
     expect(res.body.overlaps).toEqual([]);
     expect(res.body.layeringOrder).toHaveLength(2);
+  });
+
+  it('rejects analysis requests that provide both modes', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/ingredients/analyze')
+      .set('Origin', ORIGIN)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        focusProductId: retinolId,
+        productIds: [retinolId, glycolicId],
+      })
+      .expect(400);
+  });
+
+  it('rejects analysis requests that provide neither mode', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/ingredients/analyze')
+      .set('Origin', ORIGIN)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        withExplanations: false,
+      })
+      .expect(400);
+  });
+
+  it('rejects analysis requests with more than 30 product ids', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/ingredients/analyze')
+      .set('Origin', ORIGIN)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        productIds: Array.from(
+          { length: 31 },
+          (_, index) => `01HWXYZ${String(index).padStart(19, '0')}`,
+        ),
+      })
+      .expect(400);
   });
 });

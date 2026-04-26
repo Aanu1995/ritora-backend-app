@@ -9,11 +9,12 @@ import type {
 export function buildActives(
   matches: MatchedIngredient[],
   rules: ConflictRule[],
+  resolveIngredient: (slug: string) => IngredientDefinition | undefined,
 ): AnalysisActive[] {
   return matches.map((match) => {
     const ingredient = match.ingredient;
     const avoidCategories = new Set<IngredientCategory>();
-    const avoidIngredientSlugs = new Set<string>();
+    const avoidIngredientIds = new Set<string>();
     let mitigationHint: string | null = null;
 
     for (const rule of rules) {
@@ -26,7 +27,7 @@ export function buildActives(
         if (category !== ingredient.category) avoidCategories.add(category);
       }
       for (const slug of otherSide.ingredientSlugs ?? []) {
-        if (slug !== ingredient.slug) avoidIngredientSlugs.add(slug);
+        if (slug !== ingredient.slug) avoidIngredientIds.add(slug);
       }
 
       if (!mitigationHint && rule.mitigationEn) {
@@ -40,7 +41,13 @@ export function buildActives(
       category: ingredient.category,
       summary: ingredient.summaryEn,
       avoidCategories: Array.from(avoidCategories),
-      avoidIngredientSlugs: Array.from(avoidIngredientSlugs),
+      avoidIngredients: Array.from(avoidIngredientIds).map((slug) => {
+        const avoided = resolveIngredient(slug);
+        return {
+          slug,
+          displayName: avoided?.displayNameEn ?? slug,
+        };
+      }),
       mitigationHint,
     };
   });

@@ -7,10 +7,21 @@ import type {
   ConflictRule,
   MatchedIngredient,
   ProductMatchResult,
+  RuleSide,
 } from './ingredients.types';
 
 const OVERLAP_DESCRIPTION_EN = (ingredient: string) =>
   `${ingredient} appears in more than one product in this routine, which can raise cumulative exposure.`;
+
+type PreparedRuleSide = {
+  categories: Set<string>;
+  ingredientSlugs: Set<string>;
+};
+
+type PreparedRule = ConflictRule & {
+  leftLookup: PreparedRuleSide;
+  rightLookup: PreparedRuleSide;
+};
 
 export function buildConflicts(
   matches: ProductMatchResult[],
@@ -18,6 +29,7 @@ export function buildConflicts(
   rules: ConflictRule[],
 ): AnalysisConflict[] {
   const findings = new Map<string, AnalysisConflict>();
+  const preparedRules = rules.map(prepareRule);
 
   for (let productIndex = 0; productIndex < matches.length; productIndex += 1) {
     const leftProduct = matches[productIndex];
@@ -27,50 +39,43 @@ export function buildConflicts(
       comparisonIndex += 1
     ) {
       const rightProduct = matches[comparisonIndex];
-      const pairs =
-        leftProduct.product.id === rightProduct.product.id
-          ? buildSameProductPairs(leftProduct.matchedIngredients)
-          : buildCrossProductPairs(
-              leftProduct.matchedIngredients,
-              rightProduct.matchedIngredients,
+      if (leftProduct.product.id === rightProduct.product.id) {
+        for (
+          let leftIndex = 0;
+          leftIndex < leftProduct.matchedIngredients.length;
+          leftIndex += 1
+        ) {
+          for (
+            let rightIndex = leftIndex + 1;
+            rightIndex < leftProduct.matchedIngredients.length;
+            rightIndex += 1
+          ) {
+            addConflictFinding(
+              findings,
+              preparedRules,
+              skinProfile,
+              leftProduct.product.id,
+              rightProduct.product.id,
+              leftProduct.matchedIngredients[leftIndex],
+              leftProduct.matchedIngredients[rightIndex],
             );
+          }
+        }
+        continue;
+      }
 
-      for (const [leftIngredient, rightIngredient] of pairs) {
-        const rule = matchConflictRule(rules, leftIngredient, rightIngredient);
-        if (!rule) continue;
-
-        const productAId = leftProduct.product.id;
-        const productBId = rightProduct.product.id;
-        const key = [
-          rule.code,
-          productAId,
-          productBId,
-          leftIngredient.ingredient.slug,
-          rightIngredient.ingredient.slug,
-        ].join(':');
-
-        if (findings.has(key)) continue;
-
-        const severity = maybeAdjustSeverity(rule.severity, skinProfile, [
-          leftIngredient.ingredient.slug,
-          leftIngredient.ingredient.category,
-          rightIngredient.ingredient.slug,
-          rightIngredient.ingredient.category,
-        ]);
-
-        findings.set(key, {
-          id: key,
-          code: rule.code,
-          severity,
-          ingredientA: leftIngredient.ingredient.displayNameEn,
-          ingredientB: rightIngredient.ingredient.displayNameEn,
-          productAId,
-          productBId,
-          conditions: rule.conditions,
-          mitigation: rule.mitigationEn,
-          description: rule.descriptionEn,
-          explanation: null,
-        });
+      for (const leftIngredient of leftProduct.matchedIngredients) {
+        for (const rightIngredient of rightProduct.matchedIngredients) {
+          addConflictFinding(
+            findings,
+            preparedRules,
+            skinProfile,
+            leftProduct.product.id,
+            rightProduct.product.id,
+            leftIngredient,
+            rightIngredient,
+          );
+        }
       }
     }
   }
@@ -123,16 +128,62 @@ export function buildOverlaps(
   return sortOverlaps(findings);
 }
 
+function addConflictFinding(
+  findings: Map<string, AnalysisConflict>,
+  rules: PreparedRule[],
+  skinProfile: SkinProfile | null,
+  productAId: string,
+  productBId: string,
+  leftIngredient: MatchedIngredient,
+  rightIngredient: MatchedIngredient,
+): void {
+  const rule = matchConflictRule(rules, leftIngredient, rightIngredient);
+  if (!rule) return;
+
+  const key = [
+    rule.code,
+    productAId,
+    productBId,
+    leftIngredient.ingredient.slug,
+    rightIngredient.ingredient.slug,
+  ].join(':');
+
+  if (findings.has(key)) return;
+
+  const severity = maybeAdjustSeverity(rule.severity, skinProfile, [
+    leftIngredient.ingredient.slug,
+    leftIngredient.ingredient.category,
+    rightIngredient.ingredient.slug,
+    rightIngredient.ingredient.category,
+  ]);
+
+  findings.set(key, {
+    id: key,
+    code: rule.code,
+    severity,
+    ingredientA: leftIngredient.ingredient.displayNameEn,
+    ingredientB: rightIngredient.ingredient.displayNameEn,
+    productAId,
+    productBId,
+    conditions: rule.conditions,
+    mitigation: rule.mitigationEn,
+    description: rule.descriptionEn,
+    explanation: null,
+  });
+}
+
 function matchConflictRule(
-  rules: ConflictRule[],
+  rules: PreparedRule[],
   left: MatchedIngredient,
   right: MatchedIngredient,
-): ConflictRule | null {
+): PreparedRule | null {
   for (const rule of rules) {
     const directMatch =
-      matchesRuleSide(rule.left, left) && matchesRuleSide(rule.right, right);
+      matchesRuleSide(rule.leftLookup, left) &&
+      matchesRuleSide(rule.rightLookup, right);
     const reverseMatch =
-      matchesRuleSide(rule.left, right) && matchesRuleSide(rule.right, left);
+      matchesRuleSide(rule.leftLookup, right) &&
+      matchesRuleSide(rule.rightLookup, left);
 
     if (!directMatch && !reverseMatch) continue;
 
@@ -144,56 +195,34 @@ function matchConflictRule(
       continue;
     }
 
-    return directMatch ? rule : reverseRule(rule);
+    return rule;
   }
 
   return null;
 }
 
 function matchesRuleSide(
-  side: ConflictRule['left'],
+  side: PreparedRuleSide,
   ingredient: MatchedIngredient,
 ): boolean {
-  if (side.categories?.includes(ingredient.ingredient.category)) return true;
-  if (side.ingredientSlugs?.includes(ingredient.ingredient.slug)) return true;
+  if (side.categories.has(ingredient.ingredient.category)) return true;
+  if (side.ingredientSlugs.has(ingredient.ingredient.slug)) return true;
   return false;
 }
 
-function reverseRule(rule: ConflictRule): ConflictRule {
+function prepareRule(rule: ConflictRule): PreparedRule {
   return {
     ...rule,
-    left: rule.right,
-    right: rule.left,
+    leftLookup: prepareRuleSide(rule.left),
+    rightLookup: prepareRuleSide(rule.right),
   };
 }
 
-function buildSameProductPairs(
-  ingredients: MatchedIngredient[],
-): Array<[MatchedIngredient, MatchedIngredient]> {
-  const pairs: Array<[MatchedIngredient, MatchedIngredient]> = [];
-  for (let leftIndex = 0; leftIndex < ingredients.length; leftIndex += 1) {
-    for (
-      let rightIndex = leftIndex + 1;
-      rightIndex < ingredients.length;
-      rightIndex += 1
-    ) {
-      pairs.push([ingredients[leftIndex], ingredients[rightIndex]]);
-    }
-  }
-  return pairs;
-}
-
-function buildCrossProductPairs(
-  leftIngredients: MatchedIngredient[],
-  rightIngredients: MatchedIngredient[],
-): Array<[MatchedIngredient, MatchedIngredient]> {
-  const pairs: Array<[MatchedIngredient, MatchedIngredient]> = [];
-  for (const leftIngredient of leftIngredients) {
-    for (const rightIngredient of rightIngredients) {
-      pairs.push([leftIngredient, rightIngredient]);
-    }
-  }
-  return pairs;
+function prepareRuleSide(side: RuleSide): PreparedRuleSide {
+  return {
+    categories: new Set(side.categories ?? []),
+    ingredientSlugs: new Set(side.ingredientSlugs ?? []),
+  };
 }
 
 function sortConflicts(conflicts: AnalysisConflict[]): AnalysisConflict[] {
