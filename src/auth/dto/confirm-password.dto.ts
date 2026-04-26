@@ -4,5 +4,5 @@ import { IsString } from 'class-validator';
 export class ConfirmPasswordDto {
   @ApiProperty()
   @IsString()
-  password: string;
+  password!: string;
 }

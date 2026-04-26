@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { toIsoString } from '../../common/utils/date';
 import { AuthSession } from '../entities/auth-session.entity';
+import { maskIpAddress } from '../auth-session.utils';
 
 export class SessionResponseDto {
   @ApiProperty()
@@ -17,13 +19,27 @@ export class SessionResponseDto {
   @ApiProperty()
   lastUsedAt: string;
 
+  constructor(
+    id: string,
+    userAgent: string | null,
+    ipAddress: string | null,
+    createdAt: string,
+    lastUsedAt: string,
+  ) {
+    this.id = id;
+    this.userAgent = userAgent;
+    this.ipAddress = ipAddress;
+    this.createdAt = createdAt;
+    this.lastUsedAt = lastUsedAt;
+  }
+
   static fromEntity(session: AuthSession): SessionResponseDto {
-    const dto = new SessionResponseDto();
-    dto.id = session.id;
-    dto.userAgent = session.user_agent;
-    dto.ipAddress = session.ip_address;
-    dto.createdAt = session.created_at.toISOString();
-    dto.lastUsedAt = session.last_used_at.toISOString();
-    return dto;
+    return new SessionResponseDto(
+      session.id,
+      session.user_agent,
+      maskIpAddress(session.ip_address),
+      toIsoString(session.created_at),
+      toIsoString(session.last_used_at),
+    );
   }
 }

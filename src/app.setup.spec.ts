@@ -9,27 +9,29 @@ type MockApp = {
   use: jest.Mock;
   enableCors: jest.Mock;
   setGlobalPrefix: jest.Mock;
-  useGlobalPipes: jest.Mock;
-  useGlobalFilters: jest.Mock;
+  useGlobalPipes: jest.Mock<void, [unknown]>;
+  useGlobalFilters: jest.Mock<void, [unknown]>;
   getHttpAdapter: jest.Mock;
 };
 
 describe('configureApp', () => {
   const createApp = () => {
     const disable = jest.fn();
+    const set = jest.fn();
+    const expressUse = jest.fn();
 
     const app: MockApp = {
       use: jest.fn(),
       enableCors: jest.fn(),
       setGlobalPrefix: jest.fn(),
-      useGlobalPipes: jest.fn(),
-      useGlobalFilters: jest.fn(),
+      useGlobalPipes: jest.fn<void, [unknown]>(),
+      useGlobalFilters: jest.fn<void, [unknown]>(),
       getHttpAdapter: jest.fn(() => ({
-        getInstance: () => ({ disable }),
+        getInstance: () => ({ disable, set, use: expressUse }),
       })),
     };
 
-    return { app, disable };
+    return { app, disable, set, expressUse };
   };
 
   const createConfigService = (
@@ -46,7 +48,7 @@ describe('configureApp', () => {
   });
 
   it('configures middleware, cors, prefix, validation, filters, and swagger', () => {
-    const { app, disable } = createApp();
+    const { app, disable, expressUse } = createApp();
     const configService = createConfigService({
       CORS_ORIGINS: 'http://localhost:3000, https://ritora.com',
       SWAGGER_ENABLED: true,
@@ -62,6 +64,14 @@ describe('configureApp', () => {
     expect(app.enableCors).toHaveBeenCalledWith({
       origin: ['http://localhost:3000', 'https://ritora.com'],
       credentials: true,
+      methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Accept-Language',
+        'X-Timezone',
+      ],
+      maxAge: 86400,
     });
     expect(app.setGlobalPrefix).toHaveBeenCalledWith('api/v1');
 
@@ -72,6 +82,7 @@ describe('configureApp', () => {
     expect(filter).toBeInstanceOf(GlobalExceptionFilter);
 
     expect(disable).toHaveBeenCalledWith('x-powered-by');
+    expect(expressUse).toHaveBeenCalledWith('/media', expect.any(Function));
     expect(createDocumentSpy).toHaveBeenCalled();
     expect(setupSpy).toHaveBeenCalledWith(
       'api/docs',
@@ -89,6 +100,19 @@ describe('configureApp', () => {
 
     configureApp(app as unknown as INestApplication, configService);
 
+    expect(createDocumentSpy).not.toHaveBeenCalled();
+    expect(setupSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips swagger setup by default in production', () => {
+    const { app, set } = createApp();
+    const configService = createConfigService({ NODE_ENV: 'production' });
+    const createDocumentSpy = jest.spyOn(SwaggerModule, 'createDocument');
+    const setupSpy = jest.spyOn(SwaggerModule, 'setup');
+
+    configureApp(app as unknown as INestApplication, configService);
+
+    expect(set).toHaveBeenCalledWith('trust proxy', 1);
     expect(createDocumentSpy).not.toHaveBeenCalled();
     expect(setupSpy).not.toHaveBeenCalled();
   });

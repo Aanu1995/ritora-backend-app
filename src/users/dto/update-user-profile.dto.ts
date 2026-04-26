@@ -10,11 +10,11 @@ export class UpdateUserProfileDto {
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  firstName: string;
+  firstName!: string;
 
   @Transform(trimString)
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  lastName: string;
+  lastName!: string;
 }

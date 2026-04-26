@@ -4,9 +4,9 @@ import * as Handlebars from 'handlebars';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { Resend } from 'resend';
+import { type AppLanguage, translate } from '../common/i18n/i18n';
 import {
   DEFAULT_MAIL_FROM,
-  MAIL_SUBJECTS,
   MailTemplateName,
   RESEND_CLIENT,
 } from './mail.constants';
@@ -15,12 +15,30 @@ type VerificationTemplateContext = {
   firstName: string;
   verificationUrl: string;
   logoUrl: string;
+  previewText: string;
+  title: string;
+  intro: string;
+  ctaLabel: string;
+  expiryNote: string;
+  fallbackIntro: string;
+  ignoreNote: string;
+  footerLineOne: string;
+  footerLineTwo: string;
 };
 
 type PasswordResetTemplateContext = {
   firstName: string;
   resetUrl: string;
   logoUrl: string;
+  previewText: string;
+  title: string;
+  intro: string;
+  ctaLabel: string;
+  expiryNote: string;
+  fallbackIntro: string;
+  unexpectedTitle: string;
+  unexpectedBody: string;
+  footerLine: string;
 };
 
 type MailTemplateContextMap = {
@@ -30,7 +48,7 @@ type MailTemplateContextMap = {
 
 @Injectable()
 export class MailService {
-  private readonly frontendUrl: string;
+  private readonly webAppUrl: string;
   private readonly from: string;
   private readonly apiKey: string;
   private readonly templateDir = join(__dirname, 'templates');
@@ -43,8 +61,8 @@ export class MailService {
     @Inject(RESEND_CLIENT) private readonly resend: Resend,
     private readonly configService: ConfigService,
   ) {
-    this.frontendUrl = this.configService.get<string>(
-      'FRONTEND_URL',
+    this.webAppUrl = this.configService.get<string>(
+      'WEB_APP_URL',
       'http://localhost:3000',
     );
     this.apiKey = this.configService.get<string>('RESEND_API_KEY', '');
@@ -55,6 +73,7 @@ export class MailService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     const verificationUrl = this.buildFrontendPathActionUrl(
       'verify-email',
@@ -64,11 +83,20 @@ export class MailService {
       firstName,
       verificationUrl,
       logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      previewText: translate(language, 'mail.verification.previewText'),
+      title: translate(language, 'mail.verification.title', { firstName }),
+      intro: translate(language, 'mail.verification.intro'),
+      ctaLabel: translate(language, 'mail.verification.ctaLabel'),
+      expiryNote: translate(language, 'mail.verification.expiry'),
+      fallbackIntro: translate(language, 'mail.verification.fallbackIntro'),
+      ignoreNote: translate(language, 'mail.verification.ignore'),
+      footerLineOne: translate(language, 'mail.verification.footerLineOne'),
+      footerLineTwo: translate(language, 'mail.verification.footerLineTwo'),
     });
 
     await this.sendEmail({
       to: email,
-      subject: MAIL_SUBJECTS[MailTemplateName.Verification],
+      subject: translate(language, 'mail.subject.verification'),
       html,
     });
   }
@@ -77,17 +105,30 @@ export class MailService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     const resetUrl = this.buildFrontendPathActionUrl('reset-password', token);
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
       firstName,
       resetUrl,
       logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      previewText: translate(language, 'mail.passwordReset.previewText'),
+      title: translate(language, 'mail.passwordReset.title'),
+      intro: translate(language, 'mail.passwordReset.intro', { firstName }),
+      ctaLabel: translate(language, 'mail.passwordReset.ctaLabel'),
+      expiryNote: translate(language, 'mail.passwordReset.expiry'),
+      fallbackIntro: translate(language, 'mail.passwordReset.fallbackIntro'),
+      unexpectedTitle: translate(
+        language,
+        'mail.passwordReset.unexpectedTitle',
+      ),
+      unexpectedBody: translate(language, 'mail.passwordReset.unexpectedBody'),
+      footerLine: translate(language, 'mail.passwordReset.footerLine'),
     });
 
     await this.sendEmail({
       to: email,
-      subject: MAIL_SUBJECTS[MailTemplateName.PasswordReset],
+      subject: translate(language, 'mail.subject.passwordReset'),
       html,
     });
   }
@@ -143,13 +184,13 @@ export class MailService {
   }
 
   private buildFrontendActionUrl(path: string, token: string): string {
-    const url = new URL(path, `${this.frontendUrl}/`);
+    const url = new URL(path, `${this.webAppUrl}/`);
     url.searchParams.set('token', token);
     return url.toString();
   }
 
   private buildFrontendPathActionUrl(path: string, token: string): string {
-    const base = new URL(this.frontendUrl);
+    const base = new URL(this.webAppUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
     base.search = '';
@@ -158,7 +199,7 @@ export class MailService {
   }
 
   private buildBrandAssetUrl(fileName: string): string {
-    const base = new URL(this.frontendUrl);
+    const base = new URL(this.webAppUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/brand/${fileName}`;
     base.search = '';

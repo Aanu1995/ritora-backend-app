@@ -1,6 +1,5 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { App } from 'supertest/types';
 import { createTestApp, MockMailService, truncateTables } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
@@ -16,10 +15,36 @@ const TEST_USER = {
 };
 
 describe('Auth (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: INestApplication;
   let mockMail: MockMailService;
   let accessToken: string;
   let refreshCookie: string;
+  let currentPassword = TEST_USER.password;
+
+  function getAccessTokenFromResponse(res: request.Response): string {
+    const body = res.body as { accessToken?: unknown };
+
+    if (typeof body.accessToken !== 'string') {
+      throw new Error('Auth response did not include a string accessToken');
+    }
+
+    return body.accessToken;
+  }
+
+  function getFirstSetCookieHeader(res: request.Response): string {
+    const headers = res.headers as Record<string, unknown>;
+    const cookies = headers['set-cookie'];
+
+    if (Array.isArray(cookies) && typeof cookies[0] === 'string') {
+      return cookies[0];
+    }
+
+    if (typeof cookies === 'string') {
+      return cookies;
+    }
+
+    throw new Error('Auth response did not include a set-cookie header');
+  }
 
   beforeAll(async () => {
     mockMail = new MockMailService();
@@ -27,8 +52,10 @@ describe('Auth (e2e)', () => {
   });
 
   afterAll(async () => {
-    await truncateTables(app);
-    await app.close();
+    if (app) {
+      await truncateTables(app);
+      await app.close();
+    }
   });
 
   function authGet(path: string) {
@@ -60,14 +87,48 @@ describe('Auth (e2e)', () => {
     return body ? req.send(body) : req;
   }
 
-  function storeSessionFromAuthResponse(res: request.Response): void {
-    expect(res.body.accessToken).toBeDefined();
-    accessToken = res.body.accessToken;
+  function authGetWithToken(path: string, token: string) {
+    return request(app.getHttpServer())
+      .get(`/api/v1${path}`)
+      .set('Authorization', `Bearer ${token}`);
+  }
 
-    const cookies = res.headers['set-cookie'];
-    expect(cookies).toBeDefined();
-    refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+  function refreshWithCookie(cookie: string) {
+    return request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Origin', ORIGIN)
+      .set('Cookie', cookie);
+  }
+
+  function storeSessionFromAuthResponse(res: request.Response): void {
+    accessToken = getAccessTokenFromResponse(res);
+    refreshCookie = getFirstSetCookieHeader(res);
     expect(refreshCookie).toContain('ritora_refresh');
+  }
+
+  function getSessionStateFromAuthResponse(res: request.Response): {
+    accessToken: string;
+    refreshCookie: string;
+  } {
+    const cookie = getFirstSetCookieHeader(res);
+    expect(cookie).toContain('ritora_refresh');
+
+    return {
+      accessToken: getAccessTokenFromResponse(res),
+      refreshCookie: cookie,
+    };
+  }
+
+  function getSessionIdFromCookie(cookie: string): string {
+    const cookiePair = cookie.split(';')[0];
+    const value = cookiePair.split('=')[1] ?? '';
+    const dotIndex = value.indexOf('.');
+
+    if (dotIndex === -1) {
+      throw new Error('Refresh cookie did not include session id');
+    }
+
+    return value.slice(0, dotIndex);
   }
 
   async function loginAndStoreSession(password = TEST_USER.password) {
@@ -78,6 +139,15 @@ describe('Auth (e2e)', () => {
 
     storeSessionFromAuthResponse(res);
     return res;
+  }
+
+  async function loginSession(password = currentPassword) {
+    const res = await publicPost('/auth/login', {
+      email: TEST_USER.email,
+      password,
+    }).expect(200);
+
+    return getSessionStateFromAuthResponse(res);
   }
 
   describe('POST /auth/register', () => {
@@ -239,11 +309,8 @@ describe('Auth (e2e)', () => {
         .set('Cookie', refreshCookie)
         .expect(200);
 
-      expect(res.body.accessToken).toBeDefined();
-      accessToken = res.body.accessToken;
-
-      const cookies = res.headers['set-cookie'];
-      refreshCookie = Array.isArray(cookies) ? cookies[0] : cookies;
+      accessToken = getAccessTokenFromResponse(res);
+      refreshCookie = getFirstSetCookieHeader(res);
       expect(refreshCookie).toContain('ritora_refresh');
     });
 
@@ -288,6 +355,7 @@ describe('Auth (e2e)', () => {
         token,
         newPassword,
       }).expect(200);
+      currentPassword = newPassword;
     });
 
     it('should login with new password', async () => {
@@ -321,32 +389,78 @@ describe('Auth (e2e)', () => {
     });
   });
 
-  describe('Logout', () => {
-    it('should logout current session', async () => {
-      const res = await request(app.getHttpServer())
+  describe('Session revocation', () => {
+    let sessionA: { accessToken: string; refreshCookie: string };
+    let sessionB: { accessToken: string; refreshCookie: string };
+
+    it('should keep other sessions active when logging out from the current device', async () => {
+      sessionA = await loginSession();
+      sessionB = await loginSession();
+
+      const sessionAId = getSessionIdFromCookie(sessionA.refreshCookie);
+      const sessionBId = getSessionIdFromCookie(sessionB.refreshCookie);
+
+      const logoutRes = await request(app.getHttpServer())
         .post('/api/v1/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Authorization', `Bearer ${sessionA.accessToken}`)
         .set('Origin', ORIGIN)
-        .set('Cookie', refreshCookie)
+        .set('Cookie', sessionA.refreshCookie)
         .expect(200);
 
-      expect(res.body.message).toBe('Logged out');
+      expect(logoutRes.body.message).toBe('Logged out');
+
+      await authGetWithToken('/auth/me', sessionA.accessToken).expect(401);
+      await refreshWithCookie(sessionA.refreshCookie).expect(401);
+
+      const refreshRes = await refreshWithCookie(sessionB.refreshCookie).expect(
+        200,
+      );
+      sessionB = getSessionStateFromAuthResponse(refreshRes);
+      accessToken = sessionB.accessToken;
+      refreshCookie = sessionB.refreshCookie;
+
+      const sessionsRes = await authGetWithToken(
+        '/auth/sessions',
+        sessionB.accessToken,
+      ).expect(200);
+
+      expect(Array.isArray(sessionsRes.body)).toBe(true);
+      expect(
+        sessionsRes.body.some(
+          (session: { id: string }) => session.id === sessionAId,
+        ),
+      ).toBe(false);
+      expect(
+        sessionsRes.body.some(
+          (session: { id: string }) => session.id === sessionBId,
+        ),
+      ).toBe(true);
     });
 
-    it('should login again for logout-all test', async () => {
-      await loginAndStoreSession('NewPass1!');
-    });
+    it('should revoke every active session when logging out from all devices', async () => {
+      const sessionC = await loginSession();
 
-    it('should logout all sessions', async () => {
-      const res = await authPost('/auth/logout-all').expect(200);
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/logout-all')
+        .set('Authorization', `Bearer ${sessionB.accessToken}`)
+        .set('Origin', ORIGIN)
+        .set('Cookie', sessionB.refreshCookie)
+        .expect(200);
 
       expect(res.body.message).toBe('All sessions revoked');
+
+      await refreshWithCookie(sessionB.refreshCookie).expect(401);
+      await refreshWithCookie(sessionC.refreshCookie).expect(401);
+
+      await authGetWithToken('/auth/sessions', sessionB.accessToken).expect(
+        401,
+      );
     });
   });
 
   describe('DELETE /auth/account', () => {
     it('should login for deletion test', async () => {
-      await loginAndStoreSession('NewPass1!');
+      await loginAndStoreSession(currentPassword);
     });
 
     it('should reject with wrong password', async () => {
@@ -361,7 +475,7 @@ describe('Auth (e2e)', () => {
       const res = await request(app.getHttpServer())
         .delete('/api/v1/auth/account')
         .set('Authorization', `Bearer ${accessToken}`)
-        .send({ password: 'NewPass1!' })
+        .send({ password: currentPassword })
         .expect(200);
 
       expect(res.body.message).toBe('Account deleted');
@@ -370,7 +484,7 @@ describe('Auth (e2e)', () => {
     it('should reject login after deletion', async () => {
       await publicPost('/auth/login', {
         email: TEST_USER.email,
-        password: 'NewPass1!',
+        password: currentPassword,
       }).expect(401);
     });
   });

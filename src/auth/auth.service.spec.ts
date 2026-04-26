@@ -48,7 +48,7 @@ const mockConfigValues: Record<string, string | number | boolean> = {
   PASSWORD_RESET_EXPIRY: '1h',
   LEGAL_TERMS_VERSION: '1.0.0',
   LEGAL_PRIVACY_VERSION: '1.0.0',
-  FRONTEND_URL: 'http://localhost:3000',
+  WEB_APP_URL: 'http://localhost:3000',
   NODE_ENV: 'development',
   RESEND_API_KEY: 're_test_mock',
 };
@@ -73,16 +73,16 @@ describe('AuthService', () => {
       remove: jest.fn(),
       findByVerificationTokenHash: jest.fn(),
       findByResetTokenHash: jest.fn(),
-    } as Record<string, jest.Mock>;
+    };
 
     jwtService = {
       sign: jest.fn().mockReturnValue('access-token-123'),
-    } as Record<string, jest.Mock>;
+    };
 
     mailService = {
       sendVerificationEmail: jest.fn().mockResolvedValue(undefined),
       sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
-    } as Record<string, jest.Mock>;
+    };
 
     sessionsRepo = {
       create: jest.fn().mockImplementation((data) => data),
@@ -143,8 +143,6 @@ describe('AuthService', () => {
       ...overrides,
     }) as User;
 
-  // --- register ---
-
   describe('register', () => {
     it('creates user, records consents, sends email, and does not create a session', async () => {
       const user = fakeUser();
@@ -167,7 +165,12 @@ describe('AuthService', () => {
       expect(result.message).toContain('Verify your email');
       expect(result.user.email).toBe('test@example.com');
       expect(consentsRepo.save).toHaveBeenCalled();
-      expect(mailService.sendVerificationEmail).toHaveBeenCalled();
+      expect(mailService.sendVerificationEmail).toHaveBeenCalledWith(
+        'test@example.com',
+        expect.any(String),
+        'Jane',
+        'en',
+      );
       expect(sessionsRepo.save).not.toHaveBeenCalled();
     });
 
@@ -188,8 +191,8 @@ describe('AuthService', () => {
     });
 
     it('rejects if terms not accepted', async () => {
-      await expect(
-        service.register({
+      try {
+        await service.register({
           email: 'test@example.com',
           password: 'Password1',
           firstName: 'Jane',
@@ -197,12 +200,25 @@ describe('AuthService', () => {
           preferredLanguage: 'en',
           termsAccepted: false,
           privacyPolicyAccepted: true,
-        }),
-      ).rejects.toThrow(BadRequestException);
+        });
+        fail('Expected registration to reject');
+      } catch (error) {
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect((error as BadRequestException).getResponse()).toEqual(
+          expect.objectContaining({
+            message: [
+              'You must accept the terms of service and privacy policy',
+            ],
+            fieldErrors: {
+              termsAccepted: [
+                'You must accept the terms of service and privacy policy',
+              ],
+            },
+          }),
+        );
+      }
     });
   });
-
-  // --- login ---
 
   describe('login', () => {
     it('returns auth response on valid credentials', async () => {
@@ -219,6 +235,27 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('access-token-123');
       expect(result.user.email).toBe('test@example.com');
       expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('sanitizes stored session metadata from request headers', async () => {
+      const res = mockRes();
+      const user = fakeUser({ email_verified: true });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
+
+      await service.login(
+        'test@example.com',
+        'Password1',
+        asResponse(res),
+        'not-an-ip-address',
+        'Bad\r\nAgent\tValue',
+      );
+
+      expect(sessionsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ip_address: null,
+          user_agent: 'Bad Agent Value',
+        }),
+      );
     });
 
     it('rejects invalid password with generic message', async () => {
@@ -250,8 +287,6 @@ describe('AuthService', () => {
     });
   });
 
-  // --- refreshTokens ---
-
   describe('refreshTokens', () => {
     it('rotates token and returns new access token', async () => {
       const res = mockRes();
@@ -274,11 +309,42 @@ describe('AuthService', () => {
       );
 
       expect(result.accessToken).toBe('access-token-123');
+      expect(result.preferredLanguage).toBe('en');
       expect(sessionsRepo.save).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalled();
     });
 
-    it('revokes all sessions if revoked token is reused', async () => {
+    it('sanitizes refreshed session metadata before saving', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser();
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        ip_address: '127.0.0.1',
+        user_agent: 'Existing Agent',
+        user,
+      });
+
+      await service.refreshTokens(
+        `01SESSION.${secret}`,
+        asResponse(res),
+        'invalid-ip',
+        'Next\r\nAgent',
+      );
+
+      expect(sessionsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ip_address: '127.0.0.1',
+          user_agent: 'Next Agent',
+        }),
+      );
+    });
+
+    it('rejects revoked refresh tokens without revoking other sessions', async () => {
       const res = mockRes();
 
       sessionsRepo.findOne.mockResolvedValue({
@@ -291,7 +357,7 @@ describe('AuthService', () => {
         service.refreshTokens('01SESSION.fakesecret', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
 
-      expect(sessionsRepo.update).toHaveBeenCalled();
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
     });
 
     it('rejects expired session', async () => {
@@ -309,8 +375,6 @@ describe('AuthService', () => {
       ).rejects.toThrow(UnauthorizedException);
     });
   });
-
-  // --- verifyEmail ---
 
   describe('verifyEmail', () => {
     it('marks email as verified on valid token', async () => {
@@ -358,8 +422,6 @@ describe('AuthService', () => {
     });
   });
 
-  // --- forgotPassword ---
-
   describe('forgotPassword', () => {
     it('sends reset email for existing user', async () => {
       usersService.findByEmail.mockResolvedValue(fakeUser());
@@ -367,7 +429,12 @@ describe('AuthService', () => {
       await service.forgotPassword('test@example.com');
 
       expect(usersService.update).toHaveBeenCalled();
-      expect(mailService.sendPasswordResetEmail).toHaveBeenCalled();
+      expect(mailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'test@example.com',
+        expect.any(String),
+        'Jane',
+        'en',
+      );
     });
 
     it('does nothing for unknown email (no info leak)', async () => {
@@ -379,8 +446,6 @@ describe('AuthService', () => {
       expect(mailService.sendPasswordResetEmail).not.toHaveBeenCalled();
     });
   });
-
-  // --- resetPassword ---
 
   describe('resetPassword', () => {
     it('updates password and revokes all sessions', async () => {
@@ -421,24 +486,38 @@ describe('AuthService', () => {
     });
   });
 
-  // --- logout ---
-
   describe('logout', () => {
-    it('revokes session and clears cookie', async () => {
+    it('revokes session only when the refresh token secret matches', async () => {
       const res = mockRes();
+      const secret = 'a'.repeat(64);
       sessionsRepo.findOne.mockResolvedValue({
         id: '01SESSION',
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
         revoked_at: null,
       });
 
-      await service.logout('01SESSION', asResponse(res));
+      await service.logout(`01SESSION.${secret}`, asResponse(res));
 
       expect(sessionsRepo.save).toHaveBeenCalled();
       expect(res.clearCookie).toHaveBeenCalled();
     });
-  });
 
-  // --- logoutAll ---
+    it('clears the cookie without revoking another session on invalid token secret', async () => {
+      const res = mockRes();
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        refresh_token_hash: sha256('a'.repeat(64)),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+      });
+
+      await service.logout(`01SESSION.${'b'.repeat(64)}`, asResponse(res));
+
+      expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(res.clearCookie).toHaveBeenCalled();
+    });
+  });
 
   describe('logoutAll', () => {
     it('revokes all sessions and clears cookie', async () => {
@@ -451,7 +530,31 @@ describe('AuthService', () => {
     });
   });
 
-  // --- exportData ---
+  describe('getSessions', () => {
+    it('masks ip addresses in the routine session list', async () => {
+      sessionsRepo.find.mockResolvedValue([
+        {
+          id: '01SESSION',
+          user_agent: 'Browser',
+          ip_address: '127.0.0.1',
+          created_at: new Date('2024-01-01'),
+          last_used_at: new Date(Date.now() + 60_000),
+          expires_at: new Date(Date.now() + 60_000),
+          revoked_at: null,
+        },
+      ]);
+
+      const result = await service.getSessions('01TESTUSER');
+
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: '01SESSION',
+          ipAddress: '127.0.0.0',
+          userAgent: 'Browser',
+        }),
+      ]);
+    });
+  });
 
   describe('exportData', () => {
     it('returns user, skin profile, consents, and sessions', async () => {
@@ -516,8 +619,6 @@ describe('AuthService', () => {
       ).rejects.toThrow(UnauthorizedException);
     });
   });
-
-  // --- deleteAccount ---
 
   describe('deleteAccount', () => {
     it('deletes user after password confirmation', async () => {

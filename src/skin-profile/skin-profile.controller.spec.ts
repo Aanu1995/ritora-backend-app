@@ -27,25 +27,24 @@ describe('SkinProfileController', () => {
     controller = module.get<SkinProfileController>(SkinProfileController);
   });
 
-  const fakeProfile = (): SkinProfile =>
-    ({
-      id: '01PROFILE',
-      user_id: '01TESTUSER',
-      skin_type: 'oily',
-      skin_tone: null,
-      age_range: null,
-      ethnicity: null,
-      current_concerns: [],
-      known_sensitivities: [],
-      skin_goals: [],
-      country_code: null,
-      city: null,
-      routine_complexity: null,
-      created_at: new Date('2024-01-01'),
-      updated_at: new Date('2024-01-01'),
-      user: { id: '01TESTUSER' } as User,
-      generateId: jest.fn(),
-    }) as SkinProfile;
+  const fakeProfile = (): SkinProfile => ({
+    id: '01PROFILE',
+    user_id: '01TESTUSER',
+    skin_type: 'oily',
+    skin_tone: null,
+    age_range: null,
+    ethnicity: null,
+    current_concerns: [],
+    known_sensitivities: [],
+    skin_goals: [],
+    country_code: null,
+    city: null,
+    routine_complexity: null,
+    created_at: new Date('2024-01-01'),
+    updated_at: new Date('2024-01-01'),
+    user: { id: '01TESTUSER' } as User,
+    generateId: jest.fn(),
+  });
 
   it('getOptions returns all constant arrays', () => {
     const result = controller.getOptions();

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpStatus,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -15,6 +16,15 @@ import { Response } from 'express';
 import type { SignOptions } from 'jsonwebtoken';
 import { IsNull, Repository } from 'typeorm';
 import { ulid } from 'ulid';
+import { type AppLanguage, normalizeLanguage } from '../common/i18n/i18n';
+import {
+  expiresFromDuration,
+  isAfterNow,
+  isBeforeNow,
+  nowDate,
+  toIsoString,
+  toNullableIsoString,
+} from '../common/utils/date';
 import { SkinProfileResponseDto } from '../skin-profile/dto/skin-profile-response.dto';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
@@ -23,6 +33,7 @@ import { UserResponseDto } from '../users/dto/user-response.dto';
 import { UsersService } from '../users/users.service';
 import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
+import { sanitizeIpAddress, sanitizeUserAgent } from './auth-session.utils';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
@@ -45,7 +56,7 @@ export class AuthService {
   private readonly passwordResetExpiry: string;
   private readonly termsVersion: string;
   private readonly privacyVersion: string;
-  private readonly frontendUrl: string;
+  private readonly webAppUrl: string;
   private readonly nodeEnv: string;
 
   constructor(
@@ -80,10 +91,7 @@ export class AuthService {
     this.passwordResetExpiry = configService.get('PASSWORD_RESET_EXPIRY', '1h');
     this.termsVersion = configService.get('LEGAL_TERMS_VERSION', '1.0.0');
     this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
-    this.frontendUrl = configService.get(
-      'FRONTEND_URL',
-      'http://localhost:3000',
-    );
+    this.webAppUrl = configService.get('WEB_APP_URL', 'http://localhost:3000');
     this.nodeEnv = configService.get('NODE_ENV', 'development');
   }
 
@@ -100,9 +108,18 @@ export class AuthService {
     ip?: string,
   ): Promise<RegisterResponseDto> {
     if (!dto.termsAccepted || !dto.privacyPolicyAccepted) {
-      throw new BadRequestException(
-        'You must accept the terms of service and privacy policy',
-      );
+      const message = 'You must accept the terms of service and privacy policy';
+
+      throw new BadRequestException({
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: [message],
+        fieldErrors: {
+          ...(!dto.termsAccepted ? { termsAccepted: [message] } : {}),
+          ...(!dto.privacyPolicyAccepted
+            ? { privacyPolicyAccepted: [message] }
+            : {}),
+        },
+      });
     }
 
     const existing = await this.usersService.findByEmail(dto.email);
@@ -133,12 +150,13 @@ export class AuthService {
       user.email,
       verificationToken,
       user.first_name,
+      normalizeLanguage(dto.preferredLanguage),
     );
 
-    return {
-      message: 'Verify your email to activate your account',
-      user: UserResponseDto.fromEntity(user),
-    };
+    return new RegisterResponseDto(
+      'Verify your email to activate your account',
+      UserResponseDto.fromEntity(user),
+    );
   }
 
   async login(
@@ -167,10 +185,7 @@ export class AuthService {
 
     const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
-    return {
-      accessToken,
-      user: UserResponseDto.fromEntity(user),
-    };
+    return new AuthResponseDto(accessToken, UserResponseDto.fromEntity(user));
   }
 
   async refreshTokens(
@@ -178,7 +193,7 @@ export class AuthService {
     res: Response,
     ip?: string,
     userAgent?: string,
-  ): Promise<{ accessToken: string }> {
+  ): Promise<{ accessToken: string; preferredLanguage: string }> {
     const dotIndex = refreshTokenRaw.indexOf('.');
     if (dotIndex === -1) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -197,13 +212,10 @@ export class AuthService {
     }
 
     if (session.revoked_at) {
-      await this.revokeAllSessions(session.user_id);
-      throw new UnauthorizedException(
-        'Refresh token has been revoked — all sessions invalidated',
-      );
+      throw new UnauthorizedException('Refresh token has been revoked');
     }
 
-    if (session.expires_at < new Date()) {
+    if (isBeforeNow(session.expires_at)) {
       throw new UnauthorizedException('Refresh token expired');
     }
 
@@ -222,21 +234,20 @@ export class AuthService {
     const newSecret = randomBytes(32).toString('hex');
     const newSecretHash = this.sha256(newSecret);
     session.refresh_token_hash = newSecretHash;
-    session.last_used_at = new Date();
-    if (ip) {
-      session.ip_address = ip;
-    }
-    if (userAgent) {
-      session.user_agent = userAgent;
-    }
+    session.last_used_at = nowDate();
+    session.ip_address = sanitizeIpAddress(ip) ?? session.ip_address;
+    session.user_agent = sanitizeUserAgent(userAgent) ?? session.user_agent;
     await this.sessionsRepository.save(session);
 
     const newRefreshToken = `${session.id}.${newSecret}`;
     this.setRefreshCookie(res, newRefreshToken);
 
-    const accessToken = this.generateAccessToken(session.user);
+    const accessToken = this.generateAccessToken(session.user, session.id);
 
-    return { accessToken };
+    return {
+      accessToken,
+      preferredLanguage: session.user.preferred_language,
+    };
   }
 
   async verifyEmail(token: string): Promise<void> {
@@ -251,7 +262,7 @@ export class AuthService {
       throw new BadRequestException('Invalid verification token');
     }
 
-    if (user.email_verification_expires < new Date()) {
+    if (isBeforeNow(user.email_verification_expires)) {
       throw new BadRequestException('Verification token has expired');
     }
 
@@ -262,7 +273,10 @@ export class AuthService {
     });
   }
 
-  async resendVerification(email: string): Promise<void> {
+  async resendVerification(
+    email: string,
+    language?: AppLanguage,
+  ): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user || user.email_verified) {
       return;
@@ -280,10 +294,11 @@ export class AuthService {
       user.email,
       verificationToken,
       user.first_name,
+      language ?? normalizeLanguage(user.preferred_language),
     );
   }
 
-  async forgotPassword(email: string): Promise<void> {
+  async forgotPassword(email: string, language?: AppLanguage): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
       return;
@@ -301,6 +316,7 @@ export class AuthService {
       user.email,
       resetToken,
       user.first_name,
+      language ?? normalizeLanguage(user.preferred_language),
     );
   }
 
@@ -316,7 +332,7 @@ export class AuthService {
       throw new BadRequestException('Invalid reset token');
     }
 
-    if (user.password_reset_expires < new Date()) {
+    if (isBeforeNow(user.password_reset_expires)) {
       throw new BadRequestException('Reset token has expired');
     }
 
@@ -331,16 +347,37 @@ export class AuthService {
     await this.revokeAllSessions(user.id);
   }
 
-  async logout(sessionId: string, res: Response): Promise<void> {
-    const session = await this.sessionsRepository.findOne({
-      where: { id: sessionId },
-    });
+  async logout(refreshTokenRaw: string, res: Response): Promise<void> {
+    const parsedRefreshToken = this.parseRefreshToken(refreshTokenRaw);
 
-    if (session && !session.revoked_at) {
-      session.revoked_at = new Date();
-      await this.sessionsRepository.save(session);
+    if (!parsedRefreshToken) {
+      this.clearRefreshCookie(res);
+      return;
     }
 
+    const session = await this.sessionsRepository.findOne({
+      where: { id: parsedRefreshToken.sessionId },
+    });
+
+    if (!session || session.revoked_at || isBeforeNow(session.expires_at)) {
+      this.clearRefreshCookie(res);
+      return;
+    }
+
+    const secretHash = this.sha256(parsedRefreshToken.secret);
+    const storedHash = session.refresh_token_hash;
+    const secretsMatch = this.timingSafeCompare(
+      Buffer.from(secretHash, 'hex'),
+      Buffer.from(storedHash, 'hex'),
+    );
+
+    if (!secretsMatch) {
+      this.clearRefreshCookie(res);
+      return;
+    }
+
+    session.revoked_at = nowDate();
+    await this.sessionsRepository.save(session);
     this.clearRefreshCookie(res);
   }
 
@@ -364,7 +401,7 @@ export class AuthService {
     });
 
     return sessions
-      .filter((s) => s.expires_at > new Date())
+      .filter((s) => isAfterNow(s.expires_at))
       .map((session) => SessionResponseDto.fromEntity(session));
   }
 
@@ -402,17 +439,17 @@ export class AuthService {
         consentType: c.consent_type,
         consentVersion: c.consent_version,
         granted: c.granted,
-        grantedAt: c.granted_at?.toISOString() ?? null,
-        revokedAt: c.revoked_at?.toISOString() ?? null,
-        createdAt: c.created_at.toISOString(),
+        grantedAt: toNullableIsoString(c.granted_at),
+        revokedAt: toNullableIsoString(c.revoked_at),
+        createdAt: toIsoString(c.created_at),
       })),
       sessions: sessions.map((s) => ({
         id: s.id,
         userAgent: s.user_agent,
         ipAddress: s.ip_address,
-        createdAt: s.created_at.toISOString(),
-        lastUsedAt: s.last_used_at.toISOString(),
-        revokedAt: s.revoked_at?.toISOString() ?? null,
+        createdAt: toIsoString(s.created_at),
+        lastUsedAt: toIsoString(s.last_used_at),
+        revokedAt: toNullableIsoString(s.revoked_at),
       })),
     };
   }
@@ -436,8 +473,6 @@ export class AuthService {
     this.clearRefreshCookie(res);
   }
 
-  // --- Private helpers ---
-
   private async createSession(
     user: User,
     res: Response,
@@ -454,23 +489,23 @@ export class AuthService {
       user_id: user.id,
       refresh_token_hash: secretHash,
       expires_at: this.expiresIn(this.jwtRefreshExpiry),
-      user_agent: userAgent ?? null,
-      ip_address: ip ?? null,
-      last_used_at: new Date(),
+      user_agent: sanitizeUserAgent(userAgent),
+      ip_address: sanitizeIpAddress(ip),
+      last_used_at: nowDate(),
     });
     await this.sessionsRepository.save(session);
 
     this.setRefreshCookie(res, refreshToken);
-    const accessToken = this.generateAccessToken(user);
+    const accessToken = this.generateAccessToken(user, sessionId);
 
     return { accessToken };
   }
 
-  private generateAccessToken(user: User): string {
+  private generateAccessToken(user: User, sessionId: string): string {
     const expiresIn = this.jwtAccessExpiry as SignOptions['expiresIn'];
 
     return this.jwtService.sign(
-      { sub: user.id, email: user.email },
+      { sub: user.id, email: user.email, sid: sessionId },
       {
         expiresIn,
         issuer: this.jwtIssuer,
@@ -480,53 +515,21 @@ export class AuthService {
   }
 
   private setRefreshCookie(res: Response, token: string): void {
-    const cookieOptions: {
-      httpOnly: boolean;
-      secure: boolean;
-      sameSite: 'lax' | 'strict' | 'none';
-      path: string;
-      maxAge: number;
-      domain?: string;
-    } = {
-      httpOnly: true,
-      secure: this.cookieSecure,
-      sameSite: this.cookieSameSite,
-      path: '/api/v1/auth',
-      maxAge: this.parseExpiryMs(this.jwtRefreshExpiry),
-    };
-
-    if (this.cookieDomain) {
-      cookieOptions.domain = this.cookieDomain;
-    }
-
-    res.cookie(this.cookieRefreshName, token, cookieOptions);
+    res.cookie(
+      this.cookieRefreshName,
+      token,
+      this.getRefreshCookieOptions(this.parseExpiryMs(this.jwtRefreshExpiry)),
+    );
   }
 
-  private clearRefreshCookie(res: Response): void {
-    const cookieOptions: {
-      httpOnly: boolean;
-      secure: boolean;
-      sameSite: 'lax' | 'strict' | 'none';
-      path: string;
-      domain?: string;
-    } = {
-      httpOnly: true,
-      secure: this.cookieSecure,
-      sameSite: this.cookieSameSite,
-      path: '/api/v1/auth',
-    };
-
-    if (this.cookieDomain) {
-      cookieOptions.domain = this.cookieDomain;
-    }
-
-    res.clearCookie(this.cookieRefreshName, cookieOptions);
+  clearRefreshCookie(res: Response): void {
+    res.clearCookie(this.cookieRefreshName, this.getRefreshCookieOptions());
   }
 
   private async revokeAllSessions(userId: string): Promise<void> {
     await this.sessionsRepository.update(
       { user_id: userId, revoked_at: IsNull() },
-      { revoked_at: new Date() },
+      { revoked_at: nowDate() },
     );
   }
 
@@ -535,7 +538,8 @@ export class AuthService {
     ip: string | undefined,
     consents: { type: string; version: string }[],
   ): Promise<void> {
-    const now = new Date();
+    const now = nowDate();
+    const sanitizedIp = sanitizeIpAddress(ip);
     const entities = consents.map((c) =>
       this.consentsRepository.create({
         id: ulid(),
@@ -544,7 +548,7 @@ export class AuthService {
         consent_version: c.version,
         granted: true,
         granted_at: now,
-        ip_address: ip ?? null,
+        ip_address: sanitizedIp,
       }),
     );
     await this.consentsRepository.save(entities);
@@ -564,9 +568,15 @@ export class AuthService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     try {
-      await this.mailService.sendVerificationEmail(email, token, firstName);
+      await this.mailService.sendVerificationEmail(
+        email,
+        token,
+        firstName,
+        language,
+      );
     } catch (error) {
       this.logEmailDeliveryFailure(
         'verification',
@@ -581,9 +591,15 @@ export class AuthService {
     email: string,
     token: string,
     firstName: string,
+    language: AppLanguage,
   ): Promise<void> {
     try {
-      await this.mailService.sendPasswordResetEmail(email, token, firstName);
+      await this.mailService.sendPasswordResetEmail(
+        email,
+        token,
+        firstName,
+        language,
+      );
     } catch (error) {
       this.logEmailDeliveryFailure(
         'password reset',
@@ -620,13 +636,13 @@ export class AuthService {
   }
 
   private buildFrontendActionUrl(path: string, token: string): string {
-    const url = new URL(path, `${this.frontendUrl}/`);
+    const url = new URL(path, `${this.webAppUrl}/`);
     url.searchParams.set('token', token);
     return url.toString();
   }
 
   private buildFrontendPathActionUrl(path: string, token: string): string {
-    const base = new URL(this.frontendUrl);
+    const base = new URL(this.webAppUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
     base.search = '';
@@ -638,6 +654,21 @@ export class AuthService {
     return createHash('sha256').update(data).digest('hex');
   }
 
+  private parseRefreshToken(
+    refreshTokenRaw: string,
+  ): { sessionId: string; secret: string } | null {
+    const dotIndex = refreshTokenRaw.indexOf('.');
+
+    if (dotIndex <= 0 || dotIndex === refreshTokenRaw.length - 1) {
+      return null;
+    }
+
+    return {
+      sessionId: refreshTokenRaw.substring(0, dotIndex),
+      secret: refreshTokenRaw.substring(dotIndex + 1),
+    };
+  }
+
   private timingSafeCompare(a: Buffer, b: Buffer): boolean {
     if (a.length !== b.length) {
       return false;
@@ -646,7 +677,7 @@ export class AuthService {
   }
 
   private expiresIn(duration: string): Date {
-    return new Date(Date.now() + this.parseExpiryMs(duration));
+    return expiresFromDuration(duration);
   }
 
   private parseExpiryMs(duration: string): number {
@@ -670,5 +701,38 @@ export class AuthService {
       default:
         return 15 * 60 * 1000;
     }
+  }
+
+  private getRefreshCookieOptions(maxAge?: number): {
+    domain?: string;
+    httpOnly: boolean;
+    maxAge?: number;
+    path: string;
+    sameSite: 'lax' | 'strict' | 'none';
+    secure: boolean;
+  } {
+    const cookieOptions: {
+      domain?: string;
+      httpOnly: boolean;
+      maxAge?: number;
+      path: string;
+      sameSite: 'lax' | 'strict' | 'none';
+      secure: boolean;
+    } = {
+      httpOnly: true,
+      secure: this.cookieSecure,
+      sameSite: this.cookieSameSite,
+      path: '/api/v1/auth',
+    };
+
+    if (maxAge !== undefined) {
+      cookieOptions.maxAge = maxAge;
+    }
+
+    if (this.cookieDomain) {
+      cookieOptions.domain = this.cookieDomain;
+    }
+
+    return cookieOptions;
   }
 }

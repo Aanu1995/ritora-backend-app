@@ -48,7 +48,7 @@ describe('OriginCheckGuard', () => {
   it('rejects disallowed origins', () => {
     const configService = {
       get: jest.fn((key: string, fallback?: string) =>
-        key === 'FRONTEND_URL' ? 'http://localhost:3000' : fallback,
+        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
       ),
     } as unknown as ConfigService;
     const guard = new OriginCheckGuard(configService);
@@ -63,7 +63,7 @@ describe('OriginCheckGuard', () => {
   it('rejects malformed origin values', () => {
     const configService = {
       get: jest.fn((key: string, fallback?: string) =>
-        key === 'FRONTEND_URL' ? 'http://localhost:3000' : fallback,
+        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
       ),
     } as unknown as ConfigService;
     const guard = new OriginCheckGuard(configService);
@@ -71,6 +71,25 @@ describe('OriginCheckGuard', () => {
     expect(() =>
       guard.canActivate(
         createContext({ origin: 'not a url', referer: undefined }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('rejects cross-site browser requests before origin fallback', () => {
+    const configService = {
+      get: jest.fn((key: string, fallback?: string) =>
+        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
+      ),
+    } as unknown as ConfigService;
+    const guard = new OriginCheckGuard(configService);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          origin: 'http://localhost:3000',
+          referer: undefined,
+          'sec-fetch-site': 'cross-site',
+        }),
       ),
     ).toThrow(ForbiddenException);
   });

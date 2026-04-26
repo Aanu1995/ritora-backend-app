@@ -8,6 +8,10 @@
       {
         "include": "mail/templates/**/*",
         "watchAssets": true
+      },
+      {
+        "include": "ingredients/seed/*.json",
+        "watchAssets": true
       }
     ]
   }

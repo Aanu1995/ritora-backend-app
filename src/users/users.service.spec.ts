@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -199,6 +199,113 @@ describe('UsersService', () => {
         }),
       );
       expect(result).toEqual(updated);
+    });
+  });
+
+  describe('updatePreferredLanguage', () => {
+    it('normalizes the preferred language before saving', async () => {
+      const existing = {
+        id: '01',
+        preferred_language: 'en',
+      } as User;
+      const updated = {
+        ...existing,
+        preferred_language: 'sv',
+      } as User;
+
+      repo.findOne.mockResolvedValue(existing);
+      repo.save.mockResolvedValue(updated);
+
+      const result = await service.updatePreferredLanguage('01', '  SV  ');
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          preferred_language: 'sv',
+        }),
+      );
+      expect(result).toEqual(updated);
+    });
+  });
+
+  describe('updateTimeZone', () => {
+    it('trims the timezone before saving', async () => {
+      const existing = {
+        id: '01',
+        time_zone: null,
+      } as User;
+      const updated = {
+        ...existing,
+        time_zone: 'Europe/Stockholm',
+      } as User;
+
+      repo.findOne.mockResolvedValue(existing);
+      repo.save.mockResolvedValue(updated);
+
+      const result = await service.updateTimeZone('01', ' Europe/Stockholm ');
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          time_zone: 'Europe/Stockholm',
+        }),
+      );
+      expect(result).toEqual(updated);
+    });
+
+    it('rejects unsupported timezones', async () => {
+      await expect(service.updateTimeZone('01', '+01:00')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('captureTimeZoneIfMissing', () => {
+    it('persists the timezone when the user does not have one yet', async () => {
+      const updated = { id: '01', time_zone: 'Europe/Stockholm' } as User;
+      const execute = jest.fn().mockResolvedValue({ affected: 1 });
+      const andWhere = jest.fn().mockReturnValue({ execute });
+      const where = jest.fn().mockReturnValue({ andWhere });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      repo.createQueryBuilder.mockReturnValue({ update } as never);
+      repo.findOne.mockResolvedValue(updated);
+
+      const result = await service.captureTimeZoneIfMissing(
+        '01',
+        'Europe/Stockholm',
+      );
+
+      expect(update).toHaveBeenCalledWith(User);
+      expect(set).toHaveBeenCalledWith({ time_zone: 'Europe/Stockholm' });
+      expect(where).toHaveBeenCalledWith('id = :id', { id: '01' });
+      expect(andWhere).toHaveBeenCalledWith('time_zone IS NULL');
+      expect(result).toEqual(updated);
+    });
+
+    it('does not overwrite an existing timezone', async () => {
+      const existing = { id: '01', time_zone: 'America/New_York' } as User;
+      const execute = jest.fn().mockResolvedValue({ affected: 0 });
+      const andWhere = jest.fn().mockReturnValue({ execute });
+      const where = jest.fn().mockReturnValue({ andWhere });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      repo.createQueryBuilder.mockReturnValue({ update } as never);
+      repo.findOne.mockResolvedValue(existing);
+
+      const result = await service.captureTimeZoneIfMissing(
+        '01',
+        'Europe/Stockholm',
+      );
+
+      expect(set).toHaveBeenCalledWith({ time_zone: 'Europe/Stockholm' });
+      expect(result).toEqual(existing);
+    });
+
+    it('rejects unsupported timezones before attempting capture', async () => {
+      await expect(
+        service.captureTimeZoneIfMissing('01', '+01:00'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(repo.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 

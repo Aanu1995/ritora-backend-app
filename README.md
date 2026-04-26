@@ -1,27 +1,17 @@
 # Ritora Backend API
 
-Ritora's backend is a NestJS API that handles authentication, secure session management, email verification, password reset, consent recording, skin profile storage, and health checks for the web app in `../ritora-user-webapp`.
+Ritora's backend is a NestJS API for authentication, user settings, skin profiles, schedule management, shelf inventory, and photo-first product extraction for the frontend in `../ritora-user-webapp`.
 
 ## Current modules
 
-- `auth` - registration, login, refresh, logout, verification, password reset, session listing, data export, account deletion
+- `auth` - registration, login, refresh, logout, logout-all, verification, password reset, session listing, data export, and account deletion
+- `users` - current-user profile, preferred language, and time-zone updates
 - `skin-profile` - options lookup plus create, read, update, and delete for a user's skin profile
-- `health` - public health check endpoint
-- `mail` - verification and password-reset email delivery
-
-## Security model
-
-The current backend keeps authentication in-house and is designed to avoid the common pitfalls of a homegrown auth system:
-
-- Passwords are hashed with bcrypt before they are stored
-- Password hashes and token hashes are excluded from normal entity selection with `select: false`
-- Email-verification and password-reset tokens are random, single-use, and expiry-limited
-- Only token hashes are stored in the database
-- Registration does not create an authenticated session
-- Login is blocked until the email address has been verified
-- Refresh tokens are rotated and stored in an HTTP-only cookie
-- Helmet, CORS, request validation, throttling, and global exception handling are enabled
-- Verification and reset links use URL fragments such as `#token=...` so tokens do not travel as query params to the frontend server
+- `schedule` - slot CRUD, presets, movement, and routine-step management
+- `inventory` - shelf product CRUD, stats, filtering, bulk actions, and direct product-image upload
+- `catalogue` - photo-first product extraction, official-page completion, and product media handling
+- `mail` - verification and reset email delivery
+- `health` - public health endpoint
 
 ## Tech stack
 
@@ -29,9 +19,22 @@ The current backend keeps authentication in-house and is designed to avoid the c
 - TypeORM
 - PostgreSQL
 - JWT access tokens + rotating refresh-token cookies
-- Resend Email API + Handlebars templates
-- Swagger/OpenAPI
+- Resend email delivery + Handlebars templates
+- OpenAI Responses API for product extraction
+- Sharp for product-photo processing
+- AWS S3 + private CloudFront media support
 - Jest + Supertest
+
+## Security model
+
+- Passwords are hashed with bcrypt before storage.
+- Password hashes, reset token hashes, and verification token hashes are not selected in normal entity reads.
+- Refresh tokens are rotated and stored as hashes in `auth_sessions`.
+- Cookie-affecting auth routes use origin checks in addition to CORS.
+- Helmet, validation, throttling, exception filtering, and JWT guards are enabled globally.
+- Inventory, schedule, skin-profile, and user endpoints are scoped to the authenticated user.
+- Product and manufacturer URLs are validated before they are accepted into shelf payloads.
+- Environment validation is strict in production for JWT, cookie, CORS, and web-app origin settings.
 
 ## Prerequisites
 
@@ -41,28 +44,33 @@ The current backend keeps authentication in-house and is designed to avoid the c
 
 ## Environment
 
-Create `/.env` from `/.env.example` and fill in the secrets you need:
+Create `/.env` from `/.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-Important groups:
+Important variable groups:
 
 - Database: `DATABASE_*`
+- Web app / CORS: `WEB_APP_URL`, `CORS_ORIGINS`
 - JWT: `JWT_SECRET`, `JWT_REFRESH_SECRET`, expiry, issuer, audience
-- Cookie policy: `COOKIE_*`
+- Cookies: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
-- Mail delivery: `RESEND_API_KEY`, `MAIL_FROM`
-- Frontend origin: `FRONTEND_URL`
+- Mail: `RESEND_API_KEY`, `MAIL_FROM`
+- OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`
+- Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
+- Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
+- Product media: `AWS_REGION`, `PRODUCT_MEDIA_*`
 - Legal consent versions: `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`
 
-Production validation is intentionally strict:
+Production validation requires:
 
-- `FRONTEND_URL` must be HTTPS
-- `COOKIE_SECURE` must be `true`
-- JWT secrets must be set and long enough
-- `MAIL_FROM` must be a valid email address
+- `WEB_APP_URL` to be HTTPS
+- `COOKIE_SECURE=true`
+- non-empty strong JWT secrets
+- a valid `MAIL_FROM`
+- valid `CORS_ORIGINS` when configured
 
 ## Local development
 
@@ -81,7 +89,7 @@ createdb ritora_test
 
 3. Configure `/.env`.
 
-At minimum, confirm these values:
+Minimum local values:
 
 ```bash
 DATABASE_HOST=localhost
@@ -89,13 +97,13 @@ DATABASE_PORT=5432
 DATABASE_NAME=ritora
 DATABASE_USER=postgres
 DATABASE_PASSWORD=your-local-password
-FRONTEND_URL=http://localhost:3000
+WEB_APP_URL=http://localhost:3000
 CORS_ORIGINS=http://localhost:3000
+JWT_SECRET=dev-jwt-secret-change-me
+JWT_REFRESH_SECRET=dev-refresh-secret-change-me
 ```
 
-`/.env.test` is already configured for `ritora_test`. If `DATABASE_PASSWORD` is omitted there, local test runs can inherit it from `/.env`.
-
-4. Run database migrations.
+4. Run migrations.
 
 ```bash
 npm run migration:run
@@ -107,43 +115,35 @@ npm run migration:run
 npm run start:dev
 ```
 
-6. Open:
+6. Useful local URLs:
 
 - API base: `http://localhost:3001/api/v1`
-- Swagger docs: `http://localhost:3001/api/docs`
-- Health check: `http://localhost:3001/api/v1/health`
+- Health: `http://localhost:3001/api/v1/health`
+- Swagger: `http://localhost:3001/api/docs` when `SWAGGER_ENABLED=true`
+
+## Product photos and media
+
+- Product extraction is photo-first through `POST /catalogue/products/extract-from-images`.
+- Product images are normalized with Sharp before extraction and storage.
+- Persistent product-image storage is remote-only.
+- Set `PRODUCT_MEDIA_BUCKET`, `PRODUCT_MEDIA_CLOUDFRONT_URL`, `PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID`, and `PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY` to enable saved product images.
+- Without remote media config, product extraction can still return structured data, but persistent image saving is unavailable.
 
 ## Email delivery
 
-The backend sends verification and reset emails through the Resend Email API.
+- Verification and reset emails are sent through Resend.
+- In development, failed email delivery logs fallback action URLs so auth flows can still be tested.
 
-For local development:
+## API areas
 
-- set `RESEND_API_KEY` in `/.env`
-- use `MAIL_FROM=onboarding@resend.dev` for initial testing
+Auth:
 
-For production:
-
-- use a verified sender domain in Resend, such as `noreply@ritora.com`
-- keep `MAIL_FROM` aligned with that verified domain
-
-If email delivery fails in development, the API logs a fallback verification or reset URL so you can keep testing while fixing your Resend configuration.
-
-## Auth flow summary
-
-1. `POST /auth/register`
-   Creates an unverified user, records required consent versions, and sends a verification email.
-2. `POST /auth/verify-email`
-   Activates the account by validating the one-time token.
-3. `POST /auth/login`
-   Returns an access token and sets the refresh cookie, but only for verified users.
-4. `POST /auth/refresh`
-   Rotates the refresh token and returns a fresh access token.
-5. `POST /auth/logout` and `POST /auth/logout-all`
-   Revokes the current or all sessions.
-
-Other account endpoints include:
-
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/logout-all`
+- `POST /auth/verify-email`
 - `POST /auth/resend-verification`
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
@@ -152,7 +152,14 @@ Other account endpoints include:
 - `POST /auth/export`
 - `DELETE /auth/account`
 
-## Skin profile endpoints
+Users:
+
+- `GET /users/me`
+- `PATCH /users/me`
+- `PATCH /users/me/language`
+- `PATCH /users/me/time-zone`
+
+Skin profile:
 
 - `GET /skin-profile/options`
 - `GET /skin-profile`
@@ -160,7 +167,38 @@ Other account endpoints include:
 - `PATCH /skin-profile`
 - `DELETE /skin-profile`
 
-These routes are authenticated. The public `options` endpoint exposes the allowed enums used by the frontend form.
+Schedule:
+
+- `GET /schedule`
+- `GET /schedule/today`
+- `POST /schedule/slots`
+- `POST /schedule/slots/batch`
+- `POST /schedule/apply-preset`
+- `PATCH /schedule/slots/:id`
+- `DELETE /schedule/slots/:id`
+- `PUT /schedule/slots/:id/steps`
+- `POST /schedule/slots/:id/move`
+
+Shelf / inventory:
+
+- `GET /inventory/products`
+- `GET /inventory/products/stats`
+- `POST /inventory/products`
+- `POST /inventory/products/upload-image`
+- `GET /inventory/products/:id`
+- `PATCH /inventory/products/:id`
+- `POST /inventory/products/:id/archive`
+- `POST /inventory/products/:id/restore`
+- `POST /inventory/products/:id/mark-finished`
+- `DELETE /inventory/products/:id`
+- `POST /inventory/products/bulk/archive`
+- `POST /inventory/products/bulk/restore`
+- `POST /inventory/products/bulk/mark-finished`
+- `POST /inventory/products/bulk-delete`
+
+Catalogue:
+
+- `POST /catalogue/products/extract-from-images`
 
 ## Scripts
 
@@ -184,29 +222,30 @@ npm run migration:revert
 npm run migration:generate -- src/database/migrations/YourMigrationName
 ```
 
-Note: `npm run lint` runs ESLint with `--fix`, so it can rewrite files.
+Notes:
+
+- `npm run lint` runs ESLint with `--fix`.
+- The backend currently uses dependency overrides to pin secure transitive versions for `fast-xml-parser` and `uuid`.
 
 ## Testing
 
-- Unit and controller/service tests run with `npm run test`
-- Coverage runs with `npm run test:cov`
-- End-to-end runs with `npm run test:e2e`
-
-E2E notes:
-
-- Uses `/.env.test`
-- Expects the `ritora_test` database
-- Runs serially with `maxWorkers: 1` to avoid cross-suite database interference
-- Mail delivery is mocked in tests
+- `npm run test` runs unit and service/controller tests.
+- `npm run test:e2e` runs the full API e2e suite, including shelf/inventory coverage.
+- `/.env.test` is used for e2e and expects the `ritora_test` database.
+- E2E runs serially with `maxWorkers: 1`.
 
 ## Project layout
 
-- `src/auth` - auth controllers, services, DTOs, sessions, strategies
-- `src/skin-profile` - skin profile DTOs, controller, service, entity
-- `src/users` - user entity, consent entity, and user service
-- `src/mail` - mail service and Handlebars templates
-- `src/database` - TypeORM data source and migrations
-- `test` - e2e test setup and specs
+- `src/auth` - auth controllers, services, DTOs, strategy, sessions
+- `src/users` - user and consent entities plus user service/controller
+- `src/skin-profile` - skin profile DTOs, entity, service, controller
+- `src/schedule` - schedule entities, DTOs, controller, service
+- `src/inventory` - shelf entities, DTOs, controller, service, list/snapshot helpers
+- `src/catalogue` - photo extraction, official-page completion, media processing/storage
+- `src/mail` - email service and templates
+- `src/common` - guards, filters, interceptors, utilities, i18n
+- `src/database` - data source and migrations
+- `test` - backend e2e setup and specs
 
 ## Related repo
 

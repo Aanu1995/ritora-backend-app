@@ -12,7 +12,9 @@ const mockStatus = jest.fn().mockImplementation(() => ({
   json: mockJson,
 }));
 const mockGetResponse = jest.fn().mockReturnValue({ status: mockStatus });
-const mockGetRequest = jest.fn().mockReturnValue({ url: '/api/v1/test' });
+const mockGetRequest = jest
+  .fn()
+  .mockReturnValue({ url: '/api/v1/test', headers: {}, body: {} });
 
 const mockHost = {
   switchToHttp: jest.fn().mockReturnValue({
@@ -59,7 +61,31 @@ describe('GlobalExceptionFilter', () => {
     expect(mockStatus).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
     expect(mockJson).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: ['email must be an email'],
+        message: ['Enter a valid email address'],
+      }),
+    );
+  });
+
+  it('translates structured field errors when present', () => {
+    const exception = new HttpException(
+      {
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: ['validation.email.invalid'],
+        fieldErrors: {
+          email: ['validation.email.invalid'],
+        },
+      },
+      HttpStatus.BAD_REQUEST,
+    );
+
+    filter.catch(exception, mockHost);
+
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: ['Enter a valid email address'],
+        fieldErrors: {
+          email: ['Enter a valid email address'],
+        },
       }),
     );
   });
@@ -80,6 +106,30 @@ describe('GlobalExceptionFilter', () => {
       expect.objectContaining({
         code: 'EMAIL_NOT_VERIFIED',
         message: 'Email not verified',
+      }),
+    );
+  });
+
+  it('translates messages using the request language', () => {
+    mockGetRequest.mockReturnValueOnce({
+      url: '/api/v1/auth/login',
+      headers: {},
+      body: { language: 'sv' },
+    });
+
+    const exception = new HttpException(
+      {
+        statusCode: HttpStatus.UNAUTHORIZED,
+        message: 'Invalid credentials',
+      },
+      HttpStatus.UNAUTHORIZED,
+    );
+
+    filter.catch(exception, mockHost);
+
+    expect(mockJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Ogiltiga inloggningsuppgifter',
       }),
     );
   });

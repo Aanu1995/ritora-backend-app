@@ -2,6 +2,17 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import {
+  buildTimeZonePatch,
+  normalizeEmail,
+  normalizePreferredLanguage,
+  normalizeProfileName,
+} from './users.service.utils';
+
+type AuthUserLookup = {
+  clause: string;
+  params: Record<string, string>;
+};
 
 @Injectable()
 export class UsersService {
@@ -12,18 +23,15 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.usersRepository.findOne({
-      where: { email: email.toLowerCase().trim() },
+      where: { email: normalizeEmail(email) },
     });
   }
 
   async findByEmailForAuth(email: string): Promise<User | null> {
-    return this.usersRepository
-      .createQueryBuilder('user')
-      .addSelect('user.password_hash')
-      .where('LOWER(user.email) = :email', {
-        email: email.toLowerCase().trim(),
-      })
-      .getOne();
+    return this.findForAuth({
+      clause: 'LOWER(user.email) = :email',
+      params: { email: normalizeEmail(email) },
+    });
   }
 
   async findById(id: string): Promise<User | null> {
@@ -40,11 +48,10 @@ export class UsersService {
   }
 
   async findByIdForAuth(id: string): Promise<User | null> {
-    return this.usersRepository
-      .createQueryBuilder('user')
-      .addSelect('user.password_hash')
-      .where('user.id = :id', { id })
-      .getOne();
+    return this.findForAuth({
+      clause: 'user.id = :id',
+      params: { id },
+    });
   }
 
   async create(data: {
@@ -56,17 +63,17 @@ export class UsersService {
     email_verification_token_hash?: string;
     email_verification_expires?: Date;
   }): Promise<User> {
-    const user = this.usersRepository.create({
-      ...data,
-      email: data.email.toLowerCase().trim(),
-    });
-    return this.usersRepository.save(user);
+    return this.usersRepository.save(
+      this.usersRepository.create({
+        ...data,
+        email: normalizeEmail(data.email),
+      }),
+    );
   }
 
   async update(id: string, data: Partial<User>): Promise<User> {
     const user = await this.findByIdOrFail(id);
-    Object.assign(user, data);
-    return this.usersRepository.save(user);
+    return this.saveUserPatch(user, data);
   }
 
   async updateProfile(
@@ -74,9 +81,36 @@ export class UsersService {
     data: { firstName: string; lastName: string },
   ): Promise<User> {
     return this.update(id, {
-      first_name: data.firstName.trim(),
-      last_name: data.lastName.trim(),
+      first_name: normalizeProfileName(data.firstName),
+      last_name: normalizeProfileName(data.lastName),
     });
+  }
+
+  async updatePreferredLanguage(
+    id: string,
+    preferredLanguage: string,
+  ): Promise<User> {
+    return this.update(id, {
+      preferred_language: normalizePreferredLanguage(preferredLanguage),
+    });
+  }
+
+  async updateTimeZone(id: string, timeZone: string): Promise<User> {
+    return this.update(id, buildTimeZonePatch(timeZone));
+  }
+
+  async captureTimeZoneIfMissing(id: string, timeZone: string): Promise<User> {
+    const timeZonePatch = buildTimeZonePatch(timeZone);
+
+    await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set(timeZonePatch)
+      .where('id = :id', { id })
+      .andWhere('time_zone IS NULL')
+      .execute();
+
+    return this.findByIdOrFail(id);
   }
 
   async findByVerificationTokenHash(hash: string): Promise<User | null> {
@@ -94,5 +128,21 @@ export class UsersService {
   async remove(id: string): Promise<void> {
     const user = await this.findByIdOrFail(id);
     await this.usersRepository.remove(user);
+  }
+
+  private findForAuth({
+    clause,
+    params,
+  }: AuthUserLookup): Promise<User | null> {
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password_hash')
+      .where(clause, params)
+      .getOne();
+  }
+
+  private saveUserPatch(user: User, data: Partial<User>): Promise<User> {
+    Object.assign(user, data);
+    return this.usersRepository.save(user);
   }
 }

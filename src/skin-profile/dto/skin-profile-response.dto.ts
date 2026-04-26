@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { toIsoString } from '../../common/utils/date';
 import { SkinProfile } from '../entities/skin-profile.entity';
 
 export class SkinProfileResponseDto {
@@ -41,21 +42,51 @@ export class SkinProfileResponseDto {
   @ApiProperty()
   updatedAt: string;
 
+  constructor(
+    id: string,
+    skinType: string | null,
+    skinTone: string | null,
+    ageRange: string | null,
+    ethnicity: string | null,
+    currentConcerns: string[],
+    knownSensitivities: string[],
+    skinGoals: string[],
+    countryCode: string | null,
+    city: string | null,
+    routineComplexity: string | null,
+    createdAt: string,
+    updatedAt: string,
+  ) {
+    this.id = id;
+    this.skinType = skinType;
+    this.skinTone = skinTone;
+    this.ageRange = ageRange;
+    this.ethnicity = ethnicity;
+    this.currentConcerns = currentConcerns;
+    this.knownSensitivities = knownSensitivities;
+    this.skinGoals = skinGoals;
+    this.countryCode = countryCode;
+    this.city = city;
+    this.routineComplexity = routineComplexity;
+    this.createdAt = createdAt;
+    this.updatedAt = updatedAt;
+  }
+
   static fromEntity(profile: SkinProfile): SkinProfileResponseDto {
-    const dto = new SkinProfileResponseDto();
-    dto.id = profile.id;
-    dto.skinType = profile.skin_type;
-    dto.skinTone = profile.skin_tone;
-    dto.ageRange = profile.age_range;
-    dto.ethnicity = profile.ethnicity;
-    dto.currentConcerns = profile.current_concerns;
-    dto.knownSensitivities = profile.known_sensitivities;
-    dto.skinGoals = profile.skin_goals;
-    dto.countryCode = profile.country_code;
-    dto.city = profile.city;
-    dto.routineComplexity = profile.routine_complexity;
-    dto.createdAt = profile.created_at.toISOString();
-    dto.updatedAt = profile.updated_at.toISOString();
-    return dto;
+    return new SkinProfileResponseDto(
+      profile.id,
+      profile.skin_type,
+      profile.skin_tone,
+      profile.age_range,
+      profile.ethnicity,
+      profile.current_concerns,
+      profile.known_sensitivities,
+      profile.skin_goals,
+      profile.country_code,
+      profile.city,
+      profile.routine_complexity,
+      toIsoString(profile.created_at),
+      toIsoString(profile.updated_at),
+    );
   }
 }

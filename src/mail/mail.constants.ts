@@ -8,8 +8,3 @@ export enum MailTemplateName {
   Verification = 'verification',
   PasswordReset = 'password-reset',
 }
-
-export const MAIL_SUBJECTS: Record<MailTemplateName, string> = {
-  [MailTemplateName.Verification]: 'Verify your Ritora account',
-  [MailTemplateName.PasswordReset]: 'Reset your Ritora password',
-};

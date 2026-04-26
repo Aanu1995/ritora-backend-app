@@ -2,25 +2,50 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
-import type { Express } from 'express';
+import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
+import { createValidationException } from './common/validation/validation-exception';
+import {
+  CATALOGUE_MEDIA_ROUTE,
+  resolveCatalogueMediaRootDir,
+} from './catalogue/catalogue-media.constants';
+
+function parseCorsOrigins(configService: ConfigService): string[] {
+  const configuredOrigins =
+    configService.get<string>('CORS_ORIGINS')?.trim() ||
+    configService.get<string>('WEB_APP_URL', 'http://localhost:3000');
+
+  return Array.from(
+    new Set(
+      configuredOrigins
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+        .map((origin) => new URL(origin).origin),
+    ),
+  );
+}
 
 export function configureApp(
   app: INestApplication,
   configService: ConfigService,
 ): void {
-  const corsOrigins = configService
-    .get<string>('CORS_ORIGINS', 'http://localhost:3000')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  const corsOrigins = parseCorsOrigins(configService);
 
   app.use(helmet());
   app.use(cookieParser());
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept-Language',
+      'X-Timezone',
+    ],
+    maxAge: 86400,
   });
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
@@ -28,18 +53,29 @@ export function configureApp(
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: (errors) => createValidationException(errors),
     }),
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
   const expressApp = app.getHttpAdapter().getInstance() as Express;
+  const isProduction = configService.get<string>('NODE_ENV') === 'production';
 
-  if (configService.get<string>('NODE_ENV') === 'production') {
+  if (isProduction) {
     expressApp.set('trust proxy', 1);
   }
 
   expressApp.disable('x-powered-by');
+  expressApp.use(
+    CATALOGUE_MEDIA_ROUTE,
+    express.static(resolveCatalogueMediaRootDir()),
+  );
 
-  if (configService.get<boolean>('SWAGGER_ENABLED', true)) {
+  const swaggerEnabled = configService.get<boolean>(
+    'SWAGGER_ENABLED',
+    !isProduction,
+  );
+
+  if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Ritora API')
       .setDescription(

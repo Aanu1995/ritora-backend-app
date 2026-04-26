@@ -7,4 +7,9 @@ export class AuthResponseDto {
 
   @ApiProperty({ type: UserResponseDto })
   user: UserResponseDto;
+
+  constructor(accessToken: string, user: UserResponseDto) {
+    this.accessToken = accessToken;
+    this.user = user;
+  }
 }

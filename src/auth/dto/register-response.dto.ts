@@ -7,4 +7,9 @@ export class RegisterResponseDto {
 
   @ApiProperty({ type: UserResponseDto })
   user: UserResponseDto;
+
+  constructor(message: string, user: UserResponseDto) {
+    this.message = message;
+    this.user = user;
+  }
 }
