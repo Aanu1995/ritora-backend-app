@@ -68,11 +68,18 @@ export async function createTestApp(
   const app = moduleFixture.createNestApplication();
   const configService = app.get(ConfigService);
   configureApp(app, configService);
+
+  // E2E tests run against a real Postgres database. Apply pending migrations
+  // before Nest lifecycle hooks run so boot-time catalogue refreshes see the
+  // same schema CI and local developers expect.
+  const dataSource = app.get(DataSource);
+  if (!dataSource.isInitialized) {
+    await dataSource.initialize();
+  }
+  await dataSource.runMigrations();
+
   await app.init();
 
-  // Migrations are NOT run automatically — the test database must already
-  // have the schema applied. Run `DATABASE_NAME=ritora_test npm run migration:run`
-  // once (or whenever migrations change) before `npm test` / `npm run test:e2e`.
   //
   // Seed + refresh the ingredient catalogue now that the app is up. These
   // mirror what `IngredientsModule.onApplicationBootstrap` does at
