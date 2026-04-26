@@ -6,6 +6,12 @@ import {
   LookupWarningCode,
 } from '../shelf/shelf.types';
 import { uniqueWarnings } from './catalogue-matching.utils';
+import {
+  finalizeResolved,
+  needsDiscoveryCompletion,
+  needsOfficialPageCompletion,
+  refineResolvedCategory,
+} from './catalogue-resolution.utils';
 import { CataloguePhotoProcessorService } from './catalogue-photo-processor.service';
 import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
@@ -19,33 +25,21 @@ import type {
   ResolvedProductDraft,
 } from './product-discovery.types';
 import {
+  sanitizeBenefitList,
+  sanitizeSuitedForList,
+} from './product-claim-sanitizers';
+import {
   fillMissingGuidance,
   fillMissingIdentity,
   fillMissingManufacturer,
   inferCategoryFromText,
   mergeIdentity,
+  refineCategoryFromText,
 } from './product-discovery.utils';
 
 type ExtractionResult = NonNullable<
   Awaited<ReturnType<OpenAiExtractorProvider['extract']>>
 >;
-
-const TRUNCATED_INGREDIENT_PREFIXES = new Set([
-  'ammonium',
-  'calcium',
-  'cocamidopropyl',
-  'copper',
-  'disodium',
-  'glyceryl',
-  'hydrolyzed',
-  'magnesium',
-  'peg',
-  'potassium',
-  'ppg',
-  'sodium',
-  'trisodium',
-  'zinc',
-]);
 
 @Injectable()
 export class CatalogueService {
@@ -84,9 +78,10 @@ export class CatalogueService {
       photoExtraction,
       storedHeroImageUrl,
     );
+    current = refineResolvedCategory(current);
     const productUrl = current.manufacturer.productUrl;
 
-    if (productUrl && this.needsOfficialPageCompletion(current)) {
+    if (productUrl && needsOfficialPageCompletion(current)) {
       const extraction = await this.officialPageProvider.extract(productUrl);
       if (extraction) {
         current = await this.applyOfficialPageCompletionFromPhotos(
@@ -97,7 +92,22 @@ export class CatalogueService {
       }
     }
 
-    current = this.finalizeResolved(current);
+    current = refineResolvedCategory(current);
+    if (needsDiscoveryCompletion(current)) {
+      const completion =
+        await this.openAiExtractorProvider.completeMissingFields(current);
+      if (completion) {
+        current = this.applyPhotoAwareAiCompletion(
+          current,
+          current,
+          completion,
+          'webDiscoveryCompletion',
+        );
+        current = refineResolvedCategory(current);
+      }
+    }
+
+    current = finalizeResolved(current);
     await this.stripUntrustedUrlsFromResolved(current);
 
     return ResolvedLookupResponseDto.fromResolved(current);
@@ -126,6 +136,16 @@ export class CatalogueService {
         identity.description,
       );
     }
+
+    identity.category = refineCategoryFromText(
+      identity.category,
+      manufacturer.brand,
+      identity.brand,
+      identity.name,
+      identity.description,
+      identity.benefits,
+      identity.suitedFor,
+    );
 
     if (identity.inciIngredients?.length && !identity.inciLastConfirmedAt) {
       identity.inciLastConfirmedAt = new Date().toISOString();
@@ -175,7 +195,9 @@ export class CatalogueService {
       warnings: uniqueWarnings([
         ...base.warnings,
         ...(extraction.guidance.steps?.length ||
-        extraction.guidance.cautions?.length
+        extraction.guidance.cautions?.length ||
+        extraction.guidance.applicationMethod ||
+        extraction.guidance.quantity
           ? [LookupWarningCode.GuidanceUnverified]
           : []),
         ...(extraction.identity.inciIngredients?.length
@@ -256,18 +278,25 @@ export class CatalogueService {
     base: ResolvedProductDraft['identity'],
     extraction: OfficialPageExtraction['identity'],
   ): ResolvedProductDraft['identity'] {
-    const filledIdentity = fillMissingIdentity(base, extraction);
+    const officialIdentity = {
+      ...extraction,
+      benefits: sanitizeBenefitList(extraction.benefits),
+      suitedFor: sanitizeSuitedForList(extraction.suitedFor),
+    };
+    const filledIdentity = fillMissingIdentity(base, officialIdentity);
     const baseIngredients = base.inciIngredients ?? [];
-    const extractedIngredients = extraction.inciIngredients ?? [];
+    const extractedIngredients = officialIdentity.inciIngredients ?? [];
     const preferredIngredients =
       baseIngredients.length > 0 ? baseIngredients : extractedIngredients;
 
     return {
       ...filledIdentity,
-      brand: base.brand ?? extraction.brand ?? filledIdentity.brand,
-      name: base.name ?? extraction.name ?? filledIdentity.name,
-      category: base.category ?? extraction.category ?? filledIdentity.category,
-      barcode: base.barcode ?? extraction.barcode ?? filledIdentity.barcode,
+      brand: base.brand ?? officialIdentity.brand ?? filledIdentity.brand,
+      name: base.name ?? officialIdentity.name ?? filledIdentity.name,
+      category:
+        base.category ?? officialIdentity.category ?? filledIdentity.category,
+      barcode:
+        base.barcode ?? officialIdentity.barcode ?? filledIdentity.barcode,
       imageUrls: base.imageUrls ?? filledIdentity.imageUrls,
       inciIngredients:
         preferredIngredients.length > 0 ? preferredIngredients : undefined,
@@ -275,44 +304,11 @@ export class CatalogueService {
         preferredIngredients.length > 0
           ? baseIngredients.length > 0
             ? (base.inciLastConfirmedAt ?? filledIdentity.inciLastConfirmedAt)
-            : (extraction.inciLastConfirmedAt ??
+            : (officialIdentity.inciLastConfirmedAt ??
               base.inciLastConfirmedAt ??
               filledIdentity.inciLastConfirmedAt)
           : filledIdentity.inciLastConfirmedAt,
     };
-  }
-
-  private needsOfficialPageCompletion(resolved: ResolvedProductDraft): boolean {
-    return (
-      !resolved.identity.description ||
-      !resolved.identity.benefits?.length ||
-      this.hasLikelyTruncatedIngredients(resolved.identity.inciIngredients) ||
-      !resolved.identity.suitedFor?.length ||
-      !resolved.guidance.cautions?.length ||
-      !resolved.manufacturer.parentCompany ||
-      !resolved.manufacturer.countryOfManufacture ||
-      !resolved.manufacturer.supportEmail
-    );
-  }
-
-  private hasLikelyTruncatedIngredients(
-    ingredients: string[] | null | undefined,
-  ): boolean {
-    if (!ingredients?.length) {
-      return false;
-    }
-
-    const lastIngredient = ingredients.at(-1)?.trim().toLowerCase() ?? '';
-    if (!lastIngredient) {
-      return false;
-    }
-
-    const normalized = lastIngredient.replace(/[.,;:\s/]+$/g, '');
-    if (!normalized) {
-      return false;
-    }
-
-    return TRUNCATED_INGREDIENT_PREFIXES.has(normalized);
   }
 
   private async stripUntrustedUrlsFromResolved(
@@ -348,48 +344,5 @@ export class CatalogueService {
     }
 
     resolved.evidence = filteredEvidence;
-  }
-
-  private finalizeResolved(
-    resolved: ResolvedProductDraft,
-  ): ResolvedProductDraft {
-    const hasGuidance =
-      Boolean(resolved.guidance.steps?.length) ||
-      Boolean(resolved.guidance.cautions?.length) ||
-      resolved.guidance.waitMinutes !== undefined;
-    const hasIngredients = Boolean(resolved.identity.inciIngredients?.length);
-    const hasDescription = Boolean(resolved.identity.description);
-    const hasBenefits = Boolean(resolved.identity.benefits?.length);
-    const hasSuitedFor = Boolean(resolved.identity.suitedFor?.length);
-    const hasManufacturerDetails =
-      Boolean(resolved.manufacturer.supportEmail) ||
-      Boolean(resolved.manufacturer.parentCompany) ||
-      Boolean(resolved.manufacturer.countryOfOrigin) ||
-      Boolean(resolved.manufacturer.countryOfManufacture);
-    const hasPhotoIdentity =
-      Boolean(resolved.identity.brand?.trim()) &&
-      Boolean(resolved.identity.name?.trim());
-    const hasRichData =
-      hasDescription ||
-      hasIngredients ||
-      hasGuidance ||
-      hasBenefits ||
-      hasSuitedFor ||
-      hasManufacturerDetails;
-    const confidence =
-      hasRichData || hasPhotoIdentity
-        ? LookupConfidence.Medium
-        : LookupConfidence.Low;
-    const warnings = uniqueWarnings([
-      ...resolved.warnings,
-      ...(hasRichData ? [] : [LookupWarningCode.PartialData]),
-    ]);
-
-    return {
-      ...resolved,
-      confidence,
-      reviewRequired: true,
-      warnings,
-    };
   }
 }

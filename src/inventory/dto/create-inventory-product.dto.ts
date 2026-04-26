@@ -67,7 +67,6 @@ export class CreateCatalogueIdentityDto {
   suitedFor!: string[];
 
   @IsArray()
-  @ArrayMinSize(1)
   @IsString({ each: true })
   inciIngredients!: string[];
 

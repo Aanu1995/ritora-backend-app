@@ -79,6 +79,17 @@ describe('CataloguePhotoProcessorService', () => {
     );
 
     expect(result.extractionInput.heroImageIndex).toBe(0);
+    expect(result.extractionInput.sourceImageCount).toBe(2);
+    expect(result.extractionInput.images).toHaveLength(4);
+    expect(result.extractionInput.images.map((image) => image.variant)).toEqual(
+      ['overview', 'text-enhanced', 'overview', 'text-enhanced'],
+    );
+    expect(
+      result.extractionInput.images.map((image) => image.sourceIndex),
+    ).toEqual([0, 0, 1, 1]);
+    expect(result.extractionInput.images[0].isHero).toBe(true);
+    expect(result.extractionInput.images[2].isHero).toBe(false);
+
     expect(result.heroStorageImage.mimetype).toBe('image/webp');
     expect(result.heroStorageImage.originalname).toBe('hero.webp');
     const heroMetadata = await sharp(result.heroStorageImage.buffer).metadata();
@@ -87,11 +98,11 @@ describe('CataloguePhotoProcessorService', () => {
       Math.max(heroMetadata.width ?? 0, heroMetadata.height ?? 0),
     ).toBeLessThanOrEqual(1600);
 
-    const processedLabel = result.extractionInput.images[1];
-    const labelMetadata = await sharp(processedLabel.buffer).metadata();
+    const processedLabelOverview = result.extractionInput.images[2];
+    const labelMetadata = await sharp(processedLabelOverview.buffer).metadata();
     expect(labelMetadata.format).toBe('webp');
     expect(
       Math.max(labelMetadata.width ?? 0, labelMetadata.height ?? 0),
-    ).toBeLessThanOrEqual(1600);
+    ).toBeLessThanOrEqual(2400);
   });
 });

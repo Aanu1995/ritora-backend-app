@@ -8,62 +8,10 @@ import {
   decodeHtmlEntities,
   htmlFragmentToText,
 } from '../common/utils/imported-text';
-
-const CATEGORY_KEYWORDS: Array<{
-  category: ProductCategory;
-  patterns: RegExp[];
-}> = [
-  {
-    category: ProductCategory.Cleanser,
-    patterns: [/\bcleanser\b/i, /\bface wash\b/i, /\bcleansing\b/i],
-  },
-  {
-    category: ProductCategory.Toner,
-    patterns: [/\btoner\b/i, /\bmist\b/i],
-  },
-  {
-    category: ProductCategory.Essence,
-    patterns: [/\bessence\b/i],
-  },
-  {
-    category: ProductCategory.Serum,
-    patterns: [/\bserum\b/i, /\bampoule\b/i],
-  },
-  {
-    category: ProductCategory.Moisturizer,
-    patterns: [/\bmoisturi[sz]er\b/i, /\bcream\b/i, /\blotion\b/i],
-  },
-  {
-    category: ProductCategory.SunProtection,
-    patterns: [/\bspf\b/i, /\bsunscreen\b/i, /\bsun cream\b/i],
-  },
-  {
-    category: ProductCategory.Mask,
-    patterns: [/\bmask\b/i],
-  },
-  {
-    category: ProductCategory.Exfoliant,
-    patterns: [
-      /\bexfoli/i,
-      /\bexfoliator\b/i,
-      /\baha\b/i,
-      /\bbha\b/i,
-      /\bpeel\b/i,
-    ],
-  },
-  {
-    category: ProductCategory.EyeCare,
-    patterns: [/\beye cream\b/i, /\beye serum\b/i, /\beye gel\b/i],
-  },
-  {
-    category: ProductCategory.LipCare,
-    patterns: [/\blip balm\b/i, /\blip mask\b/i, /\blip treatment\b/i],
-  },
-  {
-    category: ProductCategory.Treatment,
-    patterns: [/\btreatment\b/i, /\bretinol\b/i, /\bspot\b/i],
-  },
-];
+export {
+  inferCategoryFromText,
+  refineCategoryFromText,
+} from './product-category-inference';
 
 export function normalizeSearchValue(value: string): string {
   return value.trim().toLowerCase();
@@ -88,20 +36,6 @@ export function parseSizeMl(value: string | null | undefined): number | null {
   }
 
   return Number(match[1].replace(',', '.'));
-}
-
-export function inferCategoryFromText(
-  ...values: Array<string | null | undefined>
-): ProductCategory {
-  const haystack = values.filter(Boolean).join(' ');
-
-  for (const entry of CATEGORY_KEYWORDS) {
-    if (entry.patterns.some((pattern) => pattern.test(haystack))) {
-      return entry.category;
-    }
-  }
-
-  return ProductCategory.Other;
 }
 
 export function splitIngredients(value: string | null | undefined): string[] {

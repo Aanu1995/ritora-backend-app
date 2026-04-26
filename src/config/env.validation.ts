@@ -241,6 +241,16 @@ export const envValidationSchema = Joi.object({
     .min(60)
     .max(95)
     .default(82),
+  PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION: Joi.number()
+    .integer()
+    .min(1024)
+    .max(4096)
+    .default(2400),
+  PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY: Joi.number()
+    .integer()
+    .min(70)
+    .max(95)
+    .default(90),
 
   LEGAL_TERMS_VERSION: Joi.string().trim().default('1.0.0'),
   LEGAL_PRIVACY_VERSION: Joi.string().trim().default('1.0.0'),

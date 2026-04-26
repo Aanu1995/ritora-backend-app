@@ -64,10 +64,6 @@ export function assertValidInventoryDraft(payload: unknown): void {
     throw new BadRequestException('At least one suited-for value is required');
   }
 
-  if (!hasNonBlankItems(instance.identity.inciIngredients)) {
-    throw new BadRequestException('At least one INCI ingredient is required');
-  }
-
   if (!hasNonBlankItems(instance.guidance.steps)) {
     throw new BadRequestException('At least one guidance step is required');
   }

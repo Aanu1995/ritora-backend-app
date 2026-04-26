@@ -3,10 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { getNumberConfig } from '../config/config-value.utils';
 import sharp from 'sharp';
 import {
+  CATALOGUE_PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION,
+  CATALOGUE_PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY,
   CATALOGUE_PRODUCT_IMAGE_MAX_DIMENSION,
   CATALOGUE_PRODUCT_IMAGE_WEBP_QUALITY,
 } from './catalogue-media.constants';
 import type {
+  CataloguePhotoAsset,
   ProcessedCatalogueImage,
   ProcessedCataloguePhotoBatch,
   UploadedCatalogueImage,
@@ -23,9 +26,12 @@ export class CataloguePhotoProcessorService {
   async prepareHeroImageForStorage(
     image: UploadedCatalogueImage,
   ): Promise<ProcessedCatalogueImage> {
+    const processingConfig = this.getProcessingConfig();
+
     return this.processImage(image, {
       isHero: true,
-      ...this.getProcessingConfig(),
+      maxDimension: processingConfig.storageMaxDimension,
+      quality: processingConfig.storageQuality,
     });
   }
 
@@ -35,24 +41,35 @@ export class CataloguePhotoProcessorService {
   ): Promise<ProcessedCataloguePhotoBatch> {
     const processingConfig = this.getProcessingConfig();
 
-    const processedImages = await Promise.all(
+    const storageImages = await Promise.all(
       images.map((image, index) =>
         this.processImage(image, {
           isHero: index === heroImageIndex,
-          ...processingConfig,
+          maxDimension: processingConfig.storageMaxDimension,
+          quality: processingConfig.storageQuality,
         }),
       ),
     );
+    const extractionImages = (
+      await Promise.all(
+        images.map((image, index) =>
+          this.prepareExtractionAssets(image, {
+            sourceIndex: index,
+            isHero: index === heroImageIndex,
+            maxDimension: processingConfig.extractionMaxDimension,
+            quality: processingConfig.extractionQuality,
+          }),
+        ),
+      )
+    ).flat();
 
     return {
       extractionInput: {
-        images: processedImages.map((image) => ({
-          buffer: image.buffer,
-          mimetype: image.mimetype,
-        })),
+        images: extractionImages,
         heroImageIndex,
+        sourceImageCount: images.length,
       },
-      heroStorageImage: processedImages[heroImageIndex],
+      heroStorageImage: storageImages[heroImageIndex],
     };
   }
 
@@ -111,20 +128,116 @@ export class CataloguePhotoProcessorService {
     }
   }
 
+  private async prepareExtractionAssets(
+    image: UploadedCatalogueImage,
+    options: {
+      sourceIndex: number;
+      isHero: boolean;
+      maxDimension: number;
+      quality: number;
+    },
+  ): Promise<CataloguePhotoAsset[]> {
+    const normalizedBuffer = await sharp(image.buffer, {
+      failOn: 'none',
+      limitInputPixels: false,
+    })
+      .rotate()
+      .toBuffer();
+    const croppedBuffer = await this.cropToSubject(
+      sharp(normalizedBuffer, {
+        failOn: 'none',
+        limitInputPixels: false,
+      }),
+      options.isHero,
+    );
+    const overview = await this.encodeExtractionAsset(normalizedBuffer, {
+      ...options,
+      variant: 'overview',
+      enhanceText: false,
+    });
+    const textEnhanced = await this.encodeExtractionAsset(croppedBuffer, {
+      ...options,
+      variant: 'text-enhanced',
+      enhanceText: true,
+    });
+
+    return [overview, textEnhanced];
+  }
+
+  private async encodeExtractionAsset(
+    buffer: Buffer,
+    options: {
+      sourceIndex: number;
+      isHero: boolean;
+      maxDimension: number;
+      quality: number;
+      variant: CataloguePhotoAsset['variant'];
+      enhanceText: boolean;
+    },
+  ): Promise<CataloguePhotoAsset> {
+    let pipeline = sharp(buffer, {
+      failOn: 'none',
+      limitInputPixels: false,
+    })
+      .resize({
+        width: options.maxDimension,
+        height: options.maxDimension,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .flatten({
+        background: options.isHero ? HERO_BACKGROUND : LABEL_BACKGROUND,
+      });
+
+    if (options.enhanceText) {
+      pipeline = pipeline.grayscale().normalize().sharpen();
+    }
+
+    const { data, info } = await pipeline
+      .webp({
+        quality: options.quality,
+        alphaQuality: options.quality,
+        effort: 4,
+      })
+      .toBuffer({ resolveWithObject: true });
+
+    return {
+      buffer: data,
+      mimetype: 'image/webp',
+      sourceIndex: options.sourceIndex,
+      isHero: options.isHero,
+      variant: options.variant,
+      width: info.width,
+      height: info.height,
+    };
+  }
+
   private getProcessingConfig(): {
-    maxDimension: number;
-    quality: number;
+    storageMaxDimension: number;
+    storageQuality: number;
+    extractionMaxDimension: number;
+    extractionQuality: number;
   } {
     return {
-      maxDimension: getNumberConfig(
+      storageMaxDimension: getNumberConfig(
         this.configService,
         'PRODUCT_MEDIA_PROCESSED_MAX_DIMENSION',
         CATALOGUE_PRODUCT_IMAGE_MAX_DIMENSION,
       ),
-      quality: getNumberConfig(
+      storageQuality: getNumberConfig(
         this.configService,
         'PRODUCT_MEDIA_WEBP_QUALITY',
         CATALOGUE_PRODUCT_IMAGE_WEBP_QUALITY,
+      ),
+      extractionMaxDimension: getNumberConfig(
+        this.configService,
+        'PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION',
+        CATALOGUE_PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION,
+      ),
+      extractionQuality: getNumberConfig(
+        this.configService,
+        'PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY',
+        CATALOGUE_PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY,
       ),
     };
   }

@@ -1,11 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
-import { CataloguePhotoProcessorService } from './catalogue-photo-processor.service';
 import { CatalogueService } from './catalogue.service';
-import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
-import type { UploadedCatalogueImage } from './catalogue-photo.types';
-import { CatalogueSourceRuleService } from './catalogue-source-rule.service';
-import { OfficialPageProvider } from './official-page.provider';
-import { OpenAiExtractorProvider } from './openai-extractor.provider';
+import {
+  createCatalogueServiceTestHarness,
+  createUploadedImage,
+} from './catalogue.service.spec-utils';
 import {
   CatalogueSource,
   LookupConfidence,
@@ -13,74 +11,33 @@ import {
   ProductCategory,
 } from '../shelf/shelf.types';
 
-function createUploadedImage(name: string): UploadedCatalogueImage {
-  return {
-    originalname: `${name}.jpg`,
-    mimetype: 'image/jpeg',
-    size: name.length,
-    buffer: Buffer.from(name),
-  };
-}
-
 describe('CatalogueService', () => {
+  let harness: ReturnType<typeof createCatalogueServiceTestHarness>;
   let service: CatalogueService;
-  const officialPageProvider = {
-    extract: jest.fn(),
-  };
-  const openAiExtractorProvider = {
-    extract: jest.fn(),
-    extractFromImages: jest.fn(),
-  };
-  const cataloguePhotoProcessorService = {
-    prepareForExtraction: jest.fn(),
-  };
-  const catalogueSourceRuleService = {
-    evaluateUrl: jest.fn(),
-  };
-  const cataloguePhotoStorageService = {
-    saveHeroImage: jest.fn(),
-  };
+  let officialPageProvider: ReturnType<
+    typeof createCatalogueServiceTestHarness
+  >['officialPageProvider'];
+  let openAiExtractorProvider: ReturnType<
+    typeof createCatalogueServiceTestHarness
+  >['openAiExtractorProvider'];
+  let cataloguePhotoProcessorService: ReturnType<
+    typeof createCatalogueServiceTestHarness
+  >['cataloguePhotoProcessorService'];
+  let catalogueSourceRuleService: ReturnType<
+    typeof createCatalogueServiceTestHarness
+  >['catalogueSourceRuleService'];
+  let cataloguePhotoStorageService: ReturnType<
+    typeof createCatalogueServiceTestHarness
+  >['cataloguePhotoStorageService'];
 
   beforeEach(() => {
-    officialPageProvider.extract.mockReset();
-    openAiExtractorProvider.extract.mockReset();
-    openAiExtractorProvider.extractFromImages.mockReset();
-    cataloguePhotoProcessorService.prepareForExtraction.mockReset();
-    catalogueSourceRuleService.evaluateUrl.mockReset();
-    cataloguePhotoStorageService.saveHeroImage.mockReset();
-
-    catalogueSourceRuleService.evaluateUrl.mockResolvedValue({
-      blocked: false,
-      scoreAdjustment: 0,
-      matchedLabels: [],
-    });
-    cataloguePhotoProcessorService.prepareForExtraction.mockImplementation(
-      async (images: UploadedCatalogueImage[], heroImageIndex: number) => ({
-        extractionInput: {
-          images: images.map((image) => ({
-            buffer: image.buffer,
-            mimetype: image.mimetype,
-          })),
-          heroImageIndex,
-        },
-        heroStorageImage: {
-          ...images[heroImageIndex],
-          width: 600,
-          height: 600,
-        },
-      }),
-    );
-    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(
-      'https://signed.example.com/product-images/processed/front-photo.webp',
-    );
-
-    service = new CatalogueService(
-      officialPageProvider as unknown as OfficialPageProvider,
-      openAiExtractorProvider as unknown as OpenAiExtractorProvider,
-      catalogueSourceRuleService as unknown as CatalogueSourceRuleService,
-      cataloguePhotoProcessorService as unknown as CataloguePhotoProcessorService,
-      cataloguePhotoStorageService as unknown as CataloguePhotoStorageService,
-    );
+    harness = createCatalogueServiceTestHarness();
+    service = harness.service;
+    officialPageProvider = harness.officialPageProvider;
+    openAiExtractorProvider = harness.openAiExtractorProvider;
+    cataloguePhotoProcessorService = harness.cataloguePhotoProcessorService;
+    catalogueSourceRuleService = harness.catalogueSourceRuleService;
+    cataloguePhotoStorageService = harness.cataloguePhotoStorageService;
   });
 
   it('extracts a product from multiple photos and persists the selected hero image', async () => {

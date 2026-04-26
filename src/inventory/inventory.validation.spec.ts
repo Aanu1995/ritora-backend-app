@@ -69,6 +69,14 @@ describe('assertValidInventoryDraft', () => {
     expect(() => assertValidInventoryDraft(draft)).not.toThrow();
   });
 
+  it('accepts products whose ingredient list is not available yet', () => {
+    const draft = createValidDraft();
+    draft.identity.inciIngredients = [];
+    draft.identity.inciLastConfirmedAt = null;
+
+    expect(() => assertValidInventoryDraft(draft)).not.toThrow();
+  });
+
   it('rejects manufacturer URLs with embedded credentials', () => {
     const draft = createValidDraft();
     draft.manufacturer.productUrl = 'https://user:pass@example.com/product';
