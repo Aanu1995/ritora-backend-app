@@ -129,6 +129,7 @@ export const envValidationSchema = Joi.object({
   DATABASE_USER: Joi.string().trim().default('postgres'),
   DATABASE_PASSWORD: productionSecret,
   DATABASE_SSL: Joi.boolean().default(false),
+  DATABASE_LOGGING: Joi.boolean().default(false),
   DATABASE_SSL_REJECT_UNAUTHORIZED: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.boolean().default(true),

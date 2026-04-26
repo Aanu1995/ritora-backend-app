@@ -15,6 +15,11 @@ export const databaseConfig: TypeOrmModuleAsyncOptions = {
       'DATABASE_SSL_REJECT_UNAUTHORIZED',
       false,
     );
+    const databaseLoggingEnabled = getBooleanConfig(
+      configService,
+      'DATABASE_LOGGING',
+      false,
+    );
 
     return {
       type: 'postgres',
@@ -28,7 +33,7 @@ export const databaseConfig: TypeOrmModuleAsyncOptions = {
       synchronize: false,
       migrationsRun: false,
       migrations: [__dirname + '/../database/migrations/*{.ts,.js}'],
-      logging: configService.get<string>('NODE_ENV') === 'development',
+      logging: databaseLoggingEnabled,
     };
   },
 };

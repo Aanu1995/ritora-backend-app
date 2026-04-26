@@ -10,6 +10,7 @@ import { envValidationSchema } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
 import { CatalogueModule } from './catalogue/catalogue.module';
 import { HealthModule } from './health/health.module';
+import { IngredientsModule } from './ingredients/ingredients.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { SkinProfileModule } from './skin-profile/skin-profile.module';
@@ -36,6 +37,7 @@ import { UsersModule } from './users/users.module';
     HealthModule,
     AuthModule,
     CatalogueModule,
+    IngredientsModule,
     InventoryModule,
     ScheduleModule,
     SkinProfileModule,
