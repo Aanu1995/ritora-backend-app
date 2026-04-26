@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { TranslationService } from './translation.service';
 
-function buildConfig(values: Record<string, string | undefined>): ConfigService {
+function buildConfig(
+  values: Record<string, string | undefined>,
+): ConfigService {
   return {
     get: jest.fn((key: string) => values[key]),
   } as unknown as ConfigService;
@@ -75,12 +77,15 @@ describe('TranslationService', () => {
     const service = new TranslationService(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+        OPENAI_MODEL: 'some-model',
         INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
       }),
       buildDataSource(),
     );
-    const sourceTexts = Array.from({ length: 45 }, (_, index) => `Text ${index}`);
+    const sourceTexts = Array.from(
+      { length: 45 },
+      (_, index) => `Text ${index}`,
+    );
     const inputs = [
       sourceTexts[0],
       sourceTexts[1],
@@ -91,13 +96,15 @@ describe('TranslationService', () => {
     let activeRequests = 0;
     let maxActiveRequests = 0;
 
-    global.fetch = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      activeRequests += 1;
-      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      activeRequests -= 1;
-      return buildTranslationResponse(readRequestedSources(init));
-    }) as jest.MockedFunction<typeof fetch>;
+    global.fetch = jest.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        activeRequests += 1;
+        maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        activeRequests -= 1;
+        return buildTranslationResponse(readRequestedSources(init));
+      },
+    ) as jest.MockedFunction<typeof fetch>;
 
     const result = await service.translateMany(inputs, 'sv');
 
@@ -114,7 +121,7 @@ describe('TranslationService', () => {
     const service = new TranslationService(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+        OPENAI_MODEL: 'some-model',
         INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
       }),
       buildDataSource(),
@@ -123,8 +130,9 @@ describe('TranslationService', () => {
     global.fetch = jest
       .fn()
       .mockResolvedValueOnce(new Response('{}', { status: 503 }))
-      .mockImplementation(async (_url: string | URL | Request, init?: RequestInit) =>
-        buildTranslationResponse(readRequestedSources(init)),
+      .mockImplementation(
+        async (_url: string | URL | Request, init?: RequestInit) =>
+          buildTranslationResponse(readRequestedSources(init)),
       ) as jest.MockedFunction<typeof fetch>;
 
     const result = await service.translateMany(

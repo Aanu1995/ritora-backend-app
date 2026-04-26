@@ -58,7 +58,9 @@ Important variable groups:
 - Cookies: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
 - Mail: `RESEND_API_KEY`, `MAIL_FROM`
-- Product extraction: `OPENAI_API_KEY`, `OPENAI_PRODUCT_DISCOVERY_MODEL`
+- OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`
+- Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
+- Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
 - Product media: `AWS_REGION`, `PRODUCT_MEDIA_*`
 - Legal consent versions: `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`
 

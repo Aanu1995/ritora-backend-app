@@ -190,7 +190,15 @@ export const envValidationSchema = Joi.object({
     otherwise: productionSecret,
   }),
   OPENAI_API_KEY: Joi.string().trim().allow('').default(''),
-  OPENAI_PRODUCT_DISCOVERY_MODEL: Joi.string().trim().default('gpt-5'),
+  OPENAI_MODEL: Joi.string().trim().allow('').default(''),
+  OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
+    .trim()
+    .allow('')
+    .default('low'),
+  OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: Joi.string()
+    .trim()
+    .allow('')
+    .default(''),
   MAIL_FROM: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().email().required(),

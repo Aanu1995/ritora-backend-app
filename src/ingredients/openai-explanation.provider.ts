@@ -5,6 +5,10 @@ import {
   extractOutputText,
   type OpenAiResponsePayload,
 } from '../catalogue/openai-extraction.utils';
+import {
+  OPENAI_MODEL_ENV_KEY,
+  readOpenAiModel,
+} from '../common/utils/openai-config';
 import type {
   ExplanationInput,
   ExplanationOutput,
@@ -12,7 +16,7 @@ import type {
 } from './explanation.port';
 
 const REQUEST_TIMEOUT_MS = 15000;
-const MODEL_ENV_KEY = 'OPENAI_INGREDIENT_EXPLANATION_MODEL';
+const DEFAULT_MODEL = 'gpt-5.5';
 
 @Injectable()
 export class OpenAiExplanationProvider implements ExplanationPort {
@@ -30,7 +34,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
     const model = this.readModel();
     if (!model) {
       this.logger.warn(
-        `${MODEL_ENV_KEY} is not set. Ingredient explanations will be skipped; clients will receive deterministic findings only.`,
+        `${OPENAI_MODEL_ENV_KEY} is not set. Ingredient explanations will be skipped; clients will receive deterministic findings only.`,
       );
       this.hasWarnedMissingModel = true;
     }
@@ -159,8 +163,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
   }
 
   private readModel(): string | null {
-    const value = this.configService.get<string>(MODEL_ENV_KEY)?.trim();
-    return value && value.length > 0 ? value : null;
+    return readOpenAiModel(this.configService, DEFAULT_MODEL);
   }
 
   private systemPrompt(language: ExplanationInput['language']): string {

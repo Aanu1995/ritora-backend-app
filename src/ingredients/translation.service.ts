@@ -3,19 +3,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import {
-  extractJsonObject,
-  extractOutputText,
-  type OpenAiResponsePayload,
-} from '../catalogue/openai-extraction.utils';
+import { translateWithOpenAi } from './translation-llm';
 
-const MODEL_ENV_KEY = 'OPENAI_INGREDIENT_EXPLANATION_MODEL';
 const SOURCE_LANG_ENV_KEY = 'INGREDIENT_TRANSLATION_SOURCE_LANGUAGE';
-const REQUEST_TIMEOUT_MS = 15000;
 const MAX_LRU_ENTRIES = 2000;
-const MAX_OUTPUT_TOKENS = 220;
-const MAX_BATCH_OUTPUT_TOKENS = 1600;
-const MAX_OUTPUT_TOKENS_PER_TRANSLATION = 120;
 const TRANSLATION_BATCH_SIZE = 20;
 const TRANSLATION_CONCURRENCY = 2;
 
@@ -79,7 +70,12 @@ export class TranslationService {
       return dbCached;
     }
 
-    const translated = await this.callLlmBatch([sourceText], target);
+    const translated = await translateWithOpenAi(
+      this.configService,
+      [sourceText],
+      target,
+      (payload) => this.logStructured(payload),
+    );
     const firstTranslation = translated?.[0];
     if (!firstTranslation) {
       return sourceText;
@@ -148,22 +144,24 @@ export class TranslationService {
 
     if (llmMisses.length > 0) {
       const missesByHash = groupBy(llmMisses, (miss) => miss.sourceHash);
-      const groups: TranslationGroup[] = Array.from(
-        missesByHash.entries(),
-      ).map(([sourceHash, misses]) => ({
-        sourceHash,
-        text: misses[0].text,
-        misses,
-      }));
+      const groups: TranslationGroup[] = Array.from(missesByHash.entries()).map(
+        ([sourceHash, misses]) => ({
+          sourceHash,
+          text: misses[0].text,
+          misses,
+        }),
+      );
       const chunks = chunkArray(groups, TRANSLATION_BATCH_SIZE);
 
       await runWithConcurrency(
         chunks,
         TRANSLATION_CONCURRENCY,
         async (chunk) => {
-          const translated = await this.callLlmBatch(
+          const translated = await translateWithOpenAi(
+            this.configService,
             chunk.map((group) => group.text),
             target,
+            (payload) => this.logStructured(payload),
           );
 
           if (!translated || translated.length !== chunk.length) {
@@ -294,155 +292,6 @@ export class TranslationService {
         message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
-  }
-
-  private async callLlmBatch(
-    sourceTexts: string[],
-    targetLanguage: string,
-  ): Promise<string[] | null> {
-    const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
-    if (!apiKey) {
-      this.logStructured({
-        event: 'translation_skipped',
-        reason: 'missing_api_key',
-      });
-      return null;
-    }
-
-    const model = this.configService.get<string>(MODEL_ENV_KEY)?.trim();
-    if (!model) {
-      this.logStructured({
-        event: 'translation_skipped',
-        reason: 'missing_model_env',
-      });
-      return null;
-    }
-
-    const startedAt = Date.now();
-    const maxOutputTokens = Math.max(
-      MAX_OUTPUT_TOKENS,
-      Math.min(
-        MAX_BATCH_OUTPUT_TOKENS,
-        sourceTexts.length * MAX_OUTPUT_TOKENS_PER_TRANSLATION,
-      ),
-    );
-
-    try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          reasoning: { effort: 'low' },
-          text: { verbosity: 'low' },
-          max_output_tokens: maxOutputTokens,
-          input: [
-            {
-              role: 'system',
-              content: [
-                {
-                  type: 'input_text',
-                  text: this.systemPrompt(targetLanguage),
-                },
-              ],
-            },
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: JSON.stringify({
-                    schema: { translations: ['string'] },
-                    sources: sourceTexts,
-                  }),
-                },
-              ],
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-
-      const durationMs = Date.now() - startedAt;
-
-      if (!response.ok) {
-        this.logStructured({
-          event: 'translation_failed',
-          reason: 'http_error',
-          status: response.status,
-          model,
-          durationMs,
-        });
-        return null;
-      }
-
-      const payload = (await response.json()) as OpenAiResponsePayload;
-      const outputText = extractOutputText(payload);
-      if (!outputText) {
-        this.logStructured({
-          event: 'translation_failed',
-          reason: 'empty_output',
-          model,
-          durationMs,
-        });
-        return null;
-      }
-
-      const parsed = JSON.parse(extractJsonObject(outputText)) as {
-        translations?: unknown;
-        translation?: unknown;
-      };
-
-      if (
-        Array.isArray(parsed.translations) &&
-        parsed.translations.every((item) => typeof item === 'string')
-      ) {
-        return parsed.translations.map((item) => item.trim());
-      }
-
-      if (
-        sourceTexts.length === 1 &&
-        typeof parsed.translation === 'string'
-      ) {
-        return [parsed.translation.trim()];
-      }
-
-      if (sourceTexts.length === 1 && typeof parsed.translations === 'string') {
-        return [parsed.translations.trim()];
-      }
-
-      if (sourceTexts.length > 1) {
-        this.logStructured({
-          event: 'translation_failed',
-          reason: 'invalid_shape',
-          model,
-          durationMs,
-        });
-        return null;
-      }
-
-      return null;
-    } catch (error) {
-      this.logStructured({
-        event: 'translation_failed',
-        reason: 'exception',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        model,
-        durationMs: Date.now() - startedAt,
-      });
-      return null;
-    }
-  }
-
-  private systemPrompt(targetLanguage: string): string {
-    return `You translate skincare reference text from English to ${targetLanguage}.
-- Keep ingredient names (retinol, niacinamide, salicylic acid, etc.) in their original scientific form unless an established local lay name exists.
-- Preserve register: calm, professional, non-alarmist, short.
-- Do not add new risk information or instructions beyond the source.
-- Return only JSON: {"translations": ["<translated text>"]} with the translations in the same order as the input sources.`;
   }
 
   private logStructured(payload: Record<string, unknown>): void {

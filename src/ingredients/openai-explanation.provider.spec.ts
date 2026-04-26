@@ -53,7 +53,7 @@ describe('OpenAiExplanationProvider', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: '',
-        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+        OPENAI_MODEL: 'some-model',
       }),
     );
     global.fetch = jest.fn();
@@ -68,7 +68,7 @@ describe('OpenAiExplanationProvider', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_INGREDIENT_EXPLANATION_MODEL: undefined,
+        OPENAI_MODEL: undefined,
       }),
     );
     global.fetch = jest.fn();
@@ -83,7 +83,7 @@ describe('OpenAiExplanationProvider', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+        OPENAI_MODEL: 'some-model',
       }),
     );
     global.fetch = jest.fn().mockResolvedValue({
@@ -117,7 +117,7 @@ describe('OpenAiExplanationProvider', () => {
   it('warnIfMisconfigured logs once when the model env var is unset', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
-        OPENAI_INGREDIENT_EXPLANATION_MODEL: undefined,
+        OPENAI_MODEL: undefined,
       }),
     );
 
@@ -125,7 +125,7 @@ describe('OpenAiExplanationProvider', () => {
 
     expect(warnSpy).toHaveBeenCalled();
     const warned = warnSpy.mock.calls.some(([message]) =>
-      String(message).includes('OPENAI_INGREDIENT_EXPLANATION_MODEL'),
+      String(message).includes('OPENAI_MODEL'),
     );
     expect(warned).toBe(true);
   });
@@ -134,7 +134,7 @@ describe('OpenAiExplanationProvider', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_INGREDIENT_EXPLANATION_MODEL: 'some-model',
+        OPENAI_MODEL: 'some-model',
       }),
     );
     global.fetch = jest.fn();

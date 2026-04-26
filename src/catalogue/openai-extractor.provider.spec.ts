@@ -8,18 +8,22 @@ import {
 import { OpenAiExtractorProvider } from './openai-extractor.provider';
 
 function buildConfig(
-  values: Record<string, string | undefined>,
+  values: Record<string, number | string | undefined>,
 ): ConfigService {
   return {
     get: jest.fn((key: string) => values[key]),
   } as unknown as ConfigService;
 }
 
-function buildProvider(): OpenAiExtractorProvider {
+function buildProvider(
+  overrides: Record<string, number | string | undefined> = {},
+): OpenAiExtractorProvider {
   return new OpenAiExtractorProvider(
     buildConfig({
       OPENAI_API_KEY: 'sk-test',
-      OPENAI_PRODUCT_DISCOVERY_MODEL: 'gpt-5.4',
+      OPENAI_MODEL: 'gpt-5.5',
+      OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
+      ...overrides,
     }),
   );
 }
@@ -65,6 +69,26 @@ function buildProductOutput(name = 'Glycolic Acid Daily Toner') {
       productUrl: null,
       websiteUrl: null,
     },
+  };
+}
+
+function buildDraft() {
+  return {
+    identity: {
+      brand: 'Q+A',
+      name: 'Glycolic Acid Daily Toner',
+      category: ProductCategory.Toner,
+    },
+    guidance: {},
+    manufacturer: {},
+    provenance: DataProvenance.PhotoLookup,
+    source: CatalogueSource.UserPhotos,
+    confidence: LookupConfidence.Low,
+    reviewRequired: true,
+    warnings: [],
+    evidence: [],
+    cacheKey: { source: CatalogueSource.UserPhotos, id: null, url: null },
+    rawSource: { photoExtraction: { brand: 'Q+A' } },
   };
 }
 
@@ -191,27 +215,51 @@ describe('OpenAiExtractorProvider', () => {
   it('caches identical web discovery completion requests', async () => {
     const provider = buildProvider();
     mockFetchJson(buildProductOutput('Completed Toner'));
-    const draft = {
-      identity: {
-        brand: 'Q+A',
-        name: 'Glycolic Acid Daily Toner',
-        category: ProductCategory.Toner,
-      },
-      guidance: {},
-      manufacturer: {},
-      provenance: DataProvenance.PhotoLookup,
-      source: CatalogueSource.UserPhotos,
-      confidence: LookupConfidence.Low,
-      reviewRequired: true,
-      warnings: [],
-      evidence: [],
-      cacheKey: { source: CatalogueSource.UserPhotos, id: null, url: null },
-      rawSource: { photoExtraction: { brand: 'Q+A' } },
-    };
+    const draft = buildDraft();
 
     await provider.completeMissingFields(draft);
     await provider.completeMissingFields({ ...draft });
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the product model for optional web discovery with task-specific reasoning', async () => {
+    const provider = buildProvider({
+      OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: 'none',
+    });
+    const timeoutSpy = jest
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
+    mockFetchJson(buildProductOutput('Fast Completion'));
+
+    await provider.completeMissingFields(buildDraft());
+
+    const body = lastRequestBody();
+    expect(body.model).toBe('gpt-5.5');
+    expect(body.reasoning).toBeUndefined();
+    expect(timeoutSpy).toHaveBeenCalledWith(20000);
+  });
+
+  it('logs optional web discovery timeouts as non-fatal enrichment skips', async () => {
+    const provider = buildProvider();
+    const warn = jest
+      .spyOn(
+        (provider as unknown as { logger: { warn: (message: string) => void } })
+          .logger,
+        'warn',
+      )
+      .mockImplementation(() => undefined);
+    global.fetch = jest.fn().mockRejectedValue(
+      Object.assign(new Error('The operation was aborted due to timeout'), {
+        name: 'TimeoutError',
+      }),
+    );
+
+    const result = await provider.completeMissingFields(buildDraft());
+
+    expect(result).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      'Optional OpenAI product discovery enrichment timed out after 20000ms; continuing with photo extraction result',
+    );
   });
 });

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { readOpenAiModel } from '../common/utils/openai-config';
 import { isSafeExternalHttpUrl } from '../common/utils/url-security';
 import { hashBuffer, hashStableValue } from './catalogue-cache-key.utils';
 import { TimedMemoryCache } from './catalogue-memory-cache';
@@ -17,8 +18,19 @@ import {
   buildOfficialDiscoveryPrompt,
   buildOfficialPageExtractionPrompt,
   buildPhotoExtractionPrompt,
-  describePhotoVariant,
 } from './openai-product-prompts';
+import { extractOfficialDiscoveryUrls } from './openai-official-discovery.utils';
+import {
+  createOpenAiExtractionCache,
+  formatOpenAiFailure,
+  formatOpenAiTimeout,
+  isOpenAiTimeoutError,
+  OPENAI_CACHE_MAX_ENTRIES,
+  PRIMARY_REASONING_EFFORT_ENV_KEY,
+  readReasoningEffort,
+  WEB_REASONING_EFFORT_ENV_KEY,
+} from './openai-provider-runtime';
+import { toPhotoImageContent } from './openai-photo-content.utils';
 import {
   OPENAI_OFFICIAL_DISCOVERY_FORMAT,
   OPENAI_PRODUCT_EXTRACTION_FORMAT,
@@ -34,25 +46,15 @@ const REQUEST_TIMEOUT_MS = 15000;
 const PHOTO_REQUEST_TIMEOUT_MS = 45000;
 const WEB_SEARCH_REQUEST_TIMEOUT_MS = 20000;
 const OFFICIAL_DISCOVERY_REQUEST_TIMEOUT_MS = 15000;
-const DEFAULT_MODEL = 'gpt-5.4';
-const OPENAI_CACHE_TTL_MS = 30 * 60 * 1000;
-const OPENAI_CACHE_MAX_ENTRIES = 100;
+const DEFAULT_MODEL = 'gpt-5.5';
 const OFFICIAL_DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000;
-
-function createExtractionCache() {
-  return new TimedMemoryCache<ExtractionResult | null>({
-    ttlMs: OPENAI_CACHE_TTL_MS,
-    maxEntries: OPENAI_CACHE_MAX_ENTRIES,
-    shouldCacheValue: (value) => Boolean(value),
-  });
-}
 
 @Injectable()
 export class OpenAiExtractorProvider {
   private readonly logger = new Logger(OpenAiExtractorProvider.name);
-  private readonly officialPageExtractionCache = createExtractionCache();
-  private readonly photoExtractionCache = createExtractionCache();
-  private readonly discoveryCompletionCache = createExtractionCache();
+  private readonly officialPageExtractionCache = createOpenAiExtractionCache();
+  private readonly photoExtractionCache = createOpenAiExtractionCache();
+  private readonly discoveryCompletionCache = createOpenAiExtractionCache();
   private readonly officialDiscoveryCache = new TimedMemoryCache<string[]>({
     ttlMs: OFFICIAL_DISCOVERY_CACHE_TTL_MS,
     maxEntries: OPENAI_CACHE_MAX_ENTRIES,
@@ -65,18 +67,25 @@ export class OpenAiExtractorProvider {
     extraction: OfficialPageExtraction,
   ): Promise<ExtractionResult | null> {
     const prompt = buildOfficialPageExtractionPrompt(extraction);
+    const model = this.getModel();
+    const reasoningEffort = this.getPrimaryReasoningEffort();
     const cacheKey = this.toTextRequestCacheKey(
       'openai-official-page-extraction:v1',
       prompt,
       OPENAI_PRODUCT_EXTRACTION_FORMAT,
       false,
+      model,
+      reasoningEffort,
     );
 
     return this.officialPageExtractionCache.getOrCreate(cacheKey, () =>
       this.runRequest(prompt, {
         useWebSearch: false,
         timeoutMs: REQUEST_TIMEOUT_MS,
-        failureLabel: 'OpenAI extraction',
+        failureLabel: 'Optional OpenAI official page normalization',
+        optionalFallbackMessage: 'continuing with page parser result',
+        model,
+        reasoningEffort,
         responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
       }),
     );
@@ -99,7 +108,7 @@ export class OpenAiExtractorProvider {
                   input.images.length,
                 ),
               },
-              ...this.toImageContent(input),
+              ...toPhotoImageContent(input),
             ],
           },
         ],
@@ -107,6 +116,8 @@ export class OpenAiExtractorProvider {
           useWebSearch: false,
           timeoutMs: PHOTO_REQUEST_TIMEOUT_MS,
           failureLabel: 'OpenAI photo extraction',
+          model: this.getModel(),
+          reasoningEffort: this.getPrimaryReasoningEffort(),
           maxOutputTokens: 1400,
           responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
         },
@@ -118,18 +129,25 @@ export class OpenAiExtractorProvider {
     draft: ResolvedProductDraft,
   ): Promise<ExtractionResult | null> {
     const prompt = buildDiscoveryPrompt(draft);
+    const model = this.getModel();
+    const reasoningEffort = this.getWebDiscoveryReasoningEffort();
     const cacheKey = this.toTextRequestCacheKey(
       'openai-product-discovery:v1',
       prompt,
       OPENAI_PRODUCT_EXTRACTION_FORMAT,
       true,
+      model,
+      reasoningEffort,
     );
 
     return this.discoveryCompletionCache.getOrCreate(cacheKey, () =>
       this.runRequest(prompt, {
         useWebSearch: true,
         timeoutMs: WEB_SEARCH_REQUEST_TIMEOUT_MS,
-        failureLabel: 'OpenAI product discovery',
+        failureLabel: 'Optional OpenAI product discovery enrichment',
+        optionalFallbackMessage: 'continuing with photo extraction result',
+        model,
+        reasoningEffort,
         maxOutputTokens: 900,
         responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
       }),
@@ -163,48 +181,15 @@ export class OpenAiExtractorProvider {
     );
   }
 
-  private toImageContent(input: CataloguePhotoExtractionInput) {
-    return input.images.flatMap((image, index) => {
-      const imageNumber = index + 1;
-      const sourceIndex = image.sourceIndex ?? index;
-      const sourceNumber = sourceIndex + 1;
-      const isHero =
-        image.isHero ??
-        (image.sourceIndex !== undefined
-          ? image.sourceIndex === input.heroImageIndex
-          : index === input.heroImageIndex);
-      const dimensions =
-        image.width && image.height ? ` ${image.width}x${image.height}` : '';
-      const imageLabel = [
-        `Image ${imageNumber} is a ${describePhotoVariant(image.variant)}${dimensions} derived from source photo ${sourceNumber}.`,
-        isHero
-          ? 'That source photo is the selected product photo to save with the item.'
-          : 'That source photo is an additional label photo of the same product and may overlap with other label photos.',
-        image.variant === 'text-enhanced'
-          ? 'Use this variant especially for small, low-contrast, blurred, or curved label text.'
-          : 'Use this variant for overall packaging layout, brand, product name, size, and context.',
-      ].join(' ');
-
-      return [
-        {
-          type: 'input_text' as const,
-          text: imageLabel,
-        },
-        {
-          type: 'input_image' as const,
-          image_url: this.toDataUrl(image.buffer, image.mimetype),
-          detail: 'high' as const,
-        },
-      ];
-    });
-  }
-
   private async runRequest(
     input: unknown,
     options: {
       useWebSearch: boolean;
       timeoutMs: number;
       failureLabel: string;
+      optionalFallbackMessage?: string;
+      model?: string;
+      reasoningEffort?: string;
       maxOutputTokens?: number;
       responseFormat: OpenAiTextFormat;
     },
@@ -222,9 +207,10 @@ export class OpenAiExtractorProvider {
       return toExtractionResult(parsed, response.payload);
     } catch (error) {
       this.logger.warn(
-        `${options.failureLabel} failed: ${
-          error instanceof Error ? error.message : 'Invalid JSON output'
-        }`,
+        formatOpenAiFailure(
+          options,
+          error instanceof Error ? error.message : 'Invalid JSON output',
+        ),
       );
       return null;
     }
@@ -236,6 +222,9 @@ export class OpenAiExtractorProvider {
       useWebSearch: boolean;
       timeoutMs: number;
       failureLabel: string;
+      optionalFallbackMessage?: string;
+      model?: string;
+      reasoningEffort?: string;
       maxOutputTokens?: number;
       responseFormat: OpenAiTextFormat;
     },
@@ -253,13 +242,15 @@ export class OpenAiExtractorProvider {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: this.getModel(),
+          model: options.model ?? this.getModel(),
           ...(options.useWebSearch
             ? { tools: [{ type: 'web_search' }], tool_choice: 'auto' }
             : {}),
           input,
           max_output_tokens: options.maxOutputTokens ?? 1200,
-          reasoning: { effort: 'low' },
+          ...(options.reasoningEffort
+            ? { reasoning: { effort: options.reasoningEffort } }
+            : {}),
           text: {
             verbosity: 'low',
             format: options.responseFormat,
@@ -270,7 +261,7 @@ export class OpenAiExtractorProvider {
 
       if (!response.ok) {
         this.logger.warn(
-          `${options.failureLabel} failed with status ${response.status}`,
+          formatOpenAiFailure(options, `status ${response.status}`),
         );
         return null;
       }
@@ -279,23 +270,38 @@ export class OpenAiExtractorProvider {
       const outputText = extractOutputText(payload);
       return outputText ? { outputText, payload } : null;
     } catch (error) {
-      this.logger.warn(
-        `${options.failureLabel} failed: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`,
-      );
+      if (isOpenAiTimeoutError(error)) {
+        this.logger.warn(formatOpenAiTimeout(options));
+      } else {
+        this.logger.warn(
+          formatOpenAiFailure(
+            options,
+            error instanceof Error ? error.message : 'Unknown error',
+          ),
+        );
+      }
       return null;
     }
   }
 
   private getModel(): string {
-    const configuredModel = this.configService
-      .get<string>('OPENAI_PRODUCT_DISCOVERY_MODEL')
-      ?.trim();
+    return readOpenAiModel(this.configService, DEFAULT_MODEL) ?? DEFAULT_MODEL;
+  }
 
-    return !configuredModel || configuredModel === 'gpt-5'
-      ? DEFAULT_MODEL
-      : configuredModel;
+  private getPrimaryReasoningEffort(): string | undefined {
+    return readReasoningEffort(
+      this.configService,
+      PRIMARY_REASONING_EFFORT_ENV_KEY,
+      'low',
+    );
+  }
+
+  private getWebDiscoveryReasoningEffort(): string | undefined {
+    return readReasoningEffort(
+      this.configService,
+      WEB_REASONING_EFFORT_ENV_KEY,
+      this.getPrimaryReasoningEffort(),
+    );
   }
 
   private toTextRequestCacheKey(
@@ -303,10 +309,13 @@ export class OpenAiExtractorProvider {
     prompt: string,
     responseFormat: OpenAiTextFormat,
     useWebSearch: boolean,
+    model = this.getModel(),
+    reasoningEffort = this.getPrimaryReasoningEffort(),
   ): string {
     return hashStableValue(scope, {
-      model: this.getModel(),
+      model,
       prompt,
+      reasoningEffort: reasoningEffort ?? null,
       responseFormat: responseFormat.name,
       useWebSearch,
     });
@@ -315,6 +324,7 @@ export class OpenAiExtractorProvider {
   private toPhotoRequestCacheKey(input: CataloguePhotoExtractionInput): string {
     return hashStableValue('openai-photo-extraction:v1', {
       model: this.getModel(),
+      reasoningEffort: this.getPrimaryReasoningEffort() ?? null,
       responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT.name,
       heroImageIndex: input.heroImageIndex,
       sourceImageCount: input.sourceImageCount ?? input.images.length,
@@ -341,7 +351,10 @@ export class OpenAiExtractorProvider {
       {
         useWebSearch: true,
         timeoutMs: OFFICIAL_DISCOVERY_REQUEST_TIMEOUT_MS,
-        failureLabel: 'OpenAI official product discovery',
+        failureLabel: 'Optional OpenAI official product URL discovery',
+        optionalFallbackMessage: 'continuing without official URL candidates',
+        model: this.getModel(),
+        reasoningEffort: this.getWebDiscoveryReasoningEffort(),
         maxOutputTokens: 1200,
         responseFormat: OPENAI_OFFICIAL_DISCOVERY_FORMAT,
       },
@@ -352,35 +365,10 @@ export class OpenAiExtractorProvider {
 
     return Array.from(
       new Set(
-        this.extractOfficialDiscoveryUrls(response.outputText)
+        extractOfficialDiscoveryUrls(response.outputText)
           .filter((url) => isSafeExternalHttpUrl(url))
           .map((url) => normalizeUrl(url)),
       ),
     ).slice(0, 3);
-  }
-
-  private extractOfficialDiscoveryUrls(outputText: string): string[] {
-    try {
-      const parsed = JSON.parse(extractJsonObject(outputText)) as {
-        productUrls?: string[];
-      };
-
-      if (Array.isArray(parsed.productUrls)) {
-        return parsed.productUrls.filter(
-          (value): value is string => typeof value === 'string',
-        );
-      }
-    } catch (error) {
-      void error;
-    }
-
-    return Array.from(
-      outputText.matchAll(/https?:\/\/[^\s"'`<>()]+/gi),
-      (match) => match[0],
-    );
-  }
-
-  private toDataUrl(buffer: Buffer, mimeType: string): string {
-    return `data:${mimeType};base64,${buffer.toString('base64')}`;
   }
 }
