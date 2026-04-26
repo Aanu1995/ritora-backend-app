@@ -32,6 +32,7 @@ export function createCatalogueServiceTestHarness() {
   };
   const cataloguePhotoStorageService = {
     saveHeroImage: jest.fn(),
+    startHeroImageUpload: jest.fn(),
   };
 
   catalogueSourceRuleService.evaluateUrl.mockResolvedValue({
@@ -58,6 +59,12 @@ export function createCatalogueServiceTestHarness() {
   cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(
     'https://signed.example.com/product-images/processed/front-photo.webp',
   );
+  cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+    url: Promise.resolve(
+      'https://signed.example.com/product-images/processed/front-photo.webp',
+    ),
+    cleanup: jest.fn().mockResolvedValue(undefined),
+  });
   openAiExtractorProvider.completeMissingFields.mockResolvedValue(null);
 
   return {

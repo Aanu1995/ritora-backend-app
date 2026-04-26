@@ -41,17 +41,13 @@ export class CataloguePhotoProcessorService {
   ): Promise<ProcessedCataloguePhotoBatch> {
     const processingConfig = this.getProcessingConfig();
 
-    const storageImages = await Promise.all(
-      images.map((image, index) =>
-        this.processImage(image, {
-          isHero: index === heroImageIndex,
-          maxDimension: processingConfig.storageMaxDimension,
-          quality: processingConfig.storageQuality,
-        }),
-      ),
-    );
-    const extractionImages = (
-      await Promise.all(
+    const [heroStorageImage, extractionImages] = await Promise.all([
+      this.processImage(images[heroImageIndex], {
+        isHero: true,
+        maxDimension: processingConfig.storageMaxDimension,
+        quality: processingConfig.storageQuality,
+      }),
+      Promise.all(
         images.map((image, index) =>
           this.prepareExtractionAssets(image, {
             sourceIndex: index,
@@ -60,8 +56,8 @@ export class CataloguePhotoProcessorService {
             quality: processingConfig.extractionQuality,
           }),
         ),
-      )
-    ).flat();
+      ).then((assets) => assets.flat()),
+    ]);
 
     return {
       extractionInput: {
@@ -69,7 +65,7 @@ export class CataloguePhotoProcessorService {
         heroImageIndex,
         sourceImageCount: images.length,
       },
-      heroStorageImage: storageImages[heroImageIndex],
+      heroStorageImage,
     };
   }
 

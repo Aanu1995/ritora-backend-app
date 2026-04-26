@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { assertSafeExternalHttpUrl } from '../common/utils/url-security';
+import { TimedMemoryCache } from './catalogue-memory-cache';
 import type { OfficialPageExtraction } from './product-discovery.types';
 import { extractOfficialPageExtraction } from './official-page-extraction.utils';
 
@@ -10,14 +11,31 @@ const REQUEST_HEADERS = {
 const REQUEST_TIMEOUT_MS = 4000;
 const MAX_REDIRECTS = 3;
 const MAX_HTML_LENGTH = 400_000;
+const OFFICIAL_PAGE_CACHE_TTL_MS = 60 * 60 * 1000;
+const OFFICIAL_PAGE_CACHE_MAX_ENTRIES = 100;
 
 @Injectable()
 export class OfficialPageProvider {
   private readonly logger = new Logger(OfficialPageProvider.name);
+  private readonly extractionCache =
+    new TimedMemoryCache<OfficialPageExtraction | null>({
+      ttlMs: OFFICIAL_PAGE_CACHE_TTL_MS,
+      maxEntries: OFFICIAL_PAGE_CACHE_MAX_ENTRIES,
+      shouldCacheValue: (value) => Boolean(value),
+    });
 
   async extract(url: string): Promise<OfficialPageExtraction | null> {
-    assertSafeExternalHttpUrl(url, 'Official product page');
+    const cacheUrl = url.trim();
+    assertSafeExternalHttpUrl(cacheUrl, 'Official product page');
 
+    return this.extractionCache.getOrCreate(cacheUrl, () =>
+      this.extractUncached(cacheUrl),
+    );
+  }
+
+  private async extractUncached(
+    url: string,
+  ): Promise<OfficialPageExtraction | null> {
     const html = await this.fetchHtml(url);
     if (!html) {
       return null;

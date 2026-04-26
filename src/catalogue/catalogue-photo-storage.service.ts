@@ -1,4 +1,8 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl as getSignedCloudFrontUrl } from '@aws-sdk/cloudfront-signer';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +20,11 @@ type MediaRuntimeConfig = {
   kmsKeyId: string | null;
 };
 
+type HeroImageUpload = {
+  url: Promise<string | null>;
+  cleanup: () => Promise<void>;
+};
+
 @Injectable()
 export class CataloguePhotoStorageService {
   private readonly s3Client: S3Client;
@@ -27,12 +36,37 @@ export class CataloguePhotoStorageService {
   }
 
   async saveHeroImage(file: UploadedCatalogueImage): Promise<string | null> {
+    return this.startHeroImageUpload(file).url;
+  }
+
+  startHeroImageUpload(file: UploadedCatalogueImage): HeroImageUpload {
     const runtimeConfig = this.getRuntimeConfig();
     if (!runtimeConfig) {
-      return null;
+      return {
+        url: Promise.resolve(null),
+        cleanup: async () => {},
+      };
     }
 
     const objectKey = `${CATALOGUE_PRODUCT_IMAGE_PROCESSED_PREFIX}/${ulid()}.webp`;
+    const upload = this.putHeroImage(file, objectKey, runtimeConfig);
+    const url = upload.then(() =>
+      this.createSignedManagedUrl(objectKey, runtimeConfig),
+    );
+    void url.catch(() => undefined);
+
+    return {
+      url,
+      cleanup: () =>
+        this.deleteUploadedHeroImage(upload, objectKey, runtimeConfig),
+    };
+  }
+
+  private async putHeroImage(
+    file: UploadedCatalogueImage,
+    objectKey: string,
+    runtimeConfig: MediaRuntimeConfig,
+  ): Promise<void> {
     await this.s3Client.send(
       new PutObjectCommand({
         Bucket: runtimeConfig.bucketName,
@@ -48,8 +82,24 @@ export class CataloguePhotoStorageService {
           : {}),
       }),
     );
+  }
 
-    return this.createSignedManagedUrl(objectKey, runtimeConfig);
+  private async deleteUploadedHeroImage(
+    upload: Promise<void>,
+    objectKey: string,
+    runtimeConfig: MediaRuntimeConfig,
+  ): Promise<void> {
+    try {
+      await upload;
+      await this.s3Client.send(
+        new DeleteObjectCommand({
+          Bucket: runtimeConfig.bucketName,
+          Key: objectKey,
+        }),
+      );
+    } catch {
+      return;
+    }
   }
 
   toPersistentImageUrls(imageUrls: string[]): string[] {

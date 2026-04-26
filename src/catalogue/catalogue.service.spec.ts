@@ -11,24 +11,16 @@ import {
   ProductCategory,
 } from '../shelf/shelf.types';
 
+type Harness = ReturnType<typeof createCatalogueServiceTestHarness>;
+
 describe('CatalogueService', () => {
-  let harness: ReturnType<typeof createCatalogueServiceTestHarness>;
+  let harness: Harness;
   let service: CatalogueService;
-  let officialPageProvider: ReturnType<
-    typeof createCatalogueServiceTestHarness
-  >['officialPageProvider'];
-  let openAiExtractorProvider: ReturnType<
-    typeof createCatalogueServiceTestHarness
-  >['openAiExtractorProvider'];
-  let cataloguePhotoProcessorService: ReturnType<
-    typeof createCatalogueServiceTestHarness
-  >['cataloguePhotoProcessorService'];
-  let catalogueSourceRuleService: ReturnType<
-    typeof createCatalogueServiceTestHarness
-  >['catalogueSourceRuleService'];
-  let cataloguePhotoStorageService: ReturnType<
-    typeof createCatalogueServiceTestHarness
-  >['cataloguePhotoStorageService'];
+  let officialPageProvider: Harness['officialPageProvider'];
+  let openAiExtractorProvider: Harness['openAiExtractorProvider'];
+  let cataloguePhotoProcessorService: Harness['cataloguePhotoProcessorService'];
+  let catalogueSourceRuleService: Harness['catalogueSourceRuleService'];
+  let cataloguePhotoStorageService: Harness['cataloguePhotoStorageService'];
 
   beforeEach(() => {
     harness = createCatalogueServiceTestHarness();
@@ -132,7 +124,9 @@ describe('CatalogueService', () => {
     expect(
       cataloguePhotoProcessorService.prepareForExtraction,
     ).toHaveBeenCalledWith([heroImage, ingredientImage, directionsImage], 2);
-    expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
+    expect(
+      cataloguePhotoStorageService.startHeroImageUpload,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         buffer: directionsImage.buffer,
         mimetype: 'image/jpeg',
@@ -360,7 +354,10 @@ describe('CatalogueService', () => {
     const heroImage = createUploadedImage('heroImage');
     const labelImage = createUploadedImage('labelImage');
 
-    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(null);
+    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+      url: Promise.resolve(null),
+      cleanup: jest.fn().mockResolvedValue(undefined),
+    });
     openAiExtractorProvider.extractFromImages.mockResolvedValue({
       data: {
         identity: {

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isSafeExternalHttpUrl } from '../common/utils/url-security';
+import { hashBuffer, hashStableValue } from './catalogue-cache-key.utils';
+import { TimedMemoryCache } from './catalogue-memory-cache';
 import type { CataloguePhotoExtractionInput } from './catalogue-photo.types';
 import {
   extractJsonObject,
@@ -33,67 +35,105 @@ const PHOTO_REQUEST_TIMEOUT_MS = 45000;
 const WEB_SEARCH_REQUEST_TIMEOUT_MS = 20000;
 const OFFICIAL_DISCOVERY_REQUEST_TIMEOUT_MS = 15000;
 const DEFAULT_MODEL = 'gpt-5.4';
+const OPENAI_CACHE_TTL_MS = 30 * 60 * 1000;
+const OPENAI_CACHE_MAX_ENTRIES = 100;
+const OFFICIAL_DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function createExtractionCache() {
+  return new TimedMemoryCache<ExtractionResult | null>({
+    ttlMs: OPENAI_CACHE_TTL_MS,
+    maxEntries: OPENAI_CACHE_MAX_ENTRIES,
+    shouldCacheValue: (value) => Boolean(value),
+  });
+}
 
 @Injectable()
 export class OpenAiExtractorProvider {
   private readonly logger = new Logger(OpenAiExtractorProvider.name);
-  private readonly officialDiscoveryCache = new Map<
-    string,
-    Promise<string[]>
-  >();
+  private readonly officialPageExtractionCache = createExtractionCache();
+  private readonly photoExtractionCache = createExtractionCache();
+  private readonly discoveryCompletionCache = createExtractionCache();
+  private readonly officialDiscoveryCache = new TimedMemoryCache<string[]>({
+    ttlMs: OFFICIAL_DISCOVERY_CACHE_TTL_MS,
+    maxEntries: OPENAI_CACHE_MAX_ENTRIES,
+    shouldCacheValue: (value) => value.length > 0,
+  });
 
   constructor(private readonly configService: ConfigService) {}
 
   async extract(
     extraction: OfficialPageExtraction,
   ): Promise<ExtractionResult | null> {
-    return this.runRequest(buildOfficialPageExtractionPrompt(extraction), {
-      useWebSearch: false,
-      timeoutMs: REQUEST_TIMEOUT_MS,
-      failureLabel: 'OpenAI extraction',
-      responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
-    });
+    const prompt = buildOfficialPageExtractionPrompt(extraction);
+    const cacheKey = this.toTextRequestCacheKey(
+      'openai-official-page-extraction:v1',
+      prompt,
+      OPENAI_PRODUCT_EXTRACTION_FORMAT,
+      false,
+    );
+
+    return this.officialPageExtractionCache.getOrCreate(cacheKey, () =>
+      this.runRequest(prompt, {
+        useWebSearch: false,
+        timeoutMs: REQUEST_TIMEOUT_MS,
+        failureLabel: 'OpenAI extraction',
+        responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
+      }),
+    );
   }
 
   async extractFromImages(
     input: CataloguePhotoExtractionInput,
   ): Promise<ExtractionResult | null> {
-    return this.runRequest(
-      [
+    const cacheKey = this.toPhotoRequestCacheKey(input);
+    return this.photoExtractionCache.getOrCreate(cacheKey, () =>
+      this.runRequest(
+        [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: buildPhotoExtractionPrompt(
+                  input.sourceImageCount ?? input.images.length,
+                  input.images.length,
+                ),
+              },
+              ...this.toImageContent(input),
+            ],
+          },
+        ],
         {
-          role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: buildPhotoExtractionPrompt(
-                input.sourceImageCount ?? input.images.length,
-                input.images.length,
-              ),
-            },
-            ...this.toImageContent(input),
-          ],
+          useWebSearch: false,
+          timeoutMs: PHOTO_REQUEST_TIMEOUT_MS,
+          failureLabel: 'OpenAI photo extraction',
+          maxOutputTokens: 1400,
+          responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
         },
-      ],
-      {
-        useWebSearch: false,
-        timeoutMs: PHOTO_REQUEST_TIMEOUT_MS,
-        failureLabel: 'OpenAI photo extraction',
-        maxOutputTokens: 1400,
-        responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
-      },
+      ),
     );
   }
 
   async completeMissingFields(
     draft: ResolvedProductDraft,
   ): Promise<ExtractionResult | null> {
-    return this.runRequest(buildDiscoveryPrompt(draft), {
-      useWebSearch: true,
-      timeoutMs: WEB_SEARCH_REQUEST_TIMEOUT_MS,
-      failureLabel: 'OpenAI product discovery',
-      maxOutputTokens: 900,
-      responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
-    });
+    const prompt = buildDiscoveryPrompt(draft);
+    const cacheKey = this.toTextRequestCacheKey(
+      'openai-product-discovery:v1',
+      prompt,
+      OPENAI_PRODUCT_EXTRACTION_FORMAT,
+      true,
+    );
+
+    return this.discoveryCompletionCache.getOrCreate(cacheKey, () =>
+      this.runRequest(prompt, {
+        useWebSearch: true,
+        timeoutMs: WEB_SEARCH_REQUEST_TIMEOUT_MS,
+        failureLabel: 'OpenAI product discovery',
+        maxOutputTokens: 900,
+        responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
+      }),
+    );
   }
 
   async discoverOfficialProductUrls(input: {
@@ -113,19 +153,14 @@ export class OpenAiExtractorProvider {
       name: input.name?.trim().toLowerCase() ?? null,
       barcode: input.barcode?.trim() ?? null,
     });
-    const cached = this.officialDiscoveryCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
-    const pending = this.runOfficialDiscoveryRequest({
-      query: normalizedQuery,
-      brand: input.brand?.trim() || undefined,
-      name: input.name?.trim() || undefined,
-      barcode: input.barcode?.trim() || undefined,
-    });
-    this.officialDiscoveryCache.set(cacheKey, pending);
-    return pending;
+    return this.officialDiscoveryCache.getOrCreate(cacheKey, () =>
+      this.runOfficialDiscoveryRequest({
+        query: normalizedQuery,
+        brand: input.brand?.trim() || undefined,
+        name: input.name?.trim() || undefined,
+        barcode: input.barcode?.trim() || undefined,
+      }),
+    );
   }
 
   private toImageContent(input: CataloguePhotoExtractionInput) {
@@ -261,6 +296,38 @@ export class OpenAiExtractorProvider {
     return !configuredModel || configuredModel === 'gpt-5'
       ? DEFAULT_MODEL
       : configuredModel;
+  }
+
+  private toTextRequestCacheKey(
+    scope: string,
+    prompt: string,
+    responseFormat: OpenAiTextFormat,
+    useWebSearch: boolean,
+  ): string {
+    return hashStableValue(scope, {
+      model: this.getModel(),
+      prompt,
+      responseFormat: responseFormat.name,
+      useWebSearch,
+    });
+  }
+
+  private toPhotoRequestCacheKey(input: CataloguePhotoExtractionInput): string {
+    return hashStableValue('openai-photo-extraction:v1', {
+      model: this.getModel(),
+      responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT.name,
+      heroImageIndex: input.heroImageIndex,
+      sourceImageCount: input.sourceImageCount ?? input.images.length,
+      images: input.images.map((image) => ({
+        bufferHash: hashBuffer(image.buffer),
+        height: image.height ?? null,
+        isHero: image.isHero ?? null,
+        mimetype: image.mimetype,
+        sourceIndex: image.sourceIndex ?? null,
+        variant: image.variant ?? null,
+        width: image.width ?? null,
+      })),
+    });
   }
 
   private async runOfficialDiscoveryRequest(input: {

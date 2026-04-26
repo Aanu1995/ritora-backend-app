@@ -14,7 +14,10 @@ import {
 } from './catalogue-resolution.utils';
 import { CataloguePhotoProcessorService } from './catalogue-photo-processor.service';
 import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
-import type { UploadedCatalogueImage } from './catalogue-photo.types';
+import type {
+  CataloguePhotoExtractionInput,
+  UploadedCatalogueImage,
+} from './catalogue-photo.types';
 import { assertValidCataloguePhotoRequest } from './catalogue-photo.utils';
 import { CatalogueSourceRuleService } from './catalogue-source-rule.service';
 import { ResolvedLookupResponseDto } from './dto/resolved-lookup-response.dto';
@@ -61,19 +64,20 @@ export class CatalogueService {
         images,
         heroImageIndex,
       );
-
-    const photoExtraction =
-      await this.openAiExtractorProvider.extractFromImages(
-        processedPhotoBatch.extractionInput,
+    const heroImageUpload =
+      this.cataloguePhotoStorageService.startHeroImageUpload(
+        processedPhotoBatch.heroStorageImage,
       );
+
+    const photoExtraction = await this.extractProductFromPreparedPhotos(
+      processedPhotoBatch.extractionInput,
+      heroImageUpload.cleanup,
+    );
     if (!photoExtraction) {
       return null;
     }
 
-    const storedHeroImageUrl =
-      await this.cataloguePhotoStorageService.saveHeroImage(
-        processedPhotoBatch.heroStorageImage,
-      );
+    const storedHeroImageUrl = await heroImageUpload.url;
     let current = this.buildPhotoResolvedDraft(
       photoExtraction,
       storedHeroImageUrl,
@@ -111,6 +115,24 @@ export class CatalogueService {
     await this.stripUntrustedUrlsFromResolved(current);
 
     return ResolvedLookupResponseDto.fromResolved(current);
+  }
+
+  private async extractProductFromPreparedPhotos(
+    extractionInput: CataloguePhotoExtractionInput,
+    cleanupHeroImageUpload: () => Promise<void>,
+  ): Promise<ExtractionResult | null> {
+    try {
+      const photoExtraction =
+        await this.openAiExtractorProvider.extractFromImages(extractionInput);
+      if (!photoExtraction) {
+        await cleanupHeroImageUpload();
+      }
+
+      return photoExtraction;
+    } catch (error) {
+      await cleanupHeroImageUpload();
+      throw error;
+    }
   }
 
   private buildPhotoResolvedDraft(
@@ -315,34 +337,33 @@ export class CatalogueService {
     resolved: ResolvedProductDraft,
   ): Promise<void> {
     const productUrl = resolved.manufacturer.productUrl;
-    if (productUrl) {
-      const evaluation =
-        await this.catalogueSourceRuleService.evaluateUrl(productUrl);
-      if (evaluation.blocked) {
-        resolved.manufacturer.productUrl = null;
-        resolved.manufacturer.websiteUrl = null;
-      }
+    const productUrlEvaluation = productUrl
+      ? this.catalogueSourceRuleService.evaluateUrl(productUrl)
+      : Promise.resolve(null);
+    const filteredEvidence = Promise.all(
+      resolved.evidence.map(async (item) => {
+        if (!item.url) {
+          return item;
+        }
+
+        const evaluation = await this.catalogueSourceRuleService.evaluateUrl(
+          item.url,
+        );
+        return evaluation.blocked ? null : item;
+      }),
+    );
+    const [productEvaluation, evidence] = await Promise.all([
+      productUrlEvaluation,
+      filteredEvidence,
+    ]);
+
+    if (productEvaluation?.blocked) {
+      resolved.manufacturer.productUrl = null;
+      resolved.manufacturer.websiteUrl = null;
     }
 
-    if (!resolved.evidence.length) {
-      return;
-    }
-
-    const filteredEvidence = [];
-    for (const item of resolved.evidence) {
-      if (!item.url) {
-        filteredEvidence.push(item);
-        continue;
-      }
-
-      const evaluation = await this.catalogueSourceRuleService.evaluateUrl(
-        item.url,
-      );
-      if (!evaluation.blocked) {
-        filteredEvidence.push(item);
-      }
-    }
-
-    resolved.evidence = filteredEvidence;
+    resolved.evidence = evidence.filter(
+      (item): item is ResolvedProductDraft['evidence'][number] => item !== null,
+    );
   }
 }
