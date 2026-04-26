@@ -20,7 +20,12 @@ function buildDataSource(): DataSource {
 }
 
 function readRequestedSources(init: RequestInit | undefined): string[] {
-  const body = JSON.parse(String(init?.body)) as {
+  const rawBody = init?.body;
+  if (typeof rawBody !== 'string') {
+    throw new Error('Translation request body was not a string');
+  }
+
+  const body = JSON.parse(rawBody) as {
     input?: Array<{
       role?: string;
       content?: Array<{ type?: string; text?: string }>;
@@ -104,7 +109,7 @@ describe('TranslationService', () => {
         activeRequests -= 1;
         return buildTranslationResponse(readRequestedSources(init));
       },
-    ) as jest.MockedFunction<typeof fetch>;
+    );
 
     const result = await service.translateMany(inputs, 'sv');
 

@@ -215,9 +215,9 @@ export class TranslationService {
   private writeLru(key: string, value: string): void {
     if (this.lru.size >= MAX_LRU_ENTRIES) {
       // JS Maps preserve insertion order — oldest-first eviction.
-      const oldest = this.lru.keys().next().value;
-      if (oldest !== undefined) {
-        this.lru.delete(oldest);
+      const oldest = this.lru.keys().next();
+      if (!oldest.done) {
+        this.lru.delete(oldest.value);
       }
     }
     this.lru.set(key, value);

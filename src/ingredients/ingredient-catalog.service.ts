@@ -68,9 +68,7 @@ export class IngredientCatalogService {
   private categoryFallbacks: CategoryFallback[] = [];
   private conflictRules: ConflictRule[] = [];
 
-  constructor(
-    @InjectDataSource() private readonly dataSource: DataSource,
-  ) {}
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   async refresh(): Promise<void> {
     try {

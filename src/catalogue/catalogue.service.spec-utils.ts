@@ -41,20 +41,21 @@ export function createCatalogueServiceTestHarness() {
     matchedLabels: [],
   });
   cataloguePhotoProcessorService.prepareForExtraction.mockImplementation(
-    async (images: UploadedCatalogueImage[], heroImageIndex: number) => ({
-      extractionInput: {
-        images: images.map((image) => ({
-          buffer: image.buffer,
-          mimetype: image.mimetype,
-        })),
-        heroImageIndex,
-      },
-      heroStorageImage: {
-        ...images[heroImageIndex],
-        width: 600,
-        height: 600,
-      },
-    }),
+    (images: UploadedCatalogueImage[], heroImageIndex: number) =>
+      Promise.resolve({
+        extractionInput: {
+          images: images.map((image) => ({
+            buffer: image.buffer,
+            mimetype: image.mimetype,
+          })),
+          heroImageIndex,
+        },
+        heroStorageImage: {
+          ...images[heroImageIndex],
+          width: 600,
+          height: 600,
+        },
+      }),
   );
   cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(
     'https://signed.example.com/product-images/processed/front-photo.webp',

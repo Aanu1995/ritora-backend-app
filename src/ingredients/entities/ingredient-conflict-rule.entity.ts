@@ -5,7 +5,10 @@ import {
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import type { AnalysisSeverity, IngredientCategory } from '../ingredients.types';
+import type {
+  AnalysisSeverity,
+  IngredientCategory,
+} from '../ingredients.types';
 
 /**
  * Deterministic conflict rule. The safety verdict is defined here. The LLM

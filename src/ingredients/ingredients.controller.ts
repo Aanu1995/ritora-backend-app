@@ -10,10 +10,7 @@ import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import {
-  normalizeLanguage,
-  resolveRequestLanguage,
-} from '../common/i18n/i18n';
+import { normalizeLanguage, resolveRequestLanguage } from '../common/i18n/i18n';
 import { AnalyzeProductsDto } from './dto/analyze-products.dto';
 import { IngredientsService } from './ingredients.service';
 import type { AnalysisResult } from './ingredients.types';
@@ -57,10 +54,6 @@ export class IngredientsController {
       ? normalizeLanguage(dto.language)
       : resolveRequestLanguage(request);
 
-    return this.ingredientsService.analyzeForUser(
-      userId,
-      dto,
-      language,
-    );
+    return this.ingredientsService.analyzeForUser(userId, dto, language);
   }
 }

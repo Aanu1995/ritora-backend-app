@@ -8,10 +8,7 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import {
-  SUPPORTED_LANGUAGES,
-  type AppLanguage,
-} from '../../common/i18n/i18n';
+import { SUPPORTED_LANGUAGES, type AppLanguage } from '../../common/i18n/i18n';
 
 export class AnalyzeProductsDto {
   @IsOptional()
