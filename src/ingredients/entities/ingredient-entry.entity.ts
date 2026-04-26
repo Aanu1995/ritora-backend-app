@@ -6,7 +6,10 @@ import {
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import type { AnalysisSeverity, IngredientCategory } from '../ingredients.types';
+import type {
+  AnalysisSeverity,
+  IngredientCategory,
+} from '../ingredients.types';
 import { IngredientAlias } from './ingredient-alias.entity';
 import { IngredientCategoryPattern } from './ingredient-category-pattern.entity';
 
@@ -58,9 +61,6 @@ export class IngredientEntry {
   @OneToMany(() => IngredientAlias, (alias) => alias.ingredient)
   aliases: IngredientAlias[];
 
-  @OneToMany(
-    () => IngredientCategoryPattern,
-    (pattern) => pattern.ingredient,
-  )
+  @OneToMany(() => IngredientCategoryPattern, (pattern) => pattern.ingredient)
   categoryPatterns: IngredientCategoryPattern[];
 }

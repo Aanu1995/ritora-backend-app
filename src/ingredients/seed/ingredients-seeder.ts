@@ -2,7 +2,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import type { AnalysisSeverity, IngredientCategory } from '../ingredients.types';
+import type {
+  AnalysisSeverity,
+  IngredientCategory,
+} from '../ingredients.types';
 
 type SeedIngredient = {
   slug: string;

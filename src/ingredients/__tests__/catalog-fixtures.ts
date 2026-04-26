@@ -1,8 +1,5 @@
 import type { IngredientCatalogService } from '../ingredient-catalog.service';
-import {
-  AnalysisSeverity,
-  IngredientCategory,
-} from '../ingredients.types';
+import { AnalysisSeverity, IngredientCategory } from '../ingredients.types';
 import type { ConflictRule, IngredientDefinition } from '../ingredients.types';
 
 type CategoryFallback = {
@@ -40,8 +37,8 @@ export function buildStubCatalog(
   }
 
   return {
-    onModuleInit: async () => undefined,
-    refresh: async () => undefined,
+    onModuleInit: () => Promise.resolve(),
+    refresh: () => Promise.resolve(),
     getIngredientBySlug: (slug: string) => bySlug.get(slug),
     getIngredientByAlias: (alias: string) => byAlias.get(alias),
     getCategoryFallbacks: () => fallbacks,
@@ -50,7 +47,9 @@ export function buildStubCatalog(
   } as unknown as IngredientCatalogService;
 }
 
-function toIngredient(raw: Partial<IngredientDefinition>): IngredientDefinition {
+function toIngredient(
+  raw: Partial<IngredientDefinition>,
+): IngredientDefinition {
   return {
     slug: raw.slug ?? 'unknown',
     displayNameEn: raw.displayNameEn ?? raw.slug ?? 'Unknown',
@@ -198,7 +197,8 @@ const DEFAULT_RULES: Partial<ConflictRule>[] = [
     severity: AnalysisSeverity.High,
     left: { categories: [IngredientCategory.BenzoylPeroxide] },
     right: { categories: [IngredientCategory.Retinoid] },
-    descriptionEn: 'Benzoyl peroxide and retinoids can be very irritating together.',
+    descriptionEn:
+      'Benzoyl peroxide and retinoids can be very irritating together.',
     mitigationEn: 'Use them at different times.',
   },
   {
@@ -206,7 +206,8 @@ const DEFAULT_RULES: Partial<ConflictRule>[] = [
     severity: AnalysisSeverity.Medium,
     left: { categories: [IngredientCategory.Retinoid] },
     right: { ingredientSlugs: ['ascorbic-acid'] },
-    descriptionEn: 'Pure vitamin C can stack barrier stress on retinoid nights.',
+    descriptionEn:
+      'Pure vitamin C can stack barrier stress on retinoid nights.',
     mitigationEn: 'Use vitamin C in the morning and retinoids in the evening.',
   },
   {
@@ -214,7 +215,8 @@ const DEFAULT_RULES: Partial<ConflictRule>[] = [
     severity: AnalysisSeverity.Medium,
     left: { categories: [IngredientCategory.VitaminC] },
     right: { categories: [IngredientCategory.Niacinamide] },
-    descriptionEn: 'Pure low-pH vitamin C may be less comfortable with niacinamide.',
+    descriptionEn:
+      'Pure low-pH vitamin C may be less comfortable with niacinamide.',
     mitigationEn: 'Split them between morning and evening.',
     onlyWhenVitaminCIsPhSensitive: true,
   },

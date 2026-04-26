@@ -124,8 +124,16 @@
     ],
     "collectCoverageFrom": [
       "**/*.(t|j)s",
+      "!**/*.spec.ts",
+      "!**/*.spec-utils.ts",
+      "!**/__tests__/**",
       "!main.ts",
       "!**/*.module.ts",
+      "!**/dto/**",
+      "!**/entities/**",
+      "!**/seed/**",
+      "!**/*.seed.ts",
+      "!scripts/**",
       "!database/**",
       "!config/**"
     ],
