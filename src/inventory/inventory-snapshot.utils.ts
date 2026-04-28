@@ -136,7 +136,7 @@ export function toInventorySnapshotFromCreateDto(
     manufacturer,
     userFields,
     status: dto.status ?? ShelfStatus.Active,
-    provenance: dto.provenance ?? DataProvenance.UserEntered,
+    provenance: dto.provenance ?? DataProvenance.PhotoLookup,
   };
 }
 
@@ -187,6 +187,6 @@ export function normalizeInventorySnapshot(
     manufacturer,
     userFields,
     status: draft.status ?? ShelfStatus.Active,
-    provenance: draft.provenance ?? DataProvenance.UserEntered,
+    provenance: draft.provenance ?? DataProvenance.PhotoLookup,
   };
 }

@@ -6,6 +6,7 @@ import {
   normalizeManufacturerInfoSnapshot,
   normalizeUserFieldsSnapshot,
 } from '../../shelf/shelf-payload-normalizer';
+import { DataProvenance } from '../../shelf/shelf.types';
 
 export class InventoryProductResponseDto {
   id: string;
@@ -56,7 +57,7 @@ export class InventoryProductResponseDto {
       manufacturer,
       userFields,
       entity.status,
-      entity.provenance,
+      DataProvenance.PhotoLookup,
       toIsoString(entity.created_at),
       toIsoString(entity.updated_at),
     );

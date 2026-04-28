@@ -1,21 +1,16 @@
 import {
   ApplicationMethod,
-  CatalogueSource,
-  DataProvenance,
-  LookupConfidence,
   ProductCategory,
   Quantity,
   type ApplicationGuidance,
   type CatalogueIdentity,
   type ManufacturerInfo,
-  type ResolvedLookup,
 } from '../shelf/shelf.types';
 
 export type CatalogueSeedProduct = {
   identity: CatalogueIdentity;
   guidance: ApplicationGuidance;
   manufacturer: ManufacturerInfo;
-  provenance: DataProvenance;
 };
 
 type CatalogueSeedTemplate = {
@@ -148,7 +143,6 @@ function buildProduct(
       productUrl: suffix === '' ? template.productUrl : null,
       websiteUrl: template.websiteUrl,
     },
-    provenance: DataProvenance.Catalogue,
   };
 }
 
@@ -372,44 +366,4 @@ const TEMPLATES: CatalogueSeedTemplate[] = [
 export const CATALOGUE_SEED_PRODUCTS: CatalogueSeedProduct[] =
   TEMPLATES.flatMap((template) =>
     VARIANT_SUFFIXES.map((suffix) => buildProduct(template, suffix)),
-  );
-
-export const BARCODE_LOOKUP_SEED: Record<string, ResolvedLookup> =
-  Object.fromEntries(
-    CATALOGUE_SEED_PRODUCTS.filter((product) => product.identity.barcode).map(
-      (product) => [
-        product.identity.barcode as string,
-        {
-          identity: product.identity,
-          guidance: product.guidance,
-          manufacturer: product.manufacturer,
-          provenance: DataProvenance.BarcodeLookup,
-          source: CatalogueSource.RitoraCatalogue,
-          confidence: LookupConfidence.High,
-          reviewRequired: false,
-          warnings: [],
-          evidence: [],
-        },
-      ],
-    ),
-  );
-
-export const URL_LOOKUP_SEED: Record<string, ResolvedLookup> =
-  Object.fromEntries(
-    CATALOGUE_SEED_PRODUCTS.filter(
-      (product) => product.manufacturer.productUrl,
-    ).map((product) => [
-      product.manufacturer.productUrl as string,
-      {
-        identity: product.identity,
-        guidance: product.guidance,
-        manufacturer: product.manufacturer,
-        provenance: DataProvenance.UrlFetch,
-        source: CatalogueSource.RitoraCatalogue,
-        confidence: LookupConfidence.High,
-        reviewRequired: false,
-        warnings: [],
-        evidence: [],
-      },
-    ]),
   );

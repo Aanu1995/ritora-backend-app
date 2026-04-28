@@ -40,7 +40,7 @@ describe('shelf payload normalizer', () => {
         supportEmail: ' support@example.com ',
         productUrl: 'https://example.com/product',
       },
-      provenance: DataProvenance.Catalogue,
+      provenance: DataProvenance.PhotoLookup,
       source: CatalogueSource.OpenBeautyFacts,
       confidence: LookupConfidence.Medium,
       reviewRequired: true,
@@ -156,7 +156,7 @@ describe('shelf payload normalizer', () => {
       manufacturer: {
         brand: 'The Ordinary',
       },
-      provenance: DataProvenance.Catalogue,
+      provenance: DataProvenance.PhotoLookup,
       source: CatalogueSource.OfficialPage,
       confidence: LookupConfidence.Medium,
       reviewRequired: true,

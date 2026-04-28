@@ -86,7 +86,7 @@ function createSnapshot(
       preferredTimeOfDay: null,
     },
     status: ShelfStatus.Active,
-    provenance: DataProvenance.UserEntered,
+    provenance: DataProvenance.PhotoLookup,
     ...overrides,
   };
 }
@@ -194,7 +194,7 @@ describe('InventoryService', () => {
     expect(createPayload).toBeDefined();
     expect(createPayload?.user_id).toBe('user-1');
     expect(createPayload?.status).toBe(ShelfStatus.Active);
-    expect(createPayload?.provenance).toBe(DataProvenance.UserEntered);
+    expect(createPayload?.provenance).toBe(DataProvenance.PhotoLookup);
     expect(createPayload?.search_document).toContain('cerave');
     expect(createPayload?.manufacturer?.brand).toBe('CeraVe');
     expect(

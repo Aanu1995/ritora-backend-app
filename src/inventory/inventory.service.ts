@@ -20,6 +20,7 @@ import {
   ShelfSort,
   ShelfStatFilter,
   ShelfStatus,
+  DataProvenance,
   type ShelfProductSnapshot,
 } from '../shelf/shelf.types';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
@@ -567,7 +568,7 @@ export class InventoryService {
       manufacturer: product.manufacturer,
       userFields: product.user_fields,
       status: product.status,
-      provenance: product.provenance,
+      provenance: DataProvenance.PhotoLookup,
     };
   }
 

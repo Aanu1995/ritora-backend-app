@@ -78,10 +78,6 @@ export const SHELF_STAT_FILTER_VALUES: ShelfStatFilter[] = [
 
 export const DATA_PROVENANCE_VALUES: DataProvenance[] = [
   DataProvenance.PhotoLookup,
-  DataProvenance.BarcodeLookup,
-  DataProvenance.UrlFetch,
-  DataProvenance.Catalogue,
-  DataProvenance.UserEntered,
 ];
 
 export const CATALOGUE_SOURCE_VALUES: CatalogueSource[] = [

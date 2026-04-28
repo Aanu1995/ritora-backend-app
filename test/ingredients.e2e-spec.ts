@@ -82,7 +82,7 @@ function createInventoryDraft(overrides?: {
       preferredTimeOfDay: PreferredTimeOfDay.Evening,
     },
     status: ShelfStatus.Active,
-    provenance: DataProvenance.UserEntered,
+    provenance: DataProvenance.PhotoLookup,
   };
 }
 
