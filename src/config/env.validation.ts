@@ -128,7 +128,11 @@ export const envValidationSchema = Joi.object({
   DATABASE_NAME: Joi.string().trim().default('ritora'),
   DATABASE_USER: Joi.string().trim().default('postgres'),
   DATABASE_PASSWORD: productionSecret,
-  DATABASE_SSL: Joi.boolean().default(false),
+  DATABASE_SSL: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.boolean().valid(true).default(true),
+    otherwise: Joi.boolean().default(false),
+  }),
   DATABASE_LOGGING: Joi.boolean().default(false),
   DATABASE_SSL_REJECT_UNAUTHORIZED: Joi.when('NODE_ENV', {
     is: 'production',
@@ -199,6 +203,15 @@ export const envValidationSchema = Joi.object({
     .trim()
     .allow('')
     .default(''),
+  SKIN_PROFILE_FIELD_ENCRYPTION_KEY: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(32).required(),
+    otherwise: Joi.string().trim().allow('').default(''),
+  }),
+  SKIN_PROFILE_FIELD_ENCRYPTION_KEY_ID: Joi.string()
+    .trim()
+    .max(64)
+    .default('primary'),
   MAIL_FROM: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().email().required(),

@@ -27,9 +27,15 @@ import {
 } from '../common/utils/date';
 import { SkinProfileResponseDto } from '../skin-profile/dto/skin-profile-response.dto';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import {
+  UserConsentType,
+  UserDataAccessPurpose,
+} from '../users/user-consent.constants';
 import { UsersService } from '../users/users.service';
 import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
@@ -38,6 +44,31 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { AuthSession } from './entities/auth-session.entity';
+
+type AccountExportConsent = {
+  consentType: UserConsentType;
+  consentVersion: string;
+  granted: boolean;
+  grantedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+};
+
+type AccountExportSession = {
+  id: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  revokedAt: string | null;
+};
+
+type AccountExportData = {
+  user: UserResponseDto;
+  skinProfile: SkinProfileResponseDto | null;
+  consents: AccountExportConsent[];
+  sessions: AccountExportSession[];
+};
 
 @Injectable()
 export class AuthService {
@@ -70,6 +101,7 @@ export class AuthService {
     private readonly consentsRepository: Repository<UserConsent>,
     @InjectRepository(SkinProfile)
     private readonly skinProfileRepository: Repository<SkinProfile>,
+    private readonly dataAccessLogService: UserDataAccessLogService,
   ) {
     this.jwtAccessExpiry = configService.get('JWT_ACCESS_EXPIRY', '15m');
     this.jwtRefreshExpiry = configService.get('JWT_REFRESH_EXPIRY', '7d');
@@ -142,8 +174,8 @@ export class AuthService {
     });
 
     await this.recordConsents(user.id, ip, [
-      { type: 'terms_of_service', version: this.termsVersion },
-      { type: 'privacy_policy', version: this.privacyVersion },
+      { type: UserConsentType.TermsOfService, version: this.termsVersion },
+      { type: UserConsentType.PrivacyPolicy, version: this.privacyVersion },
     ]);
 
     await this.sendVerificationEmailOrLogFailure(
@@ -408,7 +440,7 @@ export class AuthService {
   async exportData(
     userId: string,
     password: string,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<AccountExportData> {
     const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
@@ -428,12 +460,33 @@ export class AuthService {
     });
     const skinProfile = await this.skinProfileRepository.findOne({
       where: { user_id: userId },
+      relations: ['user'],
     });
+    const activeConsentTypes = new Set(
+      consents
+        .filter((consent) => consent.granted && consent.revoked_at === null)
+        .map((consent) => consent.consent_type),
+    );
+
+    if (skinProfile) {
+      await this.dataAccessLogService.recordDataAccess(
+        userId,
+        getSensitiveSkinProfileConsentTypes(skinProfile),
+        UserDataAccessPurpose.AccountExport,
+      );
+    }
 
     return {
       user: UserResponseDto.fromEntity(user),
       skinProfile: skinProfile
-        ? SkinProfileResponseDto.fromEntity(skinProfile)
+        ? SkinProfileResponseDto.fromEntity(skinProfile, {
+            hasHealthContextConsent: activeConsentTypes.has(
+              UserConsentType.HealthContextProcessing,
+            ),
+            hasHormonalContextConsent: activeConsentTypes.has(
+              UserConsentType.HormonalContextProcessing,
+            ),
+          })
         : null,
       consents: consents.map((c) => ({
         consentType: c.consent_type,
@@ -536,7 +589,7 @@ export class AuthService {
   private async recordConsents(
     userId: string,
     ip: string | undefined,
-    consents: { type: string; version: string }[],
+    consents: { type: UserConsentType; version: string }[],
   ): Promise<void> {
     const now = nowDate();
     const sanitizedIp = sanitizeIpAddress(ip);
@@ -578,11 +631,15 @@ export class AuthService {
         language,
       );
     } catch (error) {
+      const deliveryError =
+        error instanceof Error
+          ? error
+          : new Error('Email delivery failed with a non-Error value');
       this.logEmailDeliveryFailure(
         'verification',
         email,
         this.buildFrontendPathActionUrl('verify-email', token),
-        error,
+        deliveryError,
       );
     }
   }
@@ -601,11 +658,15 @@ export class AuthService {
         language,
       );
     } catch (error) {
+      const deliveryError =
+        error instanceof Error
+          ? error
+          : new Error('Email delivery failed with a non-Error value');
       this.logEmailDeliveryFailure(
         'password reset',
         email,
         this.buildFrontendPathActionUrl('reset-password', token),
-        error,
+        deliveryError,
       );
     }
   }
@@ -614,11 +675,10 @@ export class AuthService {
     type: 'verification' | 'password reset',
     email: string,
     actionUrl: string,
-    error: unknown,
+    error: Error,
   ): void {
-    const message =
-      error instanceof Error ? error.message : 'Unknown email delivery error';
-    const stack = error instanceof Error ? error.stack : undefined;
+    const message = error.message;
+    const stack = error.stack;
 
     this.logger.error(
       `Failed to send ${type} email to ${email} via ${MAIL_PROVIDER_LABEL}: ${message}`,

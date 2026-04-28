@@ -94,11 +94,10 @@ describe('Skin Profile (e2e)', () => {
 
       expect(res.body.skinTypes).toContain('oily');
       expect(res.body.skinTones).toContain('medium');
-      expect(res.body.ageRanges).toContain('25_34');
       expect(res.body.ethnicities).toContain('black');
       expect(res.body.concerns).toContain('acne');
-      expect(res.body.goals).toContain('clear_acne');
-      expect(res.body.complexities).toContain('minimal');
+      expect(res.body.fitzpatrickPhototypes).toContain('IV');
+      expect(res.body.routinePaces).toContain('cautious');
     });
   });
 
@@ -140,25 +139,77 @@ describe('Skin Profile (e2e)', () => {
       const res = await authPost('/skin-profile', {
         skinType: 'oily',
         skinTone: 'medium',
-        ageRange: '25_34',
+        fitzpatrickPhototype: 'IV',
+        dateOfBirth: '1992-04-15',
+        sexAtBirth: 'female',
+        ethnicity: 'black',
         currentConcerns: ['acne', 'dark_marks'],
-        knownSensitivities: ['retinol', 'fragrance'],
-        skinGoals: ['clear_acne'],
+        primaryGoal: 'acne',
+        concernDetails: {
+          per_concern: [
+            { concern: 'acne', severity: 'moderate', priority: 1 },
+            { concern: 'dark_marks', severity: 'mild', priority: 2 },
+          ],
+        },
+        skinBehavior: {
+          pih_tendency: 'often',
+          melasma_tendency: 'never',
+          keloid_tendency: 'never',
+          sunscreen_habit: 'most_days',
+          sunscreen_tolerance: 'fine',
+        },
+        routinePreferences: {
+          pace: 'cautious',
+          fragrance_free: true,
+          non_comedogenic: true,
+          sunscreen_filter: 'hybrid',
+          sunscreen_finish: 'natural',
+        },
+        budgetTier: 'mid',
+        allowSmartPicks: true,
         countryCode: 'SE',
         city: 'Stockholm',
         locationConsent: true,
-        routineComplexity: 'moderate',
       }).expect(201);
 
       expect(res.body.id).toBeDefined();
       expect(res.body.skinType).toBe('oily');
       expect(res.body.currentConcerns).toEqual(['acne', 'dark_marks']);
-      expect(res.body.knownSensitivities).toEqual(['retinol', 'fragrance']);
+      expect(res.body.routinePreferences).toMatchObject({
+        pace: 'cautious',
+        fragrance_free: true,
+      });
     });
 
     it('should reject duplicate profile', async () => {
       await authPost('/skin-profile', {
         skinType: 'dry',
+        skinTone: 'medium',
+        fitzpatrickPhototype: 'IV',
+        dateOfBirth: '1992-04-15',
+        sexAtBirth: 'female',
+        ethnicity: 'black',
+        currentConcerns: ['acne'],
+        primaryGoal: 'acne',
+        concernDetails: {
+          per_concern: [{ concern: 'acne', severity: 'moderate', priority: 1 }],
+        },
+        skinBehavior: {
+          pih_tendency: 'often',
+          melasma_tendency: 'never',
+          keloid_tendency: 'never',
+          sunscreen_habit: 'most_days',
+          sunscreen_tolerance: 'fine',
+        },
+        routinePreferences: {
+          pace: 'cautious',
+          fragrance_free: true,
+          non_comedogenic: true,
+          sunscreen_filter: 'hybrid',
+          sunscreen_finish: 'natural',
+        },
+        budgetTier: 'mid',
+        allowSmartPicks: true,
       }).expect(409);
     });
 
@@ -166,7 +217,7 @@ describe('Skin Profile (e2e)', () => {
       const res = await authGet('/skin-profile').expect(200);
 
       expect(res.body.skinType).toBe('oily');
-      expect(res.body.routineComplexity).toBe('moderate');
+      expect(res.body.routinePreferences.pace).toBe('cautious');
     });
 
     it('should partially update the profile', async () => {
@@ -179,7 +230,7 @@ describe('Skin Profile (e2e)', () => {
       expect(res.body.skinType).toBe('combination');
       expect(res.body.city).toBe('Stockholm');
       expect(res.body.countryCode).toBe('SE');
-      expect(res.body.routineComplexity).toBe('moderate');
+      expect(res.body.routinePreferences.pace).toBe('cautious');
     });
 
     it('should include location consent in data export', async () => {

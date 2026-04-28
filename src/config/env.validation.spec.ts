@@ -43,12 +43,14 @@ describe('envValidationSchema', () => {
       COOKIE_DOMAIN: 'ritora.com',
       COOKIE_SECURE: true,
       RESEND_API_KEY: 're_prod_mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
       MAIL_FROM: 'noreply@ritora.com',
       WEB_APP_URL: 'https://app.ritora.com',
     });
 
     expect(result.error).toBeUndefined();
     expect(result.value.SWAGGER_ENABLED).toBe(false);
+    expect(result.value.DATABASE_SSL).toBe(true);
     expect(result.value.DATABASE_SSL_REJECT_UNAUTHORIZED).toBe(true);
   });
 
@@ -105,6 +107,7 @@ describe('envValidationSchema', () => {
       COOKIE_SECURE: false,
       COOKIE_SAME_SITE: 'none',
       RESEND_API_KEY: 're_prod_mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
       MAIL_FROM: 'noreply@ritora.com',
       WEB_APP_URL: 'https://app.ritora.com',
     });
@@ -121,6 +124,7 @@ describe('envValidationSchema', () => {
       COOKIE_DOMAIN: 'https://ritora.com/app',
       COOKIE_SECURE: true,
       RESEND_API_KEY: 're_prod_mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
       MAIL_FROM: 'noreply@ritora.com',
       WEB_APP_URL: 'https://app.ritora.com',
     });
@@ -138,6 +142,7 @@ describe('envValidationSchema', () => {
       COOKIE_DOMAIN: 'ritora.com',
       COOKIE_SECURE: true,
       RESEND_API_KEY: 're_prod_mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
       MAIL_FROM: 'noreply@ritora.com',
       WEB_APP_URL: 'https://app.ritora.com',
     });
@@ -154,6 +159,7 @@ describe('envValidationSchema', () => {
       COOKIE_DOMAIN: 'ritora.com',
       COOKIE_SECURE: true,
       RESEND_API_KEY: 're_prod_mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
       MAIL_FROM: 'noreply@ritora.com',
       WEB_APP_URL: 'https://app.ritora.com',
       CORS_ORIGINS: 'http://localhost:3000',

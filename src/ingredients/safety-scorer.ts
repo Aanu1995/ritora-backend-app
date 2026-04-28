@@ -48,25 +48,25 @@ export function maybeAdjustSeverity(
     return bumpSeverity(severity);
   }
 
-  const normalizedSensitivities = new Set(
-    (skinProfile.known_sensitivities ?? [])
-      .map((value) => normalizeValue(value))
+  const normalizedReactionTriggers = new Set(
+    (skinProfile.reaction_history?.entries ?? [])
+      .map((entry) => normalizeValue(entry.trigger))
       .filter(Boolean),
   );
 
-  if (normalizedSensitivities.size === 0) {
+  if (normalizedReactionTriggers.size === 0) {
     return severity;
   }
 
   for (const tag of tags
     .map((value) => normalizeValue(value))
     .filter(Boolean)) {
-    if (normalizedSensitivities.has(tag)) {
+    if (normalizedReactionTriggers.has(tag)) {
       return bumpSeverity(severity);
     }
 
-    for (const sensitivity of normalizedSensitivities) {
-      if (sensitivity.includes(tag) || tag.includes(sensitivity)) {
+    for (const trigger of normalizedReactionTriggers) {
+      if (trigger.includes(tag) || tag.includes(trigger)) {
         return bumpSeverity(severity);
       }
     }

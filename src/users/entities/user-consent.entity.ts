@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { ulid } from 'ulid';
 import { User } from './user.entity';
+import { UserConsentType } from '../user-consent.constants';
 
 @Entity('user_consents')
 export class UserConsent {
@@ -19,7 +20,7 @@ export class UserConsent {
   user_id: string;
 
   @Column({ type: 'varchar', length: 50 })
-  consent_type: string;
+  consent_type: UserConsentType;
 
   @Column({ type: 'varchar', length: 20 })
   consent_version: string;

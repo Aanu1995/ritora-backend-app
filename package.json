@@ -64,8 +64,7 @@
     "ulid": "^3.0.2"
   },
   "overrides": {
-    "fast-xml-parser": "5.7.0",
-    "uuid": "14.0.0"
+    "fast-xml-parser": "5.7.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

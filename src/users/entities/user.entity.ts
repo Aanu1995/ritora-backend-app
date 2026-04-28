@@ -8,7 +8,12 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ulid } from 'ulid';
+import { encryptedNullableStringFieldTransformer } from '../../skin-profile/skin-profile-field-encryption';
 import { UserConsent } from './user-consent.entity';
+import { UserDataAccessLog } from './user-data-access-log.entity';
+
+const encryptedUserStringTransformer = (field: string) =>
+  encryptedNullableStringFieldTransformer(`users.${field}`);
 
 @Entity('users')
 export class User {
@@ -48,6 +53,20 @@ export class User {
   @Column({ type: 'varchar', length: 100, nullable: true })
   time_zone: string | null;
 
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer('date_of_birth'),
+  })
+  date_of_birth: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer('sex_at_birth'),
+  })
+  sex_at_birth: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 
@@ -56,6 +75,9 @@ export class User {
 
   @OneToMany(() => UserConsent, (consent) => consent.user)
   consents: UserConsent[];
+
+  @OneToMany(() => UserDataAccessLog, (log) => log.user)
+  data_access_logs: UserDataAccessLog[];
 
   @BeforeInsert()
   generateId() {

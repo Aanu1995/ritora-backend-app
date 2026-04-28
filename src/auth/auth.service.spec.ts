@@ -14,6 +14,11 @@ import type { Response } from 'express';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import {
+  UserConsentType,
+  UserDataAccessPurpose,
+} from '../users/user-consent.constants';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
 import { AuthSession } from './entities/auth-session.entity';
@@ -31,7 +36,9 @@ const mockRes = () => ({
 type MockResponse = Pick<Response, 'cookie' | 'clearCookie'>;
 
 const asResponse = (response: MockResponse): Response =>
-  response as unknown as Response;
+  response as MockResponse & Response;
+
+type MockConfigValue = string | number | boolean | undefined;
 
 const mockConfigValues: Record<string, string | number | boolean> = {
   JWT_ACCESS_EXPIRY: '15m',
@@ -61,6 +68,7 @@ describe('AuthService', () => {
   let sessionsRepo: Record<string, jest.Mock>;
   let consentsRepo: Record<string, jest.Mock>;
   let skinProfileRepo: Record<string, jest.Mock>;
+  let dataAccessLogService: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     usersService = {
@@ -102,6 +110,10 @@ describe('AuthService', () => {
       findOne: jest.fn().mockResolvedValue(null),
     };
 
+    dataAccessLogService = {
+      recordDataAccess: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -111,10 +123,11 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(AuthSession), useValue: sessionsRepo },
         { provide: getRepositoryToken(UserConsent), useValue: consentsRepo },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfileRepo },
+        { provide: UserDataAccessLogService, useValue: dataAccessLogService },
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, defaultVal?: unknown) =>
+            get: jest.fn((key: string, defaultVal?: MockConfigValue) =>
               key in mockConfigValues ? mockConfigValues[key] : defaultVal,
             ),
           },
@@ -167,7 +180,7 @@ describe('AuthService', () => {
       expect(consentsRepo.save).toHaveBeenCalled();
       expect(mailService.sendVerificationEmail).toHaveBeenCalledWith(
         'test@example.com',
-        expect.any(String),
+        expect.stringMatching(/^[a-f0-9]{64}$/),
         'Jane',
         'en',
       );
@@ -267,7 +280,7 @@ describe('AuthService', () => {
       ).rejects.toThrow(UnauthorizedException);
     });
 
-    it('rejects unknown email with generic message', async () => {
+    it('rejects missing email with generic message', async () => {
       const res = mockRes();
       usersService.findByEmailForAuth.mockResolvedValue(null);
 
@@ -431,13 +444,13 @@ describe('AuthService', () => {
       expect(usersService.update).toHaveBeenCalled();
       expect(mailService.sendPasswordResetEmail).toHaveBeenCalledWith(
         'test@example.com',
-        expect.any(String),
+        expect.stringMatching(/^[a-f0-9]{64}$/),
         'Jane',
         'en',
       );
     });
 
-    it('does nothing for unknown email (no info leak)', async () => {
+    it('does nothing for missing email (no info leak)', async () => {
       usersService.findByEmail.mockResolvedValue(null);
 
       await service.forgotPassword('nobody@example.com');
@@ -562,7 +575,7 @@ describe('AuthService', () => {
       usersService.findByIdForAuth.mockResolvedValue(user);
       consentsRepo.find.mockResolvedValue([
         {
-          consent_type: 'privacy_policy',
+          consent_type: UserConsentType.PrivacyPolicy,
           consent_version: '1.0.0',
           granted: true,
           granted_at: new Date('2024-01-01'),
@@ -585,14 +598,25 @@ describe('AuthService', () => {
         user_id: user.id,
         skin_type: 'oily',
         skin_tone: 'medium',
-        age_range: '25_34',
         ethnicity: 'black',
         current_concerns: ['acne'],
-        known_sensitivities: ['retinol'],
-        skin_goals: ['clear_acne'],
         country_code: 'SE',
         city: 'Stockholm',
-        routine_complexity: 'moderate',
+        fitzpatrick_phototype: 'IV',
+        primary_goal: 'acne',
+        allow_smart_picks: true,
+        budget_tier: 'mid',
+        safety_context: {},
+        reaction_history: {
+          entries: [{ trigger: 'retinol', trigger_type: 'ingredient' }],
+        },
+        concern_details: {},
+        skin_behavior: {},
+        active_tolerances: {},
+        routine_preferences: {},
+        lifestyle_context: {},
+        shopping_preferences: {},
+        hormonal_context: {},
         created_at: new Date('2024-01-01'),
         updated_at: new Date('2024-01-02'),
       });
@@ -603,11 +627,18 @@ describe('AuthService', () => {
       expect(result.user).toMatchObject({ email: 'test@example.com' });
       expect(result.skinProfile).toMatchObject({
         skinType: 'oily',
-        knownSensitivities: ['retinol'],
+        reactionHistory: {
+          entries: [{ trigger: 'retinol', trigger_type: 'ingredient' }],
+        },
         countryCode: 'SE',
       });
       expect(result.consents).toHaveLength(1);
       expect(result.sessions).toHaveLength(1);
+      expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
+        user.id,
+        [UserConsentType.LocationProcessing],
+        UserDataAccessPurpose.AccountExport,
+      );
     });
 
     it('rejects when password confirmation is wrong', async () => {

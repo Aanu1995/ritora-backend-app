@@ -1,10 +1,18 @@
-import type { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { AnalysisSeverity } from './ingredients.types';
 import {
   bumpSeverity,
   maybeAdjustSeverity,
   scoreAnalysis,
 } from './safety-scorer';
+
+function createSkinProfile(overrides: Partial<SkinProfile>): SkinProfile {
+  return Object.assign(new SkinProfile(), {
+    skin_type: null,
+    reaction_history: {},
+    ...overrides,
+  });
+}
 
 describe('safety-scorer', () => {
   it('applies the configured penalties', () => {
@@ -57,10 +65,10 @@ describe('safety-scorer', () => {
   });
 
   it('bumps severity for sensitive skin type', () => {
-    const skinProfile = {
+    const skinProfile = createSkinProfile({
       skin_type: 'sensitive',
-      known_sensitivities: [],
-    } as unknown as SkinProfile;
+      reaction_history: {},
+    });
 
     expect(
       maybeAdjustSeverity(AnalysisSeverity.Medium, skinProfile, ['retinoid']),
@@ -68,11 +76,13 @@ describe('safety-scorer', () => {
     expect(bumpSeverity(AnalysisSeverity.Low)).toBe(AnalysisSeverity.Medium);
   });
 
-  it('bumps severity when known sensitivities match ingredient tags', () => {
-    const skinProfile = {
+  it('bumps severity when reaction triggers match ingredient tags', () => {
+    const skinProfile = createSkinProfile({
       skin_type: null,
-      known_sensitivities: ['Niacinamide'],
-    } as unknown as SkinProfile;
+      reaction_history: {
+        entries: [{ trigger: 'Niacinamide' }],
+      },
+    });
 
     expect(
       maybeAdjustSeverity(AnalysisSeverity.Low, skinProfile, ['niacinamide']),

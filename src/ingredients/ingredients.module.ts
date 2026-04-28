@@ -2,6 +2,7 @@ import { Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { UsersModule } from '../users/users.module';
 import { AnalysisService } from './analysis.service';
 import { IngredientAlias } from './entities/ingredient-alias.entity';
 import { IngredientCategoryPattern } from './entities/ingredient-category-pattern.entity';
@@ -28,6 +29,7 @@ import { TranslationService } from './translation.service';
       IngredientConflictRule,
       IngredientTranslationCache,
     ]),
+    UsersModule,
   ],
   controllers: [IngredientsController],
   providers: [
