@@ -66,11 +66,9 @@ const skinProfileStringTransformers = {
   ),
   pregnancy_status: encryptedNullableStringFieldTransformer(
     'skin_profiles.pregnancy_status',
-    ['string'],
   ),
   under_dermatologist_care: encryptedNullableStringFieldTransformer(
     'skin_profiles.under_dermatologist_care',
-    ['string'],
   ),
   budget_tier: encryptedNullableStringFieldTransformer(
     'skin_profiles.budget_tier',
@@ -90,7 +88,6 @@ const skinProfileJsonTransformers = {
   safety_context: encryptedJsonFieldTransformer<Record<string, unknown>>(
     'skin_profiles.safety_context',
     {},
-    ['safety-context'],
   ),
   reaction_history: encryptedJsonFieldTransformer<Record<string, unknown>>(
     'skin_profiles.reaction_history',
@@ -123,7 +120,6 @@ const skinProfileJsonTransformers = {
   hormonal_context: encryptedJsonFieldTransformer<Record<string, unknown>>(
     'skin_profiles.hormonal_context',
     {},
-    ['hormonal-context'],
   ),
 };
 
@@ -131,7 +127,7 @@ function encryptStoredValue(
   transformer: ValueTransformer,
   value: unknown,
 ): unknown {
-  return transformer.to(transformer.from(value));
+  return transformer.to(value);
 }
 
 function decryptStoredValue(

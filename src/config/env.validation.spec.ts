@@ -43,9 +43,16 @@ describe('envValidationSchema', () => {
       COOKIE_DOMAIN: 'ritora.com',
       COOKIE_SECURE: true,
       RESEND_API_KEY: 're_prod_mock',
+      OPENAI_API_KEY: 'sk-prod-mock',
       SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
       MAIL_FROM: 'noreply@ritora.com',
       WEB_APP_URL: 'https://app.ritora.com',
+      SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-prod-skin-journal',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: 'https://media.ritora.com',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID: 'K123',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY:
+        '-----BEGIN PRIVATE KEY-----\\nmock\\n-----END PRIVATE KEY-----',
+      SKIN_JOURNAL_S3_KMS_KEY_ID: 'arn:aws:kms:eu-west-1:123:key/mock',
     });
 
     expect(result.error).toBeUndefined();
@@ -71,6 +78,42 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.value.BCRYPT_SALT_ROUNDS).toBe(4);
+  });
+
+  it('does not expose Skin Journal product policy constants as env defaults', () => {
+    const result = validateEnv({
+      NODE_ENV: 'development',
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_LOCAL_DIR).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_PUBLIC_URL_PREFIX).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_MEDIA_SIGNED_URL_TTL_SECONDS,
+    ).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_PHOTO_MAX_BYTES).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_PHOTO_MAX_DIMENSION).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_PHOTO_WEBP_QUALITY).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_MOCK).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_TIMEOUT_MS).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER,
+    ).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_REMINDER_DEFAULT_TIME).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_WRAPPED_MIN_PHOTOS).toBeUndefined();
+  });
+
+  it('does not expose product media processing policy constants as env defaults', () => {
+    const result = validateEnv({
+      NODE_ENV: 'development',
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.PRODUCT_MEDIA_SIGNED_URL_TTL_SECONDS).toBeUndefined();
+    expect(result.value.PRODUCT_MEDIA_PROCESSED_MAX_DIMENSION).toBeUndefined();
+    expect(result.value.PRODUCT_MEDIA_WEBP_QUALITY).toBeUndefined();
   });
 
   it('requires production secrets and cookie domain', () => {
@@ -166,5 +209,48 @@ describe('envValidationSchema', () => {
     });
 
     expect(result.error).toBeDefined();
+  });
+
+  it('requires production Skin Journal media storage configuration', () => {
+    const result = validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      OPENAI_API_KEY: 'sk-prod-mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
+      MAIL_FROM: 'noreply@ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('SKIN_JOURNAL_MEDIA_BUCKET');
+  });
+
+  it('requires production OpenAI key for Skin Journal analysis', () => {
+    const result = validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
+      MAIL_FROM: 'noreply@ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
+      SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-prod-skin-journal',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: 'https://media.ritora.com',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID: 'K123',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY:
+        '-----BEGIN PRIVATE KEY-----\\nmock\\n-----END PRIVATE KEY-----',
+      SKIN_JOURNAL_S3_KMS_KEY_ID: 'arn:aws:kms:eu-west-1:123:key/mock',
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('OPENAI_API_KEY');
   });
 });

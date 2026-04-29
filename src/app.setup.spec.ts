@@ -83,6 +83,10 @@ describe('configureApp', () => {
 
     expect(disable).toHaveBeenCalledWith('x-powered-by');
     expect(expressUse).toHaveBeenCalledWith('/media', expect.any(Function));
+    expect(expressUse).not.toHaveBeenCalledWith(
+      '/static/skin-journal',
+      expect.any(Function),
+    );
     expect(createDocumentSpy).toHaveBeenCalled();
     expect(setupSpy).toHaveBeenCalledWith(
       'api/docs',

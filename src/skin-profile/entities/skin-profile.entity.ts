@@ -116,9 +116,6 @@ export interface HormonalContext {
 const encryptedSkinProfileStringTransformer = (field: string) =>
   encryptedNullableStringFieldTransformer(`skin_profiles.${field}`);
 
-const encryptedLegacySkinProfileStringTransformer = (field: string) =>
-  encryptedNullableStringFieldTransformer(`skin_profiles.${field}`, ['string']);
-
 const encryptedCurrentConcernsTransformer = encryptedJsonFieldTransformer<
   string[]
 >('skin_profiles.current_concerns', []);
@@ -127,7 +124,6 @@ const encryptedSafetyContextTransformer =
   encryptedJsonFieldTransformer<SafetyContext>(
     'skin_profiles.safety_context',
     {},
-    ['safety-context'],
   );
 
 const encryptedReactionHistoryTransformer =
@@ -176,7 +172,6 @@ const encryptedHormonalContextTransformer =
   encryptedJsonFieldTransformer<HormonalContext>(
     'skin_profiles.hormonal_context',
     {},
-    ['hormonal-context'],
   );
 
 const encryptedAllowSmartPicksTransformer = encryptedBooleanFieldTransformer(
@@ -264,15 +259,14 @@ export class SkinProfile {
   @Column({
     type: 'text',
     nullable: true,
-    transformer:
-      encryptedLegacySkinProfileStringTransformer('pregnancy_status'),
+    transformer: encryptedSkinProfileStringTransformer('pregnancy_status'),
   })
   pregnancy_status: string | null;
 
   @Column({
     type: 'text',
     nullable: true,
-    transformer: encryptedLegacySkinProfileStringTransformer(
+    transformer: encryptedSkinProfileStringTransformer(
       'under_dermatologist_care',
     ),
   })

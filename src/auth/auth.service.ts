@@ -10,7 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import * as bcrypt from 'bcrypt';
+import { compare, hash } from 'bcrypt';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { Response } from 'express';
 import type { SignOptions } from 'jsonwebtoken';
@@ -28,6 +28,8 @@ import {
 import { SkinProfileResponseDto } from '../skin-profile/dto/skin-profile-response.dto';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
+import { SkinJournalService } from '../skin-journal/skin-journal.service';
+import type { SkinJournalExportPayload } from '../skin-journal/skin-journal.constants';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -66,6 +68,7 @@ type AccountExportSession = {
 type AccountExportData = {
   user: UserResponseDto;
   skinProfile: SkinProfileResponseDto | null;
+  skinJournal: SkinJournalExportPayload | null;
   consents: AccountExportConsent[];
   sessions: AccountExportSession[];
 };
@@ -102,6 +105,7 @@ export class AuthService {
     @InjectRepository(SkinProfile)
     private readonly skinProfileRepository: Repository<SkinProfile>,
     private readonly dataAccessLogService: UserDataAccessLogService,
+    private readonly skinJournalService: SkinJournalService,
   ) {
     this.jwtAccessExpiry = configService.get('JWT_ACCESS_EXPIRY', '15m');
     this.jwtRefreshExpiry = configService.get('JWT_REFRESH_EXPIRY', '7d');
@@ -159,7 +163,7 @@ export class AuthService {
       throw new ConflictException('Email already in use');
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, this.bcryptRounds);
+    const passwordHash = await hash(dto.password, this.bcryptRounds);
     const verificationToken = randomBytes(32).toString('hex');
     const verificationTokenHash = this.sha256(verificationToken);
 
@@ -203,7 +207,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    const valid = await compare(password, user.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -368,7 +372,7 @@ export class AuthService {
       throw new BadRequestException('Reset token has expired');
     }
 
-    const passwordHash = await bcrypt.hash(newPassword, this.bcryptRounds);
+    const passwordHash = await hash(newPassword, this.bcryptRounds);
 
     await this.usersService.update(user.id, {
       password_hash: passwordHash,
@@ -446,7 +450,7 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    const valid = await compare(password, user.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid password');
     }
@@ -475,6 +479,8 @@ export class AuthService {
         UserDataAccessPurpose.AccountExport,
       );
     }
+    const skinJournal =
+      await this.skinJournalService.exportAllDataForAccount(userId);
 
     return {
       user: UserResponseDto.fromEntity(user),
@@ -488,6 +494,7 @@ export class AuthService {
             ),
           })
         : null,
+      skinJournal,
       consents: consents.map((c) => ({
         consentType: c.consent_type,
         consentVersion: c.consent_version,
@@ -517,11 +524,12 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    const valid = await compare(password, user.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid password');
     }
 
+    await this.skinJournalService.deleteAllMediaForUser(userId);
     await this.usersService.remove(userId);
     this.clearRefreshCookie(res);
   }

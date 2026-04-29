@@ -8,9 +8,10 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import * as bcrypt from 'bcrypt';
+import { hashSync } from 'bcrypt';
 import { createHash } from 'crypto';
 import type { Response } from 'express';
+import { SkinJournalService } from '../skin-journal/skin-journal.service';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
@@ -113,6 +114,10 @@ describe('AuthService', () => {
     dataAccessLogService = {
       recordDataAccess: jest.fn().mockResolvedValue(undefined),
     };
+    const skinJournalService = {
+      exportAllDataForAccount: jest.fn().mockResolvedValue(null),
+      deleteAllMediaForUser: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -124,6 +129,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(UserConsent), useValue: consentsRepo },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfileRepo },
         { provide: UserDataAccessLogService, useValue: dataAccessLogService },
+        { provide: SkinJournalService, useValue: skinJournalService },
         {
           provide: ConfigService,
           useValue: {
@@ -142,7 +148,7 @@ describe('AuthService', () => {
     ({
       id: '01TESTUSER',
       email: 'test@example.com',
-      password_hash: bcrypt.hashSync('Password1', 4),
+      password_hash: hashSync('Password1', 4),
       first_name: 'Jane',
       last_name: 'Doe',
       email_verified: false,

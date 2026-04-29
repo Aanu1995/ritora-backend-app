@@ -112,33 +112,9 @@ function decryptEnvelope(
   ]).toString('utf8');
 }
 
-function decryptEnvelopeWithFieldFallback(
-  envelope: EncryptedJsonEnvelope,
-  field: string,
-  legacyFields: string[] = [],
-): string {
-  const fields = [field, ...legacyFields];
-  let lastError: unknown;
-
-  for (const candidateField of fields) {
-    try {
-      return decryptEnvelope(envelope, candidateField);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
-
-  throw new Error(`Unable to decrypt skin profile field ${field}`);
-}
-
 export function encryptedJsonFieldTransformer<T>(
   field: string,
   emptyValue: T,
-  legacyFields: string[] = [],
 ): ValueTransformer {
   return {
     to(value: T | EncryptedJsonEnvelope | null | undefined) {
@@ -154,12 +130,10 @@ export function encryptedJsonFieldTransformer<T>(
       }
 
       if (!isEncryptedJsonEnvelope(value)) {
-        return value as T;
+        throw new Error(`Unencrypted skin profile JSON field ${field}`);
       }
 
-      return JSON.parse(
-        decryptEnvelopeWithFieldFallback(value, field, legacyFields),
-      ) as T;
+      return JSON.parse(decryptEnvelope(value, field)) as T;
     },
   };
 }
@@ -193,7 +167,6 @@ function decodeEncryptedString(value: string): EncryptedJsonEnvelope | null {
 
 export function encryptedNullableStringFieldTransformer(
   field: string,
-  legacyFields: string[] = [],
 ): ValueTransformer {
   return {
     to(value: string | null | undefined) {
@@ -217,9 +190,11 @@ export function encryptedNullableStringFieldTransformer(
       }
 
       const envelope = decodeEncryptedString(value);
-      return envelope
-        ? decryptEnvelopeWithFieldFallback(envelope, field, legacyFields)
-        : value;
+      if (!envelope) {
+        throw new Error(`Unencrypted skin profile string field ${field}`);
+      }
+
+      return decryptEnvelope(envelope, field);
     },
   };
 }
@@ -227,7 +202,6 @@ export function encryptedNullableStringFieldTransformer(
 export function encryptedBooleanFieldTransformer(
   field: string,
   defaultValue: boolean,
-  legacyFields: string[] = [],
 ): ValueTransformer {
   return {
     to(value: boolean | string | null | undefined) {
@@ -253,13 +227,10 @@ export function encryptedBooleanFieldTransformer(
 
       const envelope = decodeEncryptedString(value);
       if (!envelope) {
-        return value === 'true';
+        throw new Error(`Unencrypted skin profile boolean field ${field}`);
       }
 
-      return (
-        decryptEnvelopeWithFieldFallback(envelope, field, legacyFields) ===
-        'true'
-      );
+      return decryptEnvelope(envelope, field) === 'true';
     },
   };
 }

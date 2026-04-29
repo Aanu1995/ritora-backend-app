@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { SkinJournalModule } from '../skin-journal/skin-journal.module';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
@@ -28,6 +29,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     TypeOrmModule.forFeature([AuthSession, UserConsent, SkinProfile]),
     UsersModule,
     MailModule,
+    SkinJournalModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

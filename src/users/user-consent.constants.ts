@@ -4,12 +4,14 @@ export enum UserConsentType {
   LocationProcessing = 'location_processing',
   HealthContextProcessing = 'health_context_processing',
   HormonalContextProcessing = 'hormonal_context_processing',
+  SkinProgressProcessing = 'skin_progress_processing',
 }
 
 export const SENSITIVE_SKIN_PROFILE_CONSENT_TYPES = [
   UserConsentType.LocationProcessing,
   UserConsentType.HealthContextProcessing,
   UserConsentType.HormonalContextProcessing,
+  UserConsentType.SkinProgressProcessing,
 ] as const;
 
 export type SensitiveSkinProfileConsentType =
@@ -29,6 +31,11 @@ export enum UserDataAccessActorType {
 export enum UserDataAccessPurpose {
   SkinProfileRead = 'skin_profile_read',
   RecommendationAnalysis = 'recommendation_analysis',
+  SkinJournalRead = 'skin_journal_read',
+  SkinPhotoAnalysis = 'skin_photo_analysis',
+  SkinJournalExport = 'skin_journal_export',
+  SkinJournalInsight = 'skin_journal_insight',
+  SkinJournalSimplification = 'skin_journal_simplification',
   AccountExport = 'account_export',
   ConsentGrant = 'consent_grant',
   ConsentRevoke = 'consent_revoke',

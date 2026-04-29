@@ -1,4 +1,4 @@
-import * as Joi from 'joi';
+import Joi, { type CustomHelpers } from 'joi';
 
 const COOKIE_DOMAIN_PATTERN =
   /^(?:\.[a-z0-9-]+(?:\.[a-z0-9-]+)*|localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)*)$/i;
@@ -9,10 +9,7 @@ const productionSecret = Joi.when('NODE_ENV', {
   otherwise: Joi.string().allow('').default(''),
 });
 
-function validateCorsOrigins(
-  value: string,
-  helpers: Joi.CustomHelpers<string>,
-) {
+function validateCorsOrigins(value: string, helpers: CustomHelpers<string>) {
   if (value.trim().length === 0) {
     return value;
   }
@@ -50,10 +47,7 @@ function validateCorsOrigins(
   return value;
 }
 
-function validateCookieDomain(
-  value: string,
-  helpers: Joi.CustomHelpers<string>,
-) {
+function validateCookieDomain(value: string, helpers: CustomHelpers<string>) {
   const trimmed = value.trim();
 
   if (!trimmed) {
@@ -69,7 +63,7 @@ function validateCookieDomain(
 
 function validateCookieSettings(
   env: Record<string, unknown>,
-  helpers: Joi.CustomHelpers<Record<string, unknown>>,
+  helpers: CustomHelpers<Record<string, unknown>>,
 ) {
   if (env.COOKIE_SAME_SITE === 'none' && env.COOKIE_SECURE !== true) {
     return helpers.error('any.invalid');
@@ -193,7 +187,11 @@ export const envValidationSchema = Joi.object({
     then: Joi.string().trim().default('re_test_mock'),
     otherwise: productionSecret,
   }),
-  OPENAI_API_KEY: Joi.string().trim().allow('').default(''),
+  OPENAI_API_KEY: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().trim().allow('').default(''),
+  }),
   OPENAI_MODEL: Joi.string().trim().allow('').default(''),
   OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
     .trim()
@@ -247,21 +245,6 @@ export const envValidationSchema = Joi.object({
     .default(''),
   PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY: Joi.string().allow('').default(''),
   PRODUCT_MEDIA_S3_KMS_KEY_ID: Joi.string().trim().allow('').default(''),
-  PRODUCT_MEDIA_SIGNED_URL_TTL_SECONDS: Joi.number()
-    .integer()
-    .min(300)
-    .max(86400)
-    .default(3600),
-  PRODUCT_MEDIA_PROCESSED_MAX_DIMENSION: Joi.number()
-    .integer()
-    .min(512)
-    .max(4096)
-    .default(1600),
-  PRODUCT_MEDIA_WEBP_QUALITY: Joi.number()
-    .integer()
-    .min(60)
-    .max(95)
-    .default(82),
   PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION: Joi.number()
     .integer()
     .min(1024)
@@ -275,6 +258,39 @@ export const envValidationSchema = Joi.object({
 
   LEGAL_TERMS_VERSION: Joi.string().trim().default('1.0.0'),
   LEGAL_PRIVACY_VERSION: Joi.string().trim().default('1.0.0'),
+
+  SKIN_JOURNAL_MEDIA_BUCKET: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().trim().allow('').default(''),
+  }),
+  SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string()
+      .trim()
+      .uri({ scheme: ['https'] })
+      .required(),
+    otherwise: Joi.string()
+      .trim()
+      .uri({ scheme: ['https'] })
+      .allow('')
+      .default(''),
+  }),
+  SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().trim().allow('').default(''),
+  }),
+  SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
+  SKIN_JOURNAL_S3_KMS_KEY_ID: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().trim().allow('').default(''),
+  }),
 })
   .custom(validateCookieSettings, 'cookie security validation')
   .unknown(true);

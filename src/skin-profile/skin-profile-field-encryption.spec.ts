@@ -3,7 +3,6 @@ import {
   encryptedHormonalContextTransformer,
   encryptedJsonFieldTransformer,
   encryptedNullableStringTransformer,
-  encryptedNullableStringFieldTransformer,
   encryptedSafetyContextTransformer,
 } from './skin-profile-field-encryption';
 
@@ -88,35 +87,12 @@ describe('skin profile field encryption', () => {
     expect(transformer.from(stored)).toBe(false);
   });
 
-  it('can read legacy encrypted string fields during migration', () => {
-    const stored = encryptedNullableStringTransformer.to('not_pregnant');
-    const transformer = encryptedNullableStringFieldTransformer(
-      'skin_profiles.pregnancy_status',
-      ['string'],
-    );
-
-    expect(transformer.from(stored)).toBe('not_pregnant');
-  });
-
-  it('can read legacy encrypted json fields during migration', () => {
-    const stored = encryptedSafetyContextTransformer.to({
-      conditions: ['eczema'],
-    });
-    const transformer = encryptedJsonFieldTransformer<Record<string, unknown>>(
-      'skin_profiles.safety_context',
-      {},
-      ['safety-context'],
-    );
-
-    expect(transformer.from(stored)).toEqual({ conditions: ['eczema'] });
-  });
-
-  it('keeps existing plaintext values readable for migration safety', () => {
-    expect(
+  it('rejects plaintext values read from encrypted fields', () => {
+    expect(() =>
       encryptedSafetyContextTransformer.from({ conditions: ['eczema'] }),
-    ).toEqual({ conditions: ['eczema'] });
-    expect(encryptedNullableStringTransformer.from('not_pregnant')).toBe(
-      'not_pregnant',
-    );
+    ).toThrow('Unencrypted skin profile JSON field safety-context');
+    expect(() =>
+      encryptedNullableStringTransformer.from('not_pregnant'),
+    ).toThrow('Unencrypted skin profile string field string');
   });
 });

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as Handlebars from 'handlebars';
+import { compile, escapeExpression, type TemplateDelegate } from 'handlebars';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { Resend } from 'resend';
@@ -54,7 +54,7 @@ export class MailService {
   private readonly templateDir = join(__dirname, 'templates');
   private readonly templateCache = new Map<
     MailTemplateName,
-    Handlebars.TemplateDelegate
+    TemplateDelegate
   >();
 
   constructor(
@@ -133,6 +133,20 @@ export class MailService {
     });
   }
 
+  async sendNotificationEmail(
+    email: string,
+    subject: string,
+    body: string,
+  ): Promise<void> {
+    const escapedSubject = escapeExpression(subject);
+    const escapedBody = escapeExpression(body);
+    await this.sendEmail({
+      to: email,
+      subject,
+      html: `<p>${escapedSubject}</p><p>${escapedBody}</p>`,
+    });
+  }
+
   private async sendEmail(payload: {
     to: string;
     subject: string;
@@ -166,7 +180,7 @@ export class MailService {
 
   private async getTemplate(
     templateName: MailTemplateName,
-  ): Promise<Handlebars.TemplateDelegate> {
+  ): Promise<TemplateDelegate> {
     const cachedTemplate = this.templateCache.get(templateName);
     if (cachedTemplate) {
       return cachedTemplate;
@@ -174,7 +188,7 @@ export class MailService {
 
     const templatePath = join(this.templateDir, `${templateName}.hbs`);
     const source = await readFile(templatePath, 'utf8');
-    const compiledTemplate = Handlebars.compile(source, {
+    const compiledTemplate = compile(source, {
       strict: true,
       noEscape: true,
     });

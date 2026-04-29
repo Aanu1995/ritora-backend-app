@@ -6,9 +6,11 @@ import {
 import { getSignedUrl as getSignedCloudFrontUrl } from '@aws-sdk/cloudfront-signer';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getNumberConfig } from '../config/config-value.utils';
 import { ulid } from 'ulid';
-import { CATALOGUE_PRODUCT_IMAGE_PROCESSED_PREFIX } from './catalogue-media.constants';
+import {
+  CATALOGUE_PRODUCT_IMAGE_PROCESSED_PREFIX,
+  CATALOGUE_PRODUCT_MEDIA_SIGNED_URL_TTL_SECONDS,
+} from './catalogue-media.constants';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
 
 type MediaRuntimeConfig = {
@@ -215,11 +217,7 @@ export class CataloguePhotoStorageService {
     return {
       bucketName,
       cloudFrontBaseUrl,
-      signedUrlTtlSeconds: getNumberConfig(
-        this.configService,
-        'PRODUCT_MEDIA_SIGNED_URL_TTL_SECONDS',
-        3600,
-      ),
+      signedUrlTtlSeconds: CATALOGUE_PRODUCT_MEDIA_SIGNED_URL_TTL_SECONDS,
       cloudFrontKeyPairId,
       cloudFrontPrivateKey,
       kmsKeyId:
