@@ -18,7 +18,6 @@ import {
 } from 'class-transformer';
 import {
   CONCERN_KEYS,
-  type Angle,
   type CycleMarker,
   type OverallFeel,
   type RecentChangeKind,
@@ -27,7 +26,6 @@ import {
   type SunExposure,
 } from '../skin-journal.constants';
 
-const ANGLES: Angle[] = ['head_on', 'left_profile', 'right_profile'];
 const FEELS: OverallFeel[] = ['awful', 'bad', 'ok', 'good', 'great'];
 const SLEEP: SleepBand[] = ['lt5h', '5to7h', '7to9h', 'gt9h', 'skipped'];
 const STRESS: StressLevel[] = ['low', 'mid', 'high'];
@@ -162,7 +160,6 @@ export class RecentChangeDto {
 }
 
 export class UpsertEntryDto {
-  @IsOptional() @IsIn(ANGLES) angle?: Angle;
   @IsOptional()
   @Transform(transformOptionalJsonArray)
   @IsArray()

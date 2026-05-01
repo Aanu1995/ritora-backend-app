@@ -4,6 +4,10 @@ import { todayInTimeZone } from './skin-journal.utils';
 
 const mockSkinJournalService = () => ({
   getToday: jest.fn(),
+  listPhotos: jest.fn(),
+  listPhotoDates: jest.fn(),
+  listPhotoFilters: jest.fn(),
+  getAnalysisQueueOperations: jest.fn(),
   upsertEntryForResolvedDate: jest.fn(),
 });
 
@@ -63,6 +67,59 @@ describe('SkinJournalController', () => {
         targetDate: todayInTimeZone('Europe/Stockholm'),
         timeZone: 'Europe/Stockholm',
       }),
+    );
+  });
+
+  it('passes photo-date filters to the service', async () => {
+    service.listPhotoDates.mockResolvedValue({ dates: [], months: [] });
+
+    await controller.listPhotoDates('user-1', '2025-01-01', '2026-04-30');
+
+    expect(service.listPhotoDates).toHaveBeenCalledWith('user-1', {
+      from: '2025-01-01',
+      to: '2026-04-30',
+    });
+  });
+
+  it('passes server-side photo filters to the service', async () => {
+    service.listPhotos.mockResolvedValue({ items: [], nextCursor: null });
+
+    await controller.listPhotos(
+      'user-1',
+      '2025-01-01',
+      '2026-04-30',
+      'concern:acne',
+      '12',
+      'cursor-1',
+    );
+
+    expect(service.listPhotos).toHaveBeenCalledWith('user-1', {
+      from: '2025-01-01',
+      to: '2026-04-30',
+      filter: 'concern:acne',
+      limit: 12,
+      cursor: 'cursor-1',
+    });
+  });
+
+  it('passes photo filter facet requests to the service', async () => {
+    service.listPhotoFilters.mockResolvedValue({ filters: [] });
+
+    await controller.listPhotoFilters('user-1', '2025-01-01', '2026-04-30');
+
+    expect(service.listPhotoFilters).toHaveBeenCalledWith('user-1', {
+      from: '2025-01-01',
+      to: '2026-04-30',
+    });
+  });
+
+  it('passes the private operations token to the queue operations endpoint', async () => {
+    service.getAnalysisQueueOperations.mockResolvedValue({ alerts: [] });
+
+    await controller.analysisQueueOperations('ops-token');
+
+    expect(service.getAnalysisQueueOperations).toHaveBeenCalledWith(
+      'ops-token',
     );
   });
 });

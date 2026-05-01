@@ -61,6 +61,9 @@ Important variable groups:
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`
 - Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
 - Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
+- Skin Journal analysis cost metadata: `SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD`, `SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD`
+- Skin Journal analysis queue: `SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER` (`database` or `sqs`), `SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL`, optional `SKIN_JOURNAL_ANALYSIS_SQS_DLQ_URL`
+- Skin Journal operations: `SKIN_JOURNAL_OPERATIONS_TOKEN`
 - Product media: `AWS_REGION`, `PRODUCT_MEDIA_*`
 - Legal consent versions: `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`
 
@@ -109,13 +112,29 @@ JWT_REFRESH_SECRET=dev-refresh-secret-change-me
 npm run migration:run
 ```
 
-5. Start the API.
+5. Optional: seed Skin Journal and Notifications demo data.
+
+```bash
+npm run skin-journal:seed
+npm run skin-journal:analysis-worker
+```
+
+The seeder creates or reuses `demo@ritora.local` with password
+`Password123!`, grants Skin Progress consent, writes local demo journal photos,
+and prepopulates calendar entries, AI analysis states, events, insights,
+notification preferences, an active simplification warning, and notifications.
+Override the demo account with `SKIN_JOURNAL_SEED_EMAIL`,
+`SKIN_JOURNAL_SEED_PASSWORD`, `SKIN_JOURNAL_SEED_TIME_ZONE`, or
+`SKIN_JOURNAL_SEED_ANCHOR_DATE` when needed. Re-running the seeder resets Skin
+Journal and Notification demo data for that seed user only.
+
+6. Start the API.
 
 ```bash
 npm run start:dev
 ```
 
-6. Useful local URLs:
+7. Useful local URLs:
 
 - API base: `http://localhost:3001/api/v1`
 - Health: `http://localhost:3001/api/v1/health`
@@ -220,6 +239,8 @@ npm run test:e2e
 npm run migration:run
 npm run migration:revert
 npm run migration:generate -- src/database/migrations/YourMigrationName
+
+npm run skin-journal:seed
 ```
 
 Notes:

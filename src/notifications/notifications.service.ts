@@ -11,6 +11,7 @@ import {
   Between,
   Brackets,
   IsNull,
+  MoreThan,
   Repository,
   SelectQueryBuilder,
 } from 'typeorm';
@@ -53,6 +54,7 @@ type NotificationCursorTuple = [number, string, string];
 const NOTIFICATION_CURSOR_FINGERPRINT_PREFIX = 'notifications:v1';
 const NOTIFICATION_READ_BUCKET_SQL =
   'CASE WHEN notification.read_at IS NULL THEN 0 ELSE 1 END';
+const PHOTO_REMINDER_SWEEP_BATCH_SIZE = 1000;
 
 @Injectable()
 export class NotificationsService implements OnModuleInit, OnModuleDestroy {
@@ -217,45 +219,66 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runPhotoReminderSweep(now: Date = new Date()): Promise<void> {
-    const prefs = await this.preferences.find({
-      where: { photo_reminder_enabled: true },
-      take: 1000,
-    });
-    for (const pref of prefs) {
-      const user = await this.users.findOne({ where: { id: pref.user_id } });
-      if (!user) {
-        continue;
-      }
-      const timeZone = resolveSkinJournalTimeZone(user.time_zone);
-      if (!isReminderDue(now, timeZone, pref.photo_reminder_local_time)) {
-        continue;
-      }
-      const localDate = todayInTimeZone(timeZone);
-      const existingEntryCount = await this.entries.count({
-        where: { user_id: pref.user_id, entry_date: localDate },
-      });
-      if (existingEntryCount > 0) {
-        continue;
-      }
-      const duplicateCount = await this.notifications.count({
+    let lastUserId: string | null = null;
+    while (true) {
+      const prefs = await this.preferences.find({
         where: {
-          user_id: pref.user_id,
-          kind: 'photo_reminder',
-          created_at: Between(startOfUtcDay(now), endOfUtcDay(now)),
+          photo_reminder_enabled: true,
+          ...(lastUserId ? { user_id: MoreThan(lastUserId) } : {}),
         },
+        order: { user_id: 'ASC' },
+        take: PHOTO_REMINDER_SWEEP_BATCH_SIZE,
       });
-      if (duplicateCount > 0) {
-        continue;
+      if (prefs.length === 0) {
+        return;
       }
-      await this.dispatch({
-        userId: pref.user_id,
-        kind: 'photo_reminder',
-        titleKey: 'skinJournal.notifications.photoReminder.title',
-        bodyKey: 'skinJournal.notifications.photoReminder.body',
-        payload: { entry_date: localDate },
-        deepLink: '/journal/upload',
-      });
+      for (const pref of prefs) {
+        await this.maybeDispatchPhotoReminder(pref, now);
+      }
+      if (prefs.length < PHOTO_REMINDER_SWEEP_BATCH_SIZE) {
+        return;
+      }
+      lastUserId = prefs[prefs.length - 1]?.user_id ?? lastUserId;
     }
+  }
+
+  private async maybeDispatchPhotoReminder(
+    pref: UserNotificationPreference,
+    now: Date,
+  ): Promise<void> {
+    const user = await this.users.findOne({ where: { id: pref.user_id } });
+    if (!user) {
+      return;
+    }
+    const timeZone = resolveSkinJournalTimeZone(user.time_zone);
+    if (!isReminderDue(now, timeZone, pref.photo_reminder_local_time)) {
+      return;
+    }
+    const localDate = todayInTimeZone(timeZone);
+    const existingEntryCount = await this.entries.count({
+      where: { user_id: pref.user_id, entry_date: localDate },
+    });
+    if (existingEntryCount > 0) {
+      return;
+    }
+    const duplicateCount = await this.notifications.count({
+      where: {
+        user_id: pref.user_id,
+        kind: 'photo_reminder',
+        created_at: Between(startOfUtcDay(now), endOfUtcDay(now)),
+      },
+    });
+    if (duplicateCount > 0) {
+      return;
+    }
+    await this.dispatch({
+      userId: pref.user_id,
+      kind: 'photo_reminder',
+      titleKey: 'skinJournal.notifications.photoReminder.title',
+      bodyKey: 'skinJournal.notifications.photoReminder.body',
+      payload: { entry_date: localDate },
+      deepLink: '/journal/upload',
+    });
   }
 
   private async ensurePreferences(

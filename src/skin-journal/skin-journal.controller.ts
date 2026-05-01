@@ -27,6 +27,9 @@ import { JournalEventResponseDto } from './dto/event-response.dto';
 import { JournalInsightResponseDto } from './dto/insight-response.dto';
 import { JournalStatsResponseDto } from './dto/stats-response.dto';
 import { WrappedResponseDto } from './dto/wrapped-response.dto';
+import { PhotoDatesResponseDto } from './dto/photo-dates-response.dto';
+import { PhotoFiltersResponseDto } from './dto/photo-filters-response.dto';
+import { PhotoPageResponseDto } from './dto/photo-page-response.dto';
 import {
   CreateJournalExportDto,
   JournalExportResponseDto,
@@ -105,18 +108,42 @@ export class SkinJournalController {
   }
 
   @Get('photos')
-  @ApiOkResponse({ type: [JournalEntryResponseDto] })
+  @ApiOkResponse({ type: PhotoPageResponseDto })
   async listPhotos(
     @CurrentUser('id') userId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
-    @Query('hasReaction') hasReaction?: string,
+    @Query('filter') filter?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
   ) {
     return this.service.listPhotos(userId, {
       from,
       to,
-      hasReaction: hasReaction === 'true',
+      filter,
+      limit: parseOptionalPositiveInteger(limit),
+      cursor,
     });
+  }
+
+  @Get('photo-filters')
+  @ApiOkResponse({ type: PhotoFiltersResponseDto })
+  async listPhotoFilters(
+    @CurrentUser('id') userId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.listPhotoFilters(userId, { from, to });
+  }
+
+  @Get('photo-dates')
+  @ApiOkResponse({ type: PhotoDatesResponseDto })
+  async listPhotoDates(
+    @CurrentUser('id') userId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.service.listPhotoDates(userId, { from, to });
   }
 
   @Post('today')
@@ -195,8 +222,7 @@ export class SkinJournalController {
       kind,
       from,
       to,
-      acknowledged:
-        acknowledged === undefined ? undefined : acknowledged === 'true',
+      acknowledged: parseOptionalBooleanQuery(acknowledged, 'acknowledged'),
     });
   }
 
@@ -283,6 +309,14 @@ export class SkinJournalController {
     return this.service.getStats(userId);
   }
 
+  @Public()
+  @Get('ops/analysis-queue')
+  async analysisQueueOperations(
+    @Headers('x-ritora-ops-token') operationsToken?: string,
+  ) {
+    return this.service.getAnalysisQueueOperations(operationsToken);
+  }
+
   @Post('export')
   @ApiOkResponse({ type: JournalExportResponseDto })
   async createExport(
@@ -300,4 +334,33 @@ export class SkinJournalController {
   ) {
     return this.service.getExport(userId, jobId);
   }
+}
+
+function parseOptionalPositiveInteger(
+  value: string | undefined,
+): number | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new BadRequestException('Invalid positive integer');
+  }
+  return parsed;
+}
+
+function parseOptionalBooleanQuery(
+  value: string | undefined,
+  name: string,
+): boolean | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  throw new BadRequestException(`Invalid boolean query parameter: ${name}`);
 }

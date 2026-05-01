@@ -8,16 +8,22 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Between,
+  Brackets,
   FindOptionsWhere,
   In,
   IsNull,
+  LessThan,
+  LessThanOrEqual,
   MoreThanOrEqual,
   Not,
   Repository,
+  SelectQueryBuilder,
 } from 'typeorm';
+import { decodeCursor, encodeCursor } from '../common/utils/cursor-pagination';
 import { nowDate } from '../common/utils/date';
 import { NotificationsService } from '../notifications/notifications.service';
 import type {
@@ -25,6 +31,10 @@ import type {
   NotificationSeverity,
 } from '../notifications/entities/in-app-notification.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
+import {
+  SkinProfile,
+  type ConcernDetail,
+} from '../skin-profile/entities/skin-profile.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import {
   UserConsentType,
@@ -36,10 +46,16 @@ import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
+import { SkinJournalAnalysisJob } from './entities/skin-journal-analysis-job.entity';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalPhotoStorageService } from './services/skin-journal-photo-storage.service';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
+import {
+  AnalysisQueueMetrics,
+  SkinJournalAnalysisQueueService,
+} from './services/skin-journal-analysis-queue.service';
+import { SkinJournalMediaRetentionService } from './services/skin-journal-media-retention.service';
 import { UpsertEntryDto } from './dto/upsert-entry.dto';
 import {
   CreateJournalExportDto,
@@ -57,18 +73,36 @@ import { JournalInsightResponseDto } from './dto/insight-response.dto';
 import { JournalStatsResponseDto } from './dto/stats-response.dto';
 import { WrappedResponseDto } from './dto/wrapped-response.dto';
 import { SimplificationResponseDto } from './dto/simplification-response.dto';
+import { PhotoDatesResponseDto } from './dto/photo-dates-response.dto';
 import {
+  PhotoFilterOptionDto,
+  PhotoFiltersResponseDto,
+} from './dto/photo-filters-response.dto';
+import { PhotoPageResponseDto } from './dto/photo-page-response.dto';
+import {
+  ANALYSIS_CONCERNS,
   AnalysisObservations,
   CONCERN_KEYS,
+  PHOTO_FILTER_ALL_ID,
+  PHOTO_FILTER_CONCERN_PREFIX,
+  PHOTO_FILTER_REACTION_ID,
+  type ConcernKey,
+  type AnalysisConcern,
   EventKind,
   InsightKind,
   RatingsPayload,
-  SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD,
-  SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT,
-  SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER,
+  SKIN_JOURNAL_ANALYSIS_CAPACITY_RETRY_DELAY_MS,
+  SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD,
+  SKIN_JOURNAL_ANALYSIS_QUEUE_AGE_ALERT_SECONDS,
+  SKIN_JOURNAL_ANALYSIS_RECOVERY_INTERVAL_MS,
+  SKIN_JOURNAL_PHOTO_PAGE_DEFAULT_LIMIT,
+  SKIN_JOURNAL_PHOTO_PAGE_MAX_LIMIT,
   SKIN_JOURNAL_WRAPPED_ENABLED,
   SkinJournalExportPayload,
   AnalysisStatus,
+  AnalysisEntryContext,
+  AnalysisSkinContext,
+  CompareDeltaBullet,
 } from './skin-journal.constants';
 import {
   isValidDate,
@@ -117,27 +151,37 @@ const EVENT_KINDS: ReadonlySet<EventKind> = new Set<EventKind>([
   'dermatologist_referral',
   'product_effectiveness',
 ]);
-const ANALYSIS_QUEUE_RETRY_DELAY_MS = 5000;
-const ANALYSIS_BUDGET_RETRY_GRACE_MS = 60_000;
+const JOURNAL_DAY_LOCKED_MESSAGE =
+  'Journal entries can only be changed on their local day';
+const COMPLETE_CHECK_IN_REQUIRED_MESSAGE =
+  'Complete check-in fields are required unless skip_check_in is true';
+const ANALYSIS_CONCERN_SET: ReadonlySet<AnalysisConcern> =
+  new Set<AnalysisConcern>(ANALYSIS_CONCERNS);
+const ANALYSIS_CONTEXT_MAX_TEXT_LENGTH = 500;
+const ANALYSIS_CONTEXT_MAX_ITEMS = 12;
+const CHECK_IN_REQUIRED_FIELDS = {
+  overallFeel: 'overall_feel',
+  ratings: 'ratings',
+  sleepBand: 'sleep_band',
+  stressToday: 'stress_today',
+  sunExposureToday: 'sun_exposure_today',
+  sweatExerciseToday: 'sweat_exercise_today',
+  cycleMarker: 'cycle_marker',
+} as const;
+const VALID_CHECK_IN_RATINGS = new Set<number>([1, 2, 3, 4, 5]);
 
-type QueuedAnalysisRun = {
-  userId: string;
-  entryId: string;
-  photoObjectKey: string;
-  notBefore: number;
-};
+type RequiredCheckInField =
+  (typeof CHECK_IN_REQUIRED_FIELDS)[keyof typeof CHECK_IN_REQUIRED_FIELDS];
+
+type ParsedPhotoFilter =
+  | { kind: 'all'; id: typeof PHOTO_FILTER_ALL_ID }
+  | { kind: 'reaction'; id: typeof PHOTO_FILTER_REACTION_ID }
+  | { kind: 'concern'; id: string; value: AnalysisConcern };
 
 @Injectable()
 export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SkinJournalService.name);
-  private readonly analysisInFlight = new Set<string>();
-  private readonly perUserAnalysisInFlight = new Map<string, number>();
-  private readonly analysisBudgetCounters = new Map<
-    string,
-    { date: string; count: number }
-  >();
-  private readonly queuedAnalysisRuns = new Map<string, QueuedAnalysisRun>();
-  private analysisQueueTimer: ReturnType<typeof setTimeout> | null = null;
+  private analysisRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     @InjectRepository(SkinJournalEntry)
@@ -154,8 +198,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly exportJobs: Repository<SkinJournalExportJob>,
     @InjectRepository(UserConsent)
     private readonly consents: Repository<UserConsent>,
+    @InjectRepository(SkinProfile)
+    private readonly skinProfiles: Repository<SkinProfile>,
     private readonly photoStorage: SkinJournalPhotoStorageService,
     private readonly analysis: SkinJournalAnalysisService,
+    private readonly analysisQueue: SkinJournalAnalysisQueueService,
+    private readonly mediaRetention: SkinJournalMediaRetentionService,
+    private readonly config: ConfigService,
     private readonly dataAccessLog: UserDataAccessLogService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -167,16 +216,14 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         error,
       );
     });
+    this.scheduleAnalysisRecovery();
   }
 
   onModuleDestroy(): void {
-    if (this.analysisQueueTimer) {
-      clearTimeout(this.analysisQueueTimer);
-      this.analysisQueueTimer = null;
+    if (this.analysisRecoveryTimer) {
+      clearTimeout(this.analysisRecoveryTimer);
+      this.analysisRecoveryTimer = null;
     }
-    this.queuedAnalysisRuns.clear();
-    this.analysisInFlight.clear();
-    this.perUserAnalysisInFlight.clear();
   }
 
   // ---------- ENTRY UPSERT ----------
@@ -194,8 +241,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     if (!isValidDate(params.targetDate)) {
       throw new BadRequestException('Invalid date');
     }
-    if (params.targetDate > today) {
-      throw new BadRequestException('Cannot create entries for future dates');
+    if (params.targetDate !== today) {
+      throw new BadRequestException(JOURNAL_DAY_LOCKED_MESSAGE);
     }
 
     let entry = await this.entries.findOne({
@@ -211,7 +258,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
-    if (body.angle) entry.angle = body.angle;
     if (body.concern_focus !== undefined)
       entry.concern_focus = body.concern_focus;
     if (body.is_pre_routine !== undefined)
@@ -235,6 +281,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         entry.recent_change = body.recent_change ?? null;
       if (body.complaint_note !== undefined)
         entry.complaint_note = body.complaint_note ?? null;
+
+      this.assertCompleteCheckIn(entry);
     }
 
     /* Ensure entry has an id before storing the photo so the object key matches. */
@@ -267,6 +315,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       /* Re-analyse on photo replacement. */
       entry.analysis_status = 'pending';
       entry.analysis_observations = null;
+      entry.analysis_concern_keys = [];
+      entry.has_reaction_signal = false;
+      entry.needs_retake = false;
       entry.analysis_summary = null;
       entry.analysis_completed_at = null;
       entry.analysis_error = null;
@@ -284,7 +335,11 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         storedPhotoObjectKey &&
         storedPhotoObjectKey !== previousPhotoObjectKey
       ) {
-        await this.deletePhotoBestEffort(storedPhotoObjectKey);
+        await this.deletePhotoBestEffort(
+          storedPhotoObjectKey,
+          params.userId,
+          'entry_save_failed_after_photo_upload',
+        );
       }
       throw error;
     }
@@ -293,18 +348,23 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       previousPhotoObjectKey &&
       previousPhotoObjectKey !== saved.photo_object_key
     ) {
-      this.removeQueuedAnalysisRunsForEntry(saved.id);
+      await this.analysisQueue.cancelActiveJobsForEntry(
+        saved.id,
+        'Photo was replaced before this analysis job ran.',
+      );
       await this.clearEntryAnalysisArtifacts(params.userId, saved.id);
-      await this.deletePhotoBestEffort(previousPhotoObjectKey);
+      await this.deletePhotoBestEffort(
+        previousPhotoObjectKey,
+        params.userId,
+        'photo_replaced',
+      );
     }
 
     if (saved.analysis_status === 'pending' && saved.photo_object_key) {
-      void this.runAnalysis(
-        saved.id,
+      await this.tryEnqueueAnalysisForEntry(
         params.userId,
-        saved.photo_object_key,
-      ).catch((err) =>
-        this.logger.error(`Analysis failed for ${saved.id}`, err),
+        saved,
+        'Analysis queued after photo upload.',
       );
     }
 
@@ -314,7 +374,11 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async deletePhotoBestEffort(objectKey: string): Promise<void> {
+  private async deletePhotoBestEffort(
+    objectKey: string,
+    userId: string | null = null,
+    reason = 'journal_media_deleted',
+  ): Promise<void> {
     try {
       await this.photoStorage.deletePhoto(objectKey);
     } catch (error) {
@@ -324,6 +388,76 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         }`,
       );
     }
+    try {
+      await this.mediaRetention.enqueueDeletionVerification({
+        userId,
+        objectKey,
+        reason,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enqueue media deletion verification for ${objectKey}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private assertCompleteCheckIn(entry: SkinJournalEntry): void {
+    const missingFields = this.getMissingRequiredCheckInFields(entry);
+    if (missingFields.length === 0) {
+      return;
+    }
+
+    throw new BadRequestException({
+      message: COMPLETE_CHECK_IN_REQUIRED_MESSAGE,
+      missing_fields: missingFields,
+    });
+  }
+
+  private getMissingRequiredCheckInFields(
+    entry: SkinJournalEntry,
+  ): RequiredCheckInField[] {
+    const missingFields: RequiredCheckInField[] = [];
+
+    if (!entry.overall_feel) {
+      missingFields.push(CHECK_IN_REQUIRED_FIELDS.overallFeel);
+    }
+    if (!this.hasCompleteRatings(entry.ratings)) {
+      missingFields.push(CHECK_IN_REQUIRED_FIELDS.ratings);
+    }
+    if (!entry.sleep_band) {
+      missingFields.push(CHECK_IN_REQUIRED_FIELDS.sleepBand);
+    }
+    if (!entry.stress_today) {
+      missingFields.push(CHECK_IN_REQUIRED_FIELDS.stressToday);
+    }
+    if (!entry.sun_exposure_today) {
+      missingFields.push(CHECK_IN_REQUIRED_FIELDS.sunExposureToday);
+    }
+    if (
+      entry.sweat_exercise_today === null ||
+      entry.sweat_exercise_today === undefined
+    ) {
+      missingFields.push(CHECK_IN_REQUIRED_FIELDS.sweatExerciseToday);
+    }
+    if (!entry.cycle_marker) {
+      missingFields.push(CHECK_IN_REQUIRED_FIELDS.cycleMarker);
+    }
+
+    return missingFields;
+  }
+
+  private hasCompleteRatings(
+    ratings: RatingsPayload | null | undefined,
+  ): boolean {
+    if (!ratings) {
+      return false;
+    }
+
+    return CONCERN_KEYS.every((key: ConcernKey) =>
+      VALID_CHECK_IN_RATINGS.has(ratings[key] ?? Number.NaN),
+    );
   }
 
   async retryAnalysis(
@@ -338,8 +472,15 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     entry.analysis_error = null;
     entry.analysis_retry_count = (entry.analysis_retry_count ?? 0) + 1;
     await this.entries.save(entry);
-    this.removeQueuedAnalysisRunsForEntry(entry.id);
-    await this.runAnalysis(entry.id, userId);
+    await this.analysisQueue.cancelActiveJobsForEntry(
+      entry.id,
+      'Analysis was retried by the user.',
+    );
+    await this.tryEnqueueAnalysisForEntry(
+      userId,
+      entry,
+      'Analysis queued for retry.',
+    );
     const refreshed = await this.entries.findOneByOrFail({ id: entry.id });
     return JournalEntryResponseDto.fromEntity(
       refreshed,
@@ -457,8 +598,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         } else if (entry.analysis_status === 'failed') {
           state = 'failed';
         } else {
-          hasReaction =
-            !!entry.analysis_observations?.reaction_signals?.reaction_detected;
+          hasReaction = entry.has_reaction_signal;
           state = hasReaction ? 'reaction' : 'completed';
         }
       }
@@ -499,8 +639,113 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
   async listPhotos(
     userId: string,
-    filters: { from?: string; to?: string; hasReaction?: boolean },
-  ): Promise<JournalEntryResponseDto[]> {
+    filters: {
+      from?: string;
+      to?: string;
+      filter?: string;
+      limit?: number;
+      cursor?: string;
+    },
+  ): Promise<PhotoPageResponseDto> {
+    this.validateOptionalDateRange(filters);
+    const parsedFilter = this.parsePhotoFilter(filters.filter);
+    const take = clampInteger(
+      filters.limit ?? SKIN_JOURNAL_PHOTO_PAGE_DEFAULT_LIMIT,
+      1,
+      SKIN_JOURNAL_PHOTO_PAGE_MAX_LIMIT,
+    );
+    const fingerprint = photoCursorFingerprint(userId, filters, parsedFilter);
+    const queryBuilder = this.entries
+      .createQueryBuilder('entry')
+      .where('entry.user_id = :userId', { userId })
+      .andWhere('entry.photo_object_key IS NOT NULL')
+      .orderBy('entry.entry_date', 'DESC')
+      .addOrderBy('entry.id', 'DESC');
+
+    this.applyPhotoDateFilters(queryBuilder, filters);
+    this.applyPhotoFilter(queryBuilder, parsedFilter);
+    this.applyPhotoCursor(queryBuilder, filters.cursor, fingerprint);
+
+    const rows = await queryBuilder.take(take + 1).getMany();
+    await this.recordDataAccess(userId, UserDataAccessPurpose.SkinJournalRead);
+    const hasMore = rows.length > take;
+    const page = hasMore ? rows.slice(0, take) : rows;
+    return {
+      items: page.map((entry) =>
+        JournalEntryResponseDto.fromEntity(
+          entry,
+          this.photoStorage.getSignedUrl(entry.photo_object_key),
+        ),
+      ),
+      nextCursor: this.buildPhotoNextCursor(page.at(-1), fingerprint, hasMore),
+    };
+  }
+
+  async listPhotoFilters(
+    userId: string,
+    filters: { from?: string; to?: string },
+  ): Promise<PhotoFiltersResponseDto> {
+    this.validateOptionalDateRange(filters);
+    const list = await this.entries.find({
+      where: this.buildPhotoEntryWhere(userId, filters),
+      order: { entry_date: 'DESC' },
+    });
+    await this.recordDataAccess(userId, UserDataAccessPurpose.SkinJournalRead);
+
+    const concernCounts = new Map<AnalysisConcern, number>();
+    let reactionCount = 0;
+    for (const entry of list) {
+      if (entry.has_reaction_signal) {
+        reactionCount += 1;
+      }
+      const entryConcerns = new Set<AnalysisConcern>();
+      for (const concern of entry.analysis_concern_keys ?? []) {
+        if (ANALYSIS_CONCERN_SET.has(concern)) {
+          entryConcerns.add(concern);
+        }
+      }
+      for (const concern of entryConcerns) {
+        concernCounts.set(concern, (concernCounts.get(concern) ?? 0) + 1);
+      }
+    }
+
+    const photoFilters: PhotoFilterOptionDto[] = [
+      {
+        id: PHOTO_FILTER_ALL_ID,
+        kind: 'all',
+        value: null,
+        count: list.length,
+      },
+    ];
+    if (reactionCount > 0) {
+      photoFilters.push({
+        id: PHOTO_FILTER_REACTION_ID,
+        kind: 'reaction',
+        value: null,
+        count: reactionCount,
+      });
+    }
+    for (const concern of ANALYSIS_CONCERNS) {
+      const count = concernCounts.get(concern) ?? 0;
+      if (count > 0) {
+        photoFilters.push({
+          id: `${PHOTO_FILTER_CONCERN_PREFIX}${concern}`,
+          kind: 'concern',
+          value: concern,
+          count,
+        });
+      }
+    }
+
+    return {
+      filters: photoFilters,
+    };
+  }
+
+  async listPhotoDates(
+    userId: string,
+    filters: { from?: string; to?: string },
+  ): Promise<PhotoDatesResponseDto> {
     if (filters.from && !isValidDate(filters.from)) {
       throw new BadRequestException('Invalid from date');
     }
@@ -510,27 +755,44 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     if (filters.from && filters.to && filters.from > filters.to) {
       throw new BadRequestException('Date range must start before it ends');
     }
-    const start = filters.from ?? '2000-01-01';
-    const end = filters.to ?? '2999-12-31';
-    const list = await this.entries.find({
-      where: { user_id: userId, entry_date: Between(start, end) },
+
+    const where: FindOptionsWhere<SkinJournalEntry> = {
+      user_id: userId,
+      photo_object_key: Not(IsNull()),
+    };
+    if (filters.from && filters.to) {
+      where.entry_date = Between(filters.from, filters.to);
+    } else if (filters.from) {
+      where.entry_date = MoreThanOrEqual(filters.from);
+    } else if (filters.to) {
+      where.entry_date = LessThanOrEqual(filters.to);
+    }
+
+    const entries = await this.entries.find({
+      where,
       order: { entry_date: 'DESC' },
     });
     await this.recordDataAccess(userId, UserDataAccessPurpose.SkinJournalRead);
-    const filtered = list.filter((e) => !!e.photo_object_key);
-    const reactionFiltered =
-      filters.hasReaction === true
-        ? filtered.filter(
-            (e) =>
-              !!e.analysis_observations?.reaction_signals?.reaction_detected,
-          )
-        : filtered;
-    return reactionFiltered.map((e) =>
-      JournalEntryResponseDto.fromEntity(
-        e,
-        this.photoStorage.getSignedUrl(e.photo_object_key),
-      ),
-    );
+
+    const monthCounts = new Map<string, number>();
+    const dates = entries.map((entry) => {
+      const month = entry.entry_date.slice(0, 7);
+      monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
+      return {
+        date: entry.entry_date,
+        entry_id: entry.id,
+        analysis_status: entry.analysis_status,
+        has_reaction: entry.has_reaction_signal,
+      };
+    });
+
+    return {
+      dates,
+      months: Array.from(monthCounts.entries()).map(([month, photo_count]) => ({
+        month,
+        photo_count,
+      })),
+    };
   }
 
   async getCompare(
@@ -541,11 +803,14 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     from: JournalEntryResponseDto | null;
     to: JournalEntryResponseDto | null;
     delta: {
-      bullets: Array<{ text: string; tone: 'good' | 'warn' | 'neutral' }>;
+      bullets: CompareDeltaBullet[];
     };
   }> {
     if (!isValidDate(fromDate) || !isValidDate(toDate)) {
       throw new BadRequestException('Invalid date');
+    }
+    if (fromDate === toDate) {
+      throw new BadRequestException('Compare dates must be different');
     }
     const [from, to] = await Promise.all([
       this.entries.findOne({
@@ -555,31 +820,40 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         where: { user_id: userId, entry_date: toDate },
       }),
     ]);
+    if (!from?.photo_object_key || !to?.photo_object_key) {
+      throw new BadRequestException(
+        'Both compare dates must have uploaded photos',
+      );
+    }
     await this.recordDataAccess(userId, UserDataAccessPurpose.SkinJournalRead);
     return {
-      from: from
-        ? JournalEntryResponseDto.fromEntity(
-            from,
-            this.photoStorage.getSignedUrl(from.photo_object_key),
-          )
-        : null,
-      to: to
-        ? JournalEntryResponseDto.fromEntity(
-            to,
-            this.photoStorage.getSignedUrl(to.photo_object_key),
-          )
-        : null,
+      from: JournalEntryResponseDto.fromEntity(
+        from,
+        this.photoStorage.getSignedUrl(from.photo_object_key),
+      ),
+      to: JournalEntryResponseDto.fromEntity(
+        to,
+        this.photoStorage.getSignedUrl(to.photo_object_key),
+      ),
       delta: this.computeDelta(from, to),
     };
   }
 
   async deleteEntry(userId: string, entryId: string): Promise<void> {
     const entry = await this.findOwnedEntry(userId, entryId);
-    this.removeQueuedAnalysisRunsForEntry(entry.id);
+    this.assertEntryIsEditableToday(entry);
+    await this.analysisQueue.cancelActiveJobsForEntry(
+      entry.id,
+      'Journal entry was deleted.',
+    );
     await this.entries.delete({ id: entry.id });
     await this.clearEntryAnalysisArtifacts(userId, entry.id);
     if (entry.photo_object_key) {
-      await this.deletePhotoBestEffort(entry.photo_object_key);
+      await this.deletePhotoBestEffort(
+        entry.photo_object_key,
+        userId,
+        'entry_deleted',
+      );
     }
   }
 
@@ -589,6 +863,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     body: UpsertEntryDto,
   ): Promise<JournalEntryResponseDto> {
     const entry = await this.findOwnedEntry(userId, entryId);
+    this.assertEntryIsEditableToday(entry);
     return this.upsertEntryForResolvedDate({
       userId,
       targetDate: entry.entry_date,
@@ -600,101 +875,178 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- ANALYSIS ----------
 
+  async processAnalysisJob(job: SkinJournalAnalysisJob): Promise<void> {
+    const entry = await this.entries.findOne({
+      where: { id: job.entry_id, user_id: job.user_id },
+    });
+    if (!entry || !entry.photo_object_key) {
+      await this.analysisQueue.cancelJob(
+        job,
+        'Journal entry or photo no longer exists.',
+      );
+      return;
+    }
+    if (entry.photo_object_key !== job.photo_object_key) {
+      await this.analysisQueue.cancelJob(
+        job,
+        'Photo was replaced before this analysis job ran.',
+      );
+      return;
+    }
+
+    await this.runAnalysis(
+      job.entry_id,
+      job.user_id,
+      job.photo_object_key,
+      job,
+    );
+  }
+
   async runAnalysis(
     entryId: string,
     userId: string,
     expectedPhotoObjectKey?: string,
+    job?: SkinJournalAnalysisJob,
   ): Promise<void> {
     const entry = await this.entries.findOne({
       where: { id: entryId, user_id: userId },
     });
-    if (!entry || !entry.photo_object_key) return;
+    if (!entry || !entry.photo_object_key) {
+      if (job) {
+        await this.analysisQueue.cancelJob(
+          job,
+          'Journal entry or photo no longer exists.',
+        );
+      }
+      return;
+    }
 
     const photoObjectKey = expectedPhotoObjectKey ?? entry.photo_object_key;
     if (entry.photo_object_key !== photoObjectKey) {
+      if (job) {
+        await this.analysisQueue.cancelJob(
+          job,
+          'Photo was replaced before this analysis job ran.',
+        );
+      }
       return;
     }
-    const analysisKey = `${entry.id}:${photoObjectKey}`;
-    if (this.analysisInFlight.has(analysisKey)) {
-      return;
-    }
-    if (!this.tryAcquireAnalysisSlot(userId, analysisKey)) {
-      await this.markAnalysisQueued(
-        userId,
-        entry.id,
-        photoObjectKey,
-        'Analysis queued because current analysis capacity is full.',
-      );
-      this.enqueueAnalysisRetry({
-        userId,
-        entryId: entry.id,
-        photoObjectKey,
-        notBefore: Date.now() + ANALYSIS_QUEUE_RETRY_DELAY_MS,
-      });
-      return;
-    }
-    if (!this.consumeAnalysisBudget(userId)) {
-      this.releaseAnalysisSlot(userId, analysisKey);
-      await this.markAnalysisQueued(
-        userId,
-        entry.id,
-        photoObjectKey,
-        'Analysis queued because the daily analysis budget has been reached.',
-      );
-      this.enqueueAnalysisRetry({
-        userId,
-        entryId: entry.id,
-        photoObjectKey,
-        notBefore: Date.now() + this.msUntilNextAnalysisBudgetWindow(),
-      });
-      return;
-    }
-
+    const startedAt = nowDate();
+    const fallbackStartedAt = Date.now();
+    let plannedInputImageCount = 1;
     try {
       entry.analysis_status = 'running';
+      entry.analysis_started_at = startedAt;
       await this.entries.save(entry);
       await this.recordDataAccess(
         userId,
         UserDataAccessPurpose.SkinPhotoAnalysis,
         UserDataAccessActorType.System,
       );
-      const obs = await this.analysis.analyze({
+      const [previousEntry, skinProfile] = await Promise.all([
+        this.findPreviousPhotoEntry(userId, entry),
+        this.skinProfiles.findOne({ where: { user_id: userId } }),
+      ]);
+      plannedInputImageCount = previousEntry?.photo_object_key ? 2 : 1;
+      const result = await this.analysis.analyze({
         userId,
         entryId: entry.id,
         photoObjectKey,
+        priorPhotoObjectKey: previousEntry?.photo_object_key ?? null,
         concernFocus: entry.concern_focus,
-        priorAnalysis: null,
+        priorAnalysis: previousEntry?.analysis_observations ?? null,
+        skinContext: this.buildAnalysisSkinContext(skinProfile),
+        entryContext: this.buildAnalysisEntryContext(entry),
       });
+      const obs = result.observations;
 
       const current = await this.entries.findOne({
         where: { id: entryId, user_id: userId },
       });
       if (!current || current.photo_object_key !== photoObjectKey) {
+        if (job) {
+          await this.analysisQueue.cancelJob(
+            job,
+            'Photo was replaced before completed analysis could be saved.',
+          );
+        }
         return;
       }
 
       current.analysis_observations = obs;
+      current.analysis_concern_keys = this.analysisConcernKeys(obs);
+      current.has_reaction_signal = obs.reaction_signals.reaction_detected;
+      current.needs_retake =
+        !obs.image_quality.face_detected ||
+        obs.image_quality.needs_retake === true;
       current.analysis_summary = this.analysis.shortSummary(obs);
-      current.analysis_status = obs.image_quality.face_detected
-        ? 'completed'
-        : 'needs_review';
+      current.analysis_status =
+        obs.image_quality.face_detected &&
+        obs.image_quality.needs_retake !== true
+          ? 'completed'
+          : 'needs_review';
       current.analysis_model = obs.model_version;
       current.analysis_version = obs.schema_version;
+      current.analysis_prompt_version = result.metadata.prompt_version;
+      current.analysis_started_at = startedAt;
+      current.analysis_duration_ms = result.metadata.duration_ms;
+      current.analysis_input_image_count = result.metadata.input_image_count;
+      current.analysis_input_tokens = result.metadata.input_tokens;
+      current.analysis_output_tokens = result.metadata.output_tokens;
+      current.analysis_total_tokens = result.metadata.total_tokens;
+      current.analysis_estimated_cost_usd = result.metadata.estimated_cost_usd;
       current.analysis_completed_at = new Date();
       current.analysis_error = null;
       await this.entries.save(current);
 
       await this.evaluateCompletedAnalysis(userId, current, obs);
+      if (job) {
+        await this.analysisQueue.completeJob(job);
+      }
     } catch (err) {
       const current = await this.entries.findOne({
         where: { id: entryId, user_id: userId },
       });
       if (!current || current.photo_object_key !== photoObjectKey) {
+        if (job) {
+          await this.analysisQueue.cancelJob(
+            job,
+            'Photo was replaced before failed analysis could be recorded.',
+          );
+        }
         return;
       }
+      const errorMessage =
+        err instanceof Error ? err.message : 'Analysis failed';
+      const shouldRetry =
+        !!job &&
+        job.attempt_count <
+          (job.max_attempts || this.analysisQueue.getMaxAttempts());
+      if (shouldRetry && job) {
+        current.analysis_status = 'queued';
+        current.analysis_error = errorMessage;
+        current.analysis_prompt_version = this.analysis.promptVersion();
+        current.analysis_started_at = startedAt;
+        current.analysis_duration_ms = Date.now() - fallbackStartedAt;
+        current.analysis_input_image_count = plannedInputImageCount;
+        await this.entries.save(current);
+        await this.analysisQueue.rescheduleJob(job, {
+          reason: errorMessage,
+          runAfter: this.analysisQueue.nextRetryAt(job.attempt_count),
+        });
+        return;
+      }
+
       current.analysis_status = 'failed';
-      current.analysis_error = (err as Error).message;
+      current.analysis_error = errorMessage;
+      current.analysis_prompt_version = this.analysis.promptVersion();
+      current.analysis_started_at = startedAt;
+      current.analysis_duration_ms = Date.now() - fallbackStartedAt;
+      current.analysis_input_image_count = plannedInputImageCount;
       await this.entries.save(current);
+      if (job) {
+        await this.analysisQueue.failJob(job, errorMessage);
+      }
       await this.dispatchNotification({
         userId,
         kind: 'analysis_failed',
@@ -704,9 +1056,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         payload: { entry_id: entryId, entry_date: current.entry_date },
         deepLink: `/journal/days/${current.entry_date}`,
       });
-    } finally {
-      this.releaseAnalysisSlot(userId, analysisKey);
-      this.scheduleAnalysisQueueDrain();
     }
   }
 
@@ -730,26 +1079,79 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     await this.entries.save(current);
   }
 
-  private enqueueAnalysisRetry(params: QueuedAnalysisRun): void {
-    const key = `${params.entryId}:${params.photoObjectKey}`;
-    this.queuedAnalysisRuns.set(key, params);
-    this.scheduleAnalysisQueueDrain();
+  private async enqueueAnalysisForEntry(
+    userId: string,
+    entry: SkinJournalEntry,
+    reason: string,
+    runAfter = new Date(),
+  ): Promise<void> {
+    if (!entry.photo_object_key) {
+      return;
+    }
+    await this.markAnalysisQueued(
+      userId,
+      entry.id,
+      entry.photo_object_key,
+      reason,
+    );
+    await this.analysisQueue.enqueueAnalysisJob({
+      userId,
+      entryId: entry.id,
+      photoObjectKey: entry.photo_object_key,
+      reason,
+      runAfter,
+    });
   }
 
-  private removeQueuedAnalysisRunsForEntry(entryId: string): void {
-    let removed = false;
-    for (const [key, run] of this.queuedAnalysisRuns.entries()) {
-      if (run.entryId === entryId) {
-        this.queuedAnalysisRuns.delete(key);
-        removed = true;
+  private async tryEnqueueAnalysisForEntry(
+    userId: string,
+    entry: SkinJournalEntry,
+    reason: string,
+    runAfter = new Date(),
+  ): Promise<void> {
+    try {
+      await this.enqueueAnalysisForEntry(userId, entry, reason, runAfter);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create durable analysis job for ${entry.id}; recovery will retry.`,
+        error,
+      );
+      if (entry.photo_object_key) {
+        entry.analysis_status = 'queued';
+        entry.analysis_error =
+          'Analysis queue is temporarily unavailable; it will retry automatically.';
+        await this.entries.save(entry);
       }
     }
-    if (removed) {
-      this.scheduleAnalysisQueueDrain();
+  }
+
+  private async rescheduleAnalysisJob(
+    userId: string,
+    entryId: string,
+    photoObjectKey: string,
+    job: SkinJournalAnalysisJob | undefined,
+    reason: string,
+    runAfter: Date,
+  ): Promise<void> {
+    await this.markAnalysisQueued(userId, entryId, photoObjectKey, reason);
+    if (job) {
+      await this.analysisQueue.rescheduleJob(job, { reason, runAfter });
+      return;
     }
+    await this.analysisQueue.enqueueAnalysisJob({
+      userId,
+      entryId,
+      photoObjectKey,
+      reason,
+      runAfter,
+    });
   }
 
   async recoverInterruptedAnalyses(): Promise<void> {
+    if (!(await this.analysisQueue.isReady())) {
+      return;
+    }
+    await this.analysisQueue.recoverExpiredLocks();
     const recoverableStatuses: AnalysisStatus[] = [
       'pending',
       'queued',
@@ -771,59 +1173,169 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       entry.analysis_error =
         'Analysis queued after service restart; it will retry automatically.';
       await this.entries.save(entry);
-      this.enqueueAnalysisRetry({
+      await this.analysisQueue.enqueueAnalysisJob({
         userId: entry.user_id,
         entryId: entry.id,
         photoObjectKey: entry.photo_object_key,
-        notBefore: Date.now() + ANALYSIS_QUEUE_RETRY_DELAY_MS,
+        reason: entry.analysis_error,
+        runAfter: new Date(
+          Date.now() + SKIN_JOURNAL_ANALYSIS_CAPACITY_RETRY_DELAY_MS,
+        ),
       });
     }
   }
 
-  private scheduleAnalysisQueueDrain(): void {
-    if (this.analysisQueueTimer) {
-      clearTimeout(this.analysisQueueTimer);
-      this.analysisQueueTimer = null;
-    }
-    const nextRunAt = Math.min(
-      ...Array.from(this.queuedAnalysisRuns.values()).map(
-        (run) => run.notBefore,
-      ),
+  async getAnalysisQueueMetrics(): Promise<AnalysisQueueMetrics> {
+    return this.analysisQueue.getQueueMetrics();
+  }
+
+  async getAnalysisQueueOperations(token: string | undefined): Promise<{
+    queue: AnalysisQueueMetrics;
+    analysis: {
+      window_hours: number;
+      completed_count: number;
+      failed_count: number;
+      needs_review_count: number;
+      average_duration_ms: number | null;
+      failure_rate: number;
+      retake_rate: number;
+      safety_flag_rate: number;
+      estimated_cost_usd: number;
+      total_tokens: number;
+    };
+    alerts: Array<{
+      code: string;
+      severity: 'warning' | 'critical';
+      value: number;
+      threshold: number;
+    }>;
+  }> {
+    this.assertOperationsToken(token);
+    const queue = await this.analysisQueue.getQueueMetrics();
+    const windowHours = 24;
+    const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+    const analysedEntries = await this.entries.find({
+      where: {
+        analysis_started_at: MoreThanOrEqual(since),
+      } as FindOptionsWhere<SkinJournalEntry>,
+      take: 500,
+    });
+    const completedCount = analysedEntries.filter(
+      (entry) => entry.analysis_status === 'completed',
+    ).length;
+    const failedCount = analysedEntries.filter(
+      (entry) => entry.analysis_status === 'failed',
+    ).length;
+    const needsReviewCount = analysedEntries.filter(
+      (entry) => entry.analysis_status === 'needs_review',
+    ).length;
+    const durationValues = analysedEntries
+      .map((entry) => entry.analysis_duration_ms)
+      .filter((value): value is number => typeof value === 'number');
+    const averageDuration =
+      durationValues.length > 0
+        ? Math.round(
+            durationValues.reduce((sum, value) => sum + value, 0) /
+              durationValues.length,
+          )
+        : null;
+    const denominator = Math.max(1, analysedEntries.length);
+    const retakeCount = analysedEntries.filter(
+      (entry) => entry.analysis_observations?.image_quality?.needs_retake,
+    ).length;
+    const safetyFlagCount = analysedEntries.filter(
+      (entry) =>
+        entry.analysis_observations?.safety_flags?.urgent_review_recommended ||
+        entry.analysis_observations?.safety_flags?.doctor_follow_up_recommended,
+    ).length;
+    const estimatedCost = analysedEntries.reduce(
+      (sum, entry) => sum + (entry.analysis_estimated_cost_usd ?? 0),
+      0,
     );
-    if (!Number.isFinite(nextRunAt)) {
-      return;
-    }
-    const delayMs = Math.max(0, nextRunAt - Date.now());
-    this.analysisQueueTimer = setTimeout(() => {
-      this.analysisQueueTimer = null;
-      void this.drainAnalysisQueue().catch((error) => {
-        this.logger.error('Failed to drain skin journal analysis queue', error);
+    const totalTokens = analysedEntries.reduce(
+      (sum, entry) => sum + (entry.analysis_total_tokens ?? 0),
+      0,
+    );
+    const failureRate = failedCount / denominator;
+    const alerts: Array<{
+      code: string;
+      severity: 'warning' | 'critical';
+      value: number;
+      threshold: number;
+    }> = [];
+    if (
+      queue.oldest_queued_age_seconds !== null &&
+      queue.oldest_queued_age_seconds >
+        SKIN_JOURNAL_ANALYSIS_QUEUE_AGE_ALERT_SECONDS
+    ) {
+      alerts.push({
+        code: 'analysis_queue_oldest_job_age_high',
+        severity: 'critical',
+        value: queue.oldest_queued_age_seconds,
+        threshold: SKIN_JOURNAL_ANALYSIS_QUEUE_AGE_ALERT_SECONDS,
       });
-    }, delayMs);
-    this.analysisQueueTimer.unref?.();
+    }
+    if (failureRate > SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD) {
+      alerts.push({
+        code: 'analysis_failure_rate_high',
+        severity: 'warning',
+        value: failureRate,
+        threshold: SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD,
+      });
+    }
+    if ((queue.dlq_visible_count ?? 0) > 0) {
+      alerts.push({
+        code: 'analysis_dlq_not_empty',
+        severity: 'critical',
+        value: queue.dlq_visible_count ?? 0,
+        threshold: 0,
+      });
+    }
+
+    return {
+      queue,
+      analysis: {
+        window_hours: windowHours,
+        completed_count: completedCount,
+        failed_count: failedCount,
+        needs_review_count: needsReviewCount,
+        average_duration_ms: averageDuration,
+        failure_rate: failureRate,
+        retake_rate: retakeCount / denominator,
+        safety_flag_rate: safetyFlagCount / denominator,
+        estimated_cost_usd: estimatedCost,
+        total_tokens: totalTokens,
+      },
+      alerts,
+    };
   }
 
-  private async drainAnalysisQueue(): Promise<void> {
-    const now = Date.now();
-    const dueRuns = Array.from(this.queuedAnalysisRuns.entries()).filter(
-      ([, run]) => run.notBefore <= now,
-    );
-    for (const [key, run] of dueRuns) {
-      this.queuedAnalysisRuns.delete(key);
-      await this.runAnalysis(run.entryId, run.userId, run.photoObjectKey);
+  private scheduleAnalysisRecovery(): void {
+    if (this.analysisRecoveryTimer) {
+      clearTimeout(this.analysisRecoveryTimer);
+      this.analysisRecoveryTimer = null;
     }
-    if (this.queuedAnalysisRuns.size > 0) {
-      this.scheduleAnalysisQueueDrain();
-    }
+    this.analysisRecoveryTimer = setTimeout(() => {
+      void this.recoverInterruptedAnalyses()
+        .catch((error) => {
+          this.logger.error(
+            'Failed to run scheduled skin journal analysis recovery',
+            error,
+          );
+        })
+        .finally(() => this.scheduleAnalysisRecovery());
+    }, SKIN_JOURNAL_ANALYSIS_RECOVERY_INTERVAL_MS);
+    this.analysisRecoveryTimer.unref?.();
   }
 
-  private msUntilNextAnalysisBudgetWindow(): number {
-    const nextWindow = new Date();
-    nextWindow.setUTCHours(24, 1, 0, 0);
-    return Math.max(
-      ANALYSIS_QUEUE_RETRY_DELAY_MS,
-      nextWindow.getTime() - Date.now() + ANALYSIS_BUDGET_RETRY_GRACE_MS,
+  private assertOperationsToken(token: string | undefined): void {
+    const configuredToken = this.config.get<string>(
+      'SKIN_JOURNAL_OPERATIONS_TOKEN',
+      '',
     );
+    if (!configuredToken || token !== configuredToken) {
+      throw new ForbiddenException('Invalid operations token');
+    }
   }
 
   // ---------- EVENTS ----------
@@ -1281,7 +1793,11 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         .filter((key): key is string => typeof key === 'string' && !!key),
     ];
     for (const objectKey of objectKeys) {
-      await this.deletePhotoBestEffort(objectKey);
+      await this.deletePhotoBestEffort(
+        objectKey,
+        userId,
+        'account_media_deleted',
+      );
     }
   }
 
@@ -1304,6 +1820,68 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- INTERNAL HELPERS ----------
 
+  private async findPreviousPhotoEntry(
+    userId: string,
+    currentEntry: SkinJournalEntry,
+  ): Promise<SkinJournalEntry | null> {
+    const candidates = await this.entries.find({
+      where: {
+        user_id: userId,
+        entry_date: LessThan(currentEntry.entry_date),
+        photo_object_key: Not(IsNull()),
+        analysis_status: 'completed',
+      } as FindOptionsWhere<SkinJournalEntry>,
+      order: { entry_date: 'DESC' },
+      take: 10,
+    });
+    return (
+      candidates.find(
+        (candidate) =>
+          candidate.id !== currentEntry.id &&
+          candidate.entry_date < currentEntry.entry_date &&
+          !!candidate.photo_object_key &&
+          isTrendSafeBaseline(candidate.analysis_observations),
+      ) ?? null
+    );
+  }
+
+  private buildAnalysisSkinContext(
+    profile: SkinProfile | null,
+  ): AnalysisSkinContext | null {
+    if (!profile) {
+      return null;
+    }
+    return {
+      skin_type: sanitizeContextText(profile.skin_type),
+      skin_tone: sanitizeContextText(profile.skin_tone),
+      fitzpatrick_phototype: sanitizeContextText(profile.fitzpatrick_phototype),
+      sensitivity_level: sanitizeContextText(profile.sensitivity_level),
+      hydration_level: sanitizeContextText(profile.hydration_level),
+      current_concerns: sanitizeStringArray(profile.current_concerns),
+      concern_details: sanitizeConcernDetails(
+        profile.concern_details?.per_concern ?? [],
+      ),
+    };
+  }
+
+  private buildAnalysisEntryContext(
+    entry: SkinJournalEntry,
+  ): AnalysisEntryContext {
+    return {
+      entry_date: entry.entry_date,
+      ratings: entry.ratings,
+      overall_feel: entry.overall_feel,
+      sleep_band: entry.sleep_band,
+      stress_today: entry.stress_today,
+      sun_exposure_today: entry.sun_exposure_today,
+      sweat_exercise_today: entry.sweat_exercise_today,
+      cycle_marker: entry.cycle_marker,
+      recent_change_kind: entry.recent_change?.kind ?? null,
+      complaint_note: sanitizeContextText(entry.complaint_note),
+      is_pre_routine: entry.is_pre_routine,
+    };
+  }
+
   private async findOwnedEntry(
     userId: string,
     entryId: string,
@@ -1313,6 +1891,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     });
     if (!entry) throw new NotFoundException('Entry not found');
     return entry;
+  }
+
+  private assertEntryIsEditableToday(entry: SkinJournalEntry): void {
+    const timeZone = resolveSkinJournalTimeZone(entry.time_zone);
+    if (entry.entry_date !== todayInTimeZone(timeZone)) {
+      throw new BadRequestException(JOURNAL_DAY_LOCKED_MESSAGE);
+    }
   }
 
   private async clearEntryAnalysisArtifacts(
@@ -1402,10 +1987,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     from: SkinJournalEntry | null,
     to: SkinJournalEntry | null,
   ): {
-    bullets: Array<{ text: string; tone: 'good' | 'warn' | 'neutral' }>;
+    bullets: CompareDeltaBullet[];
   } {
-    const bullets: Array<{ text: string; tone: 'good' | 'warn' | 'neutral' }> =
-      [];
+    const bullets: CompareDeltaBullet[] = [];
     if (!from || !to) {
       return { bullets };
     }
@@ -1414,23 +1998,39 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       const b = to.ratings?.[c];
       if (typeof a === 'number' && typeof b === 'number' && a !== b) {
         const tone: 'good' | 'warn' | 'neutral' = b < a ? 'good' : 'warn';
-        const verb = b < a ? 'reduced' : 'increased';
         bullets.push({
-          text: `${capitalize(c)} ${verb} from ${a} to ${b}`,
+          code: b < a ? 'rating_improved' : 'rating_worsened',
           tone,
+          concern: c,
+          from_rating: a,
+          to_rating: b,
         });
       }
     }
     if (
-      from.analysis_observations?.reaction_signals?.reaction_detected &&
-      !to.analysis_observations?.reaction_signals?.reaction_detected
+      (from.has_reaction_signal ||
+        from.analysis_observations?.reaction_signals?.reaction_detected) &&
+      !(
+        to.has_reaction_signal ||
+        to.analysis_observations?.reaction_signals?.reaction_detected
+      )
     ) {
-      bullets.push({ text: 'Reaction signs cleared', tone: 'good' });
+      bullets.push({ code: 'reaction_cleared', tone: 'good' });
     }
     if (bullets.length === 0) {
-      bullets.push({ text: 'No major visible change', tone: 'neutral' });
+      bullets.push({ code: 'no_major_change', tone: 'neutral' });
     }
     return { bullets };
+  }
+
+  private analysisConcernKeys(obs: AnalysisObservations): AnalysisConcern[] {
+    const keys = new Set<AnalysisConcern>();
+    for (const detected of obs.detected_concerns ?? []) {
+      if (ANALYSIS_CONCERN_SET.has(detected.concern)) {
+        keys.add(detected.concern);
+      }
+    }
+    return Array.from(keys);
   }
 
   private async ensureSkinProgressConsent(
@@ -1490,77 +2090,42 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private tryAcquireAnalysisSlot(userId: string, key: string): boolean {
-    if (this.analysisInFlight.has(key)) {
-      return false;
-    }
-    const maxGlobal = SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT;
-    const maxPerUser = SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER;
-    const userCount = this.perUserAnalysisInFlight.get(userId) ?? 0;
-    if (this.analysisInFlight.size >= maxGlobal || userCount >= maxPerUser) {
-      return false;
-    }
-    this.analysisInFlight.add(key);
-    this.perUserAnalysisInFlight.set(userId, userCount + 1);
-    return true;
-  }
-
-  private releaseAnalysisSlot(userId: string, key: string): void {
-    this.analysisInFlight.delete(key);
-    const userCount = this.perUserAnalysisInFlight.get(userId) ?? 0;
-    if (userCount <= 1) {
-      this.perUserAnalysisInFlight.delete(userId);
-      return;
-    }
-    this.perUserAnalysisInFlight.set(userId, userCount - 1);
-  }
-
-  private consumeAnalysisBudget(userId: string): boolean {
-    const budgetUsd = SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD;
-    if (budgetUsd <= 0) {
-      return false;
-    }
-    const date = new Date().toISOString().slice(0, 10);
-    const maxRuns = Math.max(1, Math.floor(budgetUsd / 0.01));
-    const counter = this.analysisBudgetCounters.get(userId);
-    if (!counter || counter.date !== date) {
-      this.analysisBudgetCounters.set(userId, { date, count: 1 });
-      return true;
-    }
-    if (counter.count >= maxRuns) {
-      return false;
-    }
-    counter.count += 1;
-    return true;
-  }
-
   private async evaluateCompletedAnalysis(
     userId: string,
     entry: SkinJournalEntry,
     obs: AnalysisObservations,
   ): Promise<void> {
     if (obs.reaction_signals.reaction_detected) {
-      const event = await this.recordEvent(userId, entry.id, {
-        kind: 'reaction_detected',
-        severity:
-          obs.reaction_signals.reaction_severity === 'severe'
-            ? 'critical'
-            : 'warning',
-        payload: {
-          indicators: obs.reaction_signals.indicators,
-          reaction_severity: obs.reaction_signals.reaction_severity,
-          confidence: obs.reaction_signals.confidence,
-        },
-      });
-      await this.dispatchNotification({
+      const existingReactionEvent = await this.findExistingEvent(
         userId,
-        kind: 'reaction_detected',
-        titleKey: NOTIFICATION_KEYS.reactionTitle,
-        bodyKey: NOTIFICATION_KEYS.reactionBody,
-        severity: event.severity === 'critical' ? 'critical' : 'warning',
-        payload: { event_id: event.id, entry_id: entry.id },
-        deepLink: `/journal/days/${entry.entry_date}`,
-      });
+        entry.id,
+        'reaction_detected',
+      );
+      const event =
+        existingReactionEvent ??
+        (await this.recordEvent(userId, entry.id, {
+          kind: 'reaction_detected',
+          severity:
+            obs.reaction_signals.reaction_severity === 'severe'
+              ? 'critical'
+              : 'warning',
+          payload: {
+            indicators: obs.reaction_signals.indicators,
+            reaction_severity: obs.reaction_signals.reaction_severity,
+            confidence: obs.reaction_signals.confidence,
+          },
+        }));
+      if (!existingReactionEvent) {
+        await this.dispatchNotification({
+          userId,
+          kind: 'reaction_detected',
+          titleKey: NOTIFICATION_KEYS.reactionTitle,
+          bodyKey: NOTIFICATION_KEYS.reactionBody,
+          severity: event.severity === 'critical' ? 'critical' : 'warning',
+          payload: { event_id: event.id, entry_id: entry.id },
+          deepLink: `/journal/days/${entry.entry_date}`,
+        });
+      }
 
       if (
         ['moderate', 'severe'].includes(
@@ -1568,27 +2133,55 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         ) &&
         obs.reaction_signals.confidence >= 0.6
       ) {
+        const hadActiveSimplification =
+          await this.hasActiveSimplification(userId);
         const simplification = await this.startSimplification({
           userId,
           triggeredByEventId: event.id,
           reason:
             'Journal-only barrier-repair safety state triggered by moderate or severe reaction signals.',
         });
-        await this.dispatchNotification({
-          userId,
-          kind: 'simplification_started',
-          titleKey: NOTIFICATION_KEYS.simplificationTitle,
-          bodyKey: NOTIFICATION_KEYS.simplificationBody,
-          severity: event.severity === 'critical' ? 'critical' : 'warning',
-          payload: { simplification_id: simplification.id, event_id: event.id },
-          deepLink: `/journal/simplification/${simplification.id}`,
-        });
+        if (!hadActiveSimplification) {
+          await this.dispatchNotification({
+            userId,
+            kind: 'simplification_started',
+            titleKey: NOTIFICATION_KEYS.simplificationTitle,
+            bodyKey: NOTIFICATION_KEYS.simplificationBody,
+            severity: event.severity === 'critical' ? 'critical' : 'warning',
+            payload: {
+              simplification_id: simplification.id,
+              event_id: event.id,
+            },
+            deepLink: `/journal/simplification/${simplification.id}`,
+          });
+        }
       }
     }
 
     await this.evaluateTrendEvents(userId, entry);
     await this.evaluateReferralThreshold(userId, entry, obs);
     await this.ensureDailyInsightForEntry(userId, entry, obs);
+  }
+
+  private async findExistingEvent(
+    userId: string,
+    entryId: string,
+    kind: EventKind,
+  ): Promise<SkinJournalEvent | null> {
+    return this.events.findOne({
+      where: {
+        user_id: userId,
+        entry_id: entryId,
+        kind,
+      },
+    });
+  }
+
+  private async hasActiveSimplification(userId: string): Promise<boolean> {
+    const existing = await this.simplifications.findOne({
+      where: { user_id: userId, ended_at: IsNull() },
+    });
+    return !!existing;
   }
 
   private async ensureDailyInsightForEntry(
@@ -1714,14 +2307,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const existing = await this.insights.findOne({
-      where: {
-        user_id: userId,
-        kind: 'referral',
-        dismissed_at: IsNull(),
-      },
-    });
-    if (existing) {
+    if (await this.hasExistingReferralForEntry(userId, entry.id)) {
       return;
     }
 
@@ -1763,8 +2349,150 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private async hasExistingReferralForEntry(
+    userId: string,
+    entryId: string,
+  ): Promise<boolean> {
+    const recentReferralInsights = await this.insights.find({
+      where: {
+        user_id: userId,
+        kind: 'referral',
+      },
+      order: { generated_at: 'DESC' },
+      take: 25,
+    });
+    return recentReferralInsights.some((insight) =>
+      (insight.related_entry_ids ?? []).includes(entryId),
+    );
+  }
+
   private normalizeUpsertBody(body: UpsertEntryDto): UpsertEntryDto {
     return normalizeUpsertEntryBody(body);
+  }
+
+  private validateOptionalDateRange(filters: {
+    from?: string;
+    to?: string;
+  }): void {
+    if (filters.from && !isValidDate(filters.from)) {
+      throw new BadRequestException('Invalid from date');
+    }
+    if (filters.to && !isValidDate(filters.to)) {
+      throw new BadRequestException('Invalid to date');
+    }
+    if (filters.from && filters.to && filters.from > filters.to) {
+      throw new BadRequestException('Date range must start before it ends');
+    }
+  }
+
+  private buildPhotoEntryWhere(
+    userId: string,
+    filters: { from?: string; to?: string },
+  ): FindOptionsWhere<SkinJournalEntry> {
+    const where: FindOptionsWhere<SkinJournalEntry> = {
+      user_id: userId,
+      photo_object_key: Not(IsNull()),
+    };
+    if (filters.from && filters.to) {
+      where.entry_date = Between(filters.from, filters.to);
+    } else if (filters.from) {
+      where.entry_date = MoreThanOrEqual(filters.from);
+    } else if (filters.to) {
+      where.entry_date = LessThanOrEqual(filters.to);
+    }
+    return where;
+  }
+
+  private parsePhotoFilter(filter: string | undefined): ParsedPhotoFilter {
+    if (!filter || filter === PHOTO_FILTER_ALL_ID) {
+      return { id: PHOTO_FILTER_ALL_ID, kind: 'all' };
+    }
+    if (filter === PHOTO_FILTER_REACTION_ID) {
+      return { id: PHOTO_FILTER_REACTION_ID, kind: 'reaction' };
+    }
+    if (filter.startsWith(PHOTO_FILTER_CONCERN_PREFIX)) {
+      const value = filter.slice(PHOTO_FILTER_CONCERN_PREFIX.length);
+      if (ANALYSIS_CONCERN_SET.has(value as AnalysisConcern)) {
+        return {
+          id: filter,
+          kind: 'concern',
+          value: value as AnalysisConcern,
+        };
+      }
+    }
+    throw new BadRequestException('Invalid photo filter');
+  }
+
+  private applyPhotoDateFilters(
+    queryBuilder: SelectQueryBuilder<SkinJournalEntry>,
+    filters: { from?: string; to?: string },
+  ): void {
+    if (filters.from) {
+      queryBuilder.andWhere('entry.entry_date >= :from', {
+        from: filters.from,
+      });
+    }
+    if (filters.to) {
+      queryBuilder.andWhere('entry.entry_date <= :to', { to: filters.to });
+    }
+  }
+
+  private applyPhotoFilter(
+    queryBuilder: SelectQueryBuilder<SkinJournalEntry>,
+    filter: ParsedPhotoFilter,
+  ): void {
+    if (filter.kind === 'all') {
+      return;
+    }
+    if (filter.kind === 'reaction') {
+      queryBuilder.andWhere('entry.has_reaction_signal = true');
+      return;
+    }
+    queryBuilder.andWhere(':concern = ANY(entry.analysis_concern_keys)', {
+      concern: filter.value,
+    });
+  }
+
+  private applyPhotoCursor(
+    queryBuilder: SelectQueryBuilder<SkinJournalEntry>,
+    cursor: string | undefined,
+    fingerprint: string,
+  ): void {
+    if (!cursor) {
+      return;
+    }
+    const decoded = decodeCursor(cursor);
+    if (decoded.fingerprint !== fingerprint) {
+      throw new BadRequestException('Cursor does not match this request');
+    }
+    const [entryDate, id] = decoded.tuple;
+    if (typeof entryDate !== 'string' || typeof id !== 'string') {
+      throw new BadRequestException('Invalid cursor');
+    }
+    queryBuilder.andWhere(
+      new Brackets((qb) => {
+        qb.where('entry.entry_date < :cursorEntryDate', {
+          cursorEntryDate: entryDate,
+        }).orWhere(
+          'entry.entry_date = :cursorEntryDate AND entry.id < :cursorId',
+          { cursorEntryDate: entryDate, cursorId: id },
+        );
+      }),
+    );
+  }
+
+  private buildPhotoNextCursor(
+    item: SkinJournalEntry | undefined,
+    fingerprint: string,
+    hasMore: boolean,
+  ): string | null {
+    if (!hasMore || !item) {
+      return null;
+    }
+    return encodeCursor({
+      fingerprint,
+      tuple: [item.entry_date, item.id],
+    });
   }
 
   private validateDateRange(from: string, to: string): void {
@@ -1789,12 +2517,78 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 function sameStringSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const values = new Set(a);
   return b.every((value) => values.has(value));
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function photoCursorFingerprint(
+  userId: string,
+  filters: { from?: string; to?: string; filter?: string },
+  parsedFilter: ParsedPhotoFilter,
+): string {
+  return [
+    'skin-journal-photos-v1',
+    userId,
+    filters.from ?? '',
+    filters.to ?? '',
+    parsedFilter.id,
+  ].join(':');
+}
+
+function isTrendSafeBaseline(obs: AnalysisObservations | null): boolean {
+  if (!obs) {
+    return false;
+  }
+  return (
+    obs.image_quality.face_detected === true &&
+    obs.image_quality.needs_retake !== true &&
+    obs.image_quality.excluded_from_trends_reason == null
+  );
+}
+
+function sanitizeContextText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.slice(0, ANALYSIS_CONTEXT_MAX_TEXT_LENGTH);
+}
+
+function sanitizeStringArray(
+  values: readonly string[] | null | undefined,
+): string[] {
+  const safeValues: readonly unknown[] = Array.isArray(values) ? values : [];
+  return safeValues
+    .map((value) =>
+      typeof value === 'string' ? sanitizeContextText(value) : null,
+    )
+    .filter((value): value is string => value !== null)
+    .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS);
+}
+
+function sanitizeConcernDetails(
+  details: readonly ConcernDetail[],
+): NonNullable<AnalysisSkinContext['concern_details']> {
+  return details.slice(0, ANALYSIS_CONTEXT_MAX_ITEMS).map((detail) => ({
+    concern: sanitizeContextText(detail.concern) ?? 'unknown',
+    severity: sanitizeContextText(detail.severity),
+    locations: sanitizeStringArray(detail.locations),
+    subtype: sanitizeContextText(detail.subtype),
+    priority:
+      typeof detail.priority === 'number' && Number.isFinite(detail.priority)
+        ? detail.priority
+        : null,
+  }));
 }

@@ -18,6 +18,7 @@ import {
 import type {
   Angle,
   AnalysisObservations,
+  AnalysisConcern,
   AnalysisStatus,
   CycleMarker,
   OverallFeel,
@@ -147,6 +148,15 @@ export class SkinJournalEntry {
   })
   analysis_observations: AnalysisObservations | null;
 
+  @Column({ type: 'text', array: true, default: () => 'ARRAY[]::text[]' })
+  analysis_concern_keys: AnalysisConcern[];
+
+  @Column({ type: 'boolean', default: false })
+  has_reaction_signal: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  needs_retake: boolean;
+
   @Column({
     type: 'text',
     nullable: true,
@@ -162,11 +172,35 @@ export class SkinJournalEntry {
   @Column({ type: 'varchar', length: 20, nullable: true })
   analysis_version: string | null;
 
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  analysis_prompt_version: string | null;
+
   @Column({ type: 'text', nullable: true })
   analysis_error: string | null;
 
   @Column({ type: 'timestamptz', nullable: true })
+  analysis_started_at: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
   analysis_completed_at: Date | null;
+
+  @Column({ type: 'integer', nullable: true })
+  analysis_duration_ms: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  analysis_input_image_count: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  analysis_input_tokens: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  analysis_output_tokens: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  analysis_total_tokens: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  analysis_estimated_cost_usd: number | null;
 
   @Column({ type: 'integer', default: 0 })
   analysis_retry_count: number;

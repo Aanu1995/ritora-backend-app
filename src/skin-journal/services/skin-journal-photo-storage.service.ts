@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -14,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
+import { access, mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { dirname, resolve, sep } from 'path';
 import sharp from 'sharp';
 import { ulid } from 'ulid';
@@ -148,6 +149,34 @@ export class SkinJournalPhotoStorageService {
       if (err.code !== 'ENOENT') {
         this.logger.warn(`Failed to delete photo ${objectKey}: ${err.message}`);
       }
+    }
+  }
+
+  async photoExists(objectKey: string): Promise<boolean> {
+    assertSafeObjectKey(objectKey);
+    const runtimeConfig = this.getRuntimeConfig();
+    if (!runtimeConfig) {
+      try {
+        await access(this.toLocalPath(objectKey));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({
+          Bucket: runtimeConfig.bucketName,
+          Key: objectKey,
+        }),
+      );
+      return true;
+    } catch (error) {
+      if (isNotFoundStorageError(error)) {
+        return false;
+      }
+      throw error;
     }
   }
 
@@ -407,5 +436,18 @@ function isTransformToByteArrayBody(
     body !== null &&
     'transformToByteArray' in body &&
     typeof body.transformToByteArray === 'function'
+  );
+}
+
+function isNotFoundStorageError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const metadata = (error as { $metadata?: { httpStatusCode?: number } })
+    .$metadata;
+  return (
+    metadata?.httpStatusCode === 404 ||
+    error.name === 'NotFound' ||
+    error.name === 'NoSuchKey'
   );
 }

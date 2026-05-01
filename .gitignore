@@ -20,6 +20,11 @@ coverage/
 # Logs
 *.log
 
+# Local runtime uploads
+uploads/
+src/skin-journal/analysis-evaluation/private-images/
+src/skin-journal/analysis-evaluation/reports/
+
 # OpenAPI generated spec
 openapi.json
 

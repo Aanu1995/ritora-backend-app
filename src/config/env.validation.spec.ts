@@ -53,6 +53,9 @@ describe('envValidationSchema', () => {
       SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY:
         '-----BEGIN PRIVATE KEY-----\\nmock\\n-----END PRIVATE KEY-----',
       SKIN_JOURNAL_S3_KMS_KEY_ID: 'arn:aws:kms:eu-west-1:123:key/mock',
+      SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL:
+        'https://sqs.eu-west-1.amazonaws.com/123/skin-journal-analysis',
+      SKIN_JOURNAL_OPERATIONS_TOKEN: 'o'.repeat(32),
     });
 
     expect(result.error).toBeUndefined();
@@ -101,6 +104,23 @@ describe('envValidationSchema', () => {
       result.value.SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER,
     ).toBeUndefined();
     expect(result.value.SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_WORKER_ENABLED).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS,
+    ).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
+    ).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_JOB_LOCK_TTL_SECONDS,
+    ).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_JOB_MAX_ATTEMPTS).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_BASE_SECONDS,
+    ).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_MAX_SECONDS,
+    ).toBeUndefined();
     expect(result.value.SKIN_JOURNAL_REMINDER_DEFAULT_TIME).toBeUndefined();
     expect(result.value.SKIN_JOURNAL_WRAPPED_MIN_PHOTOS).toBeUndefined();
   });
@@ -224,6 +244,9 @@ describe('envValidationSchema', () => {
       SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
       MAIL_FROM: 'noreply@ritora.com',
       WEB_APP_URL: 'https://app.ritora.com',
+      SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL:
+        'https://sqs.eu-west-1.amazonaws.com/123/skin-journal-analysis',
+      SKIN_JOURNAL_OPERATIONS_TOKEN: 'o'.repeat(32),
     });
 
     expect(result.error).toBeDefined();
@@ -252,5 +275,102 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error?.message).toContain('OPENAI_API_KEY');
+  });
+
+  it('requires an SQS queue URL in production when the analysis queue driver is SQS', () => {
+    const result = validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      OPENAI_API_KEY: 'sk-prod-mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
+      MAIL_FROM: 'noreply@ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
+      SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-prod-skin-journal',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: 'https://media.ritora.com',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID: 'K123',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY:
+        '-----BEGIN PRIVATE KEY-----\\nmock\\n-----END PRIVATE KEY-----',
+      SKIN_JOURNAL_S3_KMS_KEY_ID: 'arn:aws:kms:eu-west-1:123:key/mock',
+      SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: 'sqs',
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain(
+      'SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL',
+    );
+  });
+
+  it('requires an operations token in production', () => {
+    const result = validateEnv({
+      NODE_ENV: 'production',
+      DATABASE_PASSWORD: 'postgres-password',
+      JWT_SECRET: 'a'.repeat(32),
+      JWT_REFRESH_SECRET: 'b'.repeat(32),
+      COOKIE_DOMAIN: 'ritora.com',
+      COOKIE_SECURE: true,
+      RESEND_API_KEY: 're_prod_mock',
+      OPENAI_API_KEY: 'sk-prod-mock',
+      SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
+      MAIL_FROM: 'noreply@ritora.com',
+      WEB_APP_URL: 'https://app.ritora.com',
+      SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-prod-skin-journal',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: 'https://media.ritora.com',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID: 'K123',
+      SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY:
+        '-----BEGIN PRIVATE KEY-----\\nmock\\n-----END PRIVATE KEY-----',
+      SKIN_JOURNAL_S3_KMS_KEY_ID: 'arn:aws:kms:eu-west-1:123:key/mock',
+      SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL:
+        'https://sqs.eu-west-1.amazonaws.com/123/skin-journal-analysis',
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('SKIN_JOURNAL_OPERATIONS_TOKEN');
+  });
+
+  it('uses the database analysis queue driver by default outside production', () => {
+    const result = validateEnv({
+      NODE_ENV: 'development',
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER).toBe('database');
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_WORKER_ENABLED).toBeUndefined();
+  });
+
+  it('strips Skin Journal queue policy values even when provided', () => {
+    const result = validateEnv({
+      NODE_ENV: 'development',
+      SKIN_JOURNAL_ANALYSIS_WORKER_ENABLED: 'false',
+      SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS: '20',
+      SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS: '900',
+      SKIN_JOURNAL_ANALYSIS_JOB_LOCK_TTL_SECONDS: '3600',
+      SKIN_JOURNAL_ANALYSIS_JOB_MAX_ATTEMPTS: '20',
+      SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_BASE_SECONDS: '60',
+      SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_MAX_SECONDS: '7200',
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_WORKER_ENABLED).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS,
+    ).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
+    ).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_JOB_LOCK_TTL_SECONDS,
+    ).toBeUndefined();
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_JOB_MAX_ATTEMPTS).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_BASE_SECONDS,
+    ).toBeUndefined();
+    expect(
+      result.value.SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_MAX_SECONDS,
+    ).toBeUndefined();
   });
 });

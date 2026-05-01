@@ -28,11 +28,22 @@ export class CreateSkinJournalTables1714200000000 implements MigrationInterface 
         "complaint_note" text,
         "analysis_status" varchar(20) NOT NULL DEFAULT 'pending',
         "analysis_observations" jsonb,
+        "analysis_concern_keys" text[] NOT NULL DEFAULT ARRAY[]::text[],
+        "has_reaction_signal" boolean NOT NULL DEFAULT false,
+        "needs_retake" boolean NOT NULL DEFAULT false,
         "analysis_summary" text,
         "analysis_model" varchar(60),
         "analysis_version" varchar(20),
+        "analysis_prompt_version" varchar(80),
         "analysis_error" text,
+        "analysis_started_at" timestamptz,
         "analysis_completed_at" timestamptz,
+        "analysis_duration_ms" integer,
+        "analysis_input_image_count" integer,
+        "analysis_input_tokens" integer,
+        "analysis_output_tokens" integer,
+        "analysis_total_tokens" integer,
+        "analysis_estimated_cost_usd" double precision,
         "analysis_retry_count" integer NOT NULL DEFAULT 0,
         "created_at" timestamptz NOT NULL DEFAULT now(),
         "updated_at" timestamptz NOT NULL DEFAULT now(),
@@ -52,6 +63,97 @@ export class CreateSkinJournalTables1714200000000 implements MigrationInterface 
     await queryRunner.query(`
       CREATE INDEX "IDX_skin_journal_entries_user_date_desc"
         ON "skin_journal_entries" ("user_id", "entry_date" DESC)
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_entries_photo_concern_keys"
+        ON "skin_journal_entries" USING GIN ("analysis_concern_keys")
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_entries_user_photo_reaction"
+        ON "skin_journal_entries" ("user_id", "has_reaction_signal", "entry_date" DESC)
+        WHERE "photo_object_key" IS NOT NULL
+    `);
+
+    await queryRunner.query(`
+      CREATE TABLE "skin_journal_analysis_jobs" (
+        "id" varchar(26) NOT NULL,
+        "user_id" varchar(26) NOT NULL,
+        "entry_id" varchar(26) NOT NULL,
+        "photo_object_key" text NOT NULL,
+        "status" varchar(20) NOT NULL DEFAULT 'queued',
+        "attempt_count" integer NOT NULL DEFAULT 0,
+        "max_attempts" integer NOT NULL DEFAULT 5,
+        "run_after" timestamptz NOT NULL DEFAULT now(),
+        "locked_at" timestamptz,
+        "locked_by" varchar(80),
+        "last_error" text,
+        "completed_at" timestamptz,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "PK_skin_journal_analysis_jobs" PRIMARY KEY ("id"),
+        CONSTRAINT "FK_skin_journal_analysis_jobs_user" FOREIGN KEY ("user_id")
+          REFERENCES "users" ("id") ON DELETE CASCADE,
+        CONSTRAINT "FK_skin_journal_analysis_jobs_entry" FOREIGN KEY ("entry_id")
+          REFERENCES "skin_journal_entries" ("id") ON DELETE CASCADE,
+        CONSTRAINT "CK_skin_journal_analysis_jobs_status" CHECK (
+          "status" IN ('queued','sent','running','completed','failed','cancelled')
+        )
+      )
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_analysis_jobs_status_run_after"
+        ON "skin_journal_analysis_jobs" ("status", "run_after")
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_analysis_jobs_entry_photo_status"
+        ON "skin_journal_analysis_jobs" ("entry_id", "photo_object_key", "status")
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_analysis_jobs_user_status"
+        ON "skin_journal_analysis_jobs" ("user_id", "status")
+    `);
+
+    await queryRunner.query(`
+      CREATE UNIQUE INDEX "UQ_skin_journal_analysis_jobs_active_entry_photo"
+        ON "skin_journal_analysis_jobs" ("entry_id", "photo_object_key")
+        WHERE "status" IN ('queued','sent','running')
+    `);
+
+    await queryRunner.query(`
+      CREATE TABLE "skin_journal_media_deletion_jobs" (
+        "id" varchar(26) NOT NULL,
+        "user_id" varchar(26),
+        "object_key" text NOT NULL,
+        "status" varchar(20) NOT NULL DEFAULT 'pending',
+        "attempt_count" integer NOT NULL DEFAULT 0,
+        "run_after" timestamptz NOT NULL DEFAULT now(),
+        "last_error" text,
+        "verified_at" timestamptz,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "PK_skin_journal_media_deletion_jobs" PRIMARY KEY ("id"),
+        CONSTRAINT "FK_skin_journal_media_deletion_jobs_user" FOREIGN KEY ("user_id")
+          REFERENCES "users" ("id") ON DELETE SET NULL,
+        CONSTRAINT "UQ_skin_journal_media_deletion_jobs_object_key" UNIQUE ("object_key"),
+        CONSTRAINT "CK_skin_journal_media_deletion_jobs_status" CHECK (
+          "status" IN ('pending','verified','failed')
+        )
+      )
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_media_deletion_jobs_status_run_after"
+        ON "skin_journal_media_deletion_jobs" ("status", "run_after")
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_media_deletion_jobs_user_status"
+        ON "skin_journal_media_deletion_jobs" ("user_id", "status")
     `);
 
     await queryRunner.query(`
@@ -224,6 +326,8 @@ export class CreateSkinJournalTables1714200000000 implements MigrationInterface 
     await queryRunner.query(`DROP TABLE "skin_journal_wrapped"`);
     await queryRunner.query(`DROP TABLE "skin_journal_insights"`);
     await queryRunner.query(`DROP TABLE "skin_journal_events"`);
+    await queryRunner.query(`DROP TABLE "skin_journal_media_deletion_jobs"`);
+    await queryRunner.query(`DROP TABLE "skin_journal_analysis_jobs"`);
     await queryRunner.query(`DROP TABLE "skin_journal_entries"`);
   }
 }

@@ -86,6 +86,36 @@ export class JournalEntryResponseDto {
   @ApiProperty({ required: false, nullable: true })
   analysis_completed_at: Date | null;
 
+  @ApiProperty({ required: false, nullable: true })
+  analysis_model: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_version: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_prompt_version: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_started_at: Date | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_duration_ms: number | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_input_image_count: number | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_input_tokens: number | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_output_tokens: number | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_total_tokens: number | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_estimated_cost_usd: number | null;
+
   @ApiProperty()
   analysis_retry_count: number;
 
@@ -125,9 +155,20 @@ export class JournalEntryResponseDto {
     dto.analysis_status = entry.analysis_status;
     dto.analysis_observations = entry.analysis_observations;
     dto.analysis_summary = entry.analysis_summary;
+    dto.analysis_model = entry.analysis_model;
+    dto.analysis_version = entry.analysis_version;
+    dto.analysis_prompt_version = entry.analysis_prompt_version;
+    dto.analysis_started_at = entry.analysis_started_at;
     dto.analysis_completed_at = entry.analysis_completed_at;
+    dto.analysis_duration_ms = entry.analysis_duration_ms;
+    dto.analysis_input_image_count = entry.analysis_input_image_count;
+    dto.analysis_input_tokens = entry.analysis_input_tokens;
+    dto.analysis_output_tokens = entry.analysis_output_tokens;
+    dto.analysis_total_tokens = entry.analysis_total_tokens;
+    dto.analysis_estimated_cost_usd = entry.analysis_estimated_cost_usd;
     dto.analysis_retry_count = entry.analysis_retry_count;
     dto.has_reaction =
+      entry.has_reaction_signal ||
       !!entry.analysis_observations?.reaction_signals?.reaction_detected;
     dto.created_at = entry.created_at;
     dto.updated_at = entry.updated_at;
