@@ -23,6 +23,17 @@ import {
   DataProvenance,
   type ShelfProductSnapshot,
 } from '../shelf/shelf.types';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import {
+  hasCompletedEssentialSkinProfile,
+  skinProfileRequiredException,
+} from '../skin-profile/skin-profile-completion';
+import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import {
+  UserDataAccessActorType,
+  UserDataAccessPurpose,
+} from '../users/user-consent.constants';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
@@ -59,8 +70,11 @@ export class InventoryService {
   constructor(
     @InjectRepository(InventoryProduct)
     private readonly inventoryRepository: Repository<InventoryProduct>,
+    @InjectRepository(SkinProfile)
+    private readonly skinProfilesRepository: Repository<SkinProfile>,
     private readonly cataloguePhotoProcessorService: CataloguePhotoProcessorService,
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
+    private readonly dataAccessLog: UserDataAccessLogService,
   ) {}
 
   async list(
@@ -126,6 +140,7 @@ export class InventoryService {
     userId: string,
     dto: CreateInventoryProductDto,
   ): Promise<InventoryProductResponseDto> {
+    await this.assertSkinProfileReadyForProductCreation(userId);
     assertValidInventoryDraft(dto);
     const normalized = normalizeInventorySnapshot(
       toInventorySnapshotFromCreateDto(dto),
@@ -156,7 +171,11 @@ export class InventoryService {
     return this.toResponseDto(saved);
   }
 
-  async uploadProductImage(file: UploadedCatalogueImage): Promise<string> {
+  async uploadProductImage(
+    userId: string,
+    file: UploadedCatalogueImage,
+  ): Promise<string> {
+    await this.assertSkinProfileReadyForProductCreation(userId);
     const processed =
       await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
         file,
@@ -171,6 +190,26 @@ export class InventoryService {
     }
 
     return imageUrl;
+  }
+
+  private async assertSkinProfileReadyForProductCreation(
+    userId: string,
+  ): Promise<void> {
+    const profile = await this.skinProfilesRepository.findOne({
+      where: { user_id: userId },
+      relations: ['user'],
+    });
+
+    if (!profile || !hasCompletedEssentialSkinProfile(profile)) {
+      throw skinProfileRequiredException();
+    }
+
+    await this.dataAccessLog.recordDataAccess(
+      userId,
+      getSensitiveSkinProfileConsentTypes(profile),
+      UserDataAccessPurpose.SkinProfileRead,
+      UserDataAccessActorType.System,
+    );
   }
 
   async remove(userId: string, id: string): Promise<void> {

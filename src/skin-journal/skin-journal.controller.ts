@@ -24,7 +24,7 @@ import { JournalEntryResponseDto } from './dto/journal-entry-response.dto';
 import { CalendarResponseDto } from './dto/calendar-response.dto';
 import { DayDetailResponseDto } from './dto/day-detail-response.dto';
 import { JournalEventResponseDto } from './dto/event-response.dto';
-import { JournalInsightResponseDto } from './dto/insight-response.dto';
+import { JournalInsightsResponseDto } from './dto/insight-response.dto';
 import { JournalStatsResponseDto } from './dto/stats-response.dto';
 import { WrappedResponseDto } from './dto/wrapped-response.dto';
 import { PhotoDatesResponseDto } from './dto/photo-dates-response.dto';
@@ -35,7 +35,7 @@ import {
   JournalExportResponseDto,
 } from './dto/export-journal.dto';
 import { StartSimplificationDto } from './dto/start-simplification.dto';
-import type { EventKind } from './skin-journal.constants';
+import type { EventKind, InsightWindow } from './skin-journal.constants';
 import { SKIN_JOURNAL_PHOTO_MAX_BYTES } from './skin-journal.constants';
 import { todayInTimeZone } from './skin-journal.utils';
 
@@ -46,10 +46,26 @@ interface UploadedPhoto {
   originalname: string;
 }
 
+const INSIGHT_WINDOWS: ReadonlySet<InsightWindow> = new Set([
+  'all',
+  'week',
+  'month',
+]);
+
 @ApiTags('skin-journal')
 @Controller('skin-journal')
 export class SkinJournalController {
   constructor(private readonly service: SkinJournalService) {}
+
+  private resolveInsightWindow(value: string | undefined): InsightWindow {
+    if (!value || value.trim() === '') {
+      return 'all';
+    }
+    if (!INSIGHT_WINDOWS.has(value as InsightWindow)) {
+      throw new BadRequestException('Invalid insight window');
+    }
+    return value as InsightWindow;
+  }
 
   @Public()
   @Get('media/:token')
@@ -235,10 +251,16 @@ export class SkinJournalController {
   }
 
   @Get('insights')
-  @ApiOkResponse({ type: [JournalInsightResponseDto] })
-  async listInsights(@CurrentUser('id') userId: string) {
-    await this.service.generateInsightsIfNeeded(userId);
-    return this.service.listInsights(userId);
+  @ApiOkResponse({ type: JournalInsightsResponseDto })
+  async listInsights(
+    @CurrentUser('id') userId: string,
+    @Query('window') window?: string,
+    @Query('locale') locale?: string,
+  ) {
+    return this.service.listInsights(userId, {
+      window: this.resolveInsightWindow(window),
+      locale: locale?.trim() || 'en',
+    });
   }
 
   @Post('insights/:id/dismiss')

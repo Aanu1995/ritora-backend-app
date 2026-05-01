@@ -82,14 +82,17 @@ export class InventoryController {
     },
   })
   async uploadImage(
-    @CurrentUser('id') _userId: string,
+    @CurrentUser('id') userId: string,
     @UploadedFile() file: UploadedCatalogueImage | undefined,
   ): Promise<UploadInventoryProductImageResponseDto> {
     if (!file) {
       throw new BadRequestException('Product image is required');
     }
 
-    const imageUrl = await this.inventoryService.uploadProductImage(file);
+    const imageUrl = await this.inventoryService.uploadProductImage(
+      userId,
+      file,
+    );
     return UploadInventoryProductImageResponseDto.fromImageUrl(imageUrl);
   }
 

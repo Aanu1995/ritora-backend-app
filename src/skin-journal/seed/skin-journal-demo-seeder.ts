@@ -10,8 +10,14 @@ import { SkinJournalEntry } from '../entities/skin-journal-entry.entity';
 import { SkinJournalEvent } from '../entities/skin-journal-event.entity';
 import { SkinJournalExportJob } from '../entities/skin-journal-export-job.entity';
 import { SkinJournalInsight } from '../entities/skin-journal-insight.entity';
+import { SkinJournalInsightGenerationRun } from '../entities/skin-journal-insight-generation-run.entity';
+import { SkinJournalInsightJob } from '../entities/skin-journal-insight-job.entity';
+import { SkinJournalInsightState } from '../entities/skin-journal-insight-state.entity';
 import { SkinJournalWrapped } from '../entities/skin-journal-wrapped.entity';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../skin-journal.constants';
+import { buildDeterministicInsights } from '../skin-journal-insight-detectors';
+import { KnowledgeBaseService } from '../insights/knowledge-base/knowledge-base.service';
+import { SkinJournalPhotoInterpretationService } from '../services/skin-journal-photo-interpretation.service';
 import {
   buildSkinJournalDemoData,
   SKIN_JOURNAL_DEMO_EMAIL,
@@ -35,11 +41,17 @@ type SkinJournalDemoSeederOptions = {
 type SeededEntryLookup = Map<string, SkinJournalEntry>;
 
 export class SkinJournalDemoSeeder {
+  private readonly knowledgeBase = new KnowledgeBaseService();
+  private readonly photoInterpretation =
+    new SkinJournalPhotoInterpretationService();
   private readonly users: Repository<User>;
   private readonly consents: Repository<UserConsent>;
   private readonly entries: Repository<SkinJournalEntry>;
   private readonly events: Repository<SkinJournalEvent>;
   private readonly insights: Repository<SkinJournalInsight>;
+  private readonly insightRuns: Repository<SkinJournalInsightGenerationRun>;
+  private readonly insightJobs: Repository<SkinJournalInsightJob>;
+  private readonly insightStates: Repository<SkinJournalInsightState>;
   private readonly simplifications: Repository<RoutineSimplificationEvent>;
   private readonly wrapped: Repository<SkinJournalWrapped>;
   private readonly exportJobs: Repository<SkinJournalExportJob>;
@@ -52,6 +64,11 @@ export class SkinJournalDemoSeeder {
     this.entries = dataSource.getRepository(SkinJournalEntry);
     this.events = dataSource.getRepository(SkinJournalEvent);
     this.insights = dataSource.getRepository(SkinJournalInsight);
+    this.insightRuns = dataSource.getRepository(
+      SkinJournalInsightGenerationRun,
+    );
+    this.insightJobs = dataSource.getRepository(SkinJournalInsightJob);
+    this.insightStates = dataSource.getRepository(SkinJournalInsightState);
     this.simplifications = dataSource.getRepository(RoutineSimplificationEvent);
     this.wrapped = dataSource.getRepository(SkinJournalWrapped);
     this.exportJobs = dataSource.getRepository(SkinJournalExportJob);
@@ -94,7 +111,7 @@ export class SkinJournalDemoSeeder {
     const entryLookup = await this.seedEntries(user.id, seed);
     const eventLookup = await this.seedEvents(user.id, seed, entryLookup);
     await this.seedSimplification(user.id, seed, eventLookup);
-    await this.seedInsights(user.id, seed, entryLookup);
+    await this.seedInsights(user.id, entryLookup);
     await this.seedNotifications(user.id, seed);
 
     return {
@@ -183,6 +200,7 @@ export class SkinJournalDemoSeeder {
     preference.reaction_alerts_enabled = true;
     preference.simplification_alerts_enabled = true;
     preference.insight_alerts_enabled = true;
+    preference.ai_polished_insights_enabled = true;
     preference.wrapped_alerts_enabled = true;
     preference.photo_tutorial_completed = true;
     await this.preferences.save(preference);
@@ -208,6 +226,15 @@ export class SkinJournalDemoSeeder {
     await this.deleteUserRows('skin_journal_insights', () =>
       this.insights.delete({ user_id: userId }),
     );
+    await this.deleteUserRows('skin_journal_insight_jobs', () =>
+      this.insightJobs.delete({ user_id: userId }),
+    );
+    await this.deleteUserRows('skin_journal_insight_generation_runs', () =>
+      this.insightRuns.delete({ user_id: userId }),
+    );
+    await this.deleteUserRows('skin_journal_insight_states', () =>
+      this.insightStates.delete({ user_id: userId }),
+    );
     await this.deleteUserRows('skin_journal_events', () =>
       this.events.delete({ user_id: userId }),
     );
@@ -223,6 +250,12 @@ export class SkinJournalDemoSeeder {
   ): Promise<SeededEntryLookup> {
     const lookup: SeededEntryLookup = new Map();
     for (const entrySeed of seed.entries) {
+      const analysisInterpretation = entrySeed.analysis
+        ? this.photoInterpretation.interpret(
+            entrySeed.analysis,
+            dateAtHour(entrySeed.entryDate, 18),
+          )
+        : null;
       const entry = await this.entries.save(
         this.entries.create({
           user_id: userId,
@@ -248,7 +281,9 @@ export class SkinJournalDemoSeeder {
           complaint_note: entrySeed.complaintNote,
           analysis_status: entrySeed.analysisStatus,
           analysis_observations: entrySeed.analysis,
-          analysis_summary: entrySeed.analysisSummary,
+          analysis_interpretation: analysisInterpretation,
+          analysis_summary:
+            analysisInterpretation?.summary_key ?? entrySeed.analysisSummary,
           analysis_model: entrySeed.analysis ? 'demo-seed' : null,
           analysis_version: entrySeed.analysis?.schema_version ?? null,
           analysis_prompt_version: entrySeed.analysis
@@ -361,26 +396,53 @@ export class SkinJournalDemoSeeder {
 
   private async seedInsights(
     userId: string,
-    seed: SkinJournalDemoData,
     entries: SeededEntryLookup,
   ): Promise<void> {
-    for (const insightSeed of seed.insights) {
-      const relatedEntryIds = insightSeed.relatedEntryKeys.map(
-        (key) => requiredEntry(entries, key).id,
-      );
+    const generatedAt = new Date();
+    const candidates = buildDeterministicInsights(
+      [...entries.values()].sort((a, b) =>
+        b.entry_date.localeCompare(a.entry_date),
+      ),
+      { trigger: 'scheduled_refresh', generatedAt },
+    );
+    for (const candidate of candidates) {
       await this.insights.save(
         this.insights.create({
           user_id: userId,
-          kind: insightSeed.kind,
-          summary: insightSeed.summary,
-          supporting_data: insightSeed.supportingData,
-          related_entry_ids: relatedEntryIds,
-          severity: insightSeed.severity,
-          seen_at: insightSeed.seen ? new Date() : null,
-          dismissed_at: insightSeed.dismissed ? new Date() : null,
+          kind: candidate.kind,
+          severity: candidate.severity,
+          confidence: candidate.confidence,
+          headline: candidate.headline,
+          blocks: candidate.blocks,
+          actions: candidate.actions,
+          caveats: candidate.caveats,
+          source_entry_ids: candidate.source_entry_ids,
+          time_window: candidate.time_window,
+          data_cutoff_at: new Date(candidate.data_cutoff_at),
+          generation_trigger: candidate.generation_trigger,
+          metadata: candidate.metadata,
+          sources: this.knowledgeBase.resolveMany(candidate.referenced_kb_ids),
+          insight_signature: candidate.insight_signature,
+          seen_at: null,
+          dismissed_at: null,
         }),
       );
     }
+    await this.insightStates.save(
+      this.insightStates.create({
+        user_id: userId,
+        dirty_since: null,
+        dirty_reasons: [],
+        latest_input_signature: null,
+        latest_entry_count: entries.size,
+        last_generated_signature: null,
+        last_generated_at: generatedAt,
+        last_generation_trigger: 'scheduled_refresh',
+        last_failed_signature: null,
+        last_failed_at: null,
+        last_checked_at: generatedAt,
+      }),
+    );
   }
 
   private async seedNotifications(

@@ -20,7 +20,7 @@ function openAiPayload(overrides: Record<string, unknown> = {}) {
     },
     output_text: JSON.stringify({
       schema_version: '1.0',
-      model_version: 'gpt-4o-2024-08-06',
+      model_version: 'gpt-5.2',
       image_quality: {
         face_detected: true,
         lighting_quality: 'good',
@@ -58,6 +58,7 @@ function openAiPayload(overrides: Record<string, unknown> = {}) {
 }
 
 type OpenAiRequestBody = {
+  model: string;
   store: boolean;
   input: Array<{
     role: string;
@@ -108,7 +109,8 @@ describe('SkinJournalAnalysisService', () => {
     const service = new SkinJournalAnalysisService(
       config({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_MODEL: 'gpt-4o-2024-08-06',
+        SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'skin-photo-model',
+        OPENAI_MODEL: 'fallback-model',
         SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD: 5,
         SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD: 15,
       }),
@@ -136,6 +138,7 @@ describe('SkinJournalAnalysisService', () => {
     expect(result.metadata.output_tokens).toBe(100);
     expect(result.metadata.total_tokens).toBe(1100);
     expect(result.metadata.estimated_cost_usd).toBeCloseTo(0.0065, 6);
+    expect(body.model).toBe('skin-photo-model');
     expect(body.store).toBe(false);
     expect(body.text.format.strict).toBe(true);
   });
@@ -223,6 +226,9 @@ describe('SkinJournalAnalysisService', () => {
     expect(systemPrompt).toContain('Skin-tone equity');
     expect(systemPrompt).toContain('Severity rubric');
     expect(systemPrompt).toContain('Do not diagnose');
+    expect(systemPrompt).toContain('Write like a careful human specialist');
+    expect(systemPrompt).toContain('Do not use hyphens or em dashes');
+    expect(systemPrompt).toContain('overly polished style common in AI text');
     expect(userPrompt).toContain('redness, texture');
     expect(userPrompt).toContain('Prior redness appeared mild around cheeks.');
     expect(userPrompt).toContain('medium_deep');
@@ -230,6 +236,38 @@ describe('SkinJournalAnalysisService', () => {
     expect(userPrompt).toContain('Burning feeling near cheeks');
     expect(userPrompt).not.toContain('user-1');
     expect(userPrompt).not.toContain('entry-1');
+  });
+
+  it('rejects photo analysis copy that uses em dash style wording', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          overall_assessment: 'Skin looks calmer — keep watching it.',
+          user_visible_message: 'Skin looks calmer — keep watching it.',
+        }),
+      ),
+    });
+    global.fetch = fetchMock;
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        priorPhotoObjectKey: null,
+        priorAnalysis: null,
+        concernFocus: null,
+        skinContext: {},
+        entryContext: {
+          entry_date: '2026-05-01',
+        },
+      }),
+    ).rejects.toThrow('artificial wording');
   });
 
   it('passes previous and current photos when a previous photo is available', async () => {

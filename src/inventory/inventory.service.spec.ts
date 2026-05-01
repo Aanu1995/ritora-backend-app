@@ -5,6 +5,8 @@ import { CataloguePhotoProcessorService } from '../catalogue/catalogue-photo-pro
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { decodeCursor } from '../common/utils/cursor-pagination';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { InventoryService } from './inventory.service';
 import { InventoryProduct } from './entities/inventory-product.entity';
 import {
@@ -33,6 +35,7 @@ const createMockQueryBuilder = () => ({
 const mockRepository = () => ({
   find: jest.fn(),
   findOne: jest.fn(),
+  count: jest.fn(),
   create: jest.fn().mockImplementation((data) => data),
   save: jest.fn().mockImplementation(async (data) => data),
   remove: jest.fn().mockImplementation(async (data) => data),
@@ -124,9 +127,54 @@ function createEntity(
   } as InventoryProduct;
 }
 
+function completeSkinProfile(
+  overrides: Partial<SkinProfile> = {},
+): SkinProfile {
+  return {
+    user_id: 'user-1',
+    skin_type: 'oily',
+    skin_tone: 'medium',
+    ethnicity: 'black',
+    current_concerns: ['acne'],
+    fitzpatrick_phototype: 'IV',
+    primary_goal: 'clear_acne',
+    allow_smart_picks: true,
+    budget_tier: 'mid',
+    concern_details: {
+      per_concern: [{ concern: 'acne', severity: 'moderate' }],
+    },
+    skin_behavior: {
+      pih_tendency: 'often',
+      melasma_tendency: 'never',
+      keloid_tendency: 'never',
+      sunscreen_habit: 'most_days',
+      sunscreen_tolerance: 'fine',
+    },
+    routine_preferences: {
+      pace: 'cautious',
+      fragrance_free: true,
+      non_comedogenic: true,
+      sunscreen_filter: 'hybrid',
+      sunscreen_finish: 'natural',
+    },
+    safety_context: {},
+    reaction_history: {},
+    active_tolerances: {},
+    lifestyle_context: {},
+    shopping_preferences: {},
+    hormonal_context: {},
+    user: {
+      date_of_birth: '1992-04-15',
+      sex_at_birth: 'female',
+    },
+    ...overrides,
+  } as SkinProfile;
+}
+
 describe('InventoryService', () => {
   let service: InventoryService;
   let repo: jest.Mocked<Repository<InventoryProduct>>;
+  let skinProfiles: jest.Mocked<Repository<SkinProfile>>;
   let queryBuilder: ReturnType<typeof createMockQueryBuilder>;
   const cataloguePhotoProcessorService = {
     prepareHeroImageForStorage: jest.fn(),
@@ -135,6 +183,9 @@ describe('InventoryService', () => {
     saveHeroImage: jest.fn(),
     toPersistentImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
     resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  };
+  const dataAccess = {
+    recordDataAccess: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
@@ -151,6 +202,10 @@ describe('InventoryService', () => {
           useFactory: mockRepository,
         },
         {
+          provide: getRepositoryToken(SkinProfile),
+          useFactory: mockRepository,
+        },
+        {
           provide: CataloguePhotoProcessorService,
           useValue: cataloguePhotoProcessorService,
         },
@@ -158,12 +213,16 @@ describe('InventoryService', () => {
           provide: CataloguePhotoStorageService,
           useValue: cataloguePhotoStorageService,
         },
+        { provide: UserDataAccessLogService, useValue: dataAccess },
       ],
     }).compile();
 
     service = module.get<InventoryService>(InventoryService);
     repo = module.get(getRepositoryToken(InventoryProduct));
+    skinProfiles = module.get(getRepositoryToken(SkinProfile));
+    skinProfiles.findOne.mockResolvedValue(completeSkinProfile());
     repo.createQueryBuilder.mockReturnValue(queryBuilder as never);
+    dataAccess.recordDataAccess.mockClear();
   });
 
   afterEach(() => {
@@ -201,6 +260,58 @@ describe('InventoryService', () => {
       cataloguePhotoStorageService.toPersistentImageUrls,
     ).toHaveBeenCalled();
     expect(result.id).toBe('inventory-1');
+  });
+
+  it('rejects product creation when the skin profile is missing', async () => {
+    skinProfiles.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.create('user-1', createSnapshot() as never),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'skin_profile_required',
+      }),
+    });
+
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects product creation when the skin profile is incomplete', async () => {
+    skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile({ primary_goal: null }),
+    );
+
+    await expect(
+      service.create('user-1', createSnapshot() as never),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'skin_profile_required',
+      }),
+    });
+
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects product image uploads when the skin profile is missing', async () => {
+    skinProfiles.findOne.mockResolvedValue(null);
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+
+    await expect(
+      service.uploadProductImage('user-1', uploadedImage),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'skin_profile_required',
+      }),
+    });
+
+    expect(
+      cataloguePhotoProcessorService.prepareHeroImageForStorage,
+    ).not.toHaveBeenCalled();
   });
 
   it('stores managed media as stable refs and re-signs them for responses', async () => {
@@ -264,7 +375,7 @@ describe('InventoryService', () => {
     );
     cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
 
-    const result = await service.uploadProductImage(uploadedImage);
+    const result = await service.uploadProductImage('user-1', uploadedImage);
 
     expect(
       cataloguePhotoProcessorService.prepareHeroImageForStorage,

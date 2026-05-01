@@ -23,6 +23,7 @@ import {
   Repository,
   SelectQueryBuilder,
 } from 'typeorm';
+import { createHash } from 'crypto';
 import { decodeCursor, encodeCursor } from '../common/utils/cursor-pagination';
 import { nowDate } from '../common/utils/date';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -35,6 +36,11 @@ import {
   SkinProfile,
   type ConcernDetail,
 } from '../skin-profile/entities/skin-profile.entity';
+import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
+import {
+  hasCompletedEssentialSkinProfile,
+  skinProfileRequiredException,
+} from '../skin-profile/skin-profile-completion';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import {
   UserConsentType,
@@ -45,16 +51,21 @@ import {
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
+import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
+import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
+import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import { SkinJournalAnalysisJob } from './entities/skin-journal-analysis-job.entity';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalPhotoStorageService } from './services/skin-journal-photo-storage.service';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
+import { SkinJournalPhotoInterpretationService } from './services/skin-journal-photo-interpretation.service';
 import {
   AnalysisQueueMetrics,
   SkinJournalAnalysisQueueService,
 } from './services/skin-journal-analysis-queue.service';
+import { SkinJournalInsightQueueService } from './services/skin-journal-insight-queue.service';
 import { SkinJournalMediaRetentionService } from './services/skin-journal-media-retention.service';
 import { UpsertEntryDto } from './dto/upsert-entry.dto';
 import {
@@ -69,7 +80,10 @@ import {
 import { JournalEntryResponseDto } from './dto/journal-entry-response.dto';
 import { DayDetailResponseDto } from './dto/day-detail-response.dto';
 import { JournalEventResponseDto } from './dto/event-response.dto';
-import { JournalInsightResponseDto } from './dto/insight-response.dto';
+import {
+  JournalInsightResponseDto,
+  JournalInsightsResponseDto,
+} from './dto/insight-response.dto';
 import { JournalStatsResponseDto } from './dto/stats-response.dto';
 import { WrappedResponseDto } from './dto/wrapped-response.dto';
 import { SimplificationResponseDto } from './dto/simplification-response.dto';
@@ -90,11 +104,18 @@ import {
   type AnalysisConcern,
   EventKind,
   InsightKind,
+  InsightWindow,
+  InsightGenerationTrigger,
   RatingsPayload,
   SKIN_JOURNAL_ANALYSIS_CAPACITY_RETRY_DELAY_MS,
   SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD,
   SKIN_JOURNAL_ANALYSIS_QUEUE_AGE_ALERT_SECONDS,
   SKIN_JOURNAL_ANALYSIS_RECOVERY_INTERVAL_MS,
+  SKIN_JOURNAL_INSIGHT_PATTERN_CARDS_ENABLED,
+  SKIN_JOURNAL_INSIGHT_FAILED_RETRY_COOLDOWN_DAYS,
+  SKIN_JOURNAL_INSIGHT_MIN_ENTRIES_FOR_PERIODIC_GENERATION,
+  SKIN_JOURNAL_INSIGHT_PERIODIC_INTERVAL_DAYS,
+  SKIN_JOURNAL_INSIGHT_SUMMARY_CARDS_ENABLED,
   SKIN_JOURNAL_PHOTO_PAGE_DEFAULT_LIMIT,
   SKIN_JOURNAL_PHOTO_PAGE_MAX_LIMIT,
   SKIN_JOURNAL_WRAPPED_ENABLED,
@@ -126,6 +147,15 @@ import {
   toWrappedResponseDto,
 } from './skin-journal-export.mapper';
 import { normalizeUpsertEntryBody } from './skin-journal-multipart.parser';
+import { InsightPolishService } from './insights/insight-polish.service';
+import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.service';
+import type { InsightBlock, InsightCandidate } from './insights/insight-types';
+
+interface InsightEntryPreview {
+  entry_id: string;
+  date: string;
+  photo_url: string | null;
+}
 
 const SKIN_PROGRESS_CONSENT = UserConsentType.SkinProgressProcessing;
 const NOTIFICATION_KEYS = {
@@ -178,6 +208,22 @@ type ParsedPhotoFilter =
   | { kind: 'reaction'; id: typeof PHOTO_FILTER_REACTION_ID }
   | { kind: 'concern'; id: string; value: AnalysisConcern };
 
+interface InsightQueryOptions {
+  window?: InsightWindow;
+  locale?: string;
+}
+
+interface InsightGenerationOptions extends InsightQueryOptions {
+  trigger: InsightGenerationTrigger;
+  expectedInputSignature?: string;
+}
+
+class InsightInputChangedError extends Error {
+  constructor() {
+    super('Insight inputs changed while generation was running.');
+  }
+}
+
 @Injectable()
 export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SkinJournalService.name);
@@ -190,6 +236,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly events: Repository<SkinJournalEvent>,
     @InjectRepository(SkinJournalInsight)
     private readonly insights: Repository<SkinJournalInsight>,
+    @InjectRepository(SkinJournalInsightGenerationRun)
+    private readonly insightRuns: Repository<SkinJournalInsightGenerationRun>,
+    @InjectRepository(SkinJournalInsightState)
+    private readonly insightStates: Repository<SkinJournalInsightState>,
     @InjectRepository(SkinJournalWrapped)
     private readonly wrapped: Repository<SkinJournalWrapped>,
     @InjectRepository(RoutineSimplificationEvent)
@@ -202,8 +252,12 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly skinProfiles: Repository<SkinProfile>,
     private readonly photoStorage: SkinJournalPhotoStorageService,
     private readonly analysis: SkinJournalAnalysisService,
+    private readonly photoInterpretation: SkinJournalPhotoInterpretationService,
     private readonly analysisQueue: SkinJournalAnalysisQueueService,
+    private readonly insightQueue: SkinJournalInsightQueueService,
     private readonly mediaRetention: SkinJournalMediaRetentionService,
+    private readonly insightPolish: InsightPolishService,
+    private readonly knowledgeBase: KnowledgeBaseService,
     private readonly config: ConfigService,
     private readonly dataAccessLog: UserDataAccessLogService,
     private readonly notifications: NotificationsService,
@@ -244,6 +298,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     if (params.targetDate !== today) {
       throw new BadRequestException(JOURNAL_DAY_LOCKED_MESSAGE);
     }
+    await this.assertSkinProfileReadyForJournal(params.userId);
 
     let entry = await this.entries.findOne({
       where: { user_id: params.userId, entry_date: params.targetDate },
@@ -315,6 +370,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       /* Re-analyse on photo replacement. */
       entry.analysis_status = 'pending';
       entry.analysis_observations = null;
+      entry.analysis_interpretation = null;
       entry.analysis_concern_keys = [];
       entry.has_reaction_signal = false;
       entry.needs_retake = false;
@@ -365,6 +421,11 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         params.userId,
         saved,
         'Analysis queued after photo upload.',
+      );
+    } else {
+      await this.markInsightsAfterJournalChange(
+        params.userId,
+        'check_in_updated',
       );
     }
 
@@ -460,6 +521,26 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  private async assertSkinProfileReadyForJournal(
+    userId: string,
+  ): Promise<void> {
+    const profile = await this.skinProfiles.findOne({
+      where: { user_id: userId },
+      relations: ['user'],
+    });
+
+    if (!profile || !hasCompletedEssentialSkinProfile(profile)) {
+      throw skinProfileRequiredException();
+    }
+
+    await this.dataAccessLog.recordDataAccess(
+      userId,
+      getSensitiveSkinProfileConsentTypes(profile),
+      UserDataAccessPurpose.SkinProfileRead,
+      UserDataAccessActorType.System,
+    );
+  }
+
   async retryAnalysis(
     userId: string,
     entryId: string,
@@ -470,6 +551,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
     entry.analysis_status = 'pending';
     entry.analysis_error = null;
+    entry.analysis_interpretation = null;
     entry.analysis_retry_count = (entry.analysis_retry_count ?? 0) + 1;
     await this.entries.save(entry);
     await this.analysisQueue.cancelActiveJobsForEntry(
@@ -545,7 +627,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         order: { generated_at: 'DESC' },
       });
       insights = insights.filter(
-        (i) => !i.related_entry_ids || i.related_entry_ids.includes(entry.id),
+        (i) =>
+          !i.source_entry_ids ||
+          i.source_entry_ids.length === 0 ||
+          i.source_entry_ids.includes(entry.id),
       );
     }
 
@@ -577,7 +662,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     const byDate = new Map(entries.map((e) => [e.entry_date, e]));
     const insightEntryIds = new Set<string>();
     for (const i of insights) {
-      for (const id of i.related_entry_ids ?? []) {
+      for (const id of i.source_entry_ids ?? []) {
         insightEntryIds.add(id);
       }
     }
@@ -855,6 +940,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         'entry_deleted',
       );
     }
+    await this.markInsightsAfterJournalChange(userId, 'entry_deleted');
   }
 
   async updateEntryById(
@@ -947,6 +1033,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         this.findPreviousPhotoEntry(userId, entry),
         this.skinProfiles.findOne({ where: { user_id: userId } }),
       ]);
+      const skinContext = this.buildAnalysisSkinContext(skinProfile);
       plannedInputImageCount = previousEntry?.photo_object_key ? 2 : 1;
       const result = await this.analysis.analyze({
         userId,
@@ -955,7 +1042,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         priorPhotoObjectKey: previousEntry?.photo_object_key ?? null,
         concernFocus: entry.concern_focus,
         priorAnalysis: previousEntry?.analysis_observations ?? null,
-        skinContext: this.buildAnalysisSkinContext(skinProfile),
+        skinContext,
         entryContext: this.buildAnalysisEntryContext(entry),
       });
       const obs = result.observations;
@@ -973,13 +1060,22 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      const interpretation = this.photoInterpretation.interpret(
+        obs,
+        new Date(),
+        {
+          skinContext,
+          recentChange: current.recent_change,
+        },
+      );
       current.analysis_observations = obs;
+      current.analysis_interpretation = interpretation;
       current.analysis_concern_keys = this.analysisConcernKeys(obs);
       current.has_reaction_signal = obs.reaction_signals.reaction_detected;
       current.needs_retake =
         !obs.image_quality.face_detected ||
         obs.image_quality.needs_retake === true;
-      current.analysis_summary = this.analysis.shortSummary(obs);
+      current.analysis_summary = interpretation.summary_key;
       current.analysis_status =
         obs.image_quality.face_detected &&
         obs.image_quality.needs_retake !== true
@@ -1472,17 +1568,30 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- INSIGHTS ----------
 
-  async listInsights(userId: string): Promise<JournalInsightResponseDto[]> {
+  async listInsights(
+    userId: string,
+    options: InsightQueryOptions = {},
+  ): Promise<JournalInsightsResponseDto> {
     const list = await this.insights.find({
       where: { user_id: userId, dismissed_at: IsNull() },
       order: { generated_at: 'DESC' },
       take: 50,
     });
+    const filtered = this.filterInsightsByWindow(list, options.window);
+    const entryPreviewById = await this.buildInsightEntryPreviewMap(
+      userId,
+      filtered,
+    );
     await this.recordDataAccess(
       userId,
       UserDataAccessPurpose.SkinJournalInsight,
     );
-    return list.map((i) => JournalInsightResponseDto.fromEntity(i));
+    return {
+      insights: filtered.map((insight) =>
+        this.toInsightResponseDto(insight, entryPreviewById),
+      ),
+      meta: await this.buildInsightsMeta(userId),
+    };
   }
 
   async dismissInsight(userId: string, insightId: string): Promise<void> {
@@ -1505,7 +1614,267 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async generateInsightsIfNeeded(userId: string): Promise<void> {
+  async generateInsightsIfNeeded(userId: string): Promise<boolean> {
+    const snapshot = await this.buildInsightInputSnapshot(userId);
+    if (!snapshot) {
+      await this.updateInsightStateAfterSchedulerCheck(userId, null, 0);
+      return false;
+    }
+
+    const state = await this.insightStates.findOne({
+      where: { user_id: userId },
+    });
+    const activeJob = await this.insightQueue.getActiveJobForUser(userId);
+    if (activeJob) {
+      await this.updateInsightStateAfterSchedulerCheck(
+        userId,
+        snapshot.signature,
+        snapshot.entryCount,
+      );
+      return false;
+    }
+
+    if (!this.shouldQueuePeriodicInsightGeneration(state, snapshot)) {
+      await this.updateInsightStateAfterSchedulerCheck(
+        userId,
+        snapshot.signature,
+        snapshot.entryCount,
+      );
+      return false;
+    }
+
+    await this.enqueueInsightGeneration(
+      userId,
+      'scheduled_refresh',
+      'en',
+      snapshot.signature,
+    );
+    return true;
+  }
+
+  private async enqueueInsightGeneration(
+    userId: string,
+    trigger: InsightGenerationTrigger,
+    locale = 'en',
+    inputSignature?: string,
+  ): Promise<void> {
+    const signature =
+      inputSignature ?? (await this.buildInsightInputSignature(userId));
+    if (!signature) {
+      return;
+    }
+    await this.insightQueue.enqueueInsightJob({
+      userId,
+      trigger,
+      locale,
+      inputSignature: signature,
+      reason: `Insight generation queued after ${trigger}.`,
+    });
+  }
+
+  private shouldQueuePeriodicInsightGeneration(
+    state: SkinJournalInsightState | null,
+    snapshot: { signature: string; entryCount: number },
+  ): boolean {
+    if (
+      snapshot.entryCount <
+      SKIN_JOURNAL_INSIGHT_MIN_ENTRIES_FOR_PERIODIC_GENERATION
+    ) {
+      return false;
+    }
+
+    if (state?.last_generated_signature === snapshot.signature) {
+      return false;
+    }
+
+    if (
+      !state?.dirty_since &&
+      state?.latest_input_signature === snapshot.signature
+    ) {
+      return false;
+    }
+
+    if (
+      state?.last_failed_signature === snapshot.signature &&
+      state.last_failed_at
+    ) {
+      const nextRetryAt = new Date(state.last_failed_at);
+      nextRetryAt.setUTCDate(
+        nextRetryAt.getUTCDate() +
+          SKIN_JOURNAL_INSIGHT_FAILED_RETRY_COOLDOWN_DAYS,
+      );
+      if (nextRetryAt.getTime() > Date.now()) {
+        return false;
+      }
+    }
+
+    if (!state?.last_generated_at) {
+      return true;
+    }
+
+    const nextEligibleAt = new Date(state.last_generated_at);
+    nextEligibleAt.setUTCDate(
+      nextEligibleAt.getUTCDate() + SKIN_JOURNAL_INSIGHT_PERIODIC_INTERVAL_DAYS,
+    );
+    return nextEligibleAt.getTime() <= Date.now();
+  }
+
+  private async updateInsightStateAfterSchedulerCheck(
+    userId: string,
+    signature: string | null,
+    entryCount: number,
+  ): Promise<void> {
+    const current = await this.insightStates.findOne({
+      where: { user_id: userId },
+    });
+    const state =
+      current ??
+      this.insightStates.create({
+        user_id: userId,
+        dirty_since: null,
+        dirty_reasons: [],
+        last_generated_signature: null,
+        last_generated_at: null,
+        last_generation_trigger: null,
+      });
+    state.latest_input_signature = signature;
+    state.latest_entry_count = entryCount;
+    state.last_checked_at = nowDate();
+    if (!signature || state.last_generated_signature === signature) {
+      state.dirty_since = null;
+      state.dirty_reasons = [];
+    }
+    await this.insightStates.save(state);
+  }
+
+  private async buildInsightInputSignature(
+    userId: string,
+  ): Promise<string | null> {
+    const snapshot = await this.buildInsightInputSnapshot(userId);
+    return snapshot?.signature ?? null;
+  }
+
+  private async buildInsightInputSnapshot(
+    userId: string,
+  ): Promise<{ signature: string; entryCount: number } | null> {
+    const [recentEntries, entryCount] = await Promise.all([
+      this.entries.find({
+        where: { user_id: userId },
+        order: { entry_date: 'DESC' },
+        take: 30,
+      }),
+      this.entries.count({ where: { user_id: userId } }),
+    ]);
+    if (recentEntries.length === 0) {
+      return null;
+    }
+    const normalizedEntryCount = Math.max(entryCount, recentEntries.length);
+    return {
+      signature: this.hashInsightInputs(recentEntries),
+      entryCount: normalizedEntryCount,
+    };
+  }
+
+  private hashInsightInputs(entries: SkinJournalEntry[]): string {
+    const payload = [...entries]
+      .sort((left, right) => left.entry_date.localeCompare(right.entry_date))
+      .map((entry) => ({
+        id: entry.id,
+        entry_date: entry.entry_date,
+        updated_at: entry.updated_at?.toISOString?.() ?? null,
+        photo_object_key: entry.photo_object_key,
+        analysis_status: entry.analysis_status,
+        analysis_concern_keys: entry.analysis_concern_keys,
+        has_reaction_signal: entry.has_reaction_signal,
+        needs_retake: entry.needs_retake,
+        analysis_summary: entry.analysis_summary,
+        analysis_observations: entry.analysis_observations,
+        analysis_interpretation: entry.analysis_interpretation,
+        ratings: entry.ratings,
+        overall_feel: entry.overall_feel,
+        sleep_band: entry.sleep_band,
+        stress_today: entry.stress_today,
+        sun_exposure_today: entry.sun_exposure_today,
+        sweat_exercise_today: entry.sweat_exercise_today,
+        cycle_marker: entry.cycle_marker,
+        recent_change: entry.recent_change,
+        complaint_note: entry.complaint_note,
+      }));
+    return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  async processInsightJob(job: SkinJournalInsightJob): Promise<void> {
+    const currentSignature = await this.buildInsightInputSignature(job.user_id);
+    if (!currentSignature) {
+      await this.updateInsightStateAfterSchedulerCheck(job.user_id, null, 0);
+      await this.insightQueue.completeJob(job);
+      return;
+    }
+    if (currentSignature !== job.input_signature) {
+      await this.markInsightsAfterJournalChange(job.user_id, job.trigger);
+      await this.insightQueue.cancelJob(
+        job,
+        'Insight inputs changed before the scheduled job ran.',
+      );
+      return;
+    }
+
+    try {
+      await this.generateInsights(job.user_id, {
+        trigger: job.trigger,
+        locale: job.locale,
+        expectedInputSignature: currentSignature,
+      });
+      await this.markInsightGenerationCompleted(
+        job.user_id,
+        currentSignature,
+        job.trigger,
+      );
+      await this.insightQueue.completeJob(job);
+    } catch (error) {
+      if (error instanceof InsightInputChangedError) {
+        const refreshedSignature = await this.buildInsightInputSignature(
+          job.user_id,
+        );
+        if (!refreshedSignature) {
+          await this.updateInsightStateAfterSchedulerCheck(
+            job.user_id,
+            null,
+            0,
+          );
+          await this.insightQueue.completeJob(job);
+          return;
+        }
+        await this.markInsightsAfterJournalChange(job.user_id, job.trigger);
+        await this.insightQueue.cancelJob(
+          job,
+          'Insight inputs changed while generation was running.',
+        );
+        return;
+      }
+
+      const errorMessage =
+        error instanceof Error ? error.message : 'Insight generation failed';
+      const shouldRetry =
+        job.attempt_count <
+        (job.max_attempts || this.insightQueue.getMaxAttempts());
+      if (shouldRetry) {
+        await this.insightQueue.rescheduleJob(job, {
+          reason: errorMessage,
+          runAfter: this.insightQueue.nextRetryAt(job.attempt_count),
+        });
+        return;
+      }
+      await this.markInsightGenerationFailed(job.user_id, currentSignature);
+      await this.insightQueue.failJob(job, errorMessage);
+    }
+  }
+
+  private async generateInsights(
+    userId: string,
+    options: InsightGenerationOptions,
+  ): Promise<void> {
+    const startedAt = Date.now();
     const recentEntries = await this.entries.find({
       where: { user_id: userId },
       order: { entry_date: 'DESC' },
@@ -1513,69 +1882,262 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     });
     if (recentEntries.length === 0) return;
 
-    const candidates = buildDeterministicInsights(recentEntries);
-    for (const candidate of candidates) {
-      const existing = await this.findExistingInsight(userId, {
-        kind: candidate.kind,
-        related_entry_ids: candidate.related_entry_ids,
+    const entriesAsc = [...recentEntries].sort((a, b) =>
+      a.entry_date.localeCompare(b.entry_date),
+    );
+    const run = await this.insightRuns.save(
+      this.insightRuns.create({
+        user_id: userId,
+        trigger: options.trigger,
+        status: 'running',
+        data_window_start: entriesAsc[0].entry_date,
+        data_window_end:
+          entriesAsc.at(-1)?.entry_date ?? entriesAsc[0].entry_date,
+        data_cutoff_at: nowDate(),
+        insight_count: 0,
+        duration_ms: 0,
+        completed_at: null,
+        error: null,
+      }),
+    );
+
+    try {
+      const preferences = await this.notifications.getPreferences(userId);
+      const aiPolishEnabled =
+        preferences.ai_polished_insights_enabled !== false;
+      const aiSummaryEnabled =
+        aiPolishEnabled && SKIN_JOURNAL_INSIGHT_SUMMARY_CARDS_ENABLED;
+      const aiPatternEnabled =
+        aiPolishEnabled && SKIN_JOURNAL_INSIGHT_PATTERN_CARDS_ENABLED;
+      const generatedAt = nowDate();
+      const candidates = buildDeterministicInsights(recentEntries, {
+        trigger: options.trigger,
+        generatedAt,
+        aiSummaryEnabled,
+        aiPatternEnabled,
       });
-      if (existing) {
-        continue;
+      const polished = await this.insightPolish.polish(candidates, {
+        locale: options.locale ?? 'en',
+        aiPolishEnabled,
+      });
+
+      if (
+        options.expectedInputSignature &&
+        (await this.buildInsightInputSignature(userId)) !==
+          options.expectedInputSignature
+      ) {
+        throw new InsightInputChangedError();
       }
-      const insight = await this.insights.save(
-        this.insights.create({
-          user_id: userId,
+
+      let createdCount = 0;
+      const createdInsightIds: string[] = [];
+      let strongestInsightSeverity: NotificationSeverity = 'info';
+      for (const candidate of polished) {
+        const existing = await this.findExistingInsight(userId, {
           kind: candidate.kind,
-          severity: candidate.severity,
-          summary: candidate.summary,
-          supporting_data: candidate.supporting_data,
-          related_entry_ids: candidate.related_entry_ids,
-        }),
-      );
-      await this.recordDataAccess(
-        userId,
-        UserDataAccessPurpose.SkinJournalInsight,
-        UserDataAccessActorType.System,
-      );
-      await this.dispatchNotification({
-        userId,
-        kind: 'insight_ready',
-        titleKey: NOTIFICATION_KEYS.insightTitle,
-        bodyKey: NOTIFICATION_KEYS.insightBody,
-        severity: candidate.severity,
-        payload: { insight_id: insight.id, kind: candidate.kind },
-        deepLink: '/journal?tab=insights',
-      });
-      if (candidate.kind === 'effectiveness') {
-        await this.recordEventOnce(userId, candidate.related_entry_ids.at(-1), {
-          kind: 'product_effectiveness',
-          severity: candidate.severity,
-          payload: candidate.supporting_data,
+          insight_signature: candidate.insight_signature,
+        });
+        if (existing) {
+          continue;
+        }
+        const insight = await this.saveInsightCandidate(userId, candidate);
+        if (!insight) {
+          continue;
+        }
+        createdCount += 1;
+        createdInsightIds.push(insight.id);
+        strongestInsightSeverity = this.strongestNotificationSeverity(
+          strongestInsightSeverity,
+          candidate.severity,
+        );
+        await this.recordDataAccess(
+          userId,
+          UserDataAccessPurpose.SkinJournalInsight,
+          UserDataAccessActorType.System,
+        );
+        if (candidate.kind === 'effectiveness') {
+          await this.recordEventOnce(
+            userId,
+            candidate.source_entry_ids.at(-1),
+            {
+              kind: 'product_effectiveness',
+              severity: candidate.severity,
+              payload: {
+                insight_id: insight.id,
+                signature: candidate.insight_signature,
+              },
+            },
+          );
+        }
+      }
+      if (createdCount > 0) {
+        await this.dispatchNotification({
+          userId,
+          kind: 'insight_ready',
+          titleKey: NOTIFICATION_KEYS.insightTitle,
+          bodyKey: NOTIFICATION_KEYS.insightBody,
+          severity: strongestInsightSeverity,
+          payload: {
+            insight_ids: createdInsightIds,
+            insight_count: createdCount,
+          },
+          deepLink: '/journal?tab=insights',
         });
       }
+      run.status = 'completed';
+      run.insight_count = createdCount;
+      run.completed_at = nowDate();
+      run.duration_ms = Date.now() - startedAt;
+      await this.insightRuns.save(run);
+    } catch (error) {
+      run.status = 'failed';
+      run.error =
+        error instanceof Error ? error.message : 'Insight generation failed';
+      run.completed_at = nowDate();
+      run.duration_ms = Date.now() - startedAt;
+      await this.insightRuns.save(run);
+      throw error;
     }
   }
 
   private async findExistingInsight(
     userId: string,
-    params: { kind: InsightKind; related_entry_ids: string[] },
+    params: { kind: InsightKind; insight_signature: string },
   ): Promise<SkinJournalInsight | null> {
-    const candidates = await this.insights.find({
+    return this.insights.findOne({
       where: {
         user_id: userId,
         kind: params.kind,
+        insight_signature: params.insight_signature,
       },
-      order: { generated_at: 'DESC' },
-      take: 50,
     });
-    return (
-      candidates.find((insight) =>
-        sameStringSet(
-          insight.related_entry_ids ?? [],
-          params.related_entry_ids,
+  }
+
+  private async saveInsightCandidate(
+    userId: string,
+    candidate: InsightCandidate,
+  ): Promise<SkinJournalInsight | null> {
+    try {
+      return await this.insights.save(
+        this.insights.create({
+          user_id: userId,
+          kind: candidate.kind,
+          severity: candidate.severity,
+          confidence: candidate.confidence,
+          headline: candidate.headline,
+          blocks: candidate.blocks,
+          actions: candidate.actions,
+          caveats: candidate.caveats,
+          source_entry_ids: candidate.source_entry_ids,
+          time_window: candidate.time_window,
+          data_cutoff_at: new Date(candidate.data_cutoff_at),
+          generation_trigger: candidate.generation_trigger,
+          metadata: candidate.metadata,
+          sources: this.knowledgeBase.resolveMany(candidate.referenced_kb_ids),
+          insight_signature: candidate.insight_signature,
+        }),
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private filterInsightsByWindow(
+    insights: SkinJournalInsight[],
+    window: InsightWindow | undefined,
+  ): SkinJournalInsight[] {
+    if (!window || window === 'all') {
+      return insights;
+    }
+    const days = window === 'week' ? 7 : 30;
+    const threshold = nowDate();
+    threshold.setUTCDate(threshold.getUTCDate() - days);
+    return insights.filter((insight) => insight.generated_at >= threshold);
+  }
+
+  private async buildInsightsMeta(
+    userId: string,
+  ): Promise<JournalInsightsResponseDto['meta']> {
+    const [totalEntries, lastRun, activeJob] = await Promise.all([
+      this.entries.count({ where: { user_id: userId } }),
+      this.insightRuns.findOne({
+        where: { user_id: userId, status: 'completed' },
+        order: { completed_at: 'DESC' },
+      }),
+      this.insightQueue.getActiveJobForUser(userId),
+    ]);
+    const nextUnlock =
+      totalEntries < 7
+        ? 7
+        : totalEntries < 14
+          ? 14
+          : totalEntries < 30
+            ? 30
+            : totalEntries;
+    return {
+      total_entries: totalEntries,
+      entries_until_next_insight: Math.max(nextUnlock - totalEntries, 0),
+      last_generated_at: lastRun?.completed_at ?? null,
+      generation_status: activeJob?.status ?? 'idle',
+      active_job_trigger: activeJob?.trigger ?? null,
+      active_job_run_after: activeJob?.run_after ?? null,
+      active_job_last_error: activeJob?.last_error ?? null,
+    };
+  }
+
+  private async buildInsightEntryPreviewMap(
+    userId: string,
+    insights: SkinJournalInsight[],
+  ): Promise<Map<string, InsightEntryPreview>> {
+    const entryIds = [
+      ...new Set(
+        insights.flatMap((insight) =>
+          insight.blocks.flatMap((block) =>
+            block.type === 'entry_thumbs' ? block.entry_ids : [],
+          ),
         ),
-      ) ?? null
+      ),
+    ];
+    if (entryIds.length === 0) {
+      return new Map();
+    }
+
+    const entries = await this.entries.find({
+      where: { user_id: userId, id: In(entryIds) },
+    });
+
+    return new Map(
+      entries.map((entry) => [
+        entry.id,
+        {
+          entry_id: entry.id,
+          date: entry.entry_date,
+          photo_url: this.photoStorage.getSignedUrl(entry.photo_object_key),
+        },
+      ]),
     );
+  }
+
+  private toInsightResponseDto(
+    insight: SkinJournalInsight,
+    entryPreviewById: Map<string, InsightEntryPreview>,
+  ): JournalInsightResponseDto {
+    const dto = JournalInsightResponseDto.fromEntity(insight);
+    dto.blocks = dto.blocks.map((block): InsightBlock => {
+      if (block.type !== 'entry_thumbs') {
+        return block;
+      }
+      return {
+        ...block,
+        entries: block.entry_ids
+          .map((entryId) => entryPreviewById.get(entryId))
+          .filter((entry): entry is InsightEntryPreview => !!entry),
+      };
+    });
+    return dto;
   }
 
   // ---------- WRAPPED ----------
@@ -1910,7 +2472,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       order: { generated_at: 'DESC' },
     });
     const staleInsightIds = insights
-      .filter((insight) => insight.related_entry_ids?.includes(entryId))
+      .filter((insight) => insight.source_entry_ids?.includes(entryId))
       .map((insight) => insight.id);
     if (staleInsightIds.length > 0) {
       await this.insights.delete({
@@ -1969,7 +2531,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       events: events.map((event) => toExportEventRecord(event)),
       insights: insights
         .filter((insight) =>
-          (insight.related_entry_ids ?? []).some((id) => entryIds.has(id)),
+          (insight.source_entry_ids ?? []).some((id) => entryIds.has(id)),
         )
         .map((insight) => toExportInsightRecord(insight)),
       wrapped: wrapped
@@ -2160,7 +2722,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
     await this.evaluateTrendEvents(userId, entry);
     await this.evaluateReferralThreshold(userId, entry, obs);
-    await this.ensureDailyInsightForEntry(userId, entry, obs);
+    await this.markInsightsAfterJournalChange(
+      userId,
+      'photo_analysis_completed',
+    );
   }
 
   private async findExistingEvent(
@@ -2184,49 +2749,112 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     return !!existing;
   }
 
-  private async ensureDailyInsightForEntry(
+  private async markInsightsAfterJournalChange(
     userId: string,
-    entry: SkinJournalEntry,
-    obs: AnalysisObservations,
-  ): Promise<SkinJournalInsight | null> {
-    const existing = await this.findExistingInsight(userId, {
-      kind: 'daily',
-      related_entry_ids: [entry.id],
+    trigger: InsightGenerationTrigger,
+  ): Promise<void> {
+    try {
+      await this.markInsightInputsDirty(userId, trigger);
+    } catch (error) {
+      this.logger.warn(
+        `Insight inputs could not be marked dirty after ${trigger}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async markInsightInputsDirty(
+    userId: string,
+    reason: InsightGenerationTrigger,
+  ): Promise<void> {
+    const snapshot = await this.buildInsightInputSnapshot(userId);
+    const current = await this.insightStates.findOne({
+      where: { user_id: userId },
     });
-    if (existing) {
-      return existing;
+    const state =
+      current ??
+      this.insightStates.create({
+        user_id: userId,
+        dirty_since: null,
+        dirty_reasons: [],
+        last_generated_signature: null,
+        last_generated_at: null,
+        last_generation_trigger: null,
+      });
+    const dirtyReasons = new Set<InsightGenerationTrigger>(
+      state.dirty_reasons ?? [],
+    );
+    dirtyReasons.add(reason);
+    state.latest_input_signature = snapshot?.signature ?? null;
+    state.latest_entry_count = snapshot?.entryCount ?? 0;
+    state.last_checked_at = null;
+
+    if (!snapshot?.signature) {
+      state.dirty_since = null;
+      state.dirty_reasons = [];
+    } else if (state.last_generated_signature === snapshot.signature) {
+      state.dirty_since = null;
+      state.dirty_reasons = [];
+    } else {
+      state.dirty_since = state.dirty_since ?? nowDate();
+      state.dirty_reasons = [...dirtyReasons];
     }
 
-    const insight = await this.insights.save(
-      this.insights.create({
-        user_id: userId,
-        kind: 'daily',
-        severity: obs.reaction_signals.reaction_detected ? 'warning' : 'info',
-        summary: entry.analysis_summary ?? this.analysis.shortSummary(obs),
-        supporting_data: {
-          entry_date: entry.entry_date,
-          analysis_status: entry.analysis_status,
-          reaction_detected: obs.reaction_signals.reaction_detected,
-          reaction_severity: obs.reaction_signals.reaction_severity,
-        },
-        related_entry_ids: [entry.id],
-      }),
-    );
-    await this.recordDataAccess(
-      userId,
-      UserDataAccessPurpose.SkinJournalInsight,
-      UserDataAccessActorType.System,
-    );
-    await this.dispatchNotification({
-      userId,
-      kind: 'insight_ready',
-      titleKey: NOTIFICATION_KEYS.insightTitle,
-      bodyKey: NOTIFICATION_KEYS.insightBody,
-      severity: insight.severity,
-      payload: { insight_id: insight.id, kind: insight.kind },
-      deepLink: `/journal/days/${entry.entry_date}`,
+    await this.insightStates.save(state);
+  }
+
+  private async markInsightGenerationCompleted(
+    userId: string,
+    inputSignature: string,
+    trigger: InsightGenerationTrigger,
+  ): Promise<void> {
+    const snapshot = await this.buildInsightInputSnapshot(userId);
+    const current = await this.insightStates.findOne({
+      where: { user_id: userId },
     });
-    return insight;
+    const state =
+      current ??
+      this.insightStates.create({
+        user_id: userId,
+        latest_input_signature: snapshot?.signature ?? inputSignature,
+        latest_entry_count: snapshot?.entryCount ?? 0,
+      });
+    state.dirty_since =
+      snapshot?.signature === inputSignature
+        ? null
+        : (state.dirty_since ?? nowDate());
+    state.dirty_reasons =
+      snapshot?.signature === inputSignature ? [] : (state.dirty_reasons ?? []);
+    state.latest_input_signature = snapshot?.signature ?? inputSignature;
+    state.latest_entry_count = snapshot?.entryCount ?? 0;
+    state.last_generated_signature = inputSignature;
+    state.last_generated_at = nowDate();
+    state.last_generation_trigger = trigger;
+    state.last_failed_signature = null;
+    state.last_failed_at = null;
+    state.last_checked_at = nowDate();
+    await this.insightStates.save(state);
+  }
+
+  private async markInsightGenerationFailed(
+    userId: string,
+    inputSignature: string,
+  ): Promise<void> {
+    const current = await this.insightStates.findOne({
+      where: { user_id: userId },
+    });
+    const state =
+      current ??
+      this.insightStates.create({
+        user_id: userId,
+        dirty_since: nowDate(),
+        dirty_reasons: ['scheduled_refresh'],
+      });
+    state.last_failed_signature = inputSignature;
+    state.last_failed_at = nowDate();
+    state.last_checked_at = nowDate();
+    await this.insightStates.save(state);
   }
 
   private async evaluateTrendEvents(
@@ -2307,11 +2935,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (await this.hasExistingReferralForEntry(userId, entry.id)) {
-      return;
-    }
-
-    const event = await this.recordEvent(userId, entry.id, {
+    const event = await this.recordEventOnce(userId, entry.id, {
       kind: 'dermatologist_referral',
       severity: 'critical',
       payload: {
@@ -2319,51 +2943,18 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         doctor_flag_count_7d: doctorFlags.length,
       },
     });
-    const insight = await this.insights.save(
-      this.insights.create({
-        user_id: userId,
-        kind: 'referral',
-        severity: 'critical',
-        summary:
-          'Several recent entries show moderate or severe irritation signals. Consider contacting a dermatologist.',
-        supporting_data: {
-          moderate_or_severe_count_7d: moderateOrSevere.length,
-          doctor_flag_count_7d: doctorFlags.length,
-        },
-        related_entry_ids: recentEntries.map((entry) => entry.id),
-      }),
-    );
-    await this.recordDataAccess(
-      userId,
-      UserDataAccessPurpose.SkinJournalInsight,
-      UserDataAccessActorType.System,
-    );
+    if (!event) {
+      return;
+    }
     await this.dispatchNotification({
       userId,
       kind: 'doctor_referral',
       titleKey: NOTIFICATION_KEYS.referralTitle,
       bodyKey: NOTIFICATION_KEYS.referralBody,
       severity: 'critical',
-      payload: { event_id: event.id, insight_id: insight.id },
+      payload: { event_id: event.id },
       deepLink: '/journal?tab=insights',
     });
-  }
-
-  private async hasExistingReferralForEntry(
-    userId: string,
-    entryId: string,
-  ): Promise<boolean> {
-    const recentReferralInsights = await this.insights.find({
-      where: {
-        user_id: userId,
-        kind: 'referral',
-      },
-      order: { generated_at: 'DESC' },
-      take: 25,
-    });
-    return recentReferralInsights.some((insight) =>
-      (insight.related_entry_ids ?? []).includes(entryId),
-    );
   }
 
   private normalizeUpsertBody(body: UpsertEntryDto): UpsertEntryDto {
@@ -2515,12 +3106,18 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   }): Promise<void> {
     await this.notifications.dispatch(params);
   }
-}
 
-function sameStringSet(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  const values = new Set(a);
-  return b.every((value) => values.has(value));
+  private strongestNotificationSeverity(
+    left: NotificationSeverity,
+    right: NotificationSeverity,
+  ): NotificationSeverity {
+    const rank: Record<NotificationSeverity, number> = {
+      info: 0,
+      warning: 1,
+      critical: 2,
+    };
+    return rank[right] > rank[left] ? right : left;
+  }
 }
 
 function clampInteger(value: number, min: number, max: number): number {
@@ -2553,6 +3150,10 @@ function isTrendSafeBaseline(obs: AnalysisObservations | null): boolean {
     obs.image_quality.needs_retake !== true &&
     obs.image_quality.excluded_from_trends_reason == null
   );
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: unknown }).code === '23505';
 }
 
 function sanitizeContextText(value: string | null | undefined): string | null {

@@ -193,6 +193,19 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().trim().allow('').default(''),
   }),
   OPENAI_MODEL: Joi.string().trim().allow('').default(''),
+  CATALOGUE_AI_MODEL: Joi.string().trim().allow('').default('gpt-5.5'),
+  INGREDIENT_EXPLANATION_AI_MODEL: Joi.string()
+    .trim()
+    .allow('')
+    .default('gpt-5.5'),
+  INGREDIENT_TRANSLATION_AI_MODEL: Joi.string()
+    .trim()
+    .allow('')
+    .default('gpt-5.5'),
+  SKIN_JOURNAL_ANALYSIS_AI_MODEL: Joi.string()
+    .trim()
+    .allow('')
+    .default('gpt-5.5'),
   OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
     .trim()
     .allow('')
@@ -201,6 +214,7 @@ export const envValidationSchema = Joi.object({
     .trim()
     .allow('')
     .default(''),
+  INSIGHTS_AI_MODEL: Joi.string().trim().allow('').default('gpt-5.5'),
   SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD: Joi.number()
     .min(0)
     .default(0),
@@ -228,6 +242,27 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .allow('')
     .default(''),
+  SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().valid('sqs', 'database').default('sqs'),
+    otherwise: Joi.string().valid('sqs', 'database').default('database'),
+  }),
+  SKIN_JOURNAL_INSIGHT_SQS_QUEUE_URL: Joi.when(
+    'SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER',
+    {
+      is: 'sqs',
+      then: Joi.string()
+        .trim()
+        .uri({ scheme: ['https'] })
+        .required(),
+      otherwise: Joi.string().trim().allow('').default(''),
+    },
+  ),
+  SKIN_JOURNAL_INSIGHT_SQS_DLQ_URL: Joi.string()
+    .trim()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .default(''),
   SKIN_JOURNAL_OPERATIONS_TOKEN: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().trim().min(32).required(),
@@ -240,6 +275,12 @@ export const envValidationSchema = Joi.object({
   SKIN_JOURNAL_ANALYSIS_JOB_MAX_ATTEMPTS: Joi.any().strip(),
   SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_BASE_SECONDS: Joi.any().strip(),
   SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_MAX_SECONDS: Joi.any().strip(),
+  SKIN_JOURNAL_INSIGHT_SQS_WAIT_TIME_SECONDS: Joi.any().strip(),
+  SKIN_JOURNAL_INSIGHT_SQS_VISIBILITY_TIMEOUT_SECONDS: Joi.any().strip(),
+  SKIN_JOURNAL_INSIGHT_JOB_LOCK_TTL_SECONDS: Joi.any().strip(),
+  SKIN_JOURNAL_INSIGHT_JOB_MAX_ATTEMPTS: Joi.any().strip(),
+  SKIN_JOURNAL_INSIGHT_JOB_BACKOFF_BASE_SECONDS: Joi.any().strip(),
+  SKIN_JOURNAL_INSIGHT_JOB_BACKOFF_MAX_SECONDS: Joi.any().strip(),
   SKIN_PROFILE_FIELD_ENCRYPTION_KEY: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().trim().min(32).required(),

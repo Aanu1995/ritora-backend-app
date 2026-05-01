@@ -7,6 +7,7 @@ const mockSkinJournalService = () => ({
   listPhotos: jest.fn(),
   listPhotoDates: jest.fn(),
   listPhotoFilters: jest.fn(),
+  listInsights: jest.fn(),
   getAnalysisQueueOperations: jest.fn(),
   upsertEntryForResolvedDate: jest.fn(),
 });
@@ -121,5 +122,16 @@ describe('SkinJournalController', () => {
     expect(service.getAnalysisQueueOperations).toHaveBeenCalledWith(
       'ops-token',
     );
+  });
+
+  it('keeps insight listing read-only and passes window and locale filters', async () => {
+    service.listInsights.mockResolvedValue({ insights: [], meta: {} });
+
+    await controller.listInsights('user-1', 'month', 'sv');
+
+    expect(service.listInsights).toHaveBeenCalledWith('user-1', {
+      window: 'month',
+      locale: 'sv',
+    });
   });
 });

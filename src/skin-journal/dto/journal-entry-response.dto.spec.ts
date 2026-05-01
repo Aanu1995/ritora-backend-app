@@ -27,6 +27,20 @@ function entry(): SkinJournalEntry {
     complaint_note: null,
     analysis_status: 'completed',
     analysis_observations: null,
+    analysis_interpretation: {
+      version: '1.0',
+      code: 'stable_baseline',
+      severity: 'info',
+      summary_key: 'journal.analysis.interpretation.stableBaseline.summary',
+      summary_values: {},
+      guidance_keys: [
+        'journal.analysis.interpretation.stableBaseline.guidance',
+      ],
+      caveat_keys: ['journal.analysis.interpretation.caveats.notDiagnosis'],
+      source_ids: [],
+      sources: [],
+      generated_at: '2026-05-01T08:00:00.000Z',
+    },
     analysis_concern_keys: [],
     has_reaction_signal: false,
     needs_retake: false,
@@ -61,6 +75,7 @@ describe('JournalEntryResponseDto', () => {
     expect('photo_object_key' in dto).toBe(false);
     expect(dto.photo_url).toBe('https://signed.example.com/photo.webp');
     expect(dto.has_photo).toBe(true);
+    expect(dto.analysis_interpretation?.code).toBe('stable_baseline');
     expect(dto.analysis_prompt_version).toBe('skin-journal-photo-vtest');
     expect(dto.analysis_duration_ms).toBe(1234);
     expect(dto.analysis_input_image_count).toBe(2);

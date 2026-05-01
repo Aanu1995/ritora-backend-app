@@ -28,6 +28,7 @@ export class CreateSkinJournalTables1714200000000 implements MigrationInterface 
         "complaint_note" text,
         "analysis_status" varchar(20) NOT NULL DEFAULT 'pending',
         "analysis_observations" jsonb,
+        "analysis_interpretation" jsonb,
         "analysis_concern_keys" text[] NOT NULL DEFAULT ARRAY[]::text[],
         "has_reaction_signal" boolean NOT NULL DEFAULT false,
         "needs_retake" boolean NOT NULL DEFAULT false,
@@ -203,20 +204,39 @@ export class CreateSkinJournalTables1714200000000 implements MigrationInterface 
         "user_id" varchar(26) NOT NULL,
         "generated_at" timestamptz NOT NULL DEFAULT now(),
         "kind" varchar(40) NOT NULL,
-        "summary" text,
-        "supporting_data" jsonb,
-        "related_entry_ids" jsonb,
         "severity" varchar(20) NOT NULL DEFAULT 'info',
+        "confidence" double precision NOT NULL DEFAULT 0.5,
+        "headline" jsonb NOT NULL,
+        "blocks" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "actions" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "caveats" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "source_entry_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "time_window" jsonb NOT NULL,
+        "data_cutoff_at" timestamptz NOT NULL,
+        "generation_trigger" varchar(40) NOT NULL,
+        "metadata" jsonb NOT NULL,
+        "sources" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "insight_signature" varchar(120) NOT NULL,
         "seen_at" timestamptz,
         "dismissed_at" timestamptz,
         CONSTRAINT "PK_skin_journal_insights" PRIMARY KEY ("id"),
         CONSTRAINT "FK_skin_journal_insights_user" FOREIGN KEY ("user_id")
           REFERENCES "users" ("id") ON DELETE CASCADE,
         CONSTRAINT "CK_skin_journal_insights_kind" CHECK (
-          "kind" IN ('daily','weekly','monthly','trend','correlation','effectiveness','reaction_recovery','referral')
+          "kind" IN (
+            'onboarding_progress','daily','weekly','monthly','trend','correlation',
+            'effectiveness','reaction_recovery','referral','photo_quality_drift',
+            'face_zone_pattern','cycle','ai_summary','ai_pattern'
+          )
         ),
         CONSTRAINT "CK_skin_journal_insights_severity" CHECK (
           "severity" IN ('info','warning','critical')
+        ),
+        CONSTRAINT "CK_skin_journal_insights_trigger" CHECK (
+          "generation_trigger" IN (
+            'photo_analysis_completed','check_in_updated','entry_deleted',
+            'scheduled_refresh','product_or_routine_changed'
+          )
         )
       )
     `);
@@ -224,6 +244,136 @@ export class CreateSkinJournalTables1714200000000 implements MigrationInterface 
     await queryRunner.query(`
       CREATE INDEX "IDX_skin_journal_insights_user_kind_dismissed"
         ON "skin_journal_insights" ("user_id", "kind", "dismissed_at")
+    `);
+
+    await queryRunner.query(`
+      CREATE UNIQUE INDEX "IDX_skin_journal_insights_user_signature"
+        ON "skin_journal_insights" ("user_id", "insight_signature")
+    `);
+
+    await queryRunner.query(`
+      CREATE TABLE "skin_journal_insight_generation_runs" (
+        "id" varchar(26) NOT NULL,
+        "user_id" varchar(26) NOT NULL,
+        "trigger" varchar(40) NOT NULL,
+        "status" varchar(20) NOT NULL DEFAULT 'running',
+        "data_window_start" date NOT NULL,
+        "data_window_end" date NOT NULL,
+        "data_cutoff_at" timestamptz NOT NULL,
+        "insight_count" integer NOT NULL DEFAULT 0,
+        "duration_ms" integer NOT NULL DEFAULT 0,
+        "error" text,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "completed_at" timestamptz,
+        CONSTRAINT "PK_skin_journal_insight_generation_runs" PRIMARY KEY ("id"),
+        CONSTRAINT "FK_skin_journal_insight_runs_user" FOREIGN KEY ("user_id")
+          REFERENCES "users" ("id") ON DELETE CASCADE,
+        CONSTRAINT "CK_skin_journal_insight_runs_trigger" CHECK (
+          "trigger" IN (
+            'photo_analysis_completed','check_in_updated','entry_deleted',
+            'scheduled_refresh','product_or_routine_changed'
+          )
+        ),
+        CONSTRAINT "CK_skin_journal_insight_runs_status" CHECK (
+          "status" IN ('running','completed','failed')
+        )
+      )
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_insight_runs_user_created"
+        ON "skin_journal_insight_generation_runs" ("user_id", "created_at" DESC)
+    `);
+
+    await queryRunner.query(`
+      CREATE TABLE "skin_journal_insight_states" (
+        "user_id" varchar(26) NOT NULL,
+        "dirty_since" timestamptz,
+        "dirty_reasons" jsonb NOT NULL DEFAULT '[]'::jsonb,
+        "latest_input_signature" varchar(64),
+        "latest_entry_count" integer NOT NULL DEFAULT 0,
+        "last_generated_signature" varchar(64),
+        "last_generated_at" timestamptz,
+        "last_generation_trigger" varchar(40),
+        "last_failed_signature" varchar(64),
+        "last_failed_at" timestamptz,
+        "last_checked_at" timestamptz,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "PK_skin_journal_insight_states" PRIMARY KEY ("user_id"),
+        CONSTRAINT "FK_skin_journal_insight_states_user" FOREIGN KEY ("user_id")
+          REFERENCES "users" ("id") ON DELETE CASCADE,
+        CONSTRAINT "CK_skin_journal_insight_states_last_trigger" CHECK (
+          "last_generation_trigger" IS NULL OR
+          "last_generation_trigger" IN (
+            'photo_analysis_completed','check_in_updated','entry_deleted',
+            'scheduled_refresh','product_or_routine_changed'
+          )
+        )
+      )
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_insight_states_dirty_since"
+        ON "skin_journal_insight_states" ("dirty_since")
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_insight_states_last_generated"
+        ON "skin_journal_insight_states" ("last_generated_at")
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_insight_states_last_failed"
+        ON "skin_journal_insight_states" ("last_failed_at")
+    `);
+
+    await queryRunner.query(`
+      CREATE TABLE "skin_journal_insight_jobs" (
+        "id" varchar(26) NOT NULL,
+        "user_id" varchar(26) NOT NULL,
+        "trigger" varchar(40) NOT NULL,
+        "status" varchar(20) NOT NULL DEFAULT 'queued',
+        "locale" varchar(10) NOT NULL DEFAULT 'en',
+        "input_signature" varchar(64) NOT NULL,
+        "attempt_count" integer NOT NULL DEFAULT 0,
+        "max_attempts" integer NOT NULL DEFAULT 5,
+        "run_after" timestamptz NOT NULL DEFAULT now(),
+        "locked_at" timestamptz,
+        "locked_by" varchar(80),
+        "last_error" text,
+        "completed_at" timestamptz,
+        "created_at" timestamptz NOT NULL DEFAULT now(),
+        "updated_at" timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT "PK_skin_journal_insight_jobs" PRIMARY KEY ("id"),
+        CONSTRAINT "FK_skin_journal_insight_jobs_user" FOREIGN KEY ("user_id")
+          REFERENCES "users" ("id") ON DELETE CASCADE,
+        CONSTRAINT "CK_skin_journal_insight_jobs_trigger" CHECK (
+          "trigger" IN (
+            'photo_analysis_completed','check_in_updated','entry_deleted',
+            'scheduled_refresh','product_or_routine_changed'
+          )
+        ),
+        CONSTRAINT "CK_skin_journal_insight_jobs_status" CHECK (
+          "status" IN ('queued','sent','running','completed','failed','cancelled')
+        )
+      )
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_insight_jobs_status_run_after"
+        ON "skin_journal_insight_jobs" ("status", "run_after")
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX "IDX_skin_journal_insight_jobs_user_status"
+        ON "skin_journal_insight_jobs" ("user_id", "status")
+    `);
+
+    await queryRunner.query(`
+      CREATE UNIQUE INDEX "UQ_skin_journal_insight_jobs_active_user"
+        ON "skin_journal_insight_jobs" ("user_id")
+        WHERE "status" IN ('queued','sent','running')
     `);
 
     await queryRunner.query(`
@@ -324,6 +474,11 @@ export class CreateSkinJournalTables1714200000000 implements MigrationInterface 
     await queryRunner.query(`DROP TABLE "skin_journal_export_jobs"`);
     await queryRunner.query(`DROP TABLE "routine_simplification_events"`);
     await queryRunner.query(`DROP TABLE "skin_journal_wrapped"`);
+    await queryRunner.query(`DROP TABLE "skin_journal_insight_jobs"`);
+    await queryRunner.query(`DROP TABLE "skin_journal_insight_states"`);
+    await queryRunner.query(
+      `DROP TABLE "skin_journal_insight_generation_runs"`,
+    );
     await queryRunner.query(`DROP TABLE "skin_journal_insights"`);
     await queryRunner.query(`DROP TABLE "skin_journal_events"`);
     await queryRunner.query(`DROP TABLE "skin_journal_media_deletion_jobs"`);

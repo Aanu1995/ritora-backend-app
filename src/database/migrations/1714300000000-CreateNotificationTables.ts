@@ -12,6 +12,7 @@ export class CreateNotificationTables1714300000000 implements MigrationInterface
         "reaction_alerts_enabled" boolean NOT NULL DEFAULT true,
         "simplification_alerts_enabled" boolean NOT NULL DEFAULT true,
         "insight_alerts_enabled" boolean NOT NULL DEFAULT true,
+        "ai_polished_insights_enabled" boolean NOT NULL DEFAULT true,
         "wrapped_alerts_enabled" boolean NOT NULL DEFAULT true,
         "photo_tutorial_completed" boolean NOT NULL DEFAULT false,
         "created_at" timestamptz NOT NULL DEFAULT now(),

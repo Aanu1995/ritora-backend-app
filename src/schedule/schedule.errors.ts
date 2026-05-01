@@ -9,6 +9,7 @@ export const ScheduleErrorCode = {
   CustomLabelRequired: 'SCHEDULE_CUSTOM_LABEL_REQUIRED',
   MoveConflict: 'SCHEDULE_MOVE_CONFLICT',
   ProductsNotOwned: 'SCHEDULE_PRODUCTS_NOT_OWNED',
+  RequiresProduct: 'SCHEDULE_REQUIRES_PRODUCT',
   SlotConflict: 'SCHEDULE_SLOT_CONFLICT',
   SlotNotFound: 'SCHEDULE_SLOT_NOT_FOUND',
   TooManySteps: 'SCHEDULE_TOO_MANY_STEPS',
@@ -44,6 +45,15 @@ export function scheduleProductsNotOwned(productIds: string[]) {
     withCode(
       ScheduleErrorCode.ProductsNotOwned,
       `Products not on your shelf: ${productIds.join(', ')}`,
+    ),
+  );
+}
+
+export function scheduleRequiresProduct() {
+  return new BadRequestException(
+    withCode(
+      ScheduleErrorCode.RequiresProduct,
+      'Add at least one product before creating a schedule',
     ),
   );
 }

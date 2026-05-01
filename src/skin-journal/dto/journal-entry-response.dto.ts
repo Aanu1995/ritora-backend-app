@@ -6,6 +6,7 @@ import type {
   Angle,
   CycleMarker,
   OverallFeel,
+  PhotoAnalysisInterpretation,
   RatingsPayload,
   RecentChangePayload,
   SleepBand,
@@ -81,6 +82,9 @@ export class JournalEntryResponseDto {
   analysis_observations: AnalysisObservations | null;
 
   @ApiProperty({ required: false, nullable: true })
+  analysis_interpretation: PhotoAnalysisInterpretation | null;
+
+  @ApiProperty({ required: false, nullable: true })
   analysis_summary: string | null;
 
   @ApiProperty({ required: false, nullable: true })
@@ -154,6 +158,7 @@ export class JournalEntryResponseDto {
     dto.complaint_note = entry.complaint_note;
     dto.analysis_status = entry.analysis_status;
     dto.analysis_observations = entry.analysis_observations;
+    dto.analysis_interpretation = entry.analysis_interpretation;
     dto.analysis_summary = entry.analysis_summary;
     dto.analysis_model = entry.analysis_model;
     dto.analysis_version = entry.analysis_version;

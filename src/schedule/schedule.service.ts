@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import {
   resolveDayOfWeekForTimeZone,
   resolveTimeZoneContext,
   type ResolvedTimeZoneContext,
 } from '../common/timezone/timezone.utils';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { ShelfStatus } from '../shelf/shelf.types';
 import { ApplyPresetDto } from './dto/apply-preset.dto';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { CreateSlotsDto } from './dto/create-slots.dto';
@@ -34,6 +35,7 @@ import {
   scheduleCustomLabelRequired,
   scheduleMoveConflict,
   scheduleProductsNotOwned,
+  scheduleRequiresProduct,
   scheduleSlotConflict,
   scheduleSlotNotFound,
   scheduleTooManySteps,
@@ -88,6 +90,7 @@ export class ScheduleService {
 
   async createSlot(userId: string, dto: CreateSlotDto): Promise<ScheduleSlot> {
     const slotInput = normalizeSlotInput(dto);
+    await this.assertUserHasSchedulableProduct(userId);
     await this.assertSlotAvailable(
       userId,
       slotInput.dayOfWeek,
@@ -106,6 +109,7 @@ export class ScheduleService {
     dto: CreateSlotsDto,
   ): Promise<ScheduleSlot[]> {
     const slotInput = normalizeCreateSlotsInput(dto);
+    await this.assertUserHasSchedulableProduct(userId);
     const existing = await this.findExistingSlotsForTime(
       userId,
       slotInput.daysOfWeek,
@@ -137,6 +141,7 @@ export class ScheduleService {
     dto: UpdateSlotDto,
   ): Promise<ScheduleSlot> {
     const slot = await this.findOwnedSlot(userId, slotId);
+    await this.assertUserHasSchedulableProduct(userId);
 
     if (dto.slotTime !== undefined) {
       const nextTime = normaliseTime(dto.slotTime);
@@ -174,6 +179,7 @@ export class ScheduleService {
     dto: MoveSlotDto,
   ): Promise<ScheduleSlot> {
     const slot = await this.findOwnedSlot(userId, slotId);
+    await this.assertUserHasSchedulableProduct(userId);
     const toTime = normaliseTime(dto.toTime);
 
     if (slot.day_of_week === dto.toDay && slot.slot_time === toTime) {
@@ -203,6 +209,7 @@ export class ScheduleService {
     dto: UpsertRoutineStepsDto,
   ): Promise<ScheduleSlot> {
     const slot = await this.findOwnedSlot(userId, slotId);
+    await this.assertUserHasSchedulableProduct(userId);
 
     if (dto.steps.length > MAX_STEPS_PER_SLOT) {
       throw scheduleTooManySteps(MAX_STEPS_PER_SLOT);
@@ -306,6 +313,19 @@ export class ScheduleService {
 
       await repository.save(nextSlots);
     });
+  }
+
+  private async assertUserHasSchedulableProduct(userId: string): Promise<void> {
+    const productCount = await this.productsRepository.count({
+      where: {
+        user_id: userId,
+        status: Not(ShelfStatus.Archived),
+      },
+    });
+
+    if (productCount === 0) {
+      throw scheduleRequiresProduct();
+    }
   }
 
   private async assertProductsOwned(

@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import {
   Between,
   Brackets,
+  In,
   IsNull,
   MoreThan,
   Repository,
@@ -174,6 +175,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       prefs.simplification_alerts_enabled = dto.simplification_alerts_enabled;
     if (dto.insight_alerts_enabled !== undefined)
       prefs.insight_alerts_enabled = dto.insight_alerts_enabled;
+    if (dto.ai_polished_insights_enabled !== undefined)
+      prefs.ai_polished_insights_enabled = dto.ai_polished_insights_enabled;
     if (dto.wrapped_alerts_enabled !== undefined)
       prefs.wrapped_alerts_enabled = dto.wrapped_alerts_enabled;
     if (dto.photo_tutorial_completed !== undefined)
@@ -192,6 +195,22 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     deepLink?: string;
   }): Promise<InAppNotification | null> {
     const prefs = await this.ensurePreferences(params.userId);
+    return this.dispatchWithPreferences(params, prefs);
+  }
+
+  private async dispatchWithPreferences(
+    params: {
+      userId: string;
+      kind: NotificationKind;
+      titleKey: string;
+      bodyKey: string;
+      severity?: NotificationSeverity;
+      payload?: Record<string, unknown>;
+      deepLink?: string;
+    },
+    prefs: UserNotificationPreference,
+    user?: User | null,
+  ): Promise<InAppNotification | null> {
     if (!isNotificationKindEnabled(prefs, params.kind)) {
       return null;
     }
@@ -212,7 +231,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (prefs.channels.includes('email')) {
-      await this.dispatchEmail(params);
+      await this.dispatchEmail(params, user);
     }
 
     return saved;
@@ -232,8 +251,15 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       if (prefs.length === 0) {
         return;
       }
+      const usersById = await this.loadUsersById(
+        prefs.map((pref) => pref.user_id),
+      );
       for (const pref of prefs) {
-        await this.maybeDispatchPhotoReminder(pref, now);
+        await this.maybeDispatchPhotoReminder(
+          pref,
+          usersById.get(pref.user_id) ?? null,
+          now,
+        );
       }
       if (prefs.length < PHOTO_REMINDER_SWEEP_BATCH_SIZE) {
         return;
@@ -244,9 +270,9 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
 
   private async maybeDispatchPhotoReminder(
     pref: UserNotificationPreference,
+    user: User | null,
     now: Date,
   ): Promise<void> {
-    const user = await this.users.findOne({ where: { id: pref.user_id } });
     if (!user) {
       return;
     }
@@ -271,14 +297,29 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (duplicateCount > 0) {
       return;
     }
-    await this.dispatch({
-      userId: pref.user_id,
-      kind: 'photo_reminder',
-      titleKey: 'skinJournal.notifications.photoReminder.title',
-      bodyKey: 'skinJournal.notifications.photoReminder.body',
-      payload: { entry_date: localDate },
-      deepLink: '/journal/upload',
+    await this.dispatchWithPreferences(
+      {
+        userId: pref.user_id,
+        kind: 'photo_reminder',
+        titleKey: 'skinJournal.notifications.photoReminder.title',
+        bodyKey: 'skinJournal.notifications.photoReminder.body',
+        payload: { entry_date: localDate },
+        deepLink: '/journal/upload',
+      },
+      pref,
+      user,
+    );
+  }
+
+  private async loadUsersById(userIds: string[]): Promise<Map<string, User>> {
+    const uniqueIds = [...new Set(userIds)];
+    if (uniqueIds.length === 0) {
+      return new Map();
+    }
+    const users = await this.users.find({
+      where: { id: In(uniqueIds) },
     });
+    return new Map(users.map((user) => [user.id, user]));
   }
 
   private async ensurePreferences(
@@ -296,6 +337,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         reaction_alerts_enabled: true,
         simplification_alerts_enabled: true,
         insight_alerts_enabled: true,
+        ai_polished_insights_enabled: true,
         wrapped_alerts_enabled: true,
         photo_tutorial_completed: false,
       });
@@ -317,16 +359,21 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     return prefs;
   }
 
-  private async dispatchEmail(params: {
-    userId: string;
-    kind: NotificationKind;
-    titleKey: string;
-    bodyKey: string;
-    severity?: NotificationSeverity;
-    payload?: Record<string, unknown>;
-    deepLink?: string;
-  }): Promise<void> {
-    const user = await this.users.findOne({ where: { id: params.userId } });
+  private async dispatchEmail(
+    params: {
+      userId: string;
+      kind: NotificationKind;
+      titleKey: string;
+      bodyKey: string;
+      severity?: NotificationSeverity;
+      payload?: Record<string, unknown>;
+      deepLink?: string;
+    },
+    prefetchedUser?: User | null,
+  ): Promise<void> {
+    const user =
+      prefetchedUser ??
+      (await this.users.findOne({ where: { id: params.userId } }));
     if (!user?.email) {
       return;
     }

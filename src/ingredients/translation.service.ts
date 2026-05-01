@@ -295,7 +295,15 @@ export class TranslationService {
   }
 
   private logStructured(payload: Record<string, unknown>): void {
-    this.logger.warn(JSON.stringify(payload));
+    const event =
+      typeof payload.event === 'string'
+        ? payload.event
+        : 'ingredient_translation_warning';
+    const message =
+      typeof payload.message === 'string'
+        ? payload.message
+        : 'Ingredient translation warning';
+    this.logger.warn(`${event}: ${message}`);
   }
 }
 

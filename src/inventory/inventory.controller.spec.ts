@@ -80,7 +80,10 @@ describe('InventoryController', () => {
     await expect(controller.uploadImage('user-1', undefined)).rejects.toThrow(
       BadRequestException,
     );
-    expect(inventoryService.uploadProductImage).toHaveBeenCalledWith(file);
+    expect(inventoryService.uploadProductImage).toHaveBeenCalledWith(
+      'user-1',
+      file,
+    );
   });
 
   it('forwards bulk actions to the service', async () => {

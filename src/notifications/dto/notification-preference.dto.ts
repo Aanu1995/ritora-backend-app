@@ -32,6 +32,7 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() reaction_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() simplification_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() insight_alerts_enabled?: boolean;
+  @IsOptional() @IsBoolean() ai_polished_insights_enabled?: boolean;
   @IsOptional() @IsBoolean() wrapped_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() photo_tutorial_completed?: boolean;
 }
@@ -56,6 +57,9 @@ export class PreferencesResponseDto {
   insight_alerts_enabled: boolean;
 
   @ApiProperty()
+  ai_polished_insights_enabled: boolean;
+
+  @ApiProperty()
   wrapped_alerts_enabled: boolean;
 
   @ApiProperty()
@@ -71,6 +75,7 @@ export class PreferencesResponseDto {
     dto.reaction_alerts_enabled = p.reaction_alerts_enabled;
     dto.simplification_alerts_enabled = p.simplification_alerts_enabled;
     dto.insight_alerts_enabled = p.insight_alerts_enabled;
+    dto.ai_polished_insights_enabled = p.ai_polished_insights_enabled;
     dto.wrapped_alerts_enabled = p.wrapped_alerts_enabled;
     dto.photo_tutorial_completed = p.photo_tutorial_completed;
     return dto;

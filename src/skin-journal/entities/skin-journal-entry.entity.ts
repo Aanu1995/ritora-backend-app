@@ -22,6 +22,7 @@ import type {
   AnalysisStatus,
   CycleMarker,
   OverallFeel,
+  PhotoAnalysisInterpretation,
   RatingsPayload,
   RecentChangePayload,
   SleepBand,
@@ -45,6 +46,11 @@ const encryptedRecentChangeTransformer =
 const encryptedAnalysisTransformer =
   encryptedJsonFieldTransformer<AnalysisObservations | null>(
     'skin_journal_entries.analysis_observations',
+    null,
+  );
+const encryptedAnalysisInterpretationTransformer =
+  encryptedJsonFieldTransformer<PhotoAnalysisInterpretation | null>(
+    'skin_journal_entries.analysis_interpretation',
     null,
   );
 
@@ -147,6 +153,13 @@ export class SkinJournalEntry {
     transformer: encryptedAnalysisTransformer,
   })
   analysis_observations: AnalysisObservations | null;
+
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    transformer: encryptedAnalysisInterpretationTransformer,
+  })
+  analysis_interpretation: PhotoAnalysisInterpretation | null;
 
   @Column({ type: 'text', array: true, default: () => 'ARRAY[]::text[]' })
   analysis_concern_keys: AnalysisConcern[];

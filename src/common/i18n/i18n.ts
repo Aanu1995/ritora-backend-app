@@ -85,6 +85,8 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Custom step labels must include a name',
     'errors.schedule.productsNotOwned':
       'Some selected products are not on your shelf',
+    'errors.schedule.requiresProduct':
+      'Add at least one product before creating a schedule',
     'errors.schedule.slotNotFound': 'Slot not found',
     'errors.cursor.invalid': 'Invalid cursor',
     'errors.cursor.requestMismatch': 'Cursor does not match this request',
@@ -188,6 +190,8 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'errors.schedule.customLabelRequired': 'Anpassade steg måste ha ett namn',
     'errors.schedule.productsNotOwned':
       'Några valda produkter finns inte på din hylla',
+    'errors.schedule.requiresProduct':
+      'Lägg till minst en produkt innan du skapar ett schema',
     'errors.schedule.slotNotFound': 'Tiden hittades inte',
     'errors.cursor.invalid': 'Ogiltig markör',
     'errors.cursor.requestMismatch': 'Markören matchar inte den här förfrågan',
@@ -229,6 +233,7 @@ const codeKeyMap: Record<string, string> = {
   SCHEDULE_CUSTOM_LABEL_REQUIRED: 'errors.schedule.customLabelRequired',
   SCHEDULE_MOVE_CONFLICT: 'errors.schedule.moveConflict',
   SCHEDULE_PRODUCTS_NOT_OWNED: 'errors.schedule.productsNotOwned',
+  SCHEDULE_REQUIRES_PRODUCT: 'errors.schedule.requiresProduct',
   SCHEDULE_SLOT_CONFLICT: 'errors.schedule.slotConflict',
   SCHEDULE_SLOT_NOT_FOUND: 'errors.schedule.slotNotFound',
   SCHEDULE_TOO_MANY_STEPS: 'errors.schedule.tooManySteps',

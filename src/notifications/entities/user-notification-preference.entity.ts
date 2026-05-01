@@ -41,6 +41,9 @@ export class UserNotificationPreference {
   insight_alerts_enabled: boolean;
 
   @Column({ type: 'boolean', default: true })
+  ai_polished_insights_enabled: boolean;
+
+  @Column({ type: 'boolean', default: true })
   wrapped_alerts_enabled: boolean;
 
   @Column({ type: 'boolean', default: false })

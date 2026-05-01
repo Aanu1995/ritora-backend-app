@@ -1,6 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { SkinJournalInsight } from '../entities/skin-journal-insight.entity';
-import type { EventSeverity, InsightKind } from '../skin-journal.constants';
+import type {
+  EventSeverity,
+  InsightGenerationTrigger,
+  InsightJobStatus,
+  InsightKind,
+} from '../skin-journal.constants';
+import type {
+  InsightAction,
+  InsightBlock,
+  InsightMetadata,
+  InsightSourceCitation,
+  InsightTimeWindow,
+  LocalizedInsightText,
+} from '../insights/insight-types';
 
 export class JournalInsightResponseDto {
   @ApiProperty()
@@ -9,17 +22,41 @@ export class JournalInsightResponseDto {
   @ApiProperty()
   kind: InsightKind;
 
-  @ApiProperty({ required: false, nullable: true })
-  summary: string | null;
-
-  @ApiProperty({ required: false, nullable: true })
-  supporting_data: Record<string, unknown> | null;
-
-  @ApiProperty({ required: false, nullable: true })
-  related_entry_ids: string[] | null;
-
   @ApiProperty()
   severity: EventSeverity;
+
+  @ApiProperty()
+  confidence: number;
+
+  @ApiProperty()
+  headline: LocalizedInsightText;
+
+  @ApiProperty({ type: [Object] })
+  blocks: InsightBlock[];
+
+  @ApiProperty({ type: [Object] })
+  actions: InsightAction[];
+
+  @ApiProperty({ type: [Object] })
+  caveats: LocalizedInsightText[];
+
+  @ApiProperty({ type: [String] })
+  source_entry_ids: string[];
+
+  @ApiProperty()
+  time_window: InsightTimeWindow;
+
+  @ApiProperty()
+  data_cutoff_at: Date;
+
+  @ApiProperty()
+  generation_trigger: InsightGenerationTrigger;
+
+  @ApiProperty()
+  metadata: InsightMetadata;
+
+  @ApiProperty({ type: [Object] })
+  sources: InsightSourceCitation[];
 
   @ApiProperty()
   generated_at: Date;
@@ -34,13 +71,52 @@ export class JournalInsightResponseDto {
     const dto = new JournalInsightResponseDto();
     dto.id = insight.id;
     dto.kind = insight.kind;
-    dto.summary = insight.summary;
-    dto.supporting_data = insight.supporting_data;
-    dto.related_entry_ids = insight.related_entry_ids;
     dto.severity = insight.severity;
+    dto.confidence = insight.confidence;
+    dto.headline = insight.headline;
+    dto.blocks = insight.blocks;
+    dto.actions = insight.actions;
+    dto.caveats = insight.caveats;
+    dto.source_entry_ids = insight.source_entry_ids;
+    dto.time_window = insight.time_window;
+    dto.data_cutoff_at = insight.data_cutoff_at;
+    dto.generation_trigger = insight.generation_trigger;
+    dto.metadata = insight.metadata;
+    dto.sources = insight.sources;
     dto.generated_at = insight.generated_at;
     dto.seen_at = insight.seen_at;
     dto.dismissed_at = insight.dismissed_at;
     return dto;
   }
+}
+
+export class JournalInsightsMetaDto {
+  @ApiProperty()
+  total_entries: number;
+
+  @ApiProperty()
+  entries_until_next_insight: number;
+
+  @ApiProperty({ required: false, nullable: true })
+  last_generated_at: Date | null;
+
+  @ApiProperty()
+  generation_status: InsightJobStatus | 'idle';
+
+  @ApiProperty({ required: false, nullable: true })
+  active_job_trigger: InsightGenerationTrigger | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  active_job_run_after: Date | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  active_job_last_error: string | null;
+}
+
+export class JournalInsightsResponseDto {
+  @ApiProperty({ type: [JournalInsightResponseDto] })
+  insights: JournalInsightResponseDto[];
+
+  @ApiProperty()
+  meta: JournalInsightsMetaDto;
 }

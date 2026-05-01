@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -16,10 +17,17 @@ import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
+import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
+import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
+import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
+import { SkinJournalPhotoInterpretationService } from './services/skin-journal-photo-interpretation.service';
 import { SkinJournalAnalysisQueueService } from './services/skin-journal-analysis-queue.service';
+import { SkinJournalInsightQueueService } from './services/skin-journal-insight-queue.service';
 import { SkinJournalMediaRetentionService } from './services/skin-journal-media-retention.service';
+import { InsightPolishService } from './insights/insight-polish.service';
+import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.service';
 import { SkinJournalPhotoStorageService } from './services/skin-journal-photo-storage.service';
 import {
   AnalysisObservations,
@@ -66,6 +74,7 @@ function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
     complaint_note: null,
     analysis_status: 'skipped',
     analysis_observations: null,
+    analysis_interpretation: null,
     analysis_concern_keys: [],
     has_reaction_signal: false,
     needs_retake: false,
@@ -118,6 +127,34 @@ function analysisRunResult(
   };
 }
 
+function insightInputSignature(entries: SkinJournalEntry[]): string {
+  const payload = [...entries]
+    .sort((left, right) => left.entry_date.localeCompare(right.entry_date))
+    .map((item) => ({
+      id: item.id,
+      entry_date: item.entry_date,
+      updated_at: item.updated_at?.toISOString?.() ?? null,
+      photo_object_key: item.photo_object_key,
+      analysis_status: item.analysis_status,
+      analysis_concern_keys: item.analysis_concern_keys,
+      has_reaction_signal: item.has_reaction_signal,
+      needs_retake: item.needs_retake,
+      analysis_summary: item.analysis_summary,
+      analysis_observations: item.analysis_observations,
+      analysis_interpretation: item.analysis_interpretation,
+      ratings: item.ratings,
+      overall_feel: item.overall_feel,
+      sleep_band: item.sleep_band,
+      stress_today: item.stress_today,
+      sun_exposure_today: item.sun_exposure_today,
+      sweat_exercise_today: item.sweat_exercise_today,
+      cycle_marker: item.cycle_marker,
+      recent_change: item.recent_change,
+      complaint_note: item.complaint_note,
+    }));
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
 const COMPLETE_CHECK_IN_BODY = {
   overall_feel: 'good',
   ratings: {
@@ -136,11 +173,68 @@ const COMPLETE_CHECK_IN_BODY = {
   cycle_marker: 'dont_track',
 } as const;
 
+function completeSkinProfile(
+  overrides: Partial<SkinProfile> = {},
+): SkinProfile {
+  return {
+    id: 'profile-1',
+    user_id: 'user-1',
+    skin_type: 'oily',
+    skin_tone: 'medium',
+    ethnicity: 'black',
+    current_concerns: ['acne'],
+    country_code: 'SE',
+    city: 'Stockholm',
+    fitzpatrick_phototype: 'IV',
+    sensitivity_level: null,
+    hydration_level: null,
+    primary_goal: 'clear_acne',
+    pregnancy_status: null,
+    under_dermatologist_care: null,
+    allow_smart_picks: true,
+    budget_tier: 'mid',
+    safety_context: {},
+    reaction_history: {},
+    concern_details: {
+      per_concern: [{ concern: 'acne', severity: 'moderate', priority: 1 }],
+    },
+    skin_behavior: {
+      pih_tendency: 'often',
+      melasma_tendency: 'never',
+      keloid_tendency: 'never',
+      sunscreen_habit: 'most_days',
+      sunscreen_tolerance: 'fine',
+    },
+    active_tolerances: {},
+    routine_preferences: {
+      pace: 'cautious',
+      fragrance_free: true,
+      non_comedogenic: true,
+      sunscreen_filter: 'hybrid',
+      sunscreen_finish: 'natural',
+    },
+    lifestyle_context: {},
+    shopping_preferences: {},
+    hormonal_context: {},
+    created_at: new Date('2026-04-29T00:00:00.000Z'),
+    updated_at: new Date('2026-04-29T00:00:00.000Z'),
+    user: {
+      id: 'user-1',
+      date_of_birth: '1992-04-15',
+      sex_at_birth: 'female',
+    },
+    generateId: jest.fn(),
+    ...overrides,
+  } as SkinProfile;
+}
+
 describe('SkinJournalService', () => {
   let service: SkinJournalService;
   let entries: ReturnType<typeof repo>;
   let events: ReturnType<typeof repo>;
   let insights: ReturnType<typeof repo>;
+  let insightRuns: ReturnType<typeof repo>;
+  let insightStates: ReturnType<typeof repo>;
   let wrapped: ReturnType<typeof repo>;
   let simplifications: ReturnType<typeof repo>;
   let consents: ReturnType<typeof repo>;
@@ -159,8 +253,23 @@ describe('SkinJournalService', () => {
   };
   const analysis = {
     analyze: jest.fn(),
-    shortSummary: jest.fn(),
     promptVersion: jest.fn(() => SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION),
+  };
+  const photoInterpretation = {
+    interpret: jest.fn(() => ({
+      version: '1.0',
+      code: 'stable_baseline',
+      severity: 'info',
+      summary_key: 'journal.analysis.interpretation.stableBaseline.summary',
+      summary_values: {},
+      guidance_keys: [
+        'journal.analysis.interpretation.stableBaseline.guidance',
+      ],
+      caveat_keys: ['journal.analysis.interpretation.caveats.notDiagnosis'],
+      source_ids: [],
+      sources: [],
+      generated_at: '2026-05-01T08:00:00.000Z',
+    })),
   };
   const analysisQueue = {
     isReady: jest.fn().mockResolvedValue(true),
@@ -195,6 +304,19 @@ describe('SkinJournalService', () => {
       dlq_oldest_message_age_seconds: null,
     }),
   };
+  const insightQueue = {
+    enqueueInsightJob: jest.fn().mockResolvedValue({
+      id: 'insight-job-1',
+      attempt_count: 0,
+      max_attempts: 5,
+    }),
+    getActiveJobForUser: jest.fn().mockResolvedValue(null),
+    completeJob: jest.fn().mockResolvedValue(undefined),
+    failJob: jest.fn().mockResolvedValue(undefined),
+    rescheduleJob: jest.fn().mockResolvedValue(undefined),
+    getMaxAttempts: jest.fn(() => 5),
+    nextRetryAt: jest.fn(() => new Date('2026-04-30T00:05:00.000Z')),
+  };
   const mediaRetention = {
     enqueueDeletionVerification: jest.fn().mockResolvedValue(undefined),
   };
@@ -202,7 +324,18 @@ describe('SkinJournalService', () => {
     recordDataAccess: jest.fn().mockResolvedValue(undefined),
     recordConsentEvent: jest.fn().mockResolvedValue(undefined),
   };
-  const notifications = { dispatch: jest.fn().mockResolvedValue(undefined) };
+  const notifications = {
+    dispatch: jest.fn().mockResolvedValue(undefined),
+    getPreferences: jest.fn().mockResolvedValue({
+      ai_polished_insights_enabled: true,
+    }),
+  };
+  const insightPolish = {
+    polish: jest.fn(async (candidates) => candidates),
+  };
+  const knowledgeBase = {
+    resolveMany: jest.fn(() => []),
+  };
   const config = {
     get: jest.fn((key: string, fallback?: unknown) => {
       if (key === 'SKIN_JOURNAL_OPERATIONS_TOKEN') {
@@ -217,11 +350,14 @@ describe('SkinJournalService', () => {
     entries = repo();
     events = repo();
     insights = repo();
+    insightRuns = repo();
+    insightStates = repo();
     wrapped = repo();
     simplifications = repo();
     consents = repo();
     exportsRepo = repo();
     skinProfiles = repo();
+    skinProfiles.findOne.mockResolvedValue(completeSkinProfile());
     photoStorage.storePhoto.mockResolvedValue({
       object_key: 'skin-journal/user-1/entry-1/photo.webp',
       width: 100,
@@ -254,7 +390,7 @@ describe('SkinJournalService', () => {
         should_flag_for_doctor: false,
       }),
     );
-    analysis.shortSummary.mockReturnValue('Looks stable.');
+    photoInterpretation.interpret.mockClear();
     analysisQueue.enqueueAnalysisJob.mockClear();
     analysisQueue.cancelActiveJobsForEntry.mockClear();
     analysisQueue.cancelJob.mockClear();
@@ -266,6 +402,13 @@ describe('SkinJournalService', () => {
     analysisQueue.getMaxAttempts.mockClear();
     analysisQueue.nextRetryAt.mockClear();
     analysisQueue.getQueueMetrics.mockClear();
+    insightQueue.enqueueInsightJob.mockClear();
+    insightQueue.getActiveJobForUser.mockClear();
+    insightQueue.completeJob.mockClear();
+    insightQueue.failJob.mockClear();
+    insightQueue.rescheduleJob.mockClear();
+    insightQueue.getMaxAttempts.mockClear();
+    insightQueue.nextRetryAt.mockClear();
     mediaRetention.enqueueDeletionVerification.mockClear();
     config.get.mockClear();
 
@@ -275,6 +418,14 @@ describe('SkinJournalService', () => {
         { provide: getRepositoryToken(SkinJournalEntry), useValue: entries },
         { provide: getRepositoryToken(SkinJournalEvent), useValue: events },
         { provide: getRepositoryToken(SkinJournalInsight), useValue: insights },
+        {
+          provide: getRepositoryToken(SkinJournalInsightGenerationRun),
+          useValue: insightRuns,
+        },
+        {
+          provide: getRepositoryToken(SkinJournalInsightState),
+          useValue: insightStates,
+        },
         { provide: getRepositoryToken(SkinJournalWrapped), useValue: wrapped },
         {
           provide: getRepositoryToken(RoutineSimplificationEvent),
@@ -288,8 +439,15 @@ describe('SkinJournalService', () => {
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfiles },
         { provide: SkinJournalPhotoStorageService, useValue: photoStorage },
         { provide: SkinJournalAnalysisService, useValue: analysis },
+        {
+          provide: SkinJournalPhotoInterpretationService,
+          useValue: photoInterpretation,
+        },
         { provide: SkinJournalAnalysisQueueService, useValue: analysisQueue },
+        { provide: SkinJournalInsightQueueService, useValue: insightQueue },
         { provide: SkinJournalMediaRetentionService, useValue: mediaRetention },
+        { provide: InsightPolishService, useValue: insightPolish },
+        { provide: KnowledgeBaseService, useValue: knowledgeBase },
         { provide: ConfigService, useValue: config },
         { provide: UserDataAccessLogService, useValue: dataAccess },
         { provide: NotificationsService, useValue: notifications },
@@ -312,6 +470,57 @@ describe('SkinJournalService', () => {
         body: { skip_check_in: true },
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects today journal uploads when the skin profile is missing', async () => {
+    skinProfiles.findOne.mockResolvedValue(null);
+    consents.findOne.mockResolvedValue({
+      consent_type: UserConsentType.SkinProgressProcessing,
+      granted: true,
+      revoked_at: null,
+    });
+
+    await expect(
+      service.upsertEntryForResolvedDate({
+        userId: 'user-1',
+        targetDate: todayInTimeZone('UTC'),
+        timeZone: 'UTC',
+        photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        body: {
+          skip_check_in: true,
+          photo_processing_consent: true,
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'skin_profile_required',
+      }),
+    });
+
+    expect(photoStorage.storePhoto).not.toHaveBeenCalled();
+    expect(entries.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects today journal check-ins when essential skin profile fields are incomplete', async () => {
+    skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile({ primary_goal: null }),
+    );
+
+    await expect(
+      service.upsertEntryForResolvedDate({
+        userId: 'user-1',
+        targetDate: todayInTimeZone('UTC'),
+        timeZone: 'UTC',
+        photo: null,
+        body: COMPLETE_CHECK_IN_BODY,
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'skin_profile_required',
+      }),
+    });
+
+    expect(entries.save).not.toHaveBeenCalled();
   });
 
   it('rejects creating or replacing a past journal entry', async () => {
@@ -588,13 +797,13 @@ describe('SkinJournalService', () => {
         id: 'insight-stale',
         user_id: 'user-1',
         kind: 'daily',
-        related_entry_ids: ['entry-1'],
+        source_entry_ids: ['entry-1'],
       },
       {
         id: 'insight-other',
         user_id: 'user-1',
         kind: 'weekly',
-        related_entry_ids: ['entry-other'],
+        source_entry_ids: ['entry-other'],
       },
     ]);
 
@@ -902,14 +1111,21 @@ describe('SkinJournalService', () => {
     insights.findOne.mockResolvedValue(null);
     events.findOne.mockResolvedValue(null);
 
-    await service.generateInsightsIfNeeded('user-1');
+    await service.processInsightJob({
+      user_id: 'user-1',
+      trigger: 'scheduled_refresh',
+      locale: 'en',
+      input_signature: insightInputSignature(entriesForTrend),
+      attempt_count: 1,
+      max_attempts: 5,
+    } as SkinJournalInsightJob);
 
     expect(events.save).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'product_effectiveness' }),
     );
   });
 
-  it('creates the selected day daily insight immediately after analysis completes', async () => {
+  it('marks insight inputs dirty after analysis completes without saving insights inline', async () => {
     const current = entry({
       id: 'entry-current',
       entry_date: '2026-04-10',
@@ -927,20 +1143,222 @@ describe('SkinJournalService', () => {
       ...data,
     }));
     wrapped.findOne.mockResolvedValue(null);
+    skinProfiles.findOne.mockResolvedValue(null);
 
     await service.runAnalysis('entry-current', 'user-1');
 
-    expect(insights.save).toHaveBeenCalledWith(
+    expect(photoInterpretation.interpret).toHaveBeenCalledWith(
+      expect.objectContaining({ model_version: 'test-model' }),
+      expect.any(Date),
       expect.objectContaining({
-        kind: 'daily',
-        related_entry_ids: ['entry-current'],
+        recentChange: null,
+        skinContext: null,
       }),
     );
-    expect(notifications.dispatch).toHaveBeenCalledWith(
+    expect(entries.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        kind: 'insight_ready',
-        payload: expect.objectContaining({ insight_id: 'insight-1' }),
+        analysis_interpretation: expect.objectContaining({
+          summary_key: 'journal.analysis.interpretation.stableBaseline.summary',
+        }),
       }),
+    );
+    expect(insightQueue.enqueueInsightJob).not.toHaveBeenCalled();
+    expect(insightStates.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        dirty_reasons: ['photo_analysis_completed'],
+        dirty_since: expect.any(Date),
+        latest_input_signature: expect.any(String),
+      }),
+    );
+    expect(insights.save).not.toHaveBeenCalled();
+  });
+
+  it('queues scheduled insight generation only after dirty inputs meet cadence', async () => {
+    const entriesForInsights = Array.from({ length: 7 }, (_, index) =>
+      entry({
+        id: `entry-${index}`,
+        entry_date: `2026-04-${String(index + 1).padStart(2, '0')}`,
+        updated_at: new Date(
+          `2026-04-${String(index + 1).padStart(2, '0')}T09:00:00.000Z`,
+        ),
+      }),
+    ).reverse();
+    entries.find.mockResolvedValue(entriesForInsights);
+    entries.count.mockResolvedValue(entriesForInsights.length);
+    insightStates.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      dirty_since: new Date('2026-04-20T09:00:00.000Z'),
+      dirty_reasons: ['photo_analysis_completed'],
+      latest_input_signature: insightInputSignature(entriesForInsights),
+      latest_entry_count: entriesForInsights.length,
+      last_generated_signature: null,
+      last_generated_at: null,
+      last_generation_trigger: null,
+      last_checked_at: null,
+    });
+
+    await expect(service.generateInsightsIfNeeded('user-1')).resolves.toBe(
+      true,
+    );
+
+    expect(insightQueue.enqueueInsightJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        trigger: 'scheduled_refresh',
+        locale: 'en',
+        inputSignature: insightInputSignature(entriesForInsights),
+      }),
+    );
+  });
+
+  it('does not queue scheduled insight generation while cadence is cooling down', async () => {
+    const entriesForInsights = Array.from({ length: 8 }, (_, index) =>
+      entry({
+        id: `entry-${index}`,
+        entry_date: `2026-04-${String(index + 1).padStart(2, '0')}`,
+        updated_at: new Date(
+          `2026-04-${String(index + 1).padStart(2, '0')}T09:00:00.000Z`,
+        ),
+      }),
+    ).reverse();
+    entries.find.mockResolvedValue(entriesForInsights);
+    entries.count.mockResolvedValue(entriesForInsights.length);
+    insightStates.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      dirty_since: new Date('2026-04-30T09:00:00.000Z'),
+      dirty_reasons: ['check_in_updated'],
+      latest_input_signature: insightInputSignature(entriesForInsights),
+      latest_entry_count: entriesForInsights.length,
+      last_generated_signature: 'previous-signature',
+      last_generated_at: new Date(),
+      last_generation_trigger: 'scheduled_refresh',
+      last_checked_at: null,
+    });
+
+    await expect(service.generateInsightsIfNeeded('user-1')).resolves.toBe(
+      false,
+    );
+
+    expect(insightQueue.enqueueInsightJob).not.toHaveBeenCalled();
+    expect(insightStates.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        dirty_since: expect.any(Date),
+        last_checked_at: expect.any(Date),
+      }),
+    );
+  });
+
+  it('does not immediately requeue the same failed insight input signature', async () => {
+    const entriesForInsights = Array.from({ length: 8 }, (_, index) =>
+      entry({
+        id: `entry-${index}`,
+        entry_date: `2026-04-${String(index + 1).padStart(2, '0')}`,
+        updated_at: new Date(
+          `2026-04-${String(index + 1).padStart(2, '0')}T09:00:00.000Z`,
+        ),
+      }),
+    ).reverse();
+    const signature = insightInputSignature(entriesForInsights);
+    entries.find.mockResolvedValue(entriesForInsights);
+    entries.count.mockResolvedValue(entriesForInsights.length);
+    insightStates.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      dirty_since: new Date('2026-04-20T09:00:00.000Z'),
+      dirty_reasons: ['scheduled_refresh'],
+      latest_input_signature: signature,
+      latest_entry_count: entriesForInsights.length,
+      last_generated_signature: 'previous-signature',
+      last_generated_at: new Date('2026-04-01T09:00:00.000Z'),
+      last_generation_trigger: 'scheduled_refresh',
+      last_failed_signature: signature,
+      last_failed_at: new Date(),
+      last_checked_at: null,
+    });
+
+    await expect(service.generateInsightsIfNeeded('user-1')).resolves.toBe(
+      false,
+    );
+
+    expect(insightQueue.enqueueInsightJob).not.toHaveBeenCalled();
+  });
+
+  it('clears dirty insight state after a scheduled insight job completes', async () => {
+    const entriesForInsights = Array.from({ length: 7 }, (_, index) =>
+      entry({
+        id: `entry-${index}`,
+        entry_date: `2026-04-${String(index + 1).padStart(2, '0')}`,
+      }),
+    ).reverse();
+    entries.find.mockResolvedValue(entriesForInsights);
+    entries.count.mockResolvedValue(entriesForInsights.length);
+    insights.findOne.mockResolvedValue(null);
+    insightStates.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      dirty_since: new Date('2026-04-20T09:00:00.000Z'),
+      dirty_reasons: ['photo_analysis_completed'],
+      latest_input_signature: insightInputSignature(entriesForInsights),
+      latest_entry_count: entriesForInsights.length,
+      last_generated_signature: null,
+      last_generated_at: null,
+      last_generation_trigger: null,
+      last_checked_at: null,
+    });
+
+    await service.processInsightJob({
+      user_id: 'user-1',
+      trigger: 'scheduled_refresh',
+      locale: 'en',
+      input_signature: insightInputSignature(entriesForInsights),
+      attempt_count: 1,
+      max_attempts: 5,
+    } as SkinJournalInsightJob);
+
+    expect(insightStates.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        dirty_since: null,
+        dirty_reasons: [],
+        last_generated_signature: insightInputSignature(entriesForInsights),
+        last_generation_trigger: 'scheduled_refresh',
+      }),
+    );
+  });
+
+  it('does not generate AI sourced insight cards when the user disables AI refined insights', async () => {
+    notifications.getPreferences.mockResolvedValueOnce({
+      ai_polished_insights_enabled: false,
+    });
+    const entriesForInsights = Array.from({ length: 14 }, (_, index) =>
+      entry({
+        id: `entry-${index}`,
+        entry_date: `2026-04-${String(index + 1).padStart(2, '0')}`,
+        ratings: { redness: 2, breakouts: 2 },
+        recent_change:
+          index === 2 || index === 9 ? { kind: 'travelled' } : null,
+      }),
+    ).reverse();
+    entries.find.mockResolvedValue(entriesForInsights);
+    insights.findOne.mockResolvedValue(null);
+
+    await service.processInsightJob({
+      user_id: 'user-1',
+      trigger: 'scheduled_refresh',
+      locale: 'en',
+      input_signature: insightInputSignature(entriesForInsights),
+      attempt_count: 1,
+      max_attempts: 5,
+    } as SkinJournalInsightJob);
+
+    const savedKinds = insights.save.mock.calls.map(
+      ([candidate]) => candidate.kind as string,
+    );
+    expect(savedKinds).not.toContain('ai_summary');
+    expect(savedKinds).not.toContain('ai_pattern');
+    expect(insightPolish.polish).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ aiPolishEnabled: false }),
     );
   });
 
@@ -1060,6 +1478,17 @@ describe('SkinJournalService', () => {
     expect(call.skinContext).not.toHaveProperty('ethnicity');
     expect(call.skinContext).not.toHaveProperty('country_code');
     expect(call.skinContext).not.toHaveProperty('city');
+    expect(photoInterpretation.interpret).toHaveBeenCalledWith(
+      expect.objectContaining({ model_version: 'test-model' }),
+      expect.any(Date),
+      expect.objectContaining({
+        skinContext: expect.objectContaining({
+          skin_tone: 'medium_deep',
+          fitzpatrick_phototype: 'V',
+        }),
+        recentChange: current.recent_change,
+      }),
+    );
   });
 
   it('uses the most recent completed prior photo that is trend-safe as analysis baseline', async () => {
@@ -1616,40 +2045,71 @@ describe('SkinJournalService', () => {
       analysis_summary: 'Looks stable.',
     });
     entries.find.mockResolvedValue([current]);
-    insights.find.mockImplementation(
-      async (options: { where?: Record<string, unknown> }) => {
-        expect(options.where).toEqual(
-          expect.not.objectContaining({
-            dismissed_at: expect.anything(),
-          }),
-        );
-        return [
-          {
-            id: 'insight-dismissed',
-            user_id: 'user-1',
-            generated_at: new Date('2026-04-10T09:00:00.000Z'),
-            kind: 'daily',
-            summary: 'Dismissed summary',
-            supporting_data: null,
-            related_entry_ids: ['entry-current'],
-            severity: 'info',
-            seen_at: null,
-            dismissed_at: new Date('2026-04-10T10:00:00.000Z'),
-          },
-        ];
-      },
-    );
+    insights.findOne.mockResolvedValue({
+      id: 'insight-dismissed',
+      user_id: 'user-1',
+      generated_at: new Date('2026-04-10T09:00:00.000Z'),
+      kind: 'daily',
+      insight_signature: 'existing-signature',
+      source_entry_ids: ['entry-current'],
+      severity: 'info',
+      seen_at: null,
+      dismissed_at: new Date('2026-04-10T10:00:00.000Z'),
+    });
     const insightNotificationsBefore = notifications.dispatch.mock.calls.filter(
       ([payload]) => payload.kind === 'insight_ready',
     ).length;
 
-    await service.generateInsightsIfNeeded('user-1');
+    await service.processInsightJob({
+      user_id: 'user-1',
+      trigger: 'scheduled_refresh',
+      locale: 'en',
+      input_signature: insightInputSignature([current]),
+      attempt_count: 1,
+      max_attempts: 5,
+    } as SkinJournalInsightJob);
 
     expect(insights.save).not.toHaveBeenCalled();
     const insightNotificationsAfter = notifications.dispatch.mock.calls.filter(
       ([payload]) => payload.kind === 'insight_ready',
     ).length;
     expect(insightNotificationsAfter).toBe(insightNotificationsBefore);
+  });
+
+  it('treats concurrent duplicate insight signatures as an idempotent skip', async () => {
+    const current = entry({
+      id: 'entry-current',
+      entry_date: '2026-04-10',
+      analysis_status: 'skipped',
+    });
+    entries.find.mockResolvedValue([current]);
+    insights.findOne.mockResolvedValue(null);
+    insights.save.mockRejectedValueOnce(
+      Object.assign(
+        new Error('duplicate key value violates unique constraint'),
+        {
+          code: '23505',
+        },
+      ),
+    );
+
+    await expect(
+      service.processInsightJob({
+        user_id: 'user-1',
+        trigger: 'scheduled_refresh',
+        locale: 'en',
+        input_signature: insightInputSignature([current]),
+        attempt_count: 1,
+        max_attempts: 5,
+      } as SkinJournalInsightJob),
+    ).resolves.toBeUndefined();
+
+    expect(notifications.dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'insight_ready' }),
+    );
+    expect(insightRuns.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'completed' }),
+    );
   });
 
   it('rejects invalid date filters before listing photos or comparing dates', async () => {

@@ -6,6 +6,7 @@ import { ScheduleSlot } from './entities/schedule-slot.entity';
 import type { DayOfWeek, StepLabel } from './dto/schedule.constants';
 
 type MockRepo<T> = {
+  count: jest.Mock<Promise<number>, [unknown?]>;
   create: jest.Mock<T, [Partial<T>]>;
   delete: jest.Mock<Promise<void>, [unknown]>;
   find: jest.Mock<Promise<T[]>, [unknown?]>;
@@ -16,6 +17,7 @@ type MockRepo<T> = {
 
 function createRepo<T>(): MockRepo<T> {
   return {
+    count: jest.fn().mockResolvedValue(0),
     create: jest.fn((value: Partial<T>) => value as T),
     delete: jest.fn().mockResolvedValue(undefined),
     find: jest.fn().mockResolvedValue([]),
@@ -52,6 +54,7 @@ describe('ScheduleService', () => {
     slotsRepository = createRepo<ScheduleSlot>();
     stepsRepository = createRepo<RoutineStep>();
     productsRepository = createRepo<InventoryProduct>();
+    productsRepository.count.mockResolvedValue(1);
 
     const dataSource = {
       transaction: jest.fn(
@@ -79,6 +82,41 @@ describe('ScheduleService', () => {
       productsRepository as unknown as Repository<InventoryProduct>,
       dataSource,
     );
+  });
+
+  it('rejects schedule creation until the user has at least one shelf product', async () => {
+    productsRepository.count.mockResolvedValue(0);
+
+    await expect(
+      service.createSlot('user-1', {
+        dayOfWeek: 'mon',
+        slotTime: '08:00',
+        mode: 'ai',
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'SCHEDULE_REQUIRES_PRODUCT',
+      }),
+    });
+
+    expect(slotsRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects schedule step edits until the user has at least one shelf product', async () => {
+    productsRepository.count.mockResolvedValue(0);
+    slotsRepository.findOne.mockResolvedValue(buildSlot());
+
+    await expect(
+      service.upsertSteps('user-1', 'slot-1', {
+        steps: [],
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'SCHEDULE_REQUIRES_PRODUCT',
+      }),
+    });
+
+    expect(stepsRepository.delete).not.toHaveBeenCalled();
   });
 
   it('creates multiple days in one batch, deduplicates the input, and skips existing slots', async () => {

@@ -43,6 +43,7 @@ export type EventKind =
 export type EventSeverity = 'info' | 'warning' | 'critical';
 
 export type InsightKind =
+  | 'onboarding_progress'
   | 'daily'
   | 'weekly'
   | 'monthly'
@@ -50,7 +51,31 @@ export type InsightKind =
   | 'correlation'
   | 'effectiveness'
   | 'reaction_recovery'
-  | 'referral';
+  | 'referral'
+  | 'photo_quality_drift'
+  | 'face_zone_pattern'
+  | 'cycle'
+  | 'ai_summary'
+  | 'ai_pattern';
+
+export type InsightGenerationTrigger =
+  | 'photo_analysis_completed'
+  | 'check_in_updated'
+  | 'entry_deleted'
+  | 'scheduled_refresh'
+  | 'product_or_routine_changed';
+
+export type InsightGenerationStatus = 'running' | 'completed' | 'failed';
+
+export type InsightWindow = 'all' | 'week' | 'month';
+
+export type InsightSourceType = 'deterministic' | 'ai_polished' | 'ai_sourced';
+
+export type InsightEvidenceGrade =
+  | 'strong'
+  | 'moderate'
+  | 'limited'
+  | 'anecdotal';
 
 export type WrappedPeriodKind = 'monthly' | 'quarterly' | 'yearly';
 
@@ -79,6 +104,16 @@ export type AnalysisJobStatus =
   | 'cancelled';
 
 export type AnalysisQueueDriver = 'sqs' | 'database';
+
+export type InsightJobStatus =
+  | 'queued'
+  | 'sent'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type InsightQueueDriver = 'sqs' | 'database';
 
 export type MediaDeletionJobStatus = 'pending' | 'verified' | 'failed';
 
@@ -208,6 +243,25 @@ export const SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD = 0.2;
 export const SKIN_JOURNAL_REMINDER_DEFAULT_TIME = '08:00';
 export const SKIN_JOURNAL_WRAPPED_MIN_PHOTOS = 3;
 export const SKIN_JOURNAL_WRAPPED_ENABLED = false;
+export const SKIN_JOURNAL_INSIGHT_PROMPT_VERSION =
+  'skin-journal-insights-v2026-05-01.1';
+export const SKIN_JOURNAL_INSIGHTS_DEFAULT_MODEL = 'gpt-5.5';
+export const SKIN_JOURNAL_INSIGHT_POLISH_TIMEOUT_MS = 45000;
+export const SKIN_JOURNAL_INSIGHT_SUMMARY_CARDS_ENABLED = true;
+export const SKIN_JOURNAL_INSIGHT_PATTERN_CARDS_ENABLED = true;
+export const SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER: InsightQueueDriver = 'database';
+export const SKIN_JOURNAL_INSIGHT_MIN_ENTRIES_FOR_PERIODIC_GENERATION = 7;
+export const SKIN_JOURNAL_INSIGHT_PERIODIC_INTERVAL_DAYS = 7;
+export const SKIN_JOURNAL_INSIGHT_FAILED_RETRY_COOLDOWN_DAYS = 1;
+export const SKIN_JOURNAL_INSIGHT_SQS_WAIT_TIME_SECONDS = 10;
+export const SKIN_JOURNAL_INSIGHT_SQS_VISIBILITY_TIMEOUT_SECONDS = 120;
+export const SKIN_JOURNAL_INSIGHT_JOB_LOCK_TTL_SECONDS = 180;
+export const SKIN_JOURNAL_INSIGHT_JOB_MAX_ATTEMPTS = 5;
+export const SKIN_JOURNAL_INSIGHT_JOB_BACKOFF_BASE_SECONDS = 30;
+export const SKIN_JOURNAL_INSIGHT_JOB_BACKOFF_MAX_SECONDS = 3600;
+export const SKIN_JOURNAL_INSIGHT_JOB_DISPATCH_INTERVAL_MS = 5000;
+export const SKIN_JOURNAL_INSIGHT_JOB_POLL_INTERVAL_MS = 5000;
+export const SKIN_JOURNAL_INSIGHT_SQS_VISIBILITY_HEARTBEAT_MS = 45000;
 export const SKIN_JOURNAL_PHOTO_PAGE_DEFAULT_LIMIT = 24;
 export const SKIN_JOURNAL_PHOTO_PAGE_MAX_LIMIT = 60;
 export const SKIN_JOURNAL_MEDIA_DELETION_VERIFY_INTERVAL_MS = 60 * 60 * 1000;
@@ -317,6 +371,39 @@ export interface AnalysisObservations {
   };
   should_flag_for_doctor: boolean;
   doctor_flag_reason?: string;
+}
+
+export type PhotoAnalysisInterpretationCode =
+  | 'retake_needed'
+  | 'urgent_review'
+  | 'professional_review'
+  | 'barrier_support'
+  | 'acne_progress_timing'
+  | 'hyperpigmentation_tracking'
+  | 'retinoid_irritation_context'
+  | 'stable_baseline';
+
+export interface PhotoAnalysisSourceCitation {
+  id: string;
+  title_key: string;
+  organization: string;
+  summary_key: string;
+  url: string;
+  evidence_grade: Exclude<InsightEvidenceGrade, 'anecdotal'>;
+  last_verified: string;
+}
+
+export interface PhotoAnalysisInterpretation {
+  version: '1.0';
+  code: PhotoAnalysisInterpretationCode;
+  severity: EventSeverity;
+  summary_key: string;
+  summary_values: Record<string, string | number>;
+  guidance_keys: string[];
+  caveat_keys: string[];
+  source_ids: string[];
+  sources: PhotoAnalysisSourceCitation[];
+  generated_at: string;
 }
 
 export interface WrappedManifestEntry {

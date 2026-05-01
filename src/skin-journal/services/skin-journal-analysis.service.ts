@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { readOpenAiModel } from '../../common/utils/openai-config';
+import {
+  readFeatureOpenAiModel,
+  SKIN_JOURNAL_ANALYSIS_AI_MODEL_ENV_KEY,
+} from '../../common/utils/openai-config';
 import {
   extractJsonObject,
   extractOutputText,
@@ -25,9 +28,10 @@ import {
 } from '../skin-journal.constants';
 
 const MOCK_MODEL = 'ritora-stub-1.0';
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-2024-08-06';
+const DEFAULT_OPENAI_MODEL = 'gpt-5.2';
 const FORBIDDEN_MEDICAL_LANGUAGE =
   /\b(diagnose|diagnosis|treat|treatment|cure|prescribe)\b/i;
+const AI_STYLE_PUNCTUATION = /[-—–]/;
 const IMAGE_QUALITY_ISSUES = [
   'too_dark',
   'too_bright',
@@ -445,10 +449,6 @@ export class SkinJournalAnalysisService {
     return { observations, metadata };
   }
 
-  shortSummary(obs: AnalysisObservations): string {
-    return obs.user_visible_message ?? obs.overall_assessment;
-  }
-
   promptVersion(): string {
     return SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION;
   }
@@ -579,8 +579,11 @@ export class SkinJournalAnalysisService {
 
   private getModel(): string {
     return (
-      readOpenAiModel(this.configService, DEFAULT_OPENAI_MODEL) ??
-      DEFAULT_OPENAI_MODEL
+      readFeatureOpenAiModel(
+        this.configService,
+        SKIN_JOURNAL_ANALYSIS_AI_MODEL_ENV_KEY,
+        DEFAULT_OPENAI_MODEL,
+      ) ?? DEFAULT_OPENAI_MODEL
     );
   }
 }
@@ -658,6 +661,9 @@ function buildSystemPrompt(): string {
       'Return JSON only and exactly follow the strict schema.',
       'Use canonical concern enum values only.',
       'Keep overall_assessment under 200 characters and user_visible_message under 240 characters, calm, supportive, and non-diagnostic.',
+      'Write like a careful human specialist. Use plain warm sentences.',
+      'Do not use hyphens or em dashes in user visible wording. Prefer short natural wording over slogan-like copy.',
+      'Avoid the clipped, overly polished style common in AI text.',
       'Do not mention protected attributes, identity, age, sex, ethnicity, or attractiveness.',
     ].join(' '),
   ].join('\n\n');
@@ -832,8 +838,13 @@ function assertNonDiagnosticLanguage(obs: AnalysisObservations): void {
     obs.doctor_flag_reason ?? '',
     ...obs.detected_concerns.map((concern) => concern.concern),
   ].join(' ');
-  if (FORBIDDEN_MEDICAL_LANGUAGE.test(text)) {
-    throw new Error('Analysis response used forbidden medical language');
+  if (
+    FORBIDDEN_MEDICAL_LANGUAGE.test(text) ||
+    AI_STYLE_PUNCTUATION.test(text)
+  ) {
+    throw new Error(
+      'Analysis response used forbidden medical language or artificial wording',
+    );
   }
 }
 

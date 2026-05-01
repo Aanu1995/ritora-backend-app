@@ -53,7 +53,7 @@ describe('OpenAiExplanationProvider', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: '',
-        OPENAI_MODEL: 'some-model',
+        INGREDIENT_EXPLANATION_AI_MODEL: 'ingredient-explanation-model',
       }),
     );
     global.fetch = jest.fn();
@@ -68,6 +68,7 @@ describe('OpenAiExplanationProvider', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_EXPLANATION_AI_MODEL: undefined,
         OPENAI_MODEL: undefined,
       }),
     );
@@ -83,7 +84,8 @@ describe('OpenAiExplanationProvider', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_MODEL: 'some-model',
+        INGREDIENT_EXPLANATION_AI_MODEL: 'ingredient-explanation-model',
+        OPENAI_MODEL: 'fallback-model',
       }),
     );
     global.fetch = jest.fn().mockResolvedValue({
@@ -108,7 +110,7 @@ describe('OpenAiExplanationProvider', () => {
           event: 'explanation_failed',
           reason: 'http_error',
           status: 503,
-          model: 'some-model',
+          model: 'ingredient-explanation-model',
         }),
       ]),
     );
@@ -117,6 +119,7 @@ describe('OpenAiExplanationProvider', () => {
   it('warnIfMisconfigured logs once when the model env var is unset', () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
+        INGREDIENT_EXPLANATION_AI_MODEL: undefined,
         OPENAI_MODEL: undefined,
       }),
     );
@@ -125,16 +128,49 @@ describe('OpenAiExplanationProvider', () => {
 
     expect(warnSpy).toHaveBeenCalled();
     const warned = warnSpy.mock.calls.some(([message]) =>
-      String(message).includes('OPENAI_MODEL'),
+      String(message).includes('INGREDIENT_EXPLANATION_AI_MODEL'),
     );
     expect(warned).toBe(true);
+  });
+
+  it('falls back to OPENAI_MODEL when the ingredient explanation model is missing', async () => {
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_EXPLANATION_AI_MODEL: '',
+        OPENAI_MODEL: 'fallback-model',
+      }),
+    );
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    });
+
+    await provider.explainFindings(buildInput());
+
+    const loggedPayloads = warnSpy.mock.calls.map(([message]) => {
+      try {
+        return JSON.parse(String(message));
+      } catch {
+        return { raw: message };
+      }
+    });
+    expect(loggedPayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'explanation_failed',
+          model: 'fallback-model',
+        }),
+      ]),
+    );
   });
 
   it('short-circuits with null when there are no findings', async () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_MODEL: 'some-model',
+        INGREDIENT_EXPLANATION_AI_MODEL: 'ingredient-explanation-model',
       }),
     );
     global.fetch = jest.fn();

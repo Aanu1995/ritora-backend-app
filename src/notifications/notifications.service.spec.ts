@@ -159,6 +159,7 @@ describe('NotificationsService', () => {
       reaction_alerts_enabled: true,
       simplification_alerts_enabled: true,
       insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
       wrapped_alerts_enabled: true,
       photo_tutorial_completed: false,
     });
@@ -181,6 +182,7 @@ describe('NotificationsService', () => {
       reaction_alerts_enabled: true,
       simplification_alerts_enabled: true,
       insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
       wrapped_alerts_enabled: true,
       photo_tutorial_completed: false,
     });
@@ -245,12 +247,14 @@ describe('NotificationsService', () => {
         channels: ['in_app'],
       },
     ]);
-    users.findOne.mockResolvedValue({
-      id: 'user-1',
-      email: 'a@example.com',
-      time_zone: 'UTC',
-      preferred_language: 'en',
-    });
+    users.find.mockResolvedValue([
+      {
+        id: 'user-1',
+        email: 'a@example.com',
+        time_zone: 'UTC',
+        preferred_language: 'en',
+      },
+    ]);
     entries.count.mockResolvedValue(0);
     notifications.count.mockResolvedValue(0);
 
@@ -262,6 +266,8 @@ describe('NotificationsService', () => {
         user_id: 'user-1',
       }),
     );
+    expect(users.find).toHaveBeenCalledTimes(1);
+    expect(users.findOne).not.toHaveBeenCalled();
   });
 
   it('falls back safely when a stored user timezone is invalid', async () => {
@@ -273,12 +279,14 @@ describe('NotificationsService', () => {
         channels: ['in_app'],
       },
     ]);
-    users.findOne.mockResolvedValue({
-      id: 'user-1',
-      email: 'a@example.com',
-      time_zone: 'Not/AZone',
-      preferred_language: 'en',
-    });
+    users.find.mockResolvedValue([
+      {
+        id: 'user-1',
+        email: 'a@example.com',
+        time_zone: 'Not/AZone',
+        preferred_language: 'en',
+      },
+    ]);
     entries.count.mockResolvedValue(0);
     notifications.count.mockResolvedValue(0);
 
@@ -292,5 +300,44 @@ describe('NotificationsService', () => {
         user_id: 'user-1',
       }),
     );
+  });
+
+  it('loads photo reminder users once per preference batch', async () => {
+    preferences.find.mockResolvedValue([
+      {
+        user_id: 'user-1',
+        photo_reminder_enabled: true,
+        photo_reminder_local_time: '08:00:00',
+        channels: ['in_app'],
+      },
+      {
+        user_id: 'user-2',
+        photo_reminder_enabled: true,
+        photo_reminder_local_time: '08:00:00',
+        channels: ['in_app'],
+      },
+    ]);
+    users.find.mockResolvedValue([
+      {
+        id: 'user-1',
+        email: 'one@example.com',
+        time_zone: 'UTC',
+        preferred_language: 'en',
+      },
+      {
+        id: 'user-2',
+        email: 'two@example.com',
+        time_zone: 'UTC',
+        preferred_language: 'en',
+      },
+    ]);
+    entries.count.mockResolvedValue(0);
+    notifications.count.mockResolvedValue(0);
+
+    await service.runPhotoReminderSweep(new Date('2026-04-29T08:05:00.000Z'));
+
+    expect(users.find).toHaveBeenCalledTimes(1);
+    expect(users.findOne).not.toHaveBeenCalled();
+    expect(notifications.save).toHaveBeenCalledTimes(2);
   });
 });

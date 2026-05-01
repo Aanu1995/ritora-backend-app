@@ -31,6 +31,7 @@
     "ingredients:seed": "npm run build && node dist/scripts/seed-ingredients.js",
     "skin-journal:seed": "npm run build && node dist/scripts/seed-skin-journal.js",
     "skin-journal:analysis-worker": "npm run build && node dist/scripts/start-skin-journal-analysis-worker.js",
+    "skin-journal:insight-worker": "npm run build && node dist/scripts/start-skin-journal-insight-worker.js",
     "skin-journal:analysis-evaluate": "npm run build && node dist/scripts/evaluate-skin-journal-analysis.js"
   },
   "dependencies": {
@@ -65,7 +66,8 @@
     "sharp": "^0.34.5",
     "swagger-ui-express": "^5.0.1",
     "typeorm": "^0.3.28",
-    "ulid": "^3.0.2"
+    "ulid": "^3.0.2",
+    "zod": "^4.4.1"
   },
   "overrides": {
     "fast-xml-parser": "5.7.0"

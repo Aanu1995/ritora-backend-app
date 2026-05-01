@@ -85,13 +85,72 @@ describe('skin journal insight detectors', () => {
     const candidates = buildDeterministicInsights(entries.reverse());
 
     expect(candidates.map((candidate) => candidate.kind)).toEqual([
+      'onboarding_progress',
       'daily',
       'weekly',
     ]);
-    expect(candidates[0]).toMatchObject({
+    expect(candidates[1]).toMatchObject({
       kind: 'daily',
-      related_entry_ids: ['entry-3'],
+      source_entry_ids: ['entry-3'],
+      headline: {
+        key: 'journal.insightsTab.headlines.daily',
+      },
     });
+    expect(candidates[1]).toHaveProperty('blocks');
+    expect(candidates[1]).not.toHaveProperty('summary');
+    expect(candidates[1]).not.toHaveProperty('supporting_data');
+  });
+
+  it('emits trusted-source citations and evidence blocks for claim-bearing insights', () => {
+    const entries = Array.from({ length: 8 }, (_, index) =>
+      entry(
+        `entry-${index + 1}`,
+        `2026-04-${String(index + 1).padStart(2, '0')}`,
+        {
+          ratings: {
+            breakouts: index < 4 ? 4 : 2,
+            redness: 2,
+          },
+        },
+      ),
+    );
+
+    const candidates = buildDeterministicInsights(entries.reverse());
+    const trend = candidates.find((candidate) => candidate.kind === 'trend');
+
+    expect(trend).toBeDefined();
+    expect(trend?.referenced_kb_ids).toContain('derm_6_8_week_acne_window');
+    expect(trend?.blocks.map((block) => block.type)).toEqual(
+      expect.arrayContaining(['evidence_grade', 'sparkline', 'metric_delta']),
+    );
+    expect(trend?.insight_signature).toMatch(/^trend:/);
+    expect(trend?.headline.values).toMatchObject({ concern: 'breakouts' });
+  });
+
+  it('can disable AI sourced summary and pattern candidates', () => {
+    const entries = Array.from({ length: 14 }, (_, index) =>
+      entry(
+        `entry-${index + 1}`,
+        `2026-04-${String(index + 1).padStart(2, '0')}`,
+        {
+          ratings: {
+            breakouts: 2,
+            redness: 2,
+          },
+          recent_change:
+            index === 3 || index === 9 ? { kind: 'travelled' } : null,
+        },
+      ),
+    );
+
+    const candidates = buildDeterministicInsights(entries.reverse(), {
+      aiSummaryEnabled: false,
+      aiPatternEnabled: false,
+    });
+    const kinds = candidates.map((candidate) => candidate.kind);
+
+    expect(kinds).not.toContain('ai_summary');
+    expect(kinds).not.toContain('ai_pattern');
   });
 
   it('finds the strongest worsening rating change', () => {
