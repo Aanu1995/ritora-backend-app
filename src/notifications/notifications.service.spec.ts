@@ -270,6 +270,39 @@ describe('NotificationsService', () => {
     expect(users.findOne).not.toHaveBeenCalled();
   });
 
+  it('deduplicates photo reminders by the user local day instead of the UTC day', async () => {
+    preferences.find.mockResolvedValue([
+      {
+        user_id: 'user-1',
+        photo_reminder_enabled: true,
+        photo_reminder_local_time: '17:00:00',
+        channels: ['in_app'],
+      },
+    ]);
+    users.find.mockResolvedValue([
+      {
+        id: 'user-1',
+        email: 'a@example.com',
+        time_zone: 'America/Los_Angeles',
+        preferred_language: 'en',
+      },
+    ]);
+    entries.count.mockResolvedValue(0);
+    notifications.count.mockResolvedValue(1);
+
+    await service.runPhotoReminderSweep(new Date('2026-04-29T00:05:00.000Z'));
+
+    const createdAt = notifications.count.mock.calls[0]?.[0]?.where
+      ?.created_at as { _value?: [Date, Date] };
+    expect(createdAt._value?.[0].toISOString()).toBe(
+      '2026-04-28T07:00:00.000Z',
+    );
+    expect(createdAt._value?.[1].toISOString()).toBe(
+      '2026-04-29T06:59:59.999Z',
+    );
+    expect(notifications.save).not.toHaveBeenCalled();
+  });
+
   it('falls back safely when a stored user timezone is invalid', async () => {
     preferences.find.mockResolvedValue([
       {

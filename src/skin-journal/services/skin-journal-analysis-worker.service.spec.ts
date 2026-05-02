@@ -108,4 +108,37 @@ describe('SkinJournalAnalysisWorkerService', () => {
     expect(queue.extendMessageVisibility).toHaveBeenCalledWith('receipt-1');
     expect(queue.deleteMessage).toHaveBeenCalledWith('receipt-1');
   });
+
+  it('does not schedule another poll after shutdown while a poll is in flight', async () => {
+    jest.useFakeTimers();
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    let resolveClaim!: (job: null) => void;
+    queue.getDriver.mockReturnValue('database');
+    queue.claimNextDatabaseJob.mockReturnValue(
+      new Promise<null>((resolve) => {
+        resolveClaim = resolve;
+      }),
+    );
+    const worker = new SkinJournalAnalysisWorkerService(
+      queue as unknown as SkinJournalAnalysisQueueService,
+      journal as unknown as SkinJournalService,
+    );
+
+    try {
+      worker.onModuleInit();
+      await jest.advanceTimersByTimeAsync(1);
+
+      expect(queue.claimNextDatabaseJob).toHaveBeenCalledTimes(1);
+
+      worker.onModuleDestroy();
+      resolveClaim(null);
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(6000);
+
+      expect(queue.claimNextDatabaseJob).toHaveBeenCalledTimes(1);
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
 });

@@ -3,12 +3,15 @@ import { SkinJournalInsightSchedulerService } from './skin-journal-insight-sched
 
 describe('SkinJournalInsightSchedulerService', () => {
   it('evaluates only users with dirty insight state', async () => {
-    const getRawMany = jest
-      .fn()
-      .mockResolvedValue([{ user_id: 'user-1' }, { user_id: 'user-2' }]);
+    const getRawMany = jest.fn().mockResolvedValue([
+      { user_id: 'user-1', preferred_language: 'sv' },
+      { user_id: 'user-2', preferred_language: 'en' },
+    ]);
     const states = {
       createQueryBuilder: jest.fn(() => ({
         select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
@@ -26,8 +29,14 @@ describe('SkinJournalInsightSchedulerService', () => {
     const queued = await scheduler.runScheduledInsightSweep();
 
     expect(queued).toBe(2);
-    expect(journal.generateInsightsIfNeeded).toHaveBeenCalledWith('user-1');
-    expect(journal.generateInsightsIfNeeded).toHaveBeenCalledWith('user-2');
+    expect(journal.generateInsightsIfNeeded).toHaveBeenCalledWith(
+      'user-1',
+      'sv',
+    );
+    expect(journal.generateInsightsIfNeeded).toHaveBeenCalledWith(
+      'user-2',
+      'en',
+    );
     expect(states.createQueryBuilder).toHaveBeenCalledWith('state');
   });
 });

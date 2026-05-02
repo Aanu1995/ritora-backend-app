@@ -21,6 +21,7 @@ export class SkinJournalMediaRetentionService
 {
   private readonly logger = new Logger(SkinJournalMediaRetentionService.name);
   private verifyTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = true;
 
   constructor(
     @InjectRepository(SkinJournalMediaDeletionJob)
@@ -32,10 +33,12 @@ export class SkinJournalMediaRetentionService
     if (process.env.NODE_ENV === 'test') {
       return;
     }
+    this.stopped = false;
     this.scheduleVerification(SKIN_JOURNAL_MEDIA_DELETION_VERIFY_DELAY_MS);
   }
 
   onModuleDestroy(): void {
+    this.stopped = true;
     if (this.verifyTimer) {
       clearTimeout(this.verifyTimer);
       this.verifyTimer = null;
@@ -126,6 +129,9 @@ export class SkinJournalMediaRetentionService
     if (process.env.NODE_ENV === 'test') {
       return;
     }
+    if (this.stopped) {
+      return;
+    }
     if (this.verifyTimer) {
       clearTimeout(this.verifyTimer);
       this.verifyTimer = null;
@@ -141,9 +147,11 @@ export class SkinJournalMediaRetentionService
           );
         })
         .finally(() =>
-          this.scheduleVerification(
-            SKIN_JOURNAL_MEDIA_DELETION_VERIFY_INTERVAL_MS,
-          ),
+          this.stopped
+            ? undefined
+            : this.scheduleVerification(
+                SKIN_JOURNAL_MEDIA_DELETION_VERIFY_INTERVAL_MS,
+              ),
         );
     }, delayMs);
     this.verifyTimer.unref?.();

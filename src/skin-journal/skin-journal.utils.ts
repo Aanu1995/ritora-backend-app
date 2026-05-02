@@ -7,7 +7,10 @@ import type { WrappedPeriodKind } from './skin-journal.constants';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export function todayInTimeZone(timeZone: string | null | undefined): string {
+export function todayInTimeZone(
+  timeZone: string | null | undefined,
+  date: Date = new Date(),
+): string {
   const tz = resolveSkinJournalTimeZone(timeZone);
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
@@ -15,7 +18,7 @@ export function todayInTimeZone(timeZone: string | null | undefined): string {
     month: '2-digit',
     day: '2-digit',
   });
-  return formatter.format(new Date());
+  return formatter.format(date);
 }
 
 export function resolveSkinJournalTimeZone(

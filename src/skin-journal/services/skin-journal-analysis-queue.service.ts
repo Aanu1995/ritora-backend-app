@@ -79,6 +79,7 @@ export class SkinJournalAnalysisQueueService
   private readonly backoffMaxSeconds: number;
   private dispatchTimer: ReturnType<typeof setTimeout> | null = null;
   private analysisJobTableReady: boolean | null = null;
+  private stopped = false;
 
   constructor(
     @InjectRepository(SkinJournalAnalysisJob)
@@ -110,6 +111,7 @@ export class SkinJournalAnalysisQueueService
   }
 
   async onModuleInit(): Promise<void> {
+    this.stopped = false;
     if (!(await this.ensureAnalysisJobTableReady())) {
       return;
     }
@@ -119,6 +121,7 @@ export class SkinJournalAnalysisQueueService
   }
 
   onModuleDestroy(): void {
+    this.stopped = true;
     if (this.dispatchTimer) {
       clearTimeout(this.dispatchTimer);
       this.dispatchTimer = null;
@@ -520,6 +523,9 @@ export class SkinJournalAnalysisQueueService
   }
 
   private scheduleDispatch(): void {
+    if (this.stopped) {
+      return;
+    }
     if (this.driver !== 'sqs') {
       return;
     }

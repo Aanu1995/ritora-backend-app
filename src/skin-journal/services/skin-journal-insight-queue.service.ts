@@ -77,6 +77,7 @@ export class SkinJournalInsightQueueService
     SKIN_JOURNAL_INSIGHT_JOB_BACKOFF_MAX_SECONDS;
   private dispatchTimer: ReturnType<typeof setTimeout> | null = null;
   private insightJobTableReady: boolean | null = null;
+  private stopped = false;
 
   constructor(
     @InjectRepository(SkinJournalInsightJob)
@@ -101,6 +102,7 @@ export class SkinJournalInsightQueueService
   }
 
   async onModuleInit(): Promise<void> {
+    this.stopped = false;
     if (!(await this.ensureInsightJobTableReady())) {
       return;
     }
@@ -110,6 +112,7 @@ export class SkinJournalInsightQueueService
   }
 
   onModuleDestroy(): void {
+    this.stopped = true;
     if (this.dispatchTimer) {
       clearTimeout(this.dispatchTimer);
       this.dispatchTimer = null;
@@ -505,6 +508,9 @@ export class SkinJournalInsightQueueService
   }
 
   private scheduleDispatch(): void {
+    if (this.stopped) {
+      return;
+    }
     if (this.driver !== 'sqs') {
       return;
     }

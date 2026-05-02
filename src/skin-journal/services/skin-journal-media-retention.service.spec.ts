@@ -113,4 +113,37 @@ describe('SkinJournalMediaRetentionService', () => {
       }),
     );
   });
+
+  it('does not reschedule deletion verification after shutdown', async () => {
+    jest.useFakeTimers();
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    let resolveFind!: (jobs: SkinJournalMediaDeletionJob[]) => void;
+    jobs.find.mockReturnValue(
+      new Promise<SkinJournalMediaDeletionJob[]>((resolve) => {
+        resolveFind = resolve;
+      }),
+    );
+    const service = new SkinJournalMediaRetentionService(
+      jobs as never,
+      photoStorage as unknown as SkinJournalPhotoStorageService,
+    );
+
+    try {
+      service.onModuleInit();
+      await jest.advanceTimersByTimeAsync(300000);
+
+      expect(jobs.find).toHaveBeenCalledTimes(1);
+
+      service.onModuleDestroy();
+      resolveFind([]);
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(3600000);
+
+      expect(jobs.find).toHaveBeenCalledTimes(1);
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      jest.useRealTimers();
+    }
+  });
 });

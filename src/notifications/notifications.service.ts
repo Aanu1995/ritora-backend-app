@@ -6,6 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { Temporal } from '@js-temporal/polyfill';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Between,
@@ -280,18 +281,19 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (!isReminderDue(now, timeZone, pref.photo_reminder_local_time)) {
       return;
     }
-    const localDate = todayInTimeZone(timeZone);
+    const localDate = todayInTimeZone(timeZone, now);
     const existingEntryCount = await this.entries.count({
       where: { user_id: pref.user_id, entry_date: localDate },
     });
     if (existingEntryCount > 0) {
       return;
     }
+    const localReminderWindow = localDayUtcRange(localDate, timeZone);
     const duplicateCount = await this.notifications.count({
       where: {
         user_id: pref.user_id,
         kind: 'photo_reminder',
-        created_at: Between(startOfUtcDay(now), endOfUtcDay(now)),
+        created_at: Between(localReminderWindow.start, localReminderWindow.end),
       },
     });
     if (duplicateCount > 0) {
@@ -443,14 +445,22 @@ function minutesInTimeZone(date: Date, timeZone: string): number {
   return hour * 60 + minute;
 }
 
-function startOfUtcDay(date: Date): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-  );
-}
-
-function endOfUtcDay(date: Date): Date {
-  return new Date(startOfUtcDay(date).getTime() + 24 * 60 * 60 * 1000 - 1);
+function localDayUtcRange(
+  localDate: string,
+  timeZone: string,
+): { start: Date; end: Date } {
+  const startZonedDateTime = Temporal.PlainDate.from(localDate)
+    .toPlainDateTime(Temporal.PlainTime.from('00:00'))
+    .toZonedDateTime(timeZone);
+  const start = startZonedDateTime.toInstant();
+  const end = startZonedDateTime
+    .add({ days: 1 })
+    .toInstant()
+    .subtract({ milliseconds: 1 });
+  return {
+    start: new Date(start.epochMilliseconds),
+    end: new Date(end.epochMilliseconds),
+  };
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

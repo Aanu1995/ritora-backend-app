@@ -1614,7 +1614,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async generateInsightsIfNeeded(userId: string): Promise<boolean> {
+  async generateInsightsIfNeeded(
+    userId: string,
+    locale = 'en',
+  ): Promise<boolean> {
     const snapshot = await this.buildInsightInputSnapshot(userId);
     if (!snapshot) {
       await this.updateInsightStateAfterSchedulerCheck(userId, null, 0);
@@ -1646,7 +1649,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     await this.enqueueInsightGeneration(
       userId,
       'scheduled_refresh',
-      'en',
+      locale,
       snapshot.signature,
     );
     return true;

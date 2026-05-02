@@ -24,6 +24,7 @@ export class SkinJournalAnalysisWorkerService
   private readonly enabled: boolean;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private polling = false;
+  private stopped = true;
 
   constructor(
     private readonly queue: SkinJournalAnalysisQueueService,
@@ -34,11 +35,13 @@ export class SkinJournalAnalysisWorkerService
 
   onModuleInit(): void {
     if (this.enabled) {
+      this.stopped = false;
       this.schedulePoll(0);
     }
   }
 
   onModuleDestroy(): void {
+    this.stopped = true;
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
@@ -110,6 +113,9 @@ export class SkinJournalAnalysisWorkerService
   }
 
   private schedulePoll(delayMs: number): void {
+    if (this.stopped) {
+      return;
+    }
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
@@ -120,7 +126,7 @@ export class SkinJournalAnalysisWorkerService
           this.logger.error('Skin journal analysis worker poll failed', error);
         })
         .finally(() => {
-          if (this.enabled) {
+          if (this.enabled && !this.stopped) {
             this.schedulePoll(SKIN_JOURNAL_ANALYSIS_JOB_POLL_INTERVAL_MS);
           }
         });

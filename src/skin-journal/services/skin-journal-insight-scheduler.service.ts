@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { User } from '../../users/entities/user.entity';
 import { SkinJournalInsightState } from '../entities/skin-journal-insight-state.entity';
 import { SkinJournalService } from '../skin-journal.service';
 
@@ -52,16 +53,19 @@ export class SkinJournalInsightSchedulerService
     const rows = await this.states
       .createQueryBuilder('state')
       .select('state.user_id', 'user_id')
+      .addSelect('user.preferred_language', 'preferred_language')
+      .leftJoin(User, 'user', 'user.id = state.user_id')
       .where('state.dirty_since IS NOT NULL')
       .orderBy('state.dirty_since', 'ASC')
       .limit(INSIGHT_SCHEDULER_BATCH_SIZE)
-      .getRawMany<{ user_id: string }>();
+      .getRawMany<{ user_id: string; preferred_language: string | null }>();
 
     let queued = 0;
     for (const row of rows) {
       try {
         const didQueue = await this.journal.generateInsightsIfNeeded(
           row.user_id,
+          row.preferred_language ?? 'en',
         );
         if (didQueue) {
           queued += 1;
