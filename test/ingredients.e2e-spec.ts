@@ -8,7 +8,12 @@ import {
   Quantity,
   ShelfStatus,
 } from '../src/shelf/shelf.types';
-import { createTestApp, MockMailService, truncateTables } from './test-setup';
+import {
+  createCompletedSkinProfile,
+  createTestApp,
+  MockMailService,
+  truncateTables,
+} from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
 const TEST_USER = {
@@ -128,6 +133,7 @@ describe('Ingredients (e2e)', () => {
       .expect(200);
 
     accessToken = getAccessTokenFromResponse(loginResponse);
+    await createCompletedSkinProfile(app, accessToken);
 
     const retinolRes = await request(app.getHttpServer())
       .post('/api/v1/inventory/products')

@@ -1,12 +1,21 @@
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { IngredientCatalogService } from '../src/ingredients/ingredient-catalog.service';
 import { IngredientsSeeder } from '../src/ingredients/seed/ingredients-seeder';
 import { MailService } from '../src/mail/mail.service';
+import {
+  ApplicationMethod,
+  DataProvenance,
+  PreferredTimeOfDay,
+  ProductCategory,
+  Quantity,
+  ShelfStatus,
+} from '../src/shelf/shelf.types';
 
 type TestAppProviderOverride = {
   provider: unknown;
@@ -114,4 +123,111 @@ export async function truncateTables(app: INestApplication): Promise<void> {
   if (tableNames.length > 0) {
     await dataSource.query(`TRUNCATE TABLE ${tableNames} CASCADE`);
   }
+}
+
+export async function createCompletedSkinProfile(
+  app: INestApplication,
+  accessToken: string,
+): Promise<void> {
+  await request(app.getHttpServer())
+    .post('/api/v1/skin-profile')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .set('Origin', 'http://localhost:3000')
+    .send({
+      skinType: 'oily',
+      skinTone: 'medium',
+      fitzpatrickPhototype: 'IV',
+      dateOfBirth: '1992-04-15',
+      sexAtBirth: 'female',
+      ethnicity: 'black',
+      currentConcerns: ['acne', 'dark_marks'],
+      primaryGoal: 'acne',
+      concernDetails: {
+        per_concern: [
+          { concern: 'acne', severity: 'moderate', priority: 1 },
+          { concern: 'dark_marks', severity: 'mild', priority: 2 },
+        ],
+      },
+      skinBehavior: {
+        pih_tendency: 'often',
+        melasma_tendency: 'never',
+        keloid_tendency: 'never',
+        sunscreen_habit: 'most_days',
+        sunscreen_tolerance: 'fine',
+      },
+      routinePreferences: {
+        pace: 'cautious',
+        fragrance_free: true,
+        non_comedogenic: true,
+        sunscreen_filter: 'hybrid',
+        sunscreen_finish: 'natural',
+      },
+      budgetTier: 'mid',
+      allowSmartPicks: true,
+      countryCode: 'SE',
+      city: 'Stockholm',
+      locationConsent: true,
+    })
+    .expect(201);
+}
+
+export async function createTestInventoryProduct(
+  app: INestApplication,
+  accessToken: string,
+): Promise<string> {
+  const response = await request(app.getHttpServer())
+    .post('/api/v1/inventory/products')
+    .set('Authorization', `Bearer ${accessToken}`)
+    .set('Origin', 'http://localhost:3000')
+    .send({
+      identity: {
+        brand: 'Ritora',
+        name: 'Schedule Fixture Moisturizer',
+        category: ProductCategory.Moisturizer,
+        barcode: null,
+        imageUrls: ['https://cdn.example.com/product-images/fixture.webp'],
+        sizeMl: 50,
+        description: 'Fixture product used to unlock schedule creation.',
+        benefits: ['barrier support'],
+        suitedFor: ['all'],
+        inciIngredients: ['Water', 'Glycerin'],
+        inciLastConfirmedAt: new Date().toISOString(),
+      },
+      guidance: {
+        applicationMethod: ApplicationMethod.Fingertips,
+        quantity: Quantity.PeaSize,
+        steps: ['Apply to clean skin.'],
+        cautions: [],
+        waitMinutes: 1,
+      },
+      manufacturer: {
+        brand: 'Ritora',
+        parentCompany: null,
+        countryOfOrigin: 'SE',
+        countryOfManufacture: 'SE',
+        supportEmail: 'support@example.com',
+        productUrl: 'https://example.com/products/schedule-fixture',
+        websiteUrl: 'https://example.com',
+      },
+      userFields: {
+        openedAt: new Date().toISOString(),
+        expiresAt: null,
+        periodAfterOpeningMonths: 12,
+        pricePaid: 20,
+        pricePaidCurrency: 'USD',
+        purchasedFrom: 'Test',
+        personalNotes: null,
+        preferredTimeOfDay: PreferredTimeOfDay.Evening,
+      },
+      status: ShelfStatus.Active,
+      provenance: DataProvenance.PhotoLookup,
+    })
+    .expect(201);
+
+  const body = response.body as { id?: unknown };
+  if (typeof body.id !== 'string') {
+    throw new Error('Fixture inventory product response did not include id');
+  }
+
+  return body.id;
 }

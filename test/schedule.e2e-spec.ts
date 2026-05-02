@@ -1,6 +1,12 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, MockMailService, truncateTables } from './test-setup';
+import {
+  createCompletedSkinProfile,
+  createTestApp,
+  createTestInventoryProduct,
+  MockMailService,
+  truncateTables,
+} from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
 
@@ -95,6 +101,9 @@ describe('Schedule (e2e)', () => {
 
     accessToken = loginResponse.body.accessToken;
     expect(accessToken).toBeDefined();
+
+    await createCompletedSkinProfile(app, accessToken);
+    await createTestInventoryProduct(app, accessToken);
   });
 
   afterAll(async () => {

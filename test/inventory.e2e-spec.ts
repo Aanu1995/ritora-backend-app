@@ -15,7 +15,12 @@ import {
   type ManufacturerInfo,
   type UserFields,
 } from '../src/shelf/shelf.types';
-import { createTestApp, MockMailService, truncateTables } from './test-setup';
+import {
+  createCompletedSkinProfile,
+  createTestApp,
+  MockMailService,
+  truncateTables,
+} from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
 const TEST_USER = {
@@ -297,6 +302,7 @@ describe('Inventory (e2e)', () => {
       .expect(200);
 
     accessToken = getAccessTokenFromResponse(loginResponse);
+    await createCompletedSkinProfile(app, accessToken);
   });
 
   afterAll(async () => {
