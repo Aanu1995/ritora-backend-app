@@ -180,16 +180,8 @@ export const envValidationSchema = Joi.object({
   }),
   EMAIL_VERIFICATION_EXPIRY: Joi.string().trim().required(),
   PASSWORD_RESET_EXPIRY: Joi.string().trim().required(),
-  GOOGLE_CLIENT_ID: Joi.when('NODE_ENV', {
-    is: 'production',
-    then: Joi.string().trim().min(1).required(),
-    otherwise: Joi.string().trim().allow('').required(),
-  }),
-  GOOGLE_CLIENT_SECRET: Joi.when('NODE_ENV', {
-    is: 'production',
-    then: Joi.string().trim().min(1).required(),
-    otherwise: Joi.string().trim().allow('').required(),
-  }),
+  GOOGLE_CLIENT_ID: Joi.string().trim().min(1).required(),
+  GOOGLE_CLIENT_SECRET: Joi.string().trim().min(1).required(),
   GOOGLE_CALLBACK_URL: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string()
@@ -201,26 +193,10 @@ export const envValidationSchema = Joi.object({
       .uri({ scheme: ['http', 'https'] })
       .required(),
   }),
-  APPLE_CLIENT_ID: Joi.when('NODE_ENV', {
-    is: 'production',
-    then: Joi.string().trim().min(1).required(),
-    otherwise: Joi.string().trim().allow('').required(),
-  }),
-  APPLE_TEAM_ID: Joi.when('NODE_ENV', {
-    is: 'production',
-    then: Joi.string().trim().min(1).required(),
-    otherwise: Joi.string().trim().allow('').required(),
-  }),
-  APPLE_KEY_ID: Joi.when('NODE_ENV', {
-    is: 'production',
-    then: Joi.string().trim().min(1).required(),
-    otherwise: Joi.string().trim().allow('').required(),
-  }),
-  APPLE_PRIVATE_KEY: Joi.when('NODE_ENV', {
-    is: 'production',
-    then: Joi.string().trim().min(1).required(),
-    otherwise: Joi.string().allow('').required(),
-  }),
+  APPLE_CLIENT_ID: Joi.string().trim().min(1).required(),
+  APPLE_TEAM_ID: Joi.string().trim().min(1).required(),
+  APPLE_KEY_ID: Joi.string().trim().min(1).required(),
+  APPLE_PRIVATE_KEY: Joi.string().min(1).required(),
   APPLE_CALLBACK_URL: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string()

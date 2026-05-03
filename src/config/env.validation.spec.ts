@@ -41,13 +41,14 @@ function developmentEnv(
     BCRYPT_SALT_ROUNDS: 12,
     EMAIL_VERIFICATION_EXPIRY: '24h',
     PASSWORD_RESET_EXPIRY: '1h',
-    GOOGLE_CLIENT_ID: '',
-    GOOGLE_CLIENT_SECRET: '',
+    GOOGLE_CLIENT_ID: 'dev-google-client-id',
+    GOOGLE_CLIENT_SECRET: 'dev-google-client-secret',
     GOOGLE_CALLBACK_URL: 'http://localhost:3001/api/v1/auth/google/callback',
-    APPLE_CLIENT_ID: '',
-    APPLE_TEAM_ID: '',
-    APPLE_KEY_ID: '',
-    APPLE_PRIVATE_KEY: '',
+    APPLE_CLIENT_ID: 'com.ritora.dev',
+    APPLE_TEAM_ID: 'TEAM123456',
+    APPLE_KEY_ID: 'KEY1234567',
+    APPLE_PRIVATE_KEY:
+      '-----BEGIN PRIVATE KEY-----\\nmock\\n-----END PRIVATE KEY-----',
     APPLE_CALLBACK_URL: 'http://localhost:3001/api/v1/auth/apple/callback',
     RESEND_API_KEY: '',
     OPENAI_API_KEY: '',
@@ -214,6 +215,16 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.value.BCRYPT_SALT_ROUNDS).toBe(4);
+  });
+
+  it('requires OAuth strategy values outside production because Passport needs them at boot', () => {
+    const googleResult = validateEnv(developmentEnv({ GOOGLE_CLIENT_ID: '' }));
+    const appleResult = validateEnv(developmentEnv({ APPLE_CLIENT_ID: '' }));
+
+    expect(googleResult.error).toBeDefined();
+    expect(googleResult.error?.message).toContain('GOOGLE_CLIENT_ID');
+    expect(appleResult.error).toBeDefined();
+    expect(appleResult.error?.message).toContain('APPLE_CLIENT_ID');
   });
 
   it('does not expose Skin Journal product policy constants as env defaults', () => {
