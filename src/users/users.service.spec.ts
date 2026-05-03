@@ -34,14 +34,14 @@ describe('UsersService', () => {
   });
 
   describe('findByEmail', () => {
-    it('finds a user by lowercase email', async () => {
+    it('finds a user by canonical email identity', async () => {
       const user = { id: '01', email: 'test@example.com' } as User;
       repo.findOne.mockResolvedValue(user);
 
-      const result = await service.findByEmail('Test@Example.COM');
+      const result = await service.findByEmail('Test+promo@Example.COM');
 
       expect(repo.findOne).toHaveBeenCalledWith({
-        where: { email: 'test@example.com' },
+        where: { canonical_email: 'test@example.com' },
       });
       expect(result).toEqual(user);
     });
@@ -94,13 +94,18 @@ describe('UsersService', () => {
       const addSelect = jest.fn().mockReturnValue({ where });
       repo.createQueryBuilder.mockReturnValue({ addSelect } as never);
 
-      const result = await service.findByEmailForAuth('Test@Example.COM');
+      const result = await service.findByEmailForAuth(
+        'Test.User+promo@Gmail.COM',
+      );
 
       expect(repo.createQueryBuilder).toHaveBeenCalledWith('user');
       expect(addSelect).toHaveBeenCalledWith('user.password_hash');
-      expect(where).toHaveBeenCalledWith('LOWER(user.email) = :email', {
-        email: 'test@example.com',
-      });
+      expect(where).toHaveBeenCalledWith(
+        'user.canonical_email = :canonicalEmail',
+        {
+          canonicalEmail: 'testuser@gmail.com',
+        },
+      );
       expect(result).toEqual(user);
     });
   });
@@ -123,9 +128,10 @@ describe('UsersService', () => {
   });
 
   describe('create', () => {
-    it('normalizes email to lowercase and trims', async () => {
+    it('stores normalized and canonical email identities', async () => {
       const user = {
         email: 'test@example.com',
+        canonical_email: 'test@example.com',
         first_name: 'Jane',
       } as User;
       repo.create.mockReturnValue(user);
@@ -140,7 +146,84 @@ describe('UsersService', () => {
       });
 
       expect(repo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ email: 'test@example.com' }),
+        expect.objectContaining({
+          email: 'test@example.com',
+          canonical_email: 'test@example.com',
+        }),
+      );
+      expect(result).toEqual(user);
+    });
+
+    it('maps email identity unique violations to a conflict', async () => {
+      repo.create.mockReturnValue({ email: 'test@example.com' } as User);
+      repo.save.mockRejectedValue({
+        code: '23505',
+        constraint: 'idx_users_canonical_email',
+      });
+
+      await expect(
+        service.create({
+          email: 'test+promo@example.com',
+          password_hash: 'hashed',
+          first_name: 'Jane',
+          last_name: 'Doe',
+          preferred_language: 'en',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('createGoogleUser', () => {
+    it('stores the canonical email identity for Google users', async () => {
+      const user = {
+        email: 'john.doe+promo@gmail.com',
+        canonical_email: 'johndoe@gmail.com',
+        google_subject: 'google-subject',
+      } as User;
+      repo.create.mockReturnValue(user);
+      repo.save.mockResolvedValue(user);
+
+      const result = await service.createGoogleUser({
+        email: 'John.Doe+promo@Gmail.COM',
+        google_subject: 'google-subject',
+        first_name: 'John',
+        last_name: 'Doe',
+        preferred_language: 'en',
+      });
+
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'john.doe+promo@gmail.com',
+          canonical_email: 'johndoe@gmail.com',
+        }),
+      );
+      expect(result).toEqual(user);
+    });
+  });
+
+  describe('createAppleUser', () => {
+    it('stores the canonical email identity for Apple users', async () => {
+      const user = {
+        email: 'jane+promo@example.com',
+        canonical_email: 'jane@example.com',
+        apple_subject: 'apple-subject',
+      } as User;
+      repo.create.mockReturnValue(user);
+      repo.save.mockResolvedValue(user);
+
+      const result = await service.createAppleUser({
+        email: 'Jane+promo@Example.COM',
+        apple_subject: 'apple-subject',
+        first_name: 'Jane',
+        last_name: 'Doe',
+        preferred_language: 'en',
+      });
+
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'jane+promo@example.com',
+          canonical_email: 'jane@example.com',
+        }),
       );
       expect(result).toEqual(user);
     });

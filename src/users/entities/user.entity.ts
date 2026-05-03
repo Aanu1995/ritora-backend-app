@@ -24,6 +24,10 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
+  @Index('idx_users_canonical_email', { unique: true })
+  @Column({ type: 'varchar', length: 255 })
+  canonical_email: string;
+
   @Column({ type: 'varchar', length: 255, nullable: true, select: false })
   password_hash: string | null;
 

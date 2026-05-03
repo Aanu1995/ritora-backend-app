@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import {
   buildTimeZonePatch,
+  canonicalizeEmailForIdentity,
   normalizeEmail,
   normalizePreferredLanguage,
   normalizeProfileName,
@@ -18,6 +19,18 @@ type AuthUserLookup = {
   params: Record<string, string>;
 };
 
+type DatabaseError = {
+  code?: unknown;
+  constraint?: unknown;
+};
+
+const POSTGRES_UNIQUE_VIOLATION_CODE = '23505';
+const EMAIL_IDENTITY_UNIQUE_CONSTRAINTS = new Set([
+  'idx_users_canonical_email',
+  'idx_users_email_lower',
+]);
+const EMAIL_IN_USE_MESSAGE = 'Email already in use';
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -27,14 +40,14 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.usersRepository.findOne({
-      where: { email: normalizeEmail(email) },
+      where: { canonical_email: canonicalizeEmailForIdentity(email) },
     });
   }
 
   async findByEmailForAuth(email: string): Promise<User | null> {
     return this.findForAuth({
-      clause: 'LOWER(user.email) = :email',
-      params: { email: normalizeEmail(email) },
+      clause: 'user.canonical_email = :canonicalEmail',
+      params: { canonicalEmail: canonicalizeEmailForIdentity(email) },
     });
   }
 
@@ -79,10 +92,11 @@ export class UsersService {
     email_verification_token_hash?: string;
     email_verification_expires?: Date;
   }): Promise<User> {
-    return this.usersRepository.save(
+    return this.saveCreatedUser(
       this.usersRepository.create({
         ...data,
         email: normalizeEmail(data.email),
+        canonical_email: canonicalizeEmailForIdentity(data.email),
       }),
     );
   }
@@ -94,10 +108,11 @@ export class UsersService {
     last_name: string;
     preferred_language: string;
   }): Promise<User> {
-    return this.usersRepository.save(
+    return this.saveCreatedUser(
       this.usersRepository.create({
         ...data,
         email: normalizeEmail(data.email),
+        canonical_email: canonicalizeEmailForIdentity(data.email),
         password_hash: null,
         email_verified: true,
         email_verification_token_hash: null,
@@ -113,10 +128,11 @@ export class UsersService {
     last_name: string;
     preferred_language: string;
   }): Promise<User> {
-    return this.usersRepository.save(
+    return this.saveCreatedUser(
       this.usersRepository.create({
         ...data,
         email: normalizeEmail(data.email),
+        canonical_email: canonicalizeEmailForIdentity(data.email),
         password_hash: null,
         email_verified: true,
         email_verification_token_hash: null,
@@ -245,4 +261,32 @@ export class UsersService {
     Object.assign(user, data);
     return this.usersRepository.save(user);
   }
+
+  private async saveCreatedUser(user: User): Promise<User> {
+    try {
+      return await this.usersRepository.save(user);
+    } catch (error: unknown) {
+      if (isEmailIdentityUniqueViolation(error)) {
+        throw new ConflictException(EMAIL_IN_USE_MESSAGE);
+      }
+
+      throw error;
+    }
+  }
+}
+
+function isEmailIdentityUniqueViolation(error: unknown): boolean {
+  if (!isDatabaseError(error)) {
+    return false;
+  }
+
+  return (
+    error.code === POSTGRES_UNIQUE_VIOLATION_CODE &&
+    typeof error.constraint === 'string' &&
+    EMAIL_IDENTITY_UNIQUE_CONSTRAINTS.has(error.constraint)
+  );
+}
+
+function isDatabaseError(error: unknown): error is DatabaseError {
+  return typeof error === 'object' && error !== null;
 }

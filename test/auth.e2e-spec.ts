@@ -169,6 +169,15 @@ describe('Auth (e2e)', () => {
       await publicPost('/auth/register', TEST_USER).expect(409);
     });
 
+    it('should reject email aliases as already registered', async () => {
+      const res = await publicPost('/auth/register', {
+        ...TEST_USER,
+        email: 'test+promo@example.com',
+      }).expect(409);
+
+      expect(res.body.message).toBe('Email already in use');
+    });
+
     it('should reject without terms accepted', async () => {
       await publicPost('/auth/register', {
         ...TEST_USER,
