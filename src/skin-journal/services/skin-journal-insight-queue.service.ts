@@ -23,7 +23,6 @@ import {
   SKIN_JOURNAL_INSIGHT_JOB_DISPATCH_INTERVAL_MS,
   SKIN_JOURNAL_INSIGHT_JOB_LOCK_TTL_SECONDS,
   SKIN_JOURNAL_INSIGHT_JOB_MAX_ATTEMPTS,
-  SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER,
   SKIN_JOURNAL_INSIGHT_SQS_VISIBILITY_TIMEOUT_SECONDS,
   SKIN_JOURNAL_INSIGHT_SQS_WAIT_TIME_SECONDS,
   type InsightGenerationTrigger,
@@ -85,18 +84,16 @@ export class SkinJournalInsightQueueService
     private readonly config: ConfigService,
   ) {
     this.driver = this.readQueueDriver();
-    this.queueUrl = this.config.get<string>(
+    this.queueUrl = this.config.getOrThrow<string>(
       'SKIN_JOURNAL_INSIGHT_SQS_QUEUE_URL',
-      '',
     );
-    this.dlqUrl = this.config.get<string>(
+    this.dlqUrl = this.config.getOrThrow<string>(
       'SKIN_JOURNAL_INSIGHT_SQS_DLQ_URL',
-      '',
     );
     this.sqsClient =
       this.driver === 'sqs'
         ? new SQSClient({
-            region: this.config.get<string>('AWS_REGION', 'eu-west-1'),
+            region: this.config.getOrThrow<string>('AWS_REGION'),
           })
         : null;
   }
@@ -723,9 +720,8 @@ export class SkinJournalInsightQueueService
   }
 
   private readQueueDriver(): InsightQueueDriver {
-    const configured = this.config.get<InsightQueueDriver>(
+    const configured = this.config.getOrThrow<InsightQueueDriver>(
       'SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER',
-      SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER,
     );
     return configured === 'sqs' ? 'sqs' : 'database';
   }

@@ -5,11 +5,7 @@ import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { Resend } from 'resend';
 import { type AppLanguage, translate } from '../common/i18n/i18n';
-import {
-  DEFAULT_MAIL_FROM,
-  MailTemplateName,
-  RESEND_CLIENT,
-} from './mail.constants';
+import { MailTemplateName, RESEND_CLIENT } from './mail.constants';
 
 type VerificationTemplateContext = {
   firstName: string;
@@ -61,12 +57,9 @@ export class MailService {
     @Inject(RESEND_CLIENT) private readonly resend: Resend,
     private readonly configService: ConfigService,
   ) {
-    this.webAppUrl = this.configService.get<string>(
-      'WEB_APP_URL',
-      'http://localhost:3000',
-    );
-    this.apiKey = this.configService.get<string>('RESEND_API_KEY', '');
-    this.from = `"Ritora" <${this.configService.get<string>('MAIL_FROM', DEFAULT_MAIL_FROM)}>`;
+    this.webAppUrl = this.configService.getOrThrow<string>('WEB_APP_URL');
+    this.apiKey = this.configService.getOrThrow<string>('RESEND_API_KEY');
+    this.from = `"Ritora" <${this.configService.getOrThrow<string>('MAIL_FROM')}>`;
   }
 
   async sendVerificationEmail(

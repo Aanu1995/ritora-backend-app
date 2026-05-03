@@ -11,6 +11,12 @@ import { MailModule } from '../mail/mail.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthSession } from './entities/auth-session.entity';
+import { AppleOAuthCallbackGuard } from './guards/apple-oauth-callback.guard';
+import { AppleOAuthGuard } from './guards/apple-oauth.guard';
+import { GoogleOAuthCallbackGuard } from './guards/google-oauth-callback.guard';
+import { GoogleOAuthGuard } from './guards/google-oauth.guard';
+import { AppleStrategy } from './strategies/apple.strategy';
+import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -19,10 +25,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
+        secret: configService.getOrThrow<string>('JWT_SECRET'),
         signOptions: {
-          issuer: configService.get<string>('JWT_ISSUER', 'ritora'),
-          audience: configService.get<string>('JWT_AUDIENCE', 'ritora-web'),
+          issuer: configService.getOrThrow<string>('JWT_ISSUER'),
+          audience: configService.getOrThrow<string>('JWT_AUDIENCE'),
         },
       }),
     }),
@@ -32,6 +38,15 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     SkinJournalModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [
+    AuthService,
+    AppleOAuthGuard,
+    AppleOAuthCallbackGuard,
+    GoogleOAuthGuard,
+    GoogleOAuthCallbackGuard,
+    AppleStrategy,
+    GoogleStrategy,
+    JwtStrategy,
+  ],
 })
 export class AuthModule {}

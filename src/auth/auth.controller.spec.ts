@@ -7,6 +7,8 @@ import { ConfigService } from '@nestjs/config';
 const mockAuthService = () => ({
   register: jest.fn(),
   login: jest.fn(),
+  loginWithGoogle: jest.fn(),
+  loginWithApple: jest.fn(),
   refreshTokens: jest.fn(),
   verifyEmail: jest.fn(),
   resendVerification: jest.fn(),
@@ -24,13 +26,15 @@ const mockAuthService = () => ({
 const mockRes = () => ({
   cookie: jest.fn(),
   clearCookie: jest.fn(),
+  redirect: jest.fn(),
 });
 
 type MockRequest = Pick<Request, 'ip' | 'headers'> & {
   cookies: Record<string, string>;
+  user?: unknown;
 };
 
-type MockResponse = Pick<Response, 'cookie' | 'clearCookie'>;
+type MockResponse = Pick<Response, 'cookie' | 'clearCookie' | 'redirect'>;
 
 const mockReq = (overrides: Record<string, unknown> = {}) =>
   ({
@@ -43,6 +47,11 @@ const mockReq = (overrides: Record<string, unknown> = {}) =>
 const asRequest = (request: MockRequest): Request =>
   request as unknown as Request;
 
+const asOAuthRequest = (
+  request: MockRequest,
+): Parameters<AuthController['completeGoogleOAuth']>[0] =>
+  request as unknown as Parameters<AuthController['completeGoogleOAuth']>[0];
+
 const asResponse = (response: MockResponse): Response =>
   response as unknown as Response;
 
@@ -53,6 +62,14 @@ describe('AuthController', () => {
 
   beforeEach(async () => {
     authService = mockAuthService();
+    const configValues: Record<string, unknown> = {
+      CORS_ORIGINS: 'http://localhost:3000',
+      WEB_APP_URL: 'http://localhost:3000',
+      COOKIE_REFRESH_NAME: cookieName,
+      COOKIE_DOMAIN: '',
+      COOKIE_SECURE: false,
+      COOKIE_SAME_SITE: 'lax',
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
@@ -61,10 +78,12 @@ describe('AuthController', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, def?: unknown) => {
-              if (key === 'WEB_APP_URL') return 'http://localhost:3000';
-              if (key === 'COOKIE_REFRESH_NAME') return cookieName;
-              return def;
+            get: jest.fn((key: string) => configValues[key]),
+            getOrThrow: jest.fn((key: string) => {
+              if (key in configValues) {
+                return configValues[key];
+              }
+              throw new Error(`Missing config ${key}`);
             }),
           },
         },
@@ -120,6 +139,126 @@ describe('AuthController', () => {
         httpOnly: false,
         path: '/',
       }),
+    );
+  });
+
+  it('google callback creates a session and redirects to post-login', async () => {
+    const res = mockRes();
+    const authResponse = {
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+    };
+    authService.loginWithGoogle.mockResolvedValue(authResponse);
+    const oauthContext = Buffer.from(
+      JSON.stringify({
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      }),
+    ).toString('base64url');
+    const profile = {
+      provider: 'google',
+      providerSubject: 'google-subject',
+      email: 'test@gmail.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: true,
+    };
+
+    await controller.completeGoogleOAuth(
+      asOAuthRequest(
+        mockReq({
+          user: profile,
+          cookies: {
+            ritora_google_oauth_context: oauthContext,
+          },
+        }),
+      ),
+      asResponse(res),
+    );
+
+    expect(authService.loginWithGoogle).toHaveBeenCalledWith(
+      profile,
+      {
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      },
+      res,
+      '127.0.0.1',
+      'TestAgent',
+    );
+    expect(res.cookie).toHaveBeenCalledWith(
+      'NEXT_LOCALE',
+      'sv',
+      expect.objectContaining({
+        httpOnly: false,
+        path: '/',
+      }),
+    );
+    expect(res.clearCookie).toHaveBeenCalledWith(
+      'ritora_google_oauth_state',
+      expect.objectContaining({ path: '/api/v1/auth/google' }),
+    );
+    expect(res.redirect).toHaveBeenCalledWith(
+      'http://localhost:3000/post-login',
+    );
+  });
+
+  it('apple callback creates a session and redirects to post-login', async () => {
+    const res = mockRes();
+    const authResponse = {
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+    };
+    authService.loginWithApple.mockResolvedValue(authResponse);
+    const oauthContext = Buffer.from(
+      JSON.stringify({
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      }),
+    ).toString('base64url');
+    const profile = {
+      provider: 'apple',
+      providerSubject: 'apple-subject',
+      email: 'user@privaterelay.appleid.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: true,
+    };
+
+    await controller.completeAppleOAuth(
+      asOAuthRequest(
+        mockReq({
+          user: profile,
+          cookies: {
+            ritora_apple_oauth_context: oauthContext,
+          },
+        }),
+      ),
+      asResponse(res),
+    );
+
+    expect(authService.loginWithApple).toHaveBeenCalledWith(
+      profile,
+      {
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      },
+      res,
+      '127.0.0.1',
+      'TestAgent',
+    );
+    expect(res.clearCookie).toHaveBeenCalledWith(
+      'ritora_apple_oauth_state',
+      expect.objectContaining({ path: '/api/v1/auth/apple' }),
+    );
+    expect(res.redirect).toHaveBeenCalledWith(
+      'http://localhost:3000/post-login',
     );
   });
 

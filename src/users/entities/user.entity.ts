@@ -3,6 +3,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   OneToMany,
   PrimaryColumn,
   UpdateDateColumn,
@@ -23,8 +24,22 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
-  @Column({ type: 'varchar', length: 255, select: false })
-  password_hash: string;
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
+  password_hash: string | null;
+
+  @Index('idx_users_google_subject', {
+    unique: true,
+    where: '"google_subject" IS NOT NULL',
+  })
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  google_subject: string | null;
+
+  @Index('idx_users_apple_subject', {
+    unique: true,
+    where: '"apple_subject" IS NOT NULL',
+  })
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  apple_subject: string | null;
 
   @Column({ type: 'varchar', length: 100 })
   first_name: string;

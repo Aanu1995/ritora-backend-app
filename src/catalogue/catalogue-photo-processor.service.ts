@@ -3,8 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import { getNumberConfig } from '../config/config-value.utils';
 import sharp from 'sharp';
 import {
-  CATALOGUE_PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION,
-  CATALOGUE_PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY,
   CATALOGUE_PRODUCT_IMAGE_MAX_DIMENSION,
   CATALOGUE_PRODUCT_IMAGE_WEBP_QUALITY,
 } from './catalogue-media.constants';
@@ -220,12 +218,10 @@ export class CataloguePhotoProcessorService {
       extractionMaxDimension: getNumberConfig(
         this.configService,
         'PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION',
-        CATALOGUE_PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION,
       ),
       extractionQuality: getNumberConfig(
         this.configService,
         'PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY',
-        CATALOGUE_PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY,
       ),
     };
   }

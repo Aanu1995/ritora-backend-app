@@ -474,7 +474,7 @@ export class SkinJournalAnalysisService {
   }
 
   private readCostConfig(key: string): number {
-    const value = this.configService.get<number | string>(key, 0);
+    const value = this.configService.getOrThrow<number | string>(key);
     const parsed =
       typeof value === 'number' ? value : Number.parseFloat(String(value));
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;

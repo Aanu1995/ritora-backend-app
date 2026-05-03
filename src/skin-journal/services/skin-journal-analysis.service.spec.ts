@@ -4,10 +4,20 @@ import { SkinJournalPhotoStorageService } from './skin-journal-photo-storage.ser
 import { SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION } from '../skin-journal.constants';
 
 function config(values: Record<string, string | number | boolean>) {
+  const configValues: Record<string, string | number | boolean> = {
+    SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD: 0,
+    SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD: 0,
+    ...values,
+  };
+
   return {
-    get: jest.fn((key: string, fallback?: string | number | boolean) =>
-      key in values ? values[key] : fallback,
-    ),
+    get: jest.fn((key: string) => configValues[key]),
+    getOrThrow: jest.fn((key: string) => {
+      if (key in configValues) {
+        return configValues[key];
+      }
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 }
 

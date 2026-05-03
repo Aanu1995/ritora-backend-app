@@ -203,9 +203,9 @@ export class TranslationService {
   }
 
   private getSourceLanguage(): string {
-    return (
-      this.configService.get<string>(SOURCE_LANG_ENV_KEY)?.toLowerCase() || 'en'
-    );
+    return this.configService
+      .getOrThrow<string>(SOURCE_LANG_ENV_KEY)
+      .toLowerCase();
   }
 
   private hash(text: string): string {

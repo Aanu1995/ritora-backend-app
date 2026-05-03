@@ -46,6 +46,7 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { AuthSession } from './entities/auth-session.entity';
+import { OAuthIdentityProfile, OAuthProvider } from './oauth/oauth-profile';
 
 type AccountExportConsent = {
   consentType: UserConsentType;
@@ -71,6 +72,20 @@ type AccountExportData = {
   skinJournal: SkinJournalExportPayload | null;
   consents: AccountExportConsent[];
   sessions: AccountExportSession[];
+};
+
+type OAuthProviderConfig = {
+  displayName: string;
+  findBySubject: (subject: string) => Promise<User | null>;
+  readSubject: (user: User) => string | null;
+  linkSubject: (id: string, subject: string) => Promise<User>;
+  createUser: (data: {
+    email: string;
+    subject: string;
+    firstName: string;
+    lastName: string;
+    preferredLanguage: string;
+  }) => Promise<User>;
 };
 
 @Injectable()
@@ -107,28 +122,26 @@ export class AuthService {
     private readonly dataAccessLogService: UserDataAccessLogService,
     private readonly skinJournalService: SkinJournalService,
   ) {
-    this.jwtAccessExpiry = configService.get('JWT_ACCESS_EXPIRY', '15m');
-    this.jwtRefreshExpiry = configService.get('JWT_REFRESH_EXPIRY', '7d');
-    this.jwtIssuer = configService.get('JWT_ISSUER', 'ritora');
-    this.jwtAudience = configService.get('JWT_AUDIENCE', 'ritora-web');
-    this.jwtRefreshSecret = configService.get('JWT_REFRESH_SECRET', '');
-    this.bcryptRounds = configService.get('BCRYPT_SALT_ROUNDS', 12);
-    this.cookieDomain = configService.get('COOKIE_DOMAIN', '');
-    this.cookieSecure = configService.get('COOKIE_SECURE', false);
-    this.cookieSameSite = configService.get('COOKIE_SAME_SITE', 'lax');
-    this.cookieRefreshName = configService.get(
-      'COOKIE_REFRESH_NAME',
-      'ritora_refresh',
-    );
-    this.emailVerificationExpiry = configService.get(
+    this.jwtAccessExpiry = configService.getOrThrow('JWT_ACCESS_EXPIRY');
+    this.jwtRefreshExpiry = configService.getOrThrow('JWT_REFRESH_EXPIRY');
+    this.jwtIssuer = configService.getOrThrow('JWT_ISSUER');
+    this.jwtAudience = configService.getOrThrow('JWT_AUDIENCE');
+    this.jwtRefreshSecret = configService.getOrThrow('JWT_REFRESH_SECRET');
+    this.bcryptRounds = configService.getOrThrow('BCRYPT_SALT_ROUNDS');
+    this.cookieDomain = configService.getOrThrow('COOKIE_DOMAIN');
+    this.cookieSecure = configService.getOrThrow('COOKIE_SECURE');
+    this.cookieSameSite = configService.getOrThrow('COOKIE_SAME_SITE');
+    this.cookieRefreshName = configService.getOrThrow('COOKIE_REFRESH_NAME');
+    this.emailVerificationExpiry = configService.getOrThrow(
       'EMAIL_VERIFICATION_EXPIRY',
-      '24h',
     );
-    this.passwordResetExpiry = configService.get('PASSWORD_RESET_EXPIRY', '1h');
-    this.termsVersion = configService.get('LEGAL_TERMS_VERSION', '1.0.0');
-    this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
-    this.webAppUrl = configService.get('WEB_APP_URL', 'http://localhost:3000');
-    this.nodeEnv = configService.get('NODE_ENV', 'development');
+    this.passwordResetExpiry = configService.getOrThrow(
+      'PASSWORD_RESET_EXPIRY',
+    );
+    this.termsVersion = configService.getOrThrow('LEGAL_TERMS_VERSION');
+    this.privacyVersion = configService.getOrThrow('LEGAL_PRIVACY_VERSION');
+    this.webAppUrl = configService.getOrThrow('WEB_APP_URL');
+    this.nodeEnv = configService.getOrThrow('NODE_ENV');
   }
 
   async register(
@@ -203,7 +216,7 @@ export class AuthService {
     userAgent?: string,
   ): Promise<AuthResponseDto> {
     const user = await this.usersService.findByEmailForAuth(email);
-    if (!user) {
+    if (!user || !user.password_hash) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -222,6 +235,141 @@ export class AuthService {
     const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
     return new AuthResponseDto(accessToken, UserResponseDto.fromEntity(user));
+  }
+
+  async loginWithGoogle(
+    googleProfile: OAuthIdentityProfile,
+    options: {
+      preferredLanguage: string;
+      termsAccepted: boolean;
+      privacyPolicyAccepted: boolean;
+    },
+    res: Response,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResponseDto> {
+    return this.loginWithOAuthProvider(
+      googleProfile,
+      options,
+      res,
+      ip,
+      userAgent,
+    );
+  }
+
+  async loginWithApple(
+    appleProfile: OAuthIdentityProfile,
+    options: {
+      preferredLanguage: string;
+      termsAccepted: boolean;
+      privacyPolicyAccepted: boolean;
+    },
+    res: Response,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResponseDto> {
+    return this.loginWithOAuthProvider(
+      appleProfile,
+      options,
+      res,
+      ip,
+      userAgent,
+    );
+  }
+
+  private async loginWithOAuthProvider(
+    profile: OAuthIdentityProfile,
+    options: {
+      preferredLanguage: string;
+      termsAccepted: boolean;
+      privacyPolicyAccepted: boolean;
+    },
+    res: Response,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResponseDto> {
+    const providerConfig = this.getOAuthProviderConfig(profile.provider);
+    const existingProviderUser = await providerConfig.findBySubject(
+      profile.providerSubject,
+    );
+
+    if (existingProviderUser) {
+      const { accessToken } = await this.createSession(
+        existingProviderUser,
+        res,
+        ip,
+        userAgent,
+      );
+      return new AuthResponseDto(
+        accessToken,
+        UserResponseDto.fromEntity(existingProviderUser),
+      );
+    }
+
+    const existingEmailUser = await this.usersService.findByEmail(
+      profile.email,
+    );
+
+    if (existingEmailUser) {
+      const linkedSubject = providerConfig.readSubject(existingEmailUser);
+      if (linkedSubject && linkedSubject !== profile.providerSubject) {
+        throw new ConflictException(
+          `Email already linked to ${providerConfig.displayName}`,
+        );
+      }
+
+      if (!profile.isEmailAuthoritative) {
+        throw new ConflictException(
+          `Sign in with your password before linking ${providerConfig.displayName}`,
+        );
+      }
+
+      const linkedUser = await providerConfig.linkSubject(
+        existingEmailUser.id,
+        profile.providerSubject,
+      );
+      const { accessToken } = await this.createSession(
+        linkedUser,
+        res,
+        ip,
+        userAgent,
+      );
+
+      return new AuthResponseDto(
+        accessToken,
+        UserResponseDto.fromEntity(linkedUser),
+      );
+    }
+
+    this.assertLegalConsent(
+      options.termsAccepted,
+      options.privacyPolicyAccepted,
+    );
+
+    const createdUser = await providerConfig.createUser({
+      email: profile.email,
+      subject: profile.providerSubject,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      preferredLanguage: normalizeLanguage(options.preferredLanguage),
+    });
+
+    await this.recordConsents(createdUser.id, ip, [
+      { type: UserConsentType.TermsOfService, version: this.termsVersion },
+      { type: UserConsentType.PrivacyPolicy, version: this.privacyVersion },
+    ]);
+
+    const { accessToken } = await this.createSession(
+      createdUser,
+      res,
+      ip,
+      userAgent,
+    );
+
+    return new AuthResponseDto(
+      accessToken,
+      UserResponseDto.fromEntity(createdUser),
+    );
   }
 
   async refreshTokens(
@@ -450,7 +598,9 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    const valid = await compare(password, user.password_hash);
+    const valid = user.password_hash
+      ? await compare(password, user.password_hash)
+      : false;
     if (!valid) {
       throw new UnauthorizedException('Invalid password');
     }
@@ -524,7 +674,9 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    const valid = await compare(password, user.password_hash);
+    const valid = user.password_hash
+      ? await compare(password, user.password_hash)
+      : false;
     if (!valid) {
       throw new UnauthorizedException('Invalid password');
     }
@@ -613,6 +765,26 @@ export class AuthService {
       }),
     );
     await this.consentsRepository.save(entities);
+  }
+
+  private assertLegalConsent(
+    termsAccepted: boolean,
+    privacyPolicyAccepted: boolean,
+  ): void {
+    if (termsAccepted && privacyPolicyAccepted) {
+      return;
+    }
+
+    const message = 'You must accept the terms of service and privacy policy';
+
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      message: [message],
+      fieldErrors: {
+        ...(!termsAccepted ? { termsAccepted: [message] } : {}),
+        ...(!privacyPolicyAccepted ? { privacyPolicyAccepted: [message] } : {}),
+      },
+    });
   }
 
   private async findUserByField(
@@ -720,6 +892,48 @@ export class AuthService {
 
   private sha256(data: string): string {
     return createHash('sha256').update(data).digest('hex');
+  }
+
+  private getOAuthProviderConfig(provider: OAuthProvider): OAuthProviderConfig {
+    if (provider === OAuthProvider.Apple) {
+      return {
+        displayName: 'Apple',
+        findBySubject: (subject) =>
+          this.usersService.findByAppleSubject(subject),
+        readSubject: (user) => user.apple_subject,
+        linkSubject: (id, subject) =>
+          this.usersService.linkAppleSubject(id, subject),
+        createUser: (data) =>
+          this.usersService.createAppleUser({
+            email: data.email,
+            apple_subject: data.subject,
+            first_name: data.firstName,
+            last_name: data.lastName,
+            preferred_language: data.preferredLanguage,
+          }),
+      };
+    }
+
+    if (provider === OAuthProvider.Google) {
+      return {
+        displayName: 'Google',
+        findBySubject: (subject) =>
+          this.usersService.findByGoogleSubject(subject),
+        readSubject: (user) => user.google_subject,
+        linkSubject: (id, subject) =>
+          this.usersService.linkGoogleSubject(id, subject),
+        createUser: (data) =>
+          this.usersService.createGoogleUser({
+            email: data.email,
+            google_subject: data.subject,
+            first_name: data.firstName,
+            last_name: data.lastName,
+            preferred_language: data.preferredLanguage,
+          }),
+      };
+    }
+
+    throw new UnauthorizedException('Unsupported OAuth provider');
   }
 
   private parseRefreshToken(

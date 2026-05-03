@@ -45,18 +45,19 @@ describe('MailService', () => {
       },
     } as unknown as Resend;
 
+    const configValues: Record<string, string> = {
+      WEB_APP_URL: 'http://localhost:3000',
+      MAIL_FROM: 'onboarding@resend.dev',
+      RESEND_API_KEY: 're_test_mock',
+    };
+
     configService = {
-      get: jest.fn((key: string, fallback?: string) => {
-        switch (key) {
-          case 'WEB_APP_URL':
-            return 'http://localhost:3000';
-          case 'MAIL_FROM':
-            return 'onboarding@resend.dev';
-          case 'RESEND_API_KEY':
-            return 're_test_mock';
-          default:
-            return fallback;
+      get: jest.fn((key: string) => configValues[key]),
+      getOrThrow: jest.fn((key: string) => {
+        if (key in configValues) {
+          return configValues[key];
         }
+        throw new Error(`Missing config ${key}`);
       }),
     } as unknown as ConfigService;
   });
@@ -122,18 +123,19 @@ describe('MailService', () => {
   });
 
   it('throws when RESEND_API_KEY is missing', async () => {
+    const configValues: Record<string, string> = {
+      WEB_APP_URL: 'http://localhost:3000',
+      MAIL_FROM: 'onboarding@resend.dev',
+      RESEND_API_KEY: '',
+    };
+
     configService = {
-      get: jest.fn((key: string, fallback?: string) => {
-        switch (key) {
-          case 'WEB_APP_URL':
-            return 'http://localhost:3000';
-          case 'MAIL_FROM':
-            return 'onboarding@resend.dev';
-          case 'RESEND_API_KEY':
-            return '';
-          default:
-            return fallback;
+      get: jest.fn((key: string) => configValues[key]),
+      getOrThrow: jest.fn((key: string) => {
+        if (key in configValues) {
+          return configValues[key];
         }
+        throw new Error(`Missing config ${key}`);
       }),
     } as unknown as ConfigService;
 

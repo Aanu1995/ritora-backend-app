@@ -24,6 +24,7 @@ import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
 import { AuthSession } from './entities/auth-session.entity';
 import { AuthService } from './auth.service';
+import { OAuthProvider } from './oauth/oauth-profile';
 
 function sha256(data: string): string {
   return createHash('sha256').update(data).digest('hex');
@@ -38,8 +39,6 @@ type MockResponse = Pick<Response, 'cookie' | 'clearCookie'>;
 
 const asResponse = (response: MockResponse): Response =>
   response as MockResponse & Response;
-
-type MockConfigValue = string | number | boolean | undefined;
 
 const mockConfigValues: Record<string, string | number | boolean> = {
   JWT_ACCESS_EXPIRY: '15m',
@@ -75,10 +74,16 @@ describe('AuthService', () => {
     usersService = {
       findByEmail: jest.fn(),
       findByEmailForAuth: jest.fn(),
+      findByGoogleSubject: jest.fn(),
+      findByAppleSubject: jest.fn(),
       findById: jest.fn(),
       findByIdForAuth: jest.fn(),
       create: jest.fn(),
+      createGoogleUser: jest.fn(),
+      createAppleUser: jest.fn(),
       update: jest.fn(),
+      linkGoogleSubject: jest.fn(),
+      linkAppleSubject: jest.fn(),
       remove: jest.fn(),
       findByVerificationTokenHash: jest.fn(),
       findByResetTokenHash: jest.fn(),
@@ -133,9 +138,13 @@ describe('AuthService', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, defaultVal?: MockConfigValue) =>
-              key in mockConfigValues ? mockConfigValues[key] : defaultVal,
-            ),
+            get: jest.fn((key: string) => mockConfigValues[key]),
+            getOrThrow: jest.fn((key: string) => {
+              if (key in mockConfigValues) {
+                return mockConfigValues[key];
+              }
+              throw new Error(`Missing config ${key}`);
+            }),
           },
         },
       ],
@@ -157,6 +166,8 @@ describe('AuthService', () => {
       password_reset_token_hash: null,
       password_reset_expires: null,
       preferred_language: 'en',
+      google_subject: null,
+      apple_subject: null,
       created_at: new Date('2024-01-01'),
       updated_at: new Date('2024-01-01'),
       ...overrides,
@@ -303,6 +314,294 @@ describe('AuthService', () => {
         service.login('test@example.com', 'Password1', asResponse(res)),
       ).rejects.toThrow(ForbiddenException);
       expect(res.cookie).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('loginWithGoogle', () => {
+    const googleProfile = {
+      provider: OAuthProvider.Google,
+      providerSubject: 'google-subject-123',
+      email: 'test@example.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: false,
+    };
+    const authoritativeGoogleProfile = {
+      ...googleProfile,
+      email: 'test@gmail.com',
+      isEmailAuthoritative: true,
+    };
+
+    it('creates a verified user, records legal consents, and starts a session for first-time Google sign-in', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        email_verified: true,
+        password_hash: null,
+        google_subject: googleProfile.providerSubject,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+      usersService.createGoogleUser.mockResolvedValue(user);
+
+      const result = await service.loginWithGoogle(
+        googleProfile,
+        {
+          preferredLanguage: 'sv',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        },
+        asResponse(res),
+        '127.0.0.1',
+        'Google Agent',
+      );
+
+      expect(result.accessToken).toBe('access-token-123');
+      expect(usersService.createGoogleUser).toHaveBeenCalledWith({
+        email: googleProfile.email,
+        google_subject: googleProfile.providerSubject,
+        first_name: googleProfile.firstName,
+        last_name: googleProfile.lastName,
+        preferred_language: 'sv',
+      });
+      expect(consentsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('requires legal consent before creating a new Google user', async () => {
+      const res = mockRes();
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: false,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(usersService.createGoogleUser).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('links authoritative Gmail Google identity to an existing email account', async () => {
+      const res = mockRes();
+      const existing = fakeUser({
+        email: authoritativeGoogleProfile.email,
+        email_verified: true,
+        google_subject: null,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+      usersService.linkGoogleSubject.mockResolvedValue({
+        ...existing,
+        google_subject: authoritativeGoogleProfile.providerSubject,
+      });
+
+      await service.loginWithGoogle(
+        authoritativeGoogleProfile,
+        {
+          preferredLanguage: 'en',
+          termsAccepted: false,
+          privacyPolicyAccepted: false,
+        },
+        asResponse(res),
+      );
+
+      expect(usersService.linkGoogleSubject).toHaveBeenCalledWith(
+        existing.id,
+        authoritativeGoogleProfile.providerSubject,
+      );
+      expect(consentsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('links authoritative Workspace Google identity to an existing email account', async () => {
+      const res = mockRes();
+      const workspaceGoogleProfile = {
+        ...googleProfile,
+        isEmailAuthoritative: true,
+      };
+      const existing = fakeUser({
+        email: workspaceGoogleProfile.email,
+        email_verified: true,
+        google_subject: null,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+      usersService.linkGoogleSubject.mockResolvedValue({
+        ...existing,
+        google_subject: workspaceGoogleProfile.providerSubject,
+      });
+
+      await service.loginWithGoogle(
+        workspaceGoogleProfile,
+        {
+          preferredLanguage: 'en',
+          termsAccepted: false,
+          privacyPolicyAccepted: false,
+        },
+        asResponse(res),
+      );
+
+      expect(usersService.linkGoogleSubject).toHaveBeenCalledWith(
+        existing.id,
+        workspaceGoogleProfile.providerSubject,
+      );
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('rejects non-authoritative Google email when an email-password account already exists', async () => {
+      const res = mockRes();
+      const existing = fakeUser({
+        email: googleProfile.email,
+        email_verified: true,
+        google_subject: null,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: false,
+            privacyPolicyAccepted: false,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      expect(usersService.linkGoogleSubject).not.toHaveBeenCalled();
+      expect(sessionsRepo.create).not.toHaveBeenCalled();
+      expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('rejects if the email account is already linked to a different Google subject', async () => {
+      const res = mockRes();
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(
+        fakeUser({ google_subject: 'different-subject' }),
+      );
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: true,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('loginWithApple', () => {
+    const appleProfile = {
+      provider: OAuthProvider.Apple,
+      providerSubject: 'apple-subject-123',
+      email: 'user@privaterelay.appleid.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: true,
+    };
+
+    it('creates a verified user, records legal consents, and starts a session for first-time Apple sign-in', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        email: appleProfile.email,
+        email_verified: true,
+        password_hash: null,
+        apple_subject: appleProfile.providerSubject,
+      });
+      usersService.findByAppleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+      usersService.createAppleUser.mockResolvedValue(user);
+
+      const result = await service.loginWithApple(
+        appleProfile,
+        {
+          preferredLanguage: 'sv',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        },
+        asResponse(res),
+        '127.0.0.1',
+        'Apple Agent',
+      );
+
+      expect(result.accessToken).toBe('access-token-123');
+      expect(usersService.createAppleUser).toHaveBeenCalledWith({
+        email: appleProfile.email,
+        apple_subject: appleProfile.providerSubject,
+        first_name: appleProfile.firstName,
+        last_name: appleProfile.lastName,
+        preferred_language: 'sv',
+      });
+      expect(consentsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('links a verified Apple identity to an existing email account', async () => {
+      const res = mockRes();
+      const existing = fakeUser({
+        email: appleProfile.email,
+        email_verified: true,
+        apple_subject: null,
+      });
+      usersService.findByAppleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+      usersService.linkAppleSubject.mockResolvedValue({
+        ...existing,
+        apple_subject: appleProfile.providerSubject,
+      });
+
+      await service.loginWithApple(
+        appleProfile,
+        {
+          preferredLanguage: 'en',
+          termsAccepted: false,
+          privacyPolicyAccepted: false,
+        },
+        asResponse(res),
+      );
+
+      expect(usersService.linkAppleSubject).toHaveBeenCalledWith(
+        existing.id,
+        appleProfile.providerSubject,
+      );
+      expect(consentsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('rejects if the email account is already linked to a different Apple subject', async () => {
+      const res = mockRes();
+      usersService.findByAppleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(
+        fakeUser({ apple_subject: 'different-subject' }),
+      );
+
+      await expect(
+        service.loginWithApple(
+          appleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: true,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ConflictException);
     });
   });
 

@@ -6,6 +6,12 @@ function createConfigService(
 ): ConfigService {
   return {
     get: jest.fn((key: string) => overrides[key]),
+    getOrThrow: jest.fn((key: string) => {
+      if (key in overrides) {
+        return overrides[key];
+      }
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 }
 
@@ -19,6 +25,7 @@ describe('databaseConfig', () => {
       DATABASE_PASSWORD: 'password',
       DATABASE_SSL: true,
       DATABASE_SSL_REJECT_UNAUTHORIZED: true,
+      DATABASE_LOGGING: false,
       NODE_ENV: 'production',
     });
 
@@ -40,6 +47,7 @@ describe('databaseConfig', () => {
       DATABASE_PASSWORD: 'password',
       DATABASE_SSL: false,
       DATABASE_SSL_REJECT_UNAUTHORIZED: false,
+      DATABASE_LOGGING: false,
       NODE_ENV: 'development',
     });
 
@@ -60,6 +68,7 @@ describe('databaseConfig', () => {
       DATABASE_USER: 'postgres',
       DATABASE_PASSWORD: 'password',
       DATABASE_SSL: false,
+      DATABASE_SSL_REJECT_UNAUTHORIZED: false,
       DATABASE_LOGGING: true,
       NODE_ENV: 'development',
     });

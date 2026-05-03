@@ -31,7 +31,18 @@ describe('UsersController', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, defaultValue?: unknown) => defaultValue),
+            get: jest.fn((key: string) => {
+              if (key === 'COOKIE_DOMAIN') return '';
+              if (key === 'COOKIE_SECURE') return false;
+              if (key === 'COOKIE_SAME_SITE') return 'lax';
+              return undefined;
+            }),
+            getOrThrow: jest.fn((key: string) => {
+              if (key === 'COOKIE_DOMAIN') return '';
+              if (key === 'COOKIE_SECURE') return false;
+              if (key === 'COOKIE_SAME_SITE') return 'lax';
+              throw new Error(`Missing config ${key}`);
+            }),
           },
         },
       ],

@@ -8,6 +8,12 @@ function buildConfig(
 ): ConfigService {
   return {
     get: jest.fn((key: string) => values[key]),
+    getOrThrow: jest.fn((key: string) => {
+      if (Object.prototype.hasOwnProperty.call(values, key)) {
+        return values[key];
+      }
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 }
 

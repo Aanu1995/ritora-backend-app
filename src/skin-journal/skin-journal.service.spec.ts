@@ -337,11 +337,17 @@ describe('SkinJournalService', () => {
     resolveMany: jest.fn(() => []),
   };
   const config = {
-    get: jest.fn((key: string, fallback?: unknown) => {
+    get: jest.fn((key: string) => {
       if (key === 'SKIN_JOURNAL_OPERATIONS_TOKEN') {
         return 'ops-token-123456789012345678901234';
       }
-      return fallback;
+      return undefined;
+    }),
+    getOrThrow: jest.fn((key: string) => {
+      if (key === 'SKIN_JOURNAL_OPERATIONS_TOKEN') {
+        return 'ops-token-123456789012345678901234';
+      }
+      throw new Error(`Missing config ${key}`);
     }),
   };
 

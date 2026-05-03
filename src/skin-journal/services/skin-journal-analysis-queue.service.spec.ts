@@ -31,12 +31,22 @@ const repo = () => ({
 });
 
 function config(values: Record<string, unknown>): ConfigService {
+  const configValues: Record<string, unknown> = {
+    AWS_REGION: 'eu-north-1',
+    SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: 'database',
+    SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL: '',
+    SKIN_JOURNAL_ANALYSIS_SQS_DLQ_URL: '',
+    ...values,
+  };
+
   return {
-    get: jest.fn((key: string, fallback?: unknown) =>
-      Object.prototype.hasOwnProperty.call(values, key)
-        ? values[key]
-        : fallback,
-    ),
+    get: jest.fn((key: string) => configValues[key]),
+    getOrThrow: jest.fn((key: string) => {
+      if (Object.prototype.hasOwnProperty.call(configValues, key)) {
+        return configValues[key];
+      }
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 }
 

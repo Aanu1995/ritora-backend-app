@@ -28,7 +28,6 @@ import {
   SKIN_JOURNAL_ANALYSIS_JOB_MAX_ATTEMPTS,
   SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT,
   SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER,
-  SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER,
   SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
   SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS,
   type AnalysisJobStatus,
@@ -87,13 +86,11 @@ export class SkinJournalAnalysisQueueService
     private readonly config: ConfigService,
   ) {
     this.driver = this.readQueueDriver();
-    this.queueUrl = this.config.get<string>(
+    this.queueUrl = this.config.getOrThrow<string>(
       'SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL',
-      '',
     );
-    this.dlqUrl = this.config.get<string>(
+    this.dlqUrl = this.config.getOrThrow<string>(
       'SKIN_JOURNAL_ANALYSIS_SQS_DLQ_URL',
-      '',
     );
     this.waitTimeSeconds = SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS;
     this.visibilityTimeoutSeconds =
@@ -105,7 +102,7 @@ export class SkinJournalAnalysisQueueService
     this.sqsClient =
       this.driver === 'sqs'
         ? new SQSClient({
-            region: this.config.get<string>('AWS_REGION', 'eu-west-1'),
+            region: this.config.getOrThrow<string>('AWS_REGION'),
           })
         : null;
   }
@@ -837,9 +834,8 @@ export class SkinJournalAnalysisQueueService
   }
 
   private readQueueDriver(): AnalysisQueueDriver {
-    const configured = this.config.get<AnalysisQueueDriver>(
+    const configured = this.config.getOrThrow<AnalysisQueueDriver>(
       'SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER',
-      SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER,
     );
     return configured === 'sqs' ? 'sqs' : 'database';
   }

@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -255,6 +259,102 @@ describe('UsersService', () => {
       await expect(service.updateTimeZone('01', '+01:00')).rejects.toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('linkGoogleSubject', () => {
+    it('links the Google subject only when the account is not already linked', async () => {
+      const updated = {
+        id: '01',
+        google_subject: 'google-subject',
+        email_verified: true,
+      } as User;
+      const execute = jest.fn().mockResolvedValue({ affected: 1 });
+      const andWhere = jest.fn().mockReturnValue({ execute });
+      const where = jest.fn().mockReturnValue({ andWhere });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      repo.createQueryBuilder.mockReturnValue({ update } as never);
+      repo.findOne.mockResolvedValue(updated);
+
+      const result = await service.linkGoogleSubject('01', 'google-subject');
+
+      expect(update).toHaveBeenCalledWith(User);
+      expect(set).toHaveBeenCalledWith({
+        google_subject: 'google-subject',
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      });
+      expect(where).toHaveBeenCalledWith('id = :id', { id: '01' });
+      expect(andWhere).toHaveBeenCalledWith(
+        '(google_subject IS NULL OR google_subject = :googleSubject)',
+        { googleSubject: 'google-subject' },
+      );
+      expect(result).toEqual(updated);
+    });
+
+    it('rejects linking when another Google subject won the race', async () => {
+      const execute = jest.fn().mockResolvedValue({ affected: 0 });
+      const andWhere = jest.fn().mockReturnValue({ execute });
+      const where = jest.fn().mockReturnValue({ andWhere });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      repo.createQueryBuilder.mockReturnValue({ update } as never);
+
+      await expect(
+        service.linkGoogleSubject('01', 'google-subject'),
+      ).rejects.toThrow(ConflictException);
+
+      expect(repo.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('linkAppleSubject', () => {
+    it('links the Apple subject only when the account is not already linked', async () => {
+      const updated = {
+        id: '01',
+        apple_subject: 'apple-subject',
+        email_verified: true,
+      } as User;
+      const execute = jest.fn().mockResolvedValue({ affected: 1 });
+      const andWhere = jest.fn().mockReturnValue({ execute });
+      const where = jest.fn().mockReturnValue({ andWhere });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      repo.createQueryBuilder.mockReturnValue({ update } as never);
+      repo.findOne.mockResolvedValue(updated);
+
+      const result = await service.linkAppleSubject('01', 'apple-subject');
+
+      expect(update).toHaveBeenCalledWith(User);
+      expect(set).toHaveBeenCalledWith({
+        apple_subject: 'apple-subject',
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      });
+      expect(where).toHaveBeenCalledWith('id = :id', { id: '01' });
+      expect(andWhere).toHaveBeenCalledWith(
+        '(apple_subject IS NULL OR apple_subject = :appleSubject)',
+        { appleSubject: 'apple-subject' },
+      );
+      expect(result).toEqual(updated);
+    });
+
+    it('rejects linking when another Apple subject won the race', async () => {
+      const execute = jest.fn().mockResolvedValue({ affected: 0 });
+      const andWhere = jest.fn().mockReturnValue({ execute });
+      const where = jest.fn().mockReturnValue({ andWhere });
+      const set = jest.fn().mockReturnValue({ where });
+      const update = jest.fn().mockReturnValue({ set });
+      repo.createQueryBuilder.mockReturnValue({ update } as never);
+
+      await expect(
+        service.linkAppleSubject('01', 'apple-subject'),
+      ).rejects.toThrow(ConflictException);
+
+      expect(repo.findOne).not.toHaveBeenCalled();
     });
   });
 

@@ -32,6 +32,18 @@ import { RegisterResponseDto } from './dto/register-response.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { AppleOAuthCallbackGuard } from './guards/apple-oauth-callback.guard';
+import { AppleOAuthGuard } from './guards/apple-oauth.guard';
+import { GoogleOAuthCallbackGuard } from './guards/google-oauth-callback.guard';
+import { GoogleOAuthGuard } from './guards/google-oauth.guard';
+import { OAuthIdentityProfile } from './oauth/oauth-profile';
+import {
+  APPLE_OAUTH_CONTEXT_COOKIE,
+  APPLE_OAUTH_STATE_COOKIE,
+  GOOGLE_OAUTH_CONTEXT_COOKIE,
+  GOOGLE_OAUTH_STATE_COOKIE,
+  OAuthStartContext,
+} from './oauth/oauth-state';
 import { AuthService } from './auth.service';
 
 const authThrottle = (limit: number) => ({
@@ -55,20 +67,31 @@ function getCookieValue(req: Request, cookieName: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+type OAuthRequest = Request & {
+  user?: OAuthIdentityProfile;
+};
+
 @ApiTags('auth')
 @Controller('auth')
 @UseInterceptors(NoCacheInterceptor)
 export class AuthController {
   private readonly cookieRefreshName: string;
+  private readonly webAppUrl: string;
+  private readonly cookieDomain: string;
+  private readonly cookieSecure: boolean;
+  private readonly cookieSameSite: 'lax' | 'strict' | 'none';
 
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {
-    this.cookieRefreshName = this.configService.get(
+    this.cookieRefreshName = this.configService.getOrThrow(
       'COOKIE_REFRESH_NAME',
-      'ritora_refresh',
     );
+    this.webAppUrl = this.configService.getOrThrow('WEB_APP_URL');
+    this.cookieDomain = this.configService.getOrThrow('COOKIE_DOMAIN');
+    this.cookieSecure = this.configService.getOrThrow('COOKIE_SECURE');
+    this.cookieSameSite = this.configService.getOrThrow('COOKIE_SAME_SITE');
   }
 
   @Post('register')
@@ -112,6 +135,81 @@ export class AuthController {
     setLocaleCookie(res, this.configService, language);
 
     return authResponse;
+  }
+
+  @Get('google')
+  @Public()
+  @UseGuards(GoogleOAuthGuard)
+  @Throttle(authThrottle(5))
+  startGoogleOAuth(): void {
+    // Passport redirects to Google before this handler runs.
+  }
+
+  @Get('google/callback')
+  @Public()
+  @UseGuards(GoogleOAuthCallbackGuard)
+  @Throttle(authThrottle(5))
+  async completeGoogleOAuth(
+    @Req() req: OAuthRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    if (!req.user) {
+      throw new UnauthorizedException('Missing Google profile');
+    }
+
+    const authResponse = await this.authService.loginWithGoogle(
+      req.user,
+      this.getOAuthStartContext(req),
+      res,
+      req.ip,
+      getHeaderValue(req.headers, 'user-agent'),
+    );
+
+    const language = normalizeLanguage(authResponse.user.preferredLanguage);
+    setLocaleCookie(res, this.configService, language);
+    this.clearGoogleOAuthCookies(res);
+
+    res.redirect(this.buildFrontendPathUrl('post-login'));
+  }
+
+  @Get('apple')
+  @Public()
+  @UseGuards(AppleOAuthGuard)
+  @Throttle(authThrottle(5))
+  startAppleOAuth(): void {
+    // Passport redirects to Apple before this handler runs.
+  }
+
+  @Post('apple/callback')
+  @Public()
+  @UseGuards(AppleOAuthCallbackGuard)
+  @Throttle(authThrottle(5))
+  async completeAppleOAuth(
+    @Req() req: OAuthRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    if (!req.user) {
+      throw new UnauthorizedException('Missing Apple profile');
+    }
+
+    const authResponse = await this.authService.loginWithApple(
+      req.user,
+      this.getOAuthStartContext(req, APPLE_OAUTH_CONTEXT_COOKIE),
+      res,
+      req.ip,
+      getHeaderValue(req.headers, 'user-agent'),
+    );
+
+    const language = normalizeLanguage(authResponse.user.preferredLanguage);
+    setLocaleCookie(res, this.configService, language);
+    this.clearOAuthCookies(res, {
+      stateCookie: APPLE_OAUTH_STATE_COOKIE,
+      contextCookie: APPLE_OAUTH_CONTEXT_COOKIE,
+      path: '/api/v1/auth/apple',
+      sameSite: this.cookieSecure ? 'none' : 'lax',
+    });
+
+    res.redirect(this.buildFrontendPathUrl('post-login'));
   }
 
   @Post('refresh')
@@ -292,5 +390,80 @@ export class AuthController {
         'messages.auth.deleteAccount.success',
       ),
     };
+  }
+
+  private getOAuthStartContext(
+    req: Request,
+    contextCookie = GOOGLE_OAUTH_CONTEXT_COOKIE,
+  ): OAuthStartContext {
+    const rawContext = getCookieValue(req, contextCookie);
+
+    if (!rawContext) {
+      return {
+        preferredLanguage: 'en',
+        termsAccepted: false,
+        privacyPolicyAccepted: false,
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(rawContext, 'base64url').toString('utf8'),
+      ) as Partial<OAuthStartContext>;
+
+      return {
+        preferredLanguage:
+          typeof parsed.preferredLanguage === 'string'
+            ? parsed.preferredLanguage
+            : 'en',
+        termsAccepted: parsed.termsAccepted === true,
+        privacyPolicyAccepted: parsed.privacyPolicyAccepted === true,
+      };
+    } catch {
+      return {
+        preferredLanguage: 'en',
+        termsAccepted: false,
+        privacyPolicyAccepted: false,
+      };
+    }
+  }
+
+  private clearGoogleOAuthCookies(res: Response): void {
+    this.clearOAuthCookies(res, {
+      stateCookie: GOOGLE_OAUTH_STATE_COOKIE,
+      contextCookie: GOOGLE_OAUTH_CONTEXT_COOKIE,
+      path: '/api/v1/auth/google',
+      sameSite: this.cookieSameSite,
+    });
+  }
+
+  private clearOAuthCookies(
+    res: Response,
+    oauthCookies: {
+      stateCookie: string;
+      contextCookie: string;
+      path: string;
+      sameSite: 'lax' | 'strict' | 'none';
+    },
+  ): void {
+    const cookieOptions = {
+      path: oauthCookies.path,
+      httpOnly: true,
+      secure: this.cookieSecure,
+      sameSite: oauthCookies.sameSite,
+      ...(this.cookieDomain ? { domain: this.cookieDomain } : {}),
+    } as const;
+
+    res.clearCookie(oauthCookies.stateCookie, cookieOptions);
+    res.clearCookie(oauthCookies.contextCookie, cookieOptions);
+  }
+
+  private buildFrontendPathUrl(path: string): string {
+    const base = new URL(this.webAppUrl);
+    const basePath = base.pathname.replace(/\/$/, '');
+    base.pathname = `${basePath}/${path.replace(/^\//, '')}`;
+    base.search = '';
+    base.hash = '';
+    return base.toString();
   }
 }

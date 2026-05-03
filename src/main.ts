@@ -11,7 +11,7 @@ async function bootstrap() {
   configureApp(app, configService);
   app.enableShutdownHooks();
 
-  const port = getNumberConfig(configService, 'API_PORT', 3001);
+  const port = getNumberConfig(configService, 'API_PORT');
   await app.listen(port);
 }
 

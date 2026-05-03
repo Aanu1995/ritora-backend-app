@@ -87,7 +87,7 @@ export class SkinProfileService {
     private readonly dataAccessLogService: UserDataAccessLogService,
     configService: ConfigService,
   ) {
-    this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
+    this.privacyVersion = configService.getOrThrow('LEGAL_PRIVACY_VERSION');
   }
 
   async findByUserId(

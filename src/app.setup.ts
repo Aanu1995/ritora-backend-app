@@ -13,8 +13,8 @@ import {
 
 function parseCorsOrigins(configService: ConfigService): string[] {
   const configuredOrigins =
-    configService.get<string>('CORS_ORIGINS')?.trim() ||
-    configService.get<string>('WEB_APP_URL', 'http://localhost:3000');
+    configService.getOrThrow<string>('CORS_ORIGINS').trim() ||
+    configService.getOrThrow<string>('WEB_APP_URL');
 
   return Array.from(
     new Set(
@@ -58,7 +58,8 @@ export function configureApp(
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
   const expressApp = app.getHttpAdapter().getInstance() as Express;
-  const isProduction = configService.get<string>('NODE_ENV') === 'production';
+  const isProduction =
+    configService.getOrThrow<string>('NODE_ENV') === 'production';
 
   if (isProduction) {
     expressApp.set('trust proxy', 1);
@@ -70,10 +71,7 @@ export function configureApp(
     express.static(resolveCatalogueMediaRootDir()),
   );
 
-  const swaggerEnabled = configService.get<boolean>(
-    'SWAGGER_ENABLED',
-    !isProduction,
-  );
+  const swaggerEnabled = configService.getOrThrow<boolean>('SWAGGER_ENABLED');
 
   if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()

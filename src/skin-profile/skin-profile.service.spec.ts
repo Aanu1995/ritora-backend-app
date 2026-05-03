@@ -58,9 +58,15 @@ describe('SkinProfileService', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, fallback?: string | number | boolean) =>
-              key === 'LEGAL_PRIVACY_VERSION' ? '1.0.0' : fallback,
+            get: jest.fn((key: string) =>
+              key === 'LEGAL_PRIVACY_VERSION' ? '1.0.0' : undefined,
             ),
+            getOrThrow: jest.fn((key: string) => {
+              if (key === 'LEGAL_PRIVACY_VERSION') {
+                return '1.0.0';
+              }
+              throw new Error(`Missing config ${key}`);
+            }),
           },
         },
       ],

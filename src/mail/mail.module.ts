@@ -10,7 +10,7 @@ import { MailService } from './mail.service';
       provide: RESEND_CLIENT,
       inject: [ConfigService],
       useFactory: (configService: ConfigService) =>
-        new Resend(configService.get<string>('RESEND_API_KEY', '')),
+        new Resend(configService.getOrThrow<string>('RESEND_API_KEY')),
     },
     MailService,
   ],

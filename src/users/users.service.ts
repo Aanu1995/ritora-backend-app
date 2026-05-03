@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -34,6 +38,18 @@ export class UsersService {
     });
   }
 
+  async findByGoogleSubject(googleSubject: string): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { google_subject: googleSubject },
+    });
+  }
+
+  async findByAppleSubject(appleSubject: string): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { apple_subject: appleSubject },
+    });
+  }
+
   async findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
   }
@@ -56,7 +72,7 @@ export class UsersService {
 
   async create(data: {
     email: string;
-    password_hash: string;
+    password_hash: string | null;
     first_name: string;
     last_name: string;
     preferred_language: string;
@@ -67,6 +83,44 @@ export class UsersService {
       this.usersRepository.create({
         ...data,
         email: normalizeEmail(data.email),
+      }),
+    );
+  }
+
+  async createGoogleUser(data: {
+    email: string;
+    google_subject: string;
+    first_name: string;
+    last_name: string;
+    preferred_language: string;
+  }): Promise<User> {
+    return this.usersRepository.save(
+      this.usersRepository.create({
+        ...data,
+        email: normalizeEmail(data.email),
+        password_hash: null,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      }),
+    );
+  }
+
+  async createAppleUser(data: {
+    email: string;
+    apple_subject: string;
+    first_name: string;
+    last_name: string;
+    preferred_language: string;
+  }): Promise<User> {
+    return this.usersRepository.save(
+      this.usersRepository.create({
+        ...data,
+        email: normalizeEmail(data.email),
+        password_hash: null,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
       }),
     );
   }
@@ -97,6 +151,52 @@ export class UsersService {
 
   async updateTimeZone(id: string, timeZone: string): Promise<User> {
     return this.update(id, buildTimeZonePatch(timeZone));
+  }
+
+  async linkGoogleSubject(id: string, googleSubject: string): Promise<User> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        google_subject: googleSubject,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('(google_subject IS NULL OR google_subject = :googleSubject)', {
+        googleSubject,
+      })
+      .execute();
+
+    if (result.affected !== 1) {
+      throw new ConflictException('Email already linked to Google');
+    }
+
+    return this.findByIdOrFail(id);
+  }
+
+  async linkAppleSubject(id: string, appleSubject: string): Promise<User> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        apple_subject: appleSubject,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('(apple_subject IS NULL OR apple_subject = :appleSubject)', {
+        appleSubject,
+      })
+      .execute();
+
+    if (result.affected !== 1) {
+      throw new ConflictException('Email already linked to Apple');
+    }
+
+    return this.findByIdOrFail(id);
   }
 
   async captureTimeZoneIfMissing(id: string, timeZone: string): Promise<User> {

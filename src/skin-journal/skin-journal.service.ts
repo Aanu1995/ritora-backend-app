@@ -1425,9 +1425,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   }
 
   private assertOperationsToken(token: string | undefined): void {
-    const configuredToken = this.config.get<string>(
+    const configuredToken = this.config.getOrThrow<string>(
       'SKIN_JOURNAL_OPERATIONS_TOKEN',
-      '',
     );
     if (!configuredToken || token !== configuredToken) {
       throw new ForbiddenException('Invalid operations token');

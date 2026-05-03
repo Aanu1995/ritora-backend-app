@@ -10,10 +10,24 @@ jest.mock('@aws-sdk/cloudfront-signer', () => ({
 function createConfigService(
   overrides: Record<string, number | string> = {},
 ): ConfigService {
+  const configValues: Record<string, number | string> = {
+    AWS_REGION: 'eu-north-1',
+    PRODUCT_MEDIA_BUCKET: '',
+    PRODUCT_MEDIA_CLOUDFRONT_URL: '',
+    PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID: '',
+    PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY: '',
+    PRODUCT_MEDIA_S3_KMS_KEY_ID: '',
+    ...overrides,
+  };
+
   return {
-    get: jest.fn((key: string, fallback?: number | string) =>
-      key in overrides ? overrides[key] : fallback,
-    ),
+    get: jest.fn((key: string) => configValues[key]),
+    getOrThrow: jest.fn((key: string) => {
+      if (key in configValues) {
+        return configValues[key];
+      }
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 }
 

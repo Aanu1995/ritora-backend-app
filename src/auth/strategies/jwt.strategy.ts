@@ -24,13 +24,13 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     @InjectRepository(AuthSession)
     private readonly sessionsRepository: Repository<AuthSession>,
   ) {
-    const issuer = configService.get<string>('JWT_ISSUER', 'ritora');
-    const audience = configService.get<string>('JWT_AUDIENCE', 'ritora-web');
+    const issuer = configService.getOrThrow<string>('JWT_ISSUER');
+    const audience = configService.getOrThrow<string>('JWT_AUDIENCE');
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET')!,
+      secretOrKey: configService.getOrThrow<string>('JWT_SECRET'),
       issuer,
       audience,
     });

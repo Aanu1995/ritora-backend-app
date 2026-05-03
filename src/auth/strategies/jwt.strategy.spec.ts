@@ -6,19 +6,14 @@ import { AuthSession } from '../entities/auth-session.entity';
 import type { Repository } from 'typeorm';
 
 describe('JwtStrategy', () => {
+  const configValues: Record<string, string> = {
+    JWT_ISSUER: 'ritora',
+    JWT_AUDIENCE: 'ritora-web',
+    JWT_SECRET: 'jwt-secret',
+  };
   const configService = {
-    get: jest.fn((key: string, fallback?: string) => {
-      switch (key) {
-        case 'JWT_ISSUER':
-          return 'ritora';
-        case 'JWT_AUDIENCE':
-          return 'ritora-web';
-        case 'JWT_SECRET':
-          return 'jwt-secret';
-        default:
-          return fallback;
-      }
-    }),
+    get: jest.fn((key: string) => configValues[key]),
+    getOrThrow: jest.fn((key: string) => configValues[key]),
   } as unknown as ConfigService;
 
   const usersService = {

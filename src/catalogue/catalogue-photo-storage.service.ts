@@ -33,7 +33,7 @@ export class CataloguePhotoStorageService {
 
   constructor(private readonly configService: ConfigService) {
     this.s3Client = new S3Client({
-      region: this.configService.get<string>('AWS_REGION', 'eu-west-1'),
+      region: this.configService.getOrThrow<string>('AWS_REGION'),
     });
   }
 
@@ -198,10 +198,10 @@ export class CataloguePhotoStorageService {
     const bucketName = this.getBucketName();
     const cloudFrontBaseUrl = this.getCloudFrontBaseUrl();
     const cloudFrontKeyPairId = this.configService
-      .get<string>('PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID', '')
+      .getOrThrow<string>('PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID')
       .trim();
     const cloudFrontPrivateKey = this.configService
-      .get<string>('PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY', '')
+      .getOrThrow<string>('PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY')
       .replace(/\\n/g, '\n')
       .trim();
 
@@ -222,16 +222,18 @@ export class CataloguePhotoStorageService {
       cloudFrontPrivateKey,
       kmsKeyId:
         this.configService
-          .get<string>('PRODUCT_MEDIA_S3_KMS_KEY_ID', '')
+          .getOrThrow<string>('PRODUCT_MEDIA_S3_KMS_KEY_ID')
           .trim() || null,
     };
   }
 
   private getBucketName(): string {
-    return this.configService.get<string>('PRODUCT_MEDIA_BUCKET', '');
+    return this.configService.getOrThrow<string>('PRODUCT_MEDIA_BUCKET');
   }
 
   private getCloudFrontBaseUrl(): string {
-    return this.configService.get<string>('PRODUCT_MEDIA_CLOUDFRONT_URL', '');
+    return this.configService.getOrThrow<string>(
+      'PRODUCT_MEDIA_CLOUDFRONT_URL',
+    );
   }
 }

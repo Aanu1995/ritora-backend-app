@@ -14,10 +14,28 @@ jest.mock('@aws-sdk/cloudfront-signer', () => ({
 }));
 
 function config(values: Record<string, string | number | boolean> = {}) {
+  const configValues: Record<string, string | number | boolean> = {
+    AWS_REGION: 'eu-north-1',
+    NODE_ENV: 'test',
+    SKIN_JOURNAL_MEDIA_BUCKET: '',
+    SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: '',
+    SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID: '',
+    SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY: '',
+    SKIN_JOURNAL_S3_KMS_KEY_ID: '',
+    PRODUCT_MEDIA_S3_KMS_KEY_ID: '',
+    SKIN_PROFILE_FIELD_ENCRYPTION_KEY: '',
+    JWT_SECRET: 'test-jwt-secret',
+    ...values,
+  };
+
   return {
-    get: jest.fn((key: string, fallback?: string | number | boolean) =>
-      key in values ? values[key] : fallback,
-    ),
+    get: jest.fn((key: string) => configValues[key]),
+    getOrThrow: jest.fn((key: string) => {
+      if (key in configValues) {
+        return configValues[key];
+      }
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 }
 

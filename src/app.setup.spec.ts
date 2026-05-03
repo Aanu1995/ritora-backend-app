@@ -38,9 +38,13 @@ describe('configureApp', () => {
     overrides: Record<string, boolean | string> = {},
   ) =>
     ({
-      get: jest.fn((key: string, fallback?: boolean | string) =>
-        key in overrides ? overrides[key] : fallback,
-      ),
+      get: jest.fn((key: string) => overrides[key]),
+      getOrThrow: jest.fn((key: string) => {
+        if (key in overrides) {
+          return overrides[key];
+        }
+        throw new Error(`Missing config ${key}`);
+      }),
     }) as unknown as ConfigService;
 
   afterEach(() => {
@@ -51,6 +55,7 @@ describe('configureApp', () => {
     const { app, disable, expressUse } = createApp();
     const configService = createConfigService({
       CORS_ORIGINS: 'http://localhost:3000, https://ritora.com',
+      NODE_ENV: 'development',
       SWAGGER_ENABLED: true,
     });
     const createDocumentSpy = jest
@@ -98,7 +103,11 @@ describe('configureApp', () => {
 
   it('skips swagger setup when disabled', () => {
     const { app } = createApp();
-    const configService = createConfigService({ SWAGGER_ENABLED: false });
+    const configService = createConfigService({
+      CORS_ORIGINS: 'http://localhost:3000',
+      NODE_ENV: 'development',
+      SWAGGER_ENABLED: false,
+    });
     const createDocumentSpy = jest.spyOn(SwaggerModule, 'createDocument');
     const setupSpy = jest.spyOn(SwaggerModule, 'setup');
 
@@ -108,9 +117,13 @@ describe('configureApp', () => {
     expect(setupSpy).not.toHaveBeenCalled();
   });
 
-  it('skips swagger setup by default in production', () => {
+  it('skips swagger setup when production config disables it', () => {
     const { app, set } = createApp();
-    const configService = createConfigService({ NODE_ENV: 'production' });
+    const configService = createConfigService({
+      CORS_ORIGINS: 'https://ritora.com',
+      NODE_ENV: 'production',
+      SWAGGER_ENABLED: false,
+    });
     const createDocumentSpy = jest.spyOn(SwaggerModule, 'createDocument');
     const setupSpy = jest.spyOn(SwaggerModule, 'setup');
 

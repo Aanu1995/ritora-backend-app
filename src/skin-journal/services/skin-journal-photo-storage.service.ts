@@ -73,7 +73,7 @@ export class SkinJournalPhotoStorageService {
 
   constructor(private readonly config: ConfigService) {
     this.s3Client = new S3Client({
-      region: this.config.get<string>('AWS_REGION', 'eu-west-1'),
+      region: this.config.getOrThrow<string>('AWS_REGION'),
     });
   }
 
@@ -293,16 +293,16 @@ export class SkinJournalPhotoStorageService {
 
   private getRuntimeConfig(): MediaRuntimeConfig | null {
     const bucketName = this.config
-      .get<string>('SKIN_JOURNAL_MEDIA_BUCKET', '')
+      .getOrThrow<string>('SKIN_JOURNAL_MEDIA_BUCKET')
       .trim();
     const cloudFrontBaseUrl = this.config
-      .get<string>('SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL', '')
+      .getOrThrow<string>('SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL')
       .trim();
     const cloudFrontKeyPairId = this.config
-      .get<string>('SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID', '')
+      .getOrThrow<string>('SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID')
       .trim();
     const cloudFrontPrivateKey = this.config
-      .get<string>('SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY', '')
+      .getOrThrow<string>('SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY')
       .replace(/\\n/g, '\n')
       .trim();
 
@@ -312,7 +312,7 @@ export class SkinJournalPhotoStorageService {
       !cloudFrontKeyPairId ||
       !cloudFrontPrivateKey
     ) {
-      if (this.config.get<string>('NODE_ENV') === 'production') {
+      if (this.config.getOrThrow<string>('NODE_ENV') === 'production') {
         throw new InternalServerErrorException(
           'Skin Journal media storage is not configured',
         );
@@ -327,8 +327,8 @@ export class SkinJournalPhotoStorageService {
       cloudFrontKeyPairId,
       cloudFrontPrivateKey,
       kmsKeyId:
-        this.config.get<string>('SKIN_JOURNAL_S3_KMS_KEY_ID', '').trim() ||
-        this.config.get<string>('PRODUCT_MEDIA_S3_KMS_KEY_ID', '').trim() ||
+        this.config.getOrThrow<string>('SKIN_JOURNAL_S3_KMS_KEY_ID').trim() ||
+        this.config.getOrThrow<string>('PRODUCT_MEDIA_S3_KMS_KEY_ID').trim() ||
         null,
     };
   }
@@ -362,8 +362,10 @@ export class SkinJournalPhotoStorageService {
 
   private localMediaSigningSecret(): string {
     return (
-      this.config.get<string>('SKIN_PROFILE_FIELD_ENCRYPTION_KEY', '').trim() ||
-      this.config.get<string>('JWT_SECRET', '').trim() ||
+      this.config
+        .getOrThrow<string>('SKIN_PROFILE_FIELD_ENCRYPTION_KEY')
+        .trim() ||
+      this.config.getOrThrow<string>('JWT_SECRET').trim() ||
       DEV_LOCAL_MEDIA_SIGNING_SECRET
     );
   }
