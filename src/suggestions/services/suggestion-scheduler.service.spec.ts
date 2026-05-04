@@ -1,0 +1,152 @@
+import { ConfigService } from '@nestjs/config';
+import { ObjectLiteral, Repository } from 'typeorm';
+import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
+import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
+import { User } from '../../users/entities/user.entity';
+import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
+import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { SuggestionScheduler } from './suggestion-scheduler.service';
+
+describe('SuggestionScheduler', () => {
+  const jobRepo = repo<SuggestionGenerationJob>();
+  const suggestionRepo = repo<SuggestionInstance>();
+  const slotRepo = repo<ScheduleSlot>();
+  const userRepo = repo<User>();
+  const preferenceRepo = repo<UserNotificationPreference>();
+  const scheduler = new SuggestionScheduler(
+    { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
+    jobRepo,
+    suggestionRepo,
+    slotRepo,
+    userRepo,
+    preferenceRepo,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T04:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('creates a pending suggestion row before enqueuing the generation job', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T06:00:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        day_of_week: 'wed',
+        slot_time: '08:00',
+        mode: 'ai',
+      } as ScheduleSlot,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    preferenceRepo.find.mockResolvedValue([
+      { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
+    ] as UserNotificationPreference[]);
+    suggestionRepo.findOne.mockResolvedValue(null);
+    suggestionRepo.create.mockImplementation(
+      (value) => value as SuggestionInstance,
+    );
+    suggestionRepo.save.mockResolvedValue({
+      id: 'pending-1',
+    } as SuggestionInstance);
+    jobRepo.insert.mockResolvedValue({
+      identifiers: [],
+      generatedMaps: [],
+      raw: [],
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result.enqueued).toBe(1);
+    expect(suggestionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        generation_status: 'pending',
+        visible_at: new Date('2026-04-29T06:00:00.000Z'),
+      }),
+    );
+    expect(jobRepo.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        run_after: new Date('2026-04-29T06:00:00.000Z'),
+      }),
+    );
+  });
+
+  it('does not enqueue future slots before their visibility window opens', async () => {
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        day_of_week: 'wed',
+        slot_time: '08:00',
+        mode: 'ai',
+      } as ScheduleSlot,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    preferenceRepo.find.mockResolvedValue([
+      { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
+    ] as UserNotificationPreference[]);
+
+    const result = await scheduler.runOnce();
+
+    expect(result.enqueued).toBe(0);
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
+  });
+
+  it('does not requeue a job that already exists for the slot and date', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T06:00:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        day_of_week: 'wed',
+        slot_time: '08:00',
+        mode: 'ai',
+      } as ScheduleSlot,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    preferenceRepo.find.mockResolvedValue([
+      { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
+    ] as UserNotificationPreference[]);
+    suggestionRepo.findOne.mockResolvedValue({
+      id: 'pending-1',
+    } as SuggestionInstance);
+    jobRepo.insert.mockRejectedValue(
+      Object.assign(new Error('duplicate key'), { code: '23505' }),
+    );
+
+    const result = await scheduler.runOnce();
+
+    expect(result.enqueued).toBe(0);
+    expect(jobRepo.insert).toHaveBeenCalledTimes(1);
+    expect(jobRepo.update).not.toHaveBeenCalled();
+  });
+});
+
+function repo<T extends ObjectLiteral>() {
+  return {
+    create: jest.fn((value) => value),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    insert: jest.fn(),
+    save: jest.fn(),
+    update: jest.fn(),
+  } as unknown as jest.Mocked<Repository<T>>;
+}

@@ -46,6 +46,27 @@ export class UserNotificationPreference {
   @Column({ type: 'boolean', default: true })
   wrapped_alerts_enabled: boolean;
 
+  @Column({ type: 'boolean', default: true })
+  suggestion_ready_enabled: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  slot_start_enabled: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  recording_reminder_enabled: boolean;
+
+  @Column({ type: 'integer', default: 120 })
+  suggestion_lead_time_minutes: number;
+
+  @Column({ type: 'boolean', default: false })
+  quiet_hours_enabled: boolean;
+
+  @Column({ type: 'time', default: '22:30' })
+  quiet_hours_start: string;
+
+  @Column({ type: 'time', default: '06:30' })
+  quiet_hours_end: string;
+
   @Column({ type: 'boolean', default: false })
   photo_tutorial_completed: boolean;
 

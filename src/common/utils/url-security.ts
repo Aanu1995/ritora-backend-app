@@ -92,15 +92,6 @@ function getAllowedApiMediaOrigins(): Set<string> {
   origins.add(`https://localhost:${apiPort}`);
   origins.add(`https://127.0.0.1:${apiPort}`);
 
-  const configuredPublicApiUrl = process.env.PUBLIC_API_URL?.trim();
-  if (configuredPublicApiUrl) {
-    try {
-      origins.add(new URL(configuredPublicApiUrl).origin);
-    } catch {
-      void 0;
-    }
-  }
-
   return origins;
 }
 

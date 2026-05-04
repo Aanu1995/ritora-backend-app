@@ -22,6 +22,9 @@ export class NotificationResponseDto {
   severity: NotificationSeverity;
 
   @ApiProperty({ required: false, nullable: true })
+  dedupe_key: string | null;
+
+  @ApiProperty({ required: false, nullable: true })
   payload: Record<string, unknown> | null;
 
   @ApiProperty({ required: false, nullable: true })
@@ -40,6 +43,7 @@ export class NotificationResponseDto {
     dto.title_key = n.title_key;
     dto.body_key = n.body_key;
     dto.severity = n.severity;
+    dto.dedupe_key = n.dedupe_key;
     dto.payload = n.payload;
     dto.deep_link = n.deep_link;
     dto.read_at = n.read_at;

@@ -225,6 +225,7 @@ export const envValidationSchema = Joi.object({
   INGREDIENT_TRANSLATION_AI_MODEL: Joi.string().trim().allow('').required(),
   INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: Joi.string().trim().required(),
   SKIN_JOURNAL_ANALYSIS_AI_MODEL: Joi.string().trim().allow('').required(),
+  SUGGESTION_AI_MODEL: Joi.string().trim().allow('').required(),
   OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
     .trim()
     .allow('')
@@ -317,7 +318,6 @@ export const envValidationSchema = Joi.object({
       .uri({ scheme: ['http', 'https'] })
       .required(),
   }),
-
   SWAGGER_ENABLED: Joi.boolean().required(),
 
   AWS_REGION: Joi.string().trim().required(),

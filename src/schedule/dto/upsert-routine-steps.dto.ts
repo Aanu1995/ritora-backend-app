@@ -61,6 +61,15 @@ export class RoutineStepInputDto {
   @IsOptional()
   @IsBoolean()
   optional?: boolean;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'When true, the AI suggestion engine treats this step as immutable. Specialist-locked steps are never reordered, removed, or replaced; AI may still add other steps around them.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isSpecialistLocked?: boolean;
 }
 
 export class UpsertRoutineStepsDto {

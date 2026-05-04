@@ -41,6 +41,9 @@ export class RoutineStep {
   @Column({ type: 'boolean', default: false })
   optional: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  is_specialist_locked: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

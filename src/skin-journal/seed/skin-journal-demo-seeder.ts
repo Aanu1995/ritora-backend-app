@@ -81,25 +81,13 @@ export class SkinJournalDemoSeeder {
     entryCount: number;
     notificationCount: number;
   }> {
-    const email = (
-      options.email ??
-      process.env.SKIN_JOURNAL_SEED_EMAIL ??
-      SKIN_JOURNAL_DEMO_EMAIL
-    )
+    const email = (options.email ?? SKIN_JOURNAL_DEMO_EMAIL)
       .trim()
       .toLowerCase();
-    const password =
-      options.password ??
-      process.env.SKIN_JOURNAL_SEED_PASSWORD ??
-      SKIN_JOURNAL_DEMO_PASSWORD;
-    const timeZone =
-      options.timeZone ??
-      process.env.SKIN_JOURNAL_SEED_TIME_ZONE ??
-      'Europe/Stockholm';
+    const password = options.password ?? SKIN_JOURNAL_DEMO_PASSWORD;
+    const timeZone = options.timeZone ?? 'Europe/Stockholm';
     const anchorDate =
-      options.anchorDate ??
-      process.env.SKIN_JOURNAL_SEED_ANCHOR_DATE ??
-      new Date().toISOString().slice(0, 10);
+      options.anchorDate ?? new Date().toISOString().slice(0, 10);
 
     const user = await this.ensureDemoUser(email, password, timeZone);
     const seed = buildSkinJournalDemoData({ anchorDate, timeZone });
@@ -499,10 +487,7 @@ export function demoSeedCredentials(): {
   password: string;
 } {
   return {
-    email:
-      process.env.SKIN_JOURNAL_SEED_EMAIL?.trim().toLowerCase() ??
-      SKIN_JOURNAL_DEMO_EMAIL,
-    password:
-      process.env.SKIN_JOURNAL_SEED_PASSWORD ?? SKIN_JOURNAL_DEMO_PASSWORD,
+    email: SKIN_JOURNAL_DEMO_EMAIL,
+    password: SKIN_JOURNAL_DEMO_PASSWORD,
   };
 }

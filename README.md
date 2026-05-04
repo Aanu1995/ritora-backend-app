@@ -58,7 +58,7 @@ Important variable groups:
 - Cookies: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
 - Mail: `RESEND_API_KEY`, `MAIL_FROM`
-- OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`
+- OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`, feature-specific model keys such as `SUGGESTION_AI_MODEL`
 - Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
 - Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
 - Skin Journal analysis cost metadata: `SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD`, `SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD`
@@ -123,10 +123,8 @@ The seeder creates or reuses `demo@ritora.local` with password
 `Password123!`, grants Skin Progress consent, writes local demo journal photos,
 and prepopulates calendar entries, AI analysis states, events, insights,
 notification preferences, an active simplification warning, and notifications.
-Override the demo account with `SKIN_JOURNAL_SEED_EMAIL`,
-`SKIN_JOURNAL_SEED_PASSWORD`, `SKIN_JOURNAL_SEED_TIME_ZONE`, or
-`SKIN_JOURNAL_SEED_ANCHOR_DATE` when needed. Re-running the seeder resets Skin
-Journal and Notification demo data for that seed user only.
+Re-running the seeder resets Skin Journal and Notification demo data for the
+demo user only.
 
 6. Start the API.
 

@@ -4,6 +4,7 @@ import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { InAppNotification } from './entities/in-app-notification.entity';
+import { ScheduledNotification } from './entities/scheduled-notification.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
 import { NotificationsService } from './notifications.service';
 
@@ -29,6 +30,7 @@ const notificationQueryBuilder = () => ({
 describe('NotificationsService', () => {
   let service: NotificationsService;
   let notifications: ReturnType<typeof repo>;
+  let scheduledNotifications: ReturnType<typeof repo>;
   let preferences: ReturnType<typeof repo>;
   let users: ReturnType<typeof repo>;
   let entries: ReturnType<typeof repo>;
@@ -39,6 +41,7 @@ describe('NotificationsService', () => {
     notifications = repo();
     notificationQb = notificationQueryBuilder();
     notifications.createQueryBuilder.mockReturnValue(notificationQb);
+    scheduledNotifications = repo();
     preferences = repo();
     users = repo();
     entries = repo();
@@ -50,6 +53,10 @@ describe('NotificationsService', () => {
         {
           provide: getRepositoryToken(InAppNotification),
           useValue: notifications,
+        },
+        {
+          provide: getRepositoryToken(ScheduledNotification),
+          useValue: scheduledNotifications,
         },
         {
           provide: getRepositoryToken(UserNotificationPreference),
@@ -173,6 +180,51 @@ describe('NotificationsService', () => {
     expect(result.channels).toEqual([]);
   });
 
+  it('persists suggestion and quiet-hour preferences from the API', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      photo_reminder_local_time: '08:00',
+      photo_reminder_enabled: true,
+      reaction_alerts_enabled: true,
+      simplification_alerts_enabled: true,
+      insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
+      wrapped_alerts_enabled: true,
+      photo_tutorial_completed: false,
+      suggestion_ready_enabled: true,
+      slot_start_enabled: true,
+      recording_reminder_enabled: true,
+      suggestion_lead_time_minutes: 120,
+      quiet_hours_enabled: false,
+      quiet_hours_start: '22:30',
+      quiet_hours_end: '06:30',
+    });
+    preferences.save.mockImplementation(async (value) => value);
+
+    await service.updatePreferences('user-1', {
+      suggestion_ready_enabled: false,
+      slot_start_enabled: false,
+      recording_reminder_enabled: false,
+      suggestion_lead_time_minutes: 360,
+      quiet_hours_enabled: true,
+      quiet_hours_start: '21:00',
+      quiet_hours_end: '07:00',
+    });
+
+    expect(preferences.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestion_ready_enabled: false,
+        slot_start_enabled: false,
+        recording_reminder_enabled: false,
+        suggestion_lead_time_minutes: 360,
+        quiet_hours_enabled: true,
+        quiet_hours_start: '21:00',
+        quiet_hours_end: '07:00',
+      }),
+    );
+  });
+
   it('normalizes database time values to HH:mm for the preferences API', async () => {
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
@@ -208,6 +260,146 @@ describe('NotificationsService', () => {
     });
 
     expect(result).toBeNull();
+    expect(notifications.save).not.toHaveBeenCalled();
+    expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('uses dedupe keys to avoid repeated polling notifications and emails', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app', 'email'],
+      suggestion_ready_enabled: true,
+      quiet_hours_enabled: false,
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'a@example.com',
+      time_zone: 'UTC',
+    });
+    notifications.findOne.mockResolvedValue({
+      id: 'existing',
+      user_id: 'user-1',
+      kind: 'suggestion_ready',
+      dedupe_key: 'suggestion_ready:slot-1',
+    });
+
+    const result = await service.dispatch({
+      userId: 'user-1',
+      kind: 'suggestion_ready',
+      titleKey: 'notificationsPage.kinds.suggestion_ready.title',
+      bodyKey: 'notificationsPage.kinds.suggestion_ready.body',
+      dedupeKey: 'suggestion_ready:slot-1',
+    });
+
+    expect(result?.id).toBe('existing');
+    expect(notifications.save).not.toHaveBeenCalled();
+    expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('delays non-urgent notifications during quiet hours', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T23:00:00.000Z'));
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      suggestion_ready_enabled: true,
+      quiet_hours_enabled: true,
+      quiet_hours_start: '22:00',
+      quiet_hours_end: '06:00',
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      time_zone: 'UTC',
+    });
+
+    const result = await service.dispatch({
+      userId: 'user-1',
+      kind: 'suggestion_ready',
+      titleKey: 'notificationsPage.kinds.suggestion_ready.title',
+      bodyKey: 'notificationsPage.kinds.suggestion_ready.body',
+    });
+
+    expect(result).toBeNull();
+    expect(notifications.save).not.toHaveBeenCalled();
+    expect(scheduledNotifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        kind: 'suggestion_ready',
+        deliver_at: new Date('2026-04-30T06:00:00.000Z'),
+        status: 'pending',
+      }),
+    );
+    jest.useRealTimers();
+  });
+
+  it('replays delayed quiet-hour notifications from the retry queue', async () => {
+    scheduledNotifications.find.mockResolvedValue([
+      {
+        id: 'scheduled-1',
+        user_id: 'user-1',
+        kind: 'suggestion_ready',
+        title_key: 'notificationsPage.kinds.suggestion_ready.title',
+        body_key: 'notificationsPage.kinds.suggestion_ready.body',
+        severity: 'info',
+        payload: { slotId: 'slot-1' },
+        deep_link: '/todays-suggestion',
+        dedupe_key: 'suggestion_ready:2026-04-29:slot-1',
+        attempt_count: 0,
+      },
+    ]);
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      suggestion_ready_enabled: true,
+      quiet_hours_enabled: true,
+      quiet_hours_start: '22:00',
+      quiet_hours_end: '06:00',
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      time_zone: 'UTC',
+    });
+    notifications.findOne.mockResolvedValue(null);
+
+    const result = await service.runScheduledNotificationSweep(
+      new Date('2026-04-30T06:00:00.000Z'),
+    );
+
+    expect(result).toEqual({ sent: 1, failed: 0 });
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        kind: 'suggestion_ready',
+        dedupe_key: 'suggestion_ready:2026-04-29:slot-1',
+      }),
+    );
+    expect(scheduledNotifications.update).toHaveBeenCalledWith(
+      { id: 'scheduled-1' },
+      { status: 'sent', last_error: null },
+    );
+  });
+
+  it('does not dispatch a delayed notification when another worker already claimed it', async () => {
+    scheduledNotifications.find.mockResolvedValue([
+      {
+        id: 'scheduled-1',
+        user_id: 'user-1',
+        kind: 'suggestion_ready',
+        title_key: 'notificationsPage.kinds.suggestion_ready.title',
+        body_key: 'notificationsPage.kinds.suggestion_ready.body',
+        severity: 'info',
+        payload: { slotId: 'slot-1' },
+        deep_link: '/todays-suggestion',
+        dedupe_key: 'suggestion_ready:2026-04-29:slot-1',
+        attempt_count: 0,
+      },
+    ]);
+    scheduledNotifications.update.mockResolvedValueOnce({ affected: 0 });
+
+    const result = await service.runScheduledNotificationSweep(
+      new Date('2026-04-30T06:00:00.000Z'),
+    );
+
+    expect(result).toEqual({ sent: 0, failed: 0 });
     expect(notifications.save).not.toHaveBeenCalled();
     expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
   });

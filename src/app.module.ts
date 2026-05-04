@@ -8,6 +8,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
 import { AppBadgesModule } from './app-badges/app-badges.module';
+import { ApplicationTrackingModule } from './application-tracking/application-tracking.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogueModule } from './catalogue/catalogue.module';
 import { HealthModule } from './health/health.module';
@@ -17,6 +18,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { SkinJournalModule } from './skin-journal/skin-journal.module';
 import { SkinProfileModule } from './skin-profile/skin-profile.module';
+import { SuggestionsModule } from './suggestions/suggestions.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -38,6 +40,7 @@ import { UsersModule } from './users/users.module';
       },
     ]),
     AppBadgesModule,
+    ApplicationTrackingModule,
     HealthModule,
     AuthModule,
     CatalogueModule,
@@ -47,6 +50,7 @@ import { UsersModule } from './users/users.module';
     ScheduleModule,
     SkinJournalModule,
     SkinProfileModule,
+    SuggestionsModule,
     UsersModule,
   ],
   providers: [

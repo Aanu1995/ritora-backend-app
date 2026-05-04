@@ -17,7 +17,10 @@ export type NotificationKind =
   | 'insight_ready'
   | 'wrapped_ready'
   | 'analysis_failed'
-  | 'export_ready';
+  | 'export_ready'
+  | 'suggestion_ready'
+  | 'slot_start'
+  | 'recording_reminder';
 
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 
@@ -35,6 +38,14 @@ const encryptedPayloadTransformer = encryptedJsonFieldTransformer<Record<
 @Index('IDX_in_app_notifications_user_unread', ['user_id'], {
   where: '"read_at" IS NULL',
 })
+@Index(
+  'UQ_in_app_notifications_user_kind_dedupe',
+  ['user_id', 'kind', 'dedupe_key'],
+  {
+    unique: true,
+    where: '"dedupe_key" IS NOT NULL',
+  },
+)
 export class InAppNotification {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;
@@ -60,6 +71,9 @@ export class InAppNotification {
 
   @Column({ type: 'varchar', length: 20, default: 'info' })
   severity: NotificationSeverity;
+
+  @Column({ type: 'varchar', length: 160, nullable: true })
+  dedupe_key: string | null;
 
   @Column({ type: 'text', nullable: true })
   deep_link: string | null;

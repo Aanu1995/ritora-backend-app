@@ -1,40 +1,19 @@
 import {
-  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { Temporal } from '@js-temporal/polyfill';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  Between,
-  Brackets,
-  In,
-  IsNull,
-  MoreThan,
-  Repository,
-  SelectQueryBuilder,
-} from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
-import {
-  decodeCursor,
-  encodeCursor,
-  type PaginatedResult,
-} from '../common/utils/cursor-pagination';
+import { type PaginatedResult } from '../common/utils/cursor-pagination';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../skin-journal/skin-journal.constants';
-import {
-  resolveSkinJournalTimeZone,
-  todayInTimeZone,
-} from '../skin-journal/skin-journal.utils';
 import { User } from '../users/entities/user.entity';
-import {
-  InAppNotification,
-  NotificationKind,
-  NotificationSeverity,
-} from './entities/in-app-notification.entity';
+import { InAppNotification } from './entities/in-app-notification.entity';
+import { ScheduledNotification } from './entities/scheduled-notification.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
 import { NotificationResponseDto } from './dto/notification-response.dto';
 import {
@@ -45,27 +24,38 @@ import {
   NOTIFICATION_PAGE_DEFAULT_LIMIT,
   NOTIFICATION_PAGE_MAX_LIMIT,
 } from './notifications.constants';
+import {
+  applyNotificationCursor,
+  applyPreferenceUpdates,
+  buildNotificationNextCursor,
+  clampInteger,
+  DispatchNotificationParams,
+  isDelayedByQuietHours,
+  isNotificationKindEnabled,
+  isUniqueConstraintError,
+  notificationCursorFingerprint,
+  NOTIFICATION_READ_BUCKET_SQL,
+  runPhotoReminderSweep,
+  runScheduledNotificationSweep,
+  scheduleAfterQuietHours,
+} from './notifications.service.helpers';
 
 export type NotificationsListResponse =
   PaginatedResult<NotificationResponseDto> & {
     unread_count: number;
   };
 
-type NotificationCursorTuple = [number, string, string];
-
-const NOTIFICATION_CURSOR_FINGERPRINT_PREFIX = 'notifications:v1';
-const NOTIFICATION_READ_BUCKET_SQL =
-  'CASE WHEN notification.read_at IS NULL THEN 0 ELSE 1 END';
-const PHOTO_REMINDER_SWEEP_BATCH_SIZE = 1000;
-
 @Injectable()
 export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationsService.name);
   private reminderTimer: NodeJS.Timeout | null = null;
+  private scheduledTimer: NodeJS.Timeout | null = null;
 
   constructor(
     @InjectRepository(InAppNotification)
     private readonly notifications: Repository<InAppNotification>,
+    @InjectRepository(ScheduledNotification)
+    private readonly scheduledNotifications: Repository<ScheduledNotification>,
     @InjectRepository(UserNotificationPreference)
     private readonly preferences: Repository<UserNotificationPreference>,
     @InjectRepository(User)
@@ -90,12 +80,29 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       15 * 60 * 1000,
     );
     this.reminderTimer.unref();
+    this.scheduledTimer = setInterval(
+      () => {
+        void this.runScheduledNotificationSweep(new Date()).catch((error) => {
+          this.logger.warn(
+            `Scheduled notification sweep failed: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+          );
+        });
+      },
+      5 * 60 * 1000,
+    );
+    this.scheduledTimer.unref();
   }
 
   onModuleDestroy(): void {
     if (this.reminderTimer) {
       clearInterval(this.reminderTimer);
       this.reminderTimer = null;
+    }
+    if (this.scheduledTimer) {
+      clearInterval(this.scheduledTimer);
+      this.scheduledTimer = null;
     }
   }
 
@@ -165,50 +172,20 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     dto: UpdatePreferencesDto,
   ): Promise<PreferencesResponseDto> {
     const prefs = await this.ensurePreferences(userId);
-    if (dto.photo_reminder_local_time !== undefined)
-      prefs.photo_reminder_local_time = dto.photo_reminder_local_time;
-    if (dto.photo_reminder_enabled !== undefined)
-      prefs.photo_reminder_enabled = dto.photo_reminder_enabled;
-    if (dto.channels !== undefined) prefs.channels = dto.channels;
-    if (dto.reaction_alerts_enabled !== undefined)
-      prefs.reaction_alerts_enabled = dto.reaction_alerts_enabled;
-    if (dto.simplification_alerts_enabled !== undefined)
-      prefs.simplification_alerts_enabled = dto.simplification_alerts_enabled;
-    if (dto.insight_alerts_enabled !== undefined)
-      prefs.insight_alerts_enabled = dto.insight_alerts_enabled;
-    if (dto.ai_polished_insights_enabled !== undefined)
-      prefs.ai_polished_insights_enabled = dto.ai_polished_insights_enabled;
-    if (dto.wrapped_alerts_enabled !== undefined)
-      prefs.wrapped_alerts_enabled = dto.wrapped_alerts_enabled;
-    if (dto.photo_tutorial_completed !== undefined)
-      prefs.photo_tutorial_completed = dto.photo_tutorial_completed;
+    applyPreferenceUpdates(prefs, dto);
     const saved = await this.preferences.save(prefs);
     return PreferencesResponseDto.fromEntity(saved);
   }
 
-  async dispatch(params: {
-    userId: string;
-    kind: NotificationKind;
-    titleKey: string;
-    bodyKey: string;
-    severity?: NotificationSeverity;
-    payload?: Record<string, unknown>;
-    deepLink?: string;
-  }): Promise<InAppNotification | null> {
+  async dispatch(
+    params: DispatchNotificationParams,
+  ): Promise<InAppNotification | null> {
     const prefs = await this.ensurePreferences(params.userId);
     return this.dispatchWithPreferences(params, prefs);
   }
 
   private async dispatchWithPreferences(
-    params: {
-      userId: string;
-      kind: NotificationKind;
-      titleKey: string;
-      bodyKey: string;
-      severity?: NotificationSeverity;
-      payload?: Record<string, unknown>;
-      deepLink?: string;
-    },
+    params: DispatchNotificationParams,
     prefs: UserNotificationPreference,
     user?: User | null,
   ): Promise<InAppNotification | null> {
@@ -216,112 +193,70 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
+    const notificationUser = await this.resolveNotificationUser(
+      params,
+      prefs,
+      user,
+    );
+    const now = new Date();
+    if (
+      !params.bypassQuietHours &&
+      isDelayedByQuietHours(prefs, params.kind, notificationUser, now)
+    ) {
+      await scheduleAfterQuietHours(
+        params,
+        prefs,
+        notificationUser,
+        now,
+        this.scheduledNotifications,
+      );
+      return null;
+    }
+
+    const duplicate = params.dedupeKey
+      ? await this.findDuplicateNotification(params)
+      : null;
+    if (duplicate) {
+      return duplicate;
+    }
+
     let saved: InAppNotification | null = null;
     if (prefs.channels.includes('in_app')) {
-      saved = await this.notifications.save(
-        this.notifications.create({
-          user_id: params.userId,
-          kind: params.kind,
-          title_key: params.titleKey,
-          body_key: params.bodyKey,
-          severity: params.severity ?? 'info',
-          payload: params.payload ?? null,
-          deep_link: params.deepLink ?? null,
-        }),
-      );
+      saved = await this.createInAppNotification(params);
     }
 
     if (prefs.channels.includes('email')) {
-      await this.dispatchEmail(params, user);
+      await this.dispatchEmail(params, notificationUser);
     }
 
     return saved;
   }
 
   async runPhotoReminderSweep(now: Date = new Date()): Promise<void> {
-    let lastUserId: string | null = null;
-    while (true) {
-      const prefs = await this.preferences.find({
-        where: {
-          photo_reminder_enabled: true,
-          ...(lastUserId ? { user_id: MoreThan(lastUserId) } : {}),
-        },
-        order: { user_id: 'ASC' },
-        take: PHOTO_REMINDER_SWEEP_BATCH_SIZE,
-      });
-      if (prefs.length === 0) {
-        return;
-      }
-      const usersById = await this.loadUsersById(
-        prefs.map((pref) => pref.user_id),
-      );
-      for (const pref of prefs) {
-        await this.maybeDispatchPhotoReminder(
-          pref,
-          usersById.get(pref.user_id) ?? null,
-          now,
-        );
-      }
-      if (prefs.length < PHOTO_REMINDER_SWEEP_BATCH_SIZE) {
-        return;
-      }
-      lastUserId = prefs[prefs.length - 1]?.user_id ?? lastUserId;
-    }
-  }
-
-  private async maybeDispatchPhotoReminder(
-    pref: UserNotificationPreference,
-    user: User | null,
-    now: Date,
-  ): Promise<void> {
-    if (!user) {
-      return;
-    }
-    const timeZone = resolveSkinJournalTimeZone(user.time_zone);
-    if (!isReminderDue(now, timeZone, pref.photo_reminder_local_time)) {
-      return;
-    }
-    const localDate = todayInTimeZone(timeZone, now);
-    const existingEntryCount = await this.entries.count({
-      where: { user_id: pref.user_id, entry_date: localDate },
-    });
-    if (existingEntryCount > 0) {
-      return;
-    }
-    const localReminderWindow = localDayUtcRange(localDate, timeZone);
-    const duplicateCount = await this.notifications.count({
-      where: {
-        user_id: pref.user_id,
-        kind: 'photo_reminder',
-        created_at: Between(localReminderWindow.start, localReminderWindow.end),
-      },
-    });
-    if (duplicateCount > 0) {
-      return;
-    }
-    await this.dispatchWithPreferences(
+    return runPhotoReminderSweep(
       {
-        userId: pref.user_id,
-        kind: 'photo_reminder',
-        titleKey: 'skinJournal.notifications.photoReminder.title',
-        bodyKey: 'skinJournal.notifications.photoReminder.body',
-        payload: { entry_date: localDate },
-        deepLink: '/journal/upload',
+        preferences: this.preferences,
+        users: this.users,
+        entries: this.entries,
+        notifications: this.notifications,
+        dispatchWithPreferences: (params, prefs, user) =>
+          this.dispatchWithPreferences(params, prefs, user),
       },
-      pref,
-      user,
+      now,
     );
   }
 
-  private async loadUsersById(userIds: string[]): Promise<Map<string, User>> {
-    const uniqueIds = [...new Set(userIds)];
-    if (uniqueIds.length === 0) {
-      return new Map();
-    }
-    const users = await this.users.find({
-      where: { id: In(uniqueIds) },
-    });
-    return new Map(users.map((user) => [user.id, user]));
+  async runScheduledNotificationSweep(now: Date = new Date()): Promise<{
+    sent: number;
+    failed: number;
+  }> {
+    return runScheduledNotificationSweep(
+      {
+        scheduledNotifications: this.scheduledNotifications,
+        dispatch: (params) => this.dispatch(params),
+      },
+      now,
+    );
   }
 
   private async ensurePreferences(
@@ -341,6 +276,13 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         insight_alerts_enabled: true,
         ai_polished_insights_enabled: true,
         wrapped_alerts_enabled: true,
+        suggestion_ready_enabled: true,
+        slot_start_enabled: true,
+        recording_reminder_enabled: true,
+        suggestion_lead_time_minutes: 120,
+        quiet_hours_enabled: false,
+        quiet_hours_start: '22:30',
+        quiet_hours_end: '06:30',
         photo_tutorial_completed: false,
       });
       try {
@@ -362,15 +304,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatchEmail(
-    params: {
-      userId: string;
-      kind: NotificationKind;
-      titleKey: string;
-      bodyKey: string;
-      severity?: NotificationSeverity;
-      payload?: Record<string, unknown>;
-      deepLink?: string;
-    },
+    params: DispatchNotificationParams,
     prefetchedUser?: User | null,
   ): Promise<void> {
     const user =
@@ -393,152 +327,55 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       );
     }
   }
-}
 
-function isNotificationKindEnabled(
-  prefs: UserNotificationPreference,
-  kind: NotificationKind,
-): boolean {
-  if (kind === 'photo_reminder') return prefs.photo_reminder_enabled !== false;
-  if (kind === 'reaction_detected')
-    return prefs.reaction_alerts_enabled !== false;
-  if (kind === 'simplification_started')
-    return prefs.simplification_alerts_enabled !== false;
-  if (kind === 'insight_ready' || kind === 'doctor_referral')
-    return prefs.insight_alerts_enabled !== false;
-  if (kind === 'wrapped_ready') return prefs.wrapped_alerts_enabled !== false;
-  return true;
-}
-
-function clampInteger(value: number, min: number, max: number): number {
-  if (!Number.isInteger(value)) return min;
-  return Math.max(min, Math.min(max, value));
-}
-
-function isReminderDue(
-  now: Date,
-  timeZone: string,
-  reminderTime: string,
-): boolean {
-  const reminderMinutes = parseClockMinutes(reminderTime);
-  const localMinutes = minutesInTimeZone(now, timeZone);
-  const delta = localMinutes - reminderMinutes;
-  return delta >= 0 && delta < 15;
-}
-
-function parseClockMinutes(value: string): number {
-  const [hours = '0', minutes = '0'] = value.split(':');
-  return Number(hours) * 60 + Number(minutes);
-}
-
-function minutesInTimeZone(date: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0);
-  const minute = Number(
-    parts.find((part) => part.type === 'minute')?.value ?? 0,
-  );
-  return hour * 60 + minute;
-}
-
-function localDayUtcRange(
-  localDate: string,
-  timeZone: string,
-): { start: Date; end: Date } {
-  const startZonedDateTime = Temporal.PlainDate.from(localDate)
-    .toPlainDateTime(Temporal.PlainTime.from('00:00'))
-    .toZonedDateTime(timeZone);
-  const start = startZonedDateTime.toInstant();
-  const end = startZonedDateTime
-    .add({ days: 1 })
-    .toInstant()
-    .subtract({ milliseconds: 1 });
-  return {
-    start: new Date(start.epochMilliseconds),
-    end: new Date(end.epochMilliseconds),
-  };
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === '23505'
-  );
-}
-
-function notificationCursorFingerprint(userId: string): string {
-  return `${NOTIFICATION_CURSOR_FINGERPRINT_PREFIX}:${userId}`;
-}
-
-function applyNotificationCursor(
-  queryBuilder: SelectQueryBuilder<InAppNotification>,
-  cursor: string | undefined,
-  fingerprint: string,
-): void {
-  if (!cursor) {
-    return;
+  private async resolveNotificationUser(
+    params: DispatchNotificationParams,
+    prefs: UserNotificationPreference,
+    prefetchedUser?: User | null,
+  ): Promise<User | null> {
+    if (prefetchedUser) return prefetchedUser;
+    if (!prefs.quiet_hours_enabled && !prefs.channels.includes('email')) {
+      return null;
+    }
+    return this.users.findOne({ where: { id: params.userId } });
   }
 
-  const decoded = decodeCursor(cursor);
-  if (decoded.fingerprint !== fingerprint) {
-    throw new BadRequestException('Cursor does not match this request');
+  private async createInAppNotification(
+    params: DispatchNotificationParams,
+  ): Promise<InAppNotification | null> {
+    try {
+      return await this.notifications.save(
+        this.notifications.create({
+          user_id: params.userId,
+          kind: params.kind,
+          title_key: params.titleKey,
+          body_key: params.bodyKey,
+          severity: params.severity ?? 'info',
+          dedupe_key: params.dedupeKey ?? null,
+          payload: params.payload ?? null,
+          deep_link: params.deepLink ?? null,
+        }),
+      );
+    } catch (error) {
+      if (!params.dedupeKey || !isUniqueConstraintError(error)) {
+        throw error;
+      }
+      return this.findDuplicateNotification(params);
+    }
   }
 
-  const [bucket, createdAt, id] = decoded.tuple;
-  if (
-    (bucket !== 0 && bucket !== 1) ||
-    typeof createdAt !== 'string' ||
-    typeof id !== 'string'
-  ) {
-    throw new BadRequestException('Invalid cursor');
+  private findDuplicateNotification(
+    params: DispatchNotificationParams,
+  ): Promise<InAppNotification | null> {
+    if (!params.dedupeKey) {
+      return Promise.resolve(null);
+    }
+    return this.notifications.findOne({
+      where: {
+        user_id: params.userId,
+        kind: params.kind,
+        dedupe_key: params.dedupeKey,
+      },
+    });
   }
-
-  queryBuilder.andWhere(
-    new Brackets((qb) => {
-      qb.where(`${NOTIFICATION_READ_BUCKET_SQL} > :cursorBucket`, {
-        cursorBucket: bucket,
-      })
-        .orWhere(
-          `${NOTIFICATION_READ_BUCKET_SQL} = :cursorBucket AND notification.created_at < :cursorCreatedAt`,
-          { cursorBucket: bucket, cursorCreatedAt: createdAt },
-        )
-        .orWhere(
-          `${NOTIFICATION_READ_BUCKET_SQL} = :cursorBucket AND notification.created_at = :cursorCreatedAt AND notification.id < :cursorId`,
-          { cursorBucket: bucket, cursorCreatedAt: createdAt, cursorId: id },
-        );
-    }),
-  );
-}
-
-function buildNotificationNextCursor(
-  item: InAppNotification | undefined,
-  fingerprint: string,
-  hasMore: boolean,
-): string | null {
-  if (!hasMore || !item) {
-    return null;
-  }
-
-  return encodeCursor({
-    fingerprint,
-    tuple: notificationCursorTuple(item),
-  });
-}
-
-function notificationCursorTuple(
-  item: InAppNotification,
-): NotificationCursorTuple {
-  return [item.read_at ? 1 : 0, toCursorDate(item.created_at), item.id];
-}
-
-function toCursorDate(value: Date | string): string {
-  return value instanceof Date
-    ? value.toISOString()
-    : new Date(value).toISOString();
 }

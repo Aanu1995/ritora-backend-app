@@ -75,6 +75,7 @@ describe('configureApp', () => {
         'Authorization',
         'Accept-Language',
         'X-Timezone',
+        'X-Time-Zone',
       ],
       maxAge: 86400,
     });

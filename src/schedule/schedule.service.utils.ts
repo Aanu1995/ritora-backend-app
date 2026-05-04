@@ -103,5 +103,6 @@ export function buildRoutineStepWriteData(
       custom_label: step.customLabel ?? null,
       notes: step.notes ?? null,
       optional: step.optional ?? false,
+      is_specialist_locked: step.isSpecialistLocked ?? false,
     }));
 }
