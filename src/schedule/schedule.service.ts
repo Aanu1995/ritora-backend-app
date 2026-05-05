@@ -12,18 +12,17 @@ import { ApplyPresetDto } from './dto/apply-preset.dto';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { CreateSlotsDto } from './dto/create-slots.dto';
 import { MoveSlotDto } from './dto/move-slot.dto';
-import {
-  DAYS_OF_WEEK,
-  DayOfWeek,
-  MAX_STEPS_PER_SLOT,
-} from './dto/schedule.constants';
+import { DayOfWeek, MAX_STEPS_PER_SLOT } from './dto/schedule.constants';
 import { UpdateSlotDto } from './dto/update-slot.dto';
 import { UpsertRoutineStepsDto } from './dto/upsert-routine-steps.dto';
 import { RoutineStep } from './entities/routine-step.entity';
 import { ScheduleSlot } from './entities/schedule-slot.entity';
 import {
+  buildEveryDaySlotsInput,
+  applySlotUpdatePatch,
   buildRoutineStepWriteData,
   buildScheduleSlotData,
+  buildSlotInputForDay,
   collectReferencedProductIds,
   getMissingDays,
   hasMissingCustomLabel,
@@ -127,12 +126,7 @@ export class ScheduleService {
     userId: string,
     dto: ApplyPresetDto,
   ): Promise<ScheduleSlot[]> {
-    return this.createSlots(userId, {
-      daysOfWeek: [...DAYS_OF_WEEK],
-      slotTime: dto.slotTime,
-      mode: dto.mode,
-      slotNotes: dto.slotNotes,
-    });
+    return this.createSlots(userId, buildEveryDaySlotsInput(dto));
   }
 
   async updateSlot(
@@ -156,13 +150,7 @@ export class ScheduleService {
       }
     }
 
-    if (dto.mode !== undefined) {
-      slot.mode = dto.mode;
-    }
-
-    if (dto.slotNotes !== undefined) {
-      slot.slot_notes = dto.slotNotes ?? null;
-    }
+    applySlotUpdatePatch(slot, dto);
 
     await this.slotsRepository.save(slot);
     return this.loadSlot(userId, slot.id);
@@ -301,12 +289,7 @@ export class ScheduleService {
         repository.create(
           buildScheduleSlotData(
             userId,
-            normalizeSlotInput({
-              dayOfWeek,
-              slotTime: slotInput.slotTime,
-              mode: slotInput.mode,
-              slotNotes: slotInput.slotNotes,
-            }),
+            buildSlotInputForDay(dayOfWeek, slotInput),
           ),
         ),
       );

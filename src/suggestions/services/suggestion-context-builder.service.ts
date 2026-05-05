@@ -12,9 +12,17 @@ import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
 import {
+  SUGGESTION_SAFETY_POLICY_REVIEWED_AT,
+  SUGGESTION_SAFETY_POLICY_VERSION,
+} from '../suggestions.constants';
+import {
   buildSafetyConstraints,
   skippedReasonsFromPolicy,
 } from './suggestion-safety-policy';
+import {
+  getSuggestionEvidenceSources,
+  mergeEvidenceSourceIds,
+} from './suggestion-evidence-sources';
 import { scoreProductForSuggestion } from './suggestion-product-intelligence';
 
 @Injectable()
@@ -91,12 +99,28 @@ export class SuggestionContextBuilder {
         normalizedInputs.recentApplications,
       ),
       safetyConstraints: [],
+      governance: {
+        safetyPolicyVersion: SUGGESTION_SAFETY_POLICY_VERSION,
+        safetyPolicyReviewedAt: SUGGESTION_SAFETY_POLICY_REVIEWED_AT,
+        aiPersonalizationAllowed:
+          normalizedInputs.aiPersonalizationAllowed ?? true,
+        aiPersonalizationBlockedReason:
+          normalizedInputs.aiPersonalizationBlockedReason ?? null,
+      },
+      evidenceSources: [],
       skippedCandidates: [],
     };
+    const skippedCandidates = skippedReasonsFromPolicy(baseContext);
     const summary = {
       ...baseContext,
       safetyConstraints: buildSafetyConstraints(baseContext),
-      skippedCandidates: skippedReasonsFromPolicy(baseContext),
+      skippedCandidates,
+      evidenceSources: getSuggestionEvidenceSources(
+        mergeEvidenceSourceIds(
+          ...productScores.map((product) => product.evidenceSourceIds),
+          ...skippedCandidates.map((candidate) => candidate.sourceIds),
+        ),
+      ),
     };
 
     const cachePayload = {
@@ -143,6 +167,8 @@ export interface SuggestionContextBuilderInput {
   routineSteps: RoutineStep[];
   recentJournalEntries: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
+  aiPersonalizationAllowed?: boolean;
+  aiPersonalizationBlockedReason?: string | null;
 }
 
 function buildReactionSummary(
@@ -302,6 +328,9 @@ function buildCacheKey(inputs: SuggestionContextBuilderInput): string {
                 item.is_ad_hoc,
               ]),
           ]),
+        aiPersonalizationAllowed: inputs.aiPersonalizationAllowed ?? true,
+        aiPersonalizationBlockedReason:
+          inputs.aiPersonalizationBlockedReason ?? null,
       }),
     )
     .digest('hex')

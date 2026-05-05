@@ -4,6 +4,7 @@ import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.e
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionGenerationService } from './suggestion-generation.service';
 import { SuggestionGenerationWorker } from './suggestion-generation-worker.service';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
 
 describe('SuggestionGenerationWorker', () => {
   const generationService = {
@@ -11,6 +12,9 @@ describe('SuggestionGenerationWorker', () => {
   } as unknown as jest.Mocked<SuggestionGenerationService>;
   const jobRepo = repo<SuggestionGenerationJob>();
   const suggestionRepo = repo<SuggestionInstance>();
+  const observability = {
+    record: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionObservabilityService>;
   const queryBuilder = updateQueryBuilder();
   const worker = new SuggestionGenerationWorker(
     {
@@ -19,11 +23,13 @@ describe('SuggestionGenerationWorker', () => {
     generationService,
     jobRepo,
     suggestionRepo,
+    observability,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     jobRepo.createQueryBuilder.mockReturnValue(queryBuilder as never);
+    jobRepo.find.mockResolvedValue([]);
     queryBuilder.execute.mockResolvedValue({
       raw: [
         {
@@ -47,6 +53,43 @@ describe('SuggestionGenerationWorker', () => {
       raw: [],
       generatedMaps: [],
     });
+  });
+
+  it('recovers stale running jobs before claiming new work', async () => {
+    const staleLockedAt = new Date('2026-05-04T05:40:00.000Z');
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T06:00:00.000Z'));
+    jobRepo.find.mockResolvedValue([
+      {
+        id: 'stale-job',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        target_time: '08:00',
+        attempt_count: 0,
+        locked_at: staleLockedAt,
+      } as SuggestionGenerationJob,
+    ]);
+    queryBuilder.execute.mockResolvedValue({ raw: [] });
+
+    await worker.pollOnce();
+
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'stale-job' },
+      expect.objectContaining({
+        status: 'queued',
+        attempt_count: 1,
+        locked_at: null,
+        locked_by: null,
+      }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'job_recovered',
+        severity: 'warning',
+        jobId: 'stale-job',
+      }),
+    );
+    jest.useRealTimers();
   });
 
   it('marks the pending suggestion as generating before invoking AI generation', async () => {
@@ -78,6 +121,7 @@ describe('SuggestionGenerationWorker', () => {
 function repo<T extends ObjectLiteral>() {
   return {
     createQueryBuilder: jest.fn(),
+    find: jest.fn(),
     update: jest.fn(),
   } as unknown as jest.Mocked<Repository<T>>;
 }

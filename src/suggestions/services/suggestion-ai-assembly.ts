@@ -4,6 +4,7 @@ import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import {
   SuggestionExplanationJson,
   SuggestionGapRecommendationJson,
+  SuggestionEvidenceSourceId,
   SuggestionMode,
   SuggestionSafetyFlagJson,
   SuggestionStepChipJson,
@@ -14,6 +15,7 @@ import type {
 } from './suggestion-ai-generator';
 import { RawSuggestionStepResponse } from './suggestion-ai-contract';
 import { buildPolicySafetyFlags } from './suggestion-safety-policy';
+import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
 
 export type AssemblyContext = {
   lockedSteps: RoutineStep[];
@@ -182,6 +184,7 @@ export function buildDeterministicSafetyFlags(
       message:
         'Check active ingredients with your specialist during pregnancy or medication changes.',
       ingredientSlugs: [],
+      sourceIds: [SuggestionEvidenceSourceId.DermNetTopicalRetinoids],
     });
   }
   return flags;
@@ -216,6 +219,7 @@ export function sanitizeGapRecommendations(
     reason: sanitizeText(gap.reason) ?? '',
     budgetTier: gap.budgetTier,
     goalAlignment: sanitizeText(gap.goalAlignment),
+    sourceIds: mergeEvidenceSourceIds(gap.sourceIds ?? []),
   }));
 }
 
@@ -226,6 +230,7 @@ export function sanitizeSafetyFlags(
     severity: flag.severity,
     message: sanitizeText(flag.message) ?? '',
     ingredientSlugs: flag.ingredientSlugs ?? [],
+    sourceIds: mergeEvidenceSourceIds(flag.sourceIds ?? []),
   }));
 }
 

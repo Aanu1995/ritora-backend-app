@@ -10,12 +10,16 @@ import {
 } from '../entities/suggestion-instance.entity';
 import {
   SuggestionDaypart,
+  SuggestionEvidenceSourceJson,
   SuggestionExplanationJson,
-  SuggestionGapRecommendationJson,
+  SuggestionGapActionKind,
+  SuggestionGapRecommendationResponseJson,
   SuggestionGenerationStatus,
   SuggestionMode,
   SuggestionSafetyFlagJson,
 } from '../suggestions.constants';
+import { getSuggestionEvidenceSources } from '../services/suggestion-evidence-sources';
+import { applyGapRecommendationActions } from '../services/suggestion-gap-actions';
 import { SuggestionStepResponseDto } from './suggestion-step-response.dto';
 
 export class SuggestionInstanceResponseDto {
@@ -67,7 +71,7 @@ export class SuggestionInstanceResponseDto {
   explanation: SuggestionExplanationJson | null;
 
   @ApiProperty({ type: 'array', items: { type: 'object' } })
-  gapRecommendations: SuggestionGapRecommendationJson[];
+  gapRecommendations: SuggestionGapRecommendationResponseJson[];
 
   @ApiProperty({ type: 'array', items: { type: 'object' } })
   safetyFlags: SuggestionSafetyFlagJson[];
@@ -78,6 +82,9 @@ export class SuggestionInstanceResponseDto {
     additionalProperties: true,
   })
   inputTrace: SuggestionGenerationContext | null;
+
+  @ApiProperty({ type: 'array', items: { type: 'object' } })
+  evidenceSources: SuggestionEvidenceSourceJson[];
 
   @ApiProperty({ type: [SuggestionStepResponseDto] })
   steps: SuggestionStepResponseDto[];
@@ -93,7 +100,10 @@ export class SuggestionInstanceResponseDto {
 
   static fromEntity(
     instance: SuggestionInstance,
-    options: { applicationLogId?: string | null } = {},
+    options: {
+      applicationLogId?: string | null;
+      gapActionByKey?: ReadonlyMap<string, SuggestionGapActionKind>;
+    } = {},
   ): SuggestionInstanceResponseDto {
     const dto = new SuggestionInstanceResponseDto();
     dto.id = instance.id;
@@ -113,9 +123,22 @@ export class SuggestionInstanceResponseDto {
     dto.simplifiedForReaction = instance.simplified_for_reaction;
     dto.rationaleHeadline = instance.ai_explanation?.headline ?? null;
     dto.explanation = instance.ai_explanation;
-    dto.gapRecommendations = instance.gap_recommendations ?? [];
+    dto.gapRecommendations = applyGapRecommendationActions(
+      instance.gap_recommendations,
+      options.gapActionByKey,
+    );
     dto.safetyFlags = instance.safety_flags ?? [];
     dto.inputTrace = instance.generation_context ?? null;
+    dto.evidenceSources =
+      instance.generation_context?.evidenceSources ??
+      getSuggestionEvidenceSources([
+        ...(instance.safety_flags ?? []).flatMap(
+          (flag) => flag.sourceIds ?? [],
+        ),
+        ...(instance.gap_recommendations ?? []).flatMap(
+          (gap) => gap.sourceIds ?? [],
+        ),
+      ]);
     dto.steps = (instance.steps ?? [])
       .slice()
       .sort((a, b) => a.step_order - b.step_order)

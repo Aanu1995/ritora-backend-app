@@ -226,8 +226,14 @@ function resolveItemDraft(
     recommendedSnapshot: suggestionStep
       ? {
           product_id: suggestionStep.inventory_product_id,
-          brand: suggestionStep.product_brand_snapshot,
-          name: suggestionStep.product_name_snapshot,
+          brand:
+            suggestionStep.product_brand_snapshot ??
+            suggestionStep.product?.brand ??
+            null,
+          name:
+            suggestionStep.product_name_snapshot ??
+            suggestionStep.product?.name ??
+            null,
           step_label: suggestionStep.step_label,
           routine_step_id: suggestionStep.routine_step_id,
           suggestion_step_id: suggestionStep.id,
@@ -263,6 +269,17 @@ function buildAppliedSnapshot(
   substitutedProduct: InventoryProduct | null,
   suggestionStep: SuggestionStep | null,
 ): ApplicationItemProductSnapshot | null {
+  if (item.status === 'substituted' && item.isAdHoc) {
+    return {
+      product_id: null,
+      brand: item.adHocBrand ?? null,
+      name: item.adHocName ?? null,
+      step_label: item.stepLabel ?? suggestionStep?.step_label ?? null,
+      routine_step_id: suggestionStep?.routine_step_id ?? null,
+      suggestion_step_id: suggestionStep?.id ?? null,
+      provenance: 'added_off_shelf',
+    };
+  }
   const product = substitutedProduct ?? sourceProduct;
   if (product) {
     return {

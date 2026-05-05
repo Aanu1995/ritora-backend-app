@@ -15,7 +15,7 @@ import { UserNotificationPreference } from '../../notifications/entities/user-no
 import { User } from '../../users/entities/user.entity';
 import { UserDataAccessLogService } from '../../users/user-data-access-log.service';
 import {
-  SENSITIVE_SKIN_PROFILE_CONSENT_TYPES,
+  SensitiveSkinProfileConsentType,
   UserDataAccessActorType,
   UserDataAccessPurpose,
 } from '../../users/user-consent.constants';
@@ -27,25 +27,17 @@ import {
   SuggestionGenerationInputs,
   SuggestionGenerationOutput,
 } from './suggestion-ai-generator';
+import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
+import { SuggestionConsentService } from './suggestion-consent.service';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
+import { SuggestionTodayActionService } from './suggestion-today-action.service';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
   deriveSuggestionDaypart,
 } from './suggestion-helpers';
 
-/**
- * Orchestrates one full generation cycle for a single (user, slot, date)
- * job:
- *   1. Reads the inputs the AI needs (profile, shelf, scheduled steps,
- *      recent journal entries, recent applications).
- *   2. Calls SuggestionAiGenerator to produce a routine.
- *   3. Persists the resulting SuggestionInstance + SuggestionSteps.
- *   4. Dispatches a `suggestion_ready` notification (honoured per the
- *      user's notification preferences).
- *
- * The actual claim/retry/lock semantics live in the worker.
- */
 @Injectable()
 export class SuggestionGenerationService {
   private readonly logger = new Logger(SuggestionGenerationService.name);
@@ -53,8 +45,12 @@ export class SuggestionGenerationService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly aiGenerator: SuggestionAiGenerator,
+    private readonly usageGuard: SuggestionAiUsageGuard,
+    private readonly consentService: SuggestionConsentService,
     private readonly contextBuilder: SuggestionContextBuilder,
+    private readonly todayActionService: SuggestionTodayActionService,
     private readonly notifications: NotificationsService,
+    private readonly observability: SuggestionObservabilityService,
     private readonly dataAccessLog: UserDataAccessLogService,
     @InjectRepository(SuggestionInstance)
     private readonly suggestionRepo: Repository<SuggestionInstance>,
@@ -100,9 +96,47 @@ export class SuggestionGenerationService {
       return;
     }
 
-    const profile = await this.skinProfileRepo.findOne({
-      where: { user_id: user.id },
-    });
+    const consentDecision = await this.consentService.evaluate(user.id);
+    const usageDecision = consentDecision.aiPersonalizationAllowed
+      ? await this.usageGuard.evaluate(user.id)
+      : null;
+    const aiPersonalizationAllowed =
+      consentDecision.aiPersonalizationAllowed &&
+      (usageDecision?.allowed ?? true);
+    const personalizationBlockedReason =
+      !consentDecision.aiPersonalizationAllowed
+        ? consentDecision.blockedReason
+        : (usageDecision?.blockedReason ?? consentDecision.blockedReason);
+    if (!consentDecision.aiPersonalizationAllowed) {
+      await this.observability.record({
+        kind: 'consent_degraded',
+        severity: 'warning',
+        userId: user.id,
+        jobId: job.id,
+        metadata: { reason: consentDecision.blockedReason },
+      });
+    }
+    if (usageDecision && !usageDecision.allowed) {
+      await this.observability.record({
+        kind: 'ai_budget_blocked',
+        severity: 'warning',
+        userId: user.id,
+        jobId: job.id,
+        metadata: {
+          reason: usageDecision.blockedReason,
+          generationCountToday: usageDecision.generationCountToday,
+          regenerationCountToday: usageDecision.regenerationCountToday,
+          estimatedCostTodayUsd: usageDecision.estimatedCostTodayUsd,
+        },
+      });
+    }
+
+    const canReadSensitiveContext = consentDecision.canReadSensitiveContext;
+    const profile = canReadSensitiveContext
+      ? await this.skinProfileRepo.findOne({
+          where: { user_id: user.id },
+        })
+      : null;
     const activeProducts = await this.inventoryRepo.find({
       where: { user_id: user.id, status: ShelfStatus.Active },
     });
@@ -110,18 +144,31 @@ export class SuggestionGenerationService {
       where: { user_id: user.id, status: ShelfStatus.FinishedUp },
       select: ['id'],
     });
-    const recentJournal = await this.journalRepo.find({
-      where: { user_id: user.id },
-      order: { entry_date: 'DESC' },
-      take: 7,
-    });
-    const recentApplications = await this.applicationLogRepo.find({
-      where: { user_id: user.id },
-      relations: ['items'],
-      order: { target_date: 'DESC' },
-      take: 30,
-    });
-    await this.recordRecommendationDataAccess(user.id);
+    const ignoreReactionContext =
+      await this.todayActionService.shouldIgnoreReactionContext(
+        user.id,
+        targetDate,
+        job.last_error,
+      );
+    const recentJournal = canReadSensitiveContext && !ignoreReactionContext
+      ? await this.journalRepo.find({
+          where: { user_id: user.id },
+          order: { entry_date: 'DESC' },
+          take: 7,
+        })
+      : [];
+    const recentApplications = canReadSensitiveContext
+      ? await this.applicationLogRepo.find({
+          where: { user_id: user.id },
+          relations: ['items'],
+          order: { target_date: 'DESC' },
+          take: 30,
+        })
+      : [];
+    await this.recordRecommendationDataAccess(
+      user.id,
+      consentDecision.activeSensitiveConsentTypes,
+    );
     const daypart = deriveSuggestionDaypart(slot.slot_time);
     const contextSummary = await this.contextBuilder.build({
       userId: user.id,
@@ -133,6 +180,8 @@ export class SuggestionGenerationService {
       routineSteps: slot.steps ?? [],
       recentJournalEntries: recentJournal,
       recentApplications,
+      aiPersonalizationAllowed,
+      aiPersonalizationBlockedReason: personalizationBlockedReason,
     });
 
     const inputs: SuggestionGenerationInputs = {
@@ -147,11 +196,14 @@ export class SuggestionGenerationService {
       recentJournalEntries: recentJournal,
       recentApplications,
       contextSummary,
+      aiPersonalizationAllowed,
+      aiPersonalizationBlockedReason: personalizationBlockedReason,
     };
 
     const output = await this.aiGenerator.generate(inputs);
 
-    await this.persist(user, job, slot, inputs, output);
+    const savedInstance = await this.persist(user, job, slot, inputs, output);
+    await this.recordGenerationOutcome(user.id, job.id, savedInstance, output);
 
     // Fire suggestion_ready notification.
     try {
@@ -168,6 +220,17 @@ export class SuggestionGenerationService {
         dedupeKey: `suggestion_ready:${targetDate}:${slot.id}`,
       });
     } catch (error) {
+      await this.observability.record({
+        kind: 'notification_failed',
+        severity: 'warning',
+        userId: user.id,
+        suggestionInstanceId: savedInstance.id,
+        jobId: job.id,
+        metadata: {
+          notificationKind: 'suggestion_ready',
+          message: error instanceof Error ? error.message : 'unknown error',
+        },
+      });
       this.logger.warn(
         `Failed to dispatch suggestion_ready notification: ${
           error instanceof Error ? error.message : 'unknown error'
@@ -289,12 +352,40 @@ export class SuggestionGenerationService {
     return clampLeadTimeMinutes(prefs?.suggestion_lead_time_minutes ?? 120);
   }
 
-  private async recordRecommendationDataAccess(userId: string): Promise<void> {
+  private async recordRecommendationDataAccess(
+    userId: string,
+    consentTypes: SensitiveSkinProfileConsentType[],
+  ): Promise<void> {
+    if (consentTypes.length === 0) return;
     await this.dataAccessLog.recordDataAccess(
       userId,
-      [...SENSITIVE_SKIN_PROFILE_CONSENT_TYPES],
+      consentTypes,
       UserDataAccessPurpose.RecommendationAnalysis,
       UserDataAccessActorType.System,
     );
+  }
+
+  private async recordGenerationOutcome(
+    userId: string,
+    jobId: string,
+    instance: SuggestionInstance,
+    output: SuggestionGenerationOutput,
+  ): Promise<void> {
+    const fallback =
+      output.metadata.model.startsWith('deterministic-baseline') ||
+      output.metadata.model.startsWith('fallback:');
+    await this.observability.record({
+      kind: fallback ? 'generation_fallback' : 'generation_completed',
+      severity: fallback ? 'warning' : 'info',
+      userId,
+      suggestionInstanceId: instance.id,
+      jobId,
+      metadata: {
+        model: output.metadata.model,
+        promptVersion: output.metadata.promptVersion,
+        durationMs: output.metadata.durationMs,
+        estimatedCostUsd: output.metadata.estimatedCostUsd,
+      },
+    });
   }
 }

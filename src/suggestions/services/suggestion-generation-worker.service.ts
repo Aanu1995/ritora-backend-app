@@ -6,13 +6,19 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { LessThan, Not, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
-import { SUGGESTION_GENERATION_POLL_INTERVAL_MS } from '../suggestions.constants';
+import {
+  SUGGESTION_GENERATION_MAX_ATTEMPTS,
+  SUGGESTION_GENERATION_POLL_INTERVAL_MS,
+  SUGGESTION_JOB_LOCK_TIMEOUT_MINUTES,
+  SUGGESTION_STALE_JOB_REAPER_BATCH_SIZE,
+} from '../suggestions.constants';
 import { SuggestionGenerationService } from './suggestion-generation.service';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
 
 /**
  * Polls `suggestion_generation_jobs` and runs them. Mirrors the existing
@@ -41,6 +47,7 @@ export class SuggestionGenerationWorker
     private readonly jobRepo: Repository<SuggestionGenerationJob>,
     @InjectRepository(SuggestionInstance)
     private readonly suggestionRepo: Repository<SuggestionInstance>,
+    private readonly observability: SuggestionObservabilityService,
   ) {
     this.enabled = this.configService.get<string>('NODE_ENV') !== 'test';
   }
@@ -73,6 +80,7 @@ export class SuggestionGenerationWorker
     if (this.polling) return;
     this.polling = true;
     try {
+      await this.recoverStaleRunningJobs();
       const job = await this.claimNextJob();
       if (!job) return;
       try {
@@ -80,7 +88,12 @@ export class SuggestionGenerationWorker
         await this.generationService.generateForJob(job);
         await this.jobRepo.update(
           { id: job.id },
-          { status: 'completed', last_error: null },
+          {
+            status: 'completed',
+            last_error: null,
+            locked_at: null,
+            locked_by: null,
+          },
         );
       } catch (error) {
         const message =
@@ -88,15 +101,27 @@ export class SuggestionGenerationWorker
         this.logger.error(
           `Job ${job.id} failed for slot ${job.slot_id} on ${job.target_date}: ${message}`,
         );
-        const nextStatus = job.attempt_count + 1 >= 3 ? 'failed' : 'queued';
+        const nextAttemptCount = job.attempt_count + 1;
+        const nextStatus =
+          nextAttemptCount >= SUGGESTION_GENERATION_MAX_ATTEMPTS
+            ? 'failed'
+            : 'queued';
         if (nextStatus === 'failed') {
           await this.markSuggestionFailed(job, message);
+          await this.observability.record({
+            kind: 'generation_failed',
+            severity: 'critical',
+            userId: job.user_id,
+            jobId: job.id,
+            metadata: { message, attemptCount: nextAttemptCount },
+          });
         }
         await this.jobRepo.update(
           { id: job.id },
           {
             status: nextStatus,
-            attempt_count: job.attempt_count + 1,
+            attempt_count: nextAttemptCount,
+            run_after: new Date(Date.now() + retryDelayMs(nextAttemptCount)),
             last_error: message,
             locked_at: null,
             locked_by: null,
@@ -125,6 +150,65 @@ export class SuggestionGenerationWorker
         ai_retry_count: job.attempt_count + 1,
       },
     );
+  }
+
+  private async recoverStaleRunningJobs(now = new Date()): Promise<void> {
+    const cutoff = new Date(
+      now.getTime() - SUGGESTION_JOB_LOCK_TIMEOUT_MINUTES * 60_000,
+    );
+    const staleJobs = await this.jobRepo.find({
+      where: {
+        status: 'running',
+        locked_at: LessThan(cutoff),
+      },
+      order: { locked_at: 'ASC' },
+      take: SUGGESTION_STALE_JOB_REAPER_BATCH_SIZE,
+    });
+    for (const staleJob of staleJobs) {
+      const job = normalizeClaimedJob(staleJob);
+      const nextAttemptCount = job.attempt_count + 1;
+      const message = `stale lock recovered after ${SUGGESTION_JOB_LOCK_TIMEOUT_MINUTES} minutes`;
+      if (nextAttemptCount >= SUGGESTION_GENERATION_MAX_ATTEMPTS) {
+        await this.markSuggestionFailed(job, message);
+        await this.jobRepo.update(
+          { id: job.id },
+          {
+            status: 'failed',
+            attempt_count: nextAttemptCount,
+            last_error: message,
+            locked_at: null,
+            locked_by: null,
+          },
+        );
+        await this.observability.record({
+          kind: 'job_dead_lettered',
+          severity: 'critical',
+          userId: job.user_id,
+          jobId: job.id,
+          metadata: { attemptCount: nextAttemptCount, reason: message },
+        });
+        continue;
+      }
+
+      await this.jobRepo.update(
+        { id: job.id },
+        {
+          status: 'queued',
+          attempt_count: nextAttemptCount,
+          run_after: now,
+          last_error: message,
+          locked_at: null,
+          locked_by: null,
+        },
+      );
+      await this.observability.record({
+        kind: 'job_recovered',
+        severity: 'warning',
+        userId: job.user_id,
+        jobId: job.id,
+        metadata: { attemptCount: nextAttemptCount, reason: message },
+      });
+    }
   }
 
   private async markSuggestionGenerating(
@@ -207,4 +291,8 @@ function normalizeClaimedJob(
     target_date: toDateOnlyString(raw.target_date),
     target_time: toTimeOnlyString(raw.target_time),
   };
+}
+
+function retryDelayMs(attemptCount: number): number {
+  return Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, attemptCount - 1));
 }

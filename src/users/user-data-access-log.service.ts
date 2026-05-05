@@ -10,6 +10,7 @@ import {
   UserDataAccessActorType,
   UserDataAccessEventType,
   UserDataAccessPurpose,
+  UserConsentType,
 } from './user-consent.constants';
 
 const DEFAULT_LOG_LIMIT = 100;
@@ -60,7 +61,7 @@ export class UserDataAccessLogService {
 
   async recordConsentEvent(
     userId: string,
-    consentType: SensitiveSkinProfileConsentType,
+    consentType: UserConsentType,
     eventType:
       | UserDataAccessEventType.ConsentGranted
       | UserDataAccessEventType.ConsentRevoked,

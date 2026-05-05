@@ -5,6 +5,7 @@ export enum UserConsentType {
   HealthContextProcessing = 'health_context_processing',
   HormonalContextProcessing = 'hormonal_context_processing',
   SkinProgressProcessing = 'skin_progress_processing',
+  AiSuggestionProcessing = 'ai_suggestion_processing',
 }
 
 export const SENSITIVE_SKIN_PROFILE_CONSENT_TYPES = [

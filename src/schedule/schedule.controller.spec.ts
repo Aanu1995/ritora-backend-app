@@ -24,6 +24,10 @@ function createSlot(overrides: Partial<ScheduleSlot> = {}): ScheduleSlot {
     slot_time: '08:30:00',
     mode: 'manual',
     slot_notes: null,
+    specialist_provider_name: null,
+    specialist_clinic_name: null,
+    specialist_active_since: null,
+    specialist_safety_notes: null,
     steps: [],
     created_at: new Date('2026-04-17T08:00:00.000Z'),
     updated_at: new Date('2026-04-17T08:00:00.000Z'),
@@ -68,6 +72,29 @@ describe('ScheduleController', () => {
       dayOfWeek: 'mon',
       slotTime: '08:30',
       mode: 'manual',
+      specialistProviderName: null,
+      specialistClinicName: null,
+      specialistActiveSince: null,
+      specialistSafetyNotes: null,
+    });
+  });
+
+  it('returns specialist metadata in slot responses', async () => {
+    const slot = createSlot({
+      specialist_provider_name: 'Dr. Lina Berg',
+      specialist_clinic_name: 'Nord Skin Clinic',
+      specialist_active_since: '2026-03-12',
+      specialist_safety_notes: 'Do not alter the tretinoin step.',
+    });
+    scheduleService.getForUser.mockResolvedValue([slot]);
+
+    const result = await controller.getSchedule('user-1', null, undefined);
+
+    expect(result.slots[0]).toMatchObject({
+      specialistProviderName: 'Dr. Lina Berg',
+      specialistClinicName: 'Nord Skin Clinic',
+      specialistActiveSince: '2026-03-12',
+      specialistSafetyNotes: 'Do not alter the tretinoin step.',
     });
   });
 

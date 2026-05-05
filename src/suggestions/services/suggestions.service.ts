@@ -1,6 +1,8 @@
 import {
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -18,6 +20,7 @@ import { UserNotificationPreference } from '../../notifications/entities/user-no
 import { User } from '../../users/entities/user.entity';
 import {
   RegenerateSuggestionDto,
+  SuggestionHistoryExportFile,
   SuggestionHistoryDayDto,
   SuggestionHistoryListQueryDto,
   SuggestionHistoryListResponseDto,
@@ -25,27 +28,30 @@ import {
 import { SuggestionInstanceResponseDto } from '../dto/suggestion-instance-response.dto';
 import {
   TodaysSuggestionResponseDto,
-  TodaysSuggestionRecordingDto,
   TodaysSuggestionSlotDto,
-  TodaysSuggestionSummaryDto,
 } from '../dto/todays-suggestion-response.dto';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
-import {
-  SUGGESTION_LEAD_TIME_DEFAULT_MINUTES,
-  SuggestionMode,
-  SuggestionSlotLifecycleStatus,
-} from '../suggestions.constants';
+import { SUGGESTION_LEAD_TIME_DEFAULT_MINUTES } from '../suggestions.constants';
 import { mapDayOfWeekShort } from './suggestion-history.helpers';
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
-  deriveSuggestionDaypart,
   formatDateInTimeZone,
 } from './suggestion-helpers';
 import { SuggestionHistoryReader } from './suggestion-history-reader.service';
+import { SuggestionHistoryExportService } from './suggestion-history-export.service';
 import { computeSuggestionLifecycle } from './suggestion-lifecycle';
 import { requeueSuggestionGenerationJob } from './suggestion-generation-job-queue';
+import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
+import {
+  buildPausedActiveNames,
+  buildTodaySlotDto,
+  buildTodaySummary,
+} from './todays-suggestion-response.mapper';
+import { TodaysSuggestionReactionService } from './todays-suggestion-reaction.service';
+import { SuggestionTodayActionService } from './suggestion-today-action.service';
 
 /**
  * Read-and-orchestrate service for the suggestion engine.
@@ -78,6 +84,11 @@ export class SuggestionsService {
     @InjectRepository(UserNotificationPreference)
     private readonly preferenceRepo: Repository<UserNotificationPreference>,
     private readonly historyReader: SuggestionHistoryReader,
+    private readonly historyExporter: SuggestionHistoryExportService,
+    private readonly usageGuard: SuggestionAiUsageGuard,
+    private readonly observability: SuggestionObservabilityService,
+    private readonly reactionService: TodaysSuggestionReactionService,
+    private readonly todayActionService: SuggestionTodayActionService,
   ) {}
 
   async getTodaysSuggestion(
@@ -111,7 +122,7 @@ export class SuggestionsService {
         target_date: today,
         suggestion_instance_id: Not(IsNull()),
       },
-      relations: ['items'],
+      relations: ['items', 'items.product', 'items.substituted_with_product'],
     });
 
     const suggestionBySlot = new Map<string, SuggestionInstance>();
@@ -144,6 +155,15 @@ export class SuggestionsService {
         applicationLogBySuggestion.set(log.suggestion_instance_id, log);
       }
     }
+    const gapActionMaps = await this.todayActionService.getGapActionMaps(
+      user.id,
+      suggestions.map((suggestion) => suggestion.id),
+    );
+    const reminderSnoozeMap =
+      await this.todayActionService.getReminderSnoozeMap(
+        user.id,
+        suggestions.map((suggestion) => suggestion.id),
+      );
 
     const slotDtos: TodaysSuggestionSlotDto[] = slots.map((slot) => {
       const suggestion = suggestionBySlot.get(slot.id) ?? null;
@@ -163,29 +183,26 @@ export class SuggestionsService {
         now,
         timeZone,
       });
-      return {
-        slotId: slot.id,
-        daypart: deriveSuggestionDaypart(slot.slot_time),
-        slotTime: slot.slot_time,
-        mode: suggestion?.mode ?? deriveScheduledSlotMode(slot),
-        slotNotes: slot.slot_notes ?? null,
-        routineStepCount: slot.steps?.length ?? 0,
-        specialistLockedStepCount:
-          slot.steps?.filter((step) => step.is_specialist_locked).length ?? 0,
-        visibleAt: visibleAt.toISOString(),
-        isVisible: lifecycle.status !== 'locked',
-        status: lifecycle.status,
-        slotStartsAt: toIsoString(lifecycle.slotStartsAt),
-        recordableAt: toIsoString(lifecycle.recordableAt),
-        expiresAt: toIsoString(lifecycle.expiresAt),
-        recording: applicationLog ? buildRecordingDto(applicationLog) : null,
-        suggestion: suggestion
-          ? SuggestionInstanceResponseDto.fromEntity(suggestion, {
-              applicationLogId: applicationLog?.id ?? null,
-            })
+      return buildTodaySlotDto({
+        slot,
+        suggestion,
+        applicationLog,
+        gapActionByKey: suggestion
+          ? gapActionMaps.get(suggestion.id)
+          : undefined,
+        recordingReminderSnoozedUntil: suggestion
+          ? (reminderSnoozeMap.get(suggestion.id) ?? null)
           : null,
-      };
+        visibleAt,
+        lifecycle,
+      });
     });
+
+    const reactionAlert = await this.reactionService.getReactionAlert(
+      user.id,
+      today,
+      buildPausedActiveNames(suggestions),
+    );
 
     return {
       date: today,
@@ -195,7 +212,7 @@ export class SuggestionsService {
       summary: buildTodaySummary(slotDtos),
       weatherSummary: null,
       slots: slotDtos,
-      reactionAlert: null,
+      reactionAlert,
     };
   }
 
@@ -220,9 +237,14 @@ export class SuggestionsService {
         suggestion_instance_id: suggestion.id,
       },
     });
+    const gapActionMaps = await this.todayActionService.getGapActionMaps(
+      user.id,
+      [suggestion.id],
+    );
 
     return SuggestionInstanceResponseDto.fromEntity(suggestion, {
       applicationLogId: log?.id ?? null,
+      gapActionByKey: gapActionMaps.get(suggestion.id),
     });
   }
 
@@ -239,6 +261,25 @@ export class SuggestionsService {
     }
     if (existing.user_id !== user.id) {
       throw new ForbiddenException('Suggestion belongs to another user.');
+    }
+    const usageDecision = await this.usageGuard.evaluateRegeneration(user.id);
+    if (!usageDecision.allowed) {
+      await this.observability.record({
+        kind: 'ai_budget_blocked',
+        severity: 'warning',
+        userId: user.id,
+        suggestionInstanceId: existing.id,
+        metadata: {
+          reason: usageDecision.blockedReason,
+          generationCountToday: usageDecision.generationCountToday,
+          regenerationCountToday: usageDecision.regenerationCountToday,
+          estimatedCostTodayUsd: usageDecision.estimatedCostTodayUsd,
+        },
+      });
+      throw new HttpException(
+        'Daily AI suggestion budget reached. Try again tomorrow.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     // Mark the prior instance superseded so the new one becomes active.
@@ -308,6 +349,14 @@ export class SuggestionsService {
     return this.historyReader.getHistory(user, requestTimeZone, query);
   }
 
+  async exportHistoryCsv(
+    user: User,
+    requestTimeZone: string | null,
+    query: SuggestionHistoryListQueryDto,
+  ): Promise<SuggestionHistoryExportFile> {
+    return this.historyExporter.exportCsv(user, requestTimeZone, query);
+  }
+
   async getHistoryDay(
     user: User,
     requestTimeZone: string | null,
@@ -325,43 +374,4 @@ export class SuggestionsService {
       SUGGESTION_LEAD_TIME_DEFAULT_MINUTES,
     );
   }
-}
-
-function deriveScheduledSlotMode(slot: ScheduleSlot): SuggestionMode {
-  if (slot.mode === 'ai') return 'ai';
-  const steps = slot.steps ?? [];
-  if (steps.length === 0) return 'manual';
-  const lockedCount = steps.filter((step) => step.is_specialist_locked).length;
-  if (lockedCount > 0 && lockedCount < steps.length) return 'mixed';
-  return 'manual';
-}
-
-function buildRecordingDto(log: ApplicationLog): TodaysSuggestionRecordingDto {
-  const items = log.items ?? [];
-  return {
-    applicationLogId: log.id,
-    appliedAt: log.applied_at ? toIsoString(log.applied_at) : null,
-    hasBeenEdited: log.has_been_edited,
-    editCount: log.edit_count,
-    lastEditedAt: log.last_edited_at ? toIsoString(log.last_edited_at) : null,
-    appliedCount: items.filter((item) => item.status === 'applied').length,
-    totalItems: items.length,
-  };
-}
-
-function buildTodaySummary(
-  slots: TodaysSuggestionSlotDto[],
-): TodaysSuggestionSummaryDto {
-  const count = (statuses: SuggestionSlotLifecycleStatus[]) =>
-    slots.filter((slot) => statuses.includes(slot.status)).length;
-  return {
-    total: slots.length,
-    locked: count(['locked']),
-    upcoming: count(['generating', 'ready', 'active']),
-    ready: count(['ready', 'active']),
-    recordable: count(['recordable']),
-    recorded: count(['recorded', 'edited']),
-    edited: count(['edited']),
-    failed: count(['failed']),
-  };
 }

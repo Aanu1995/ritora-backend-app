@@ -2,6 +2,7 @@ import { InventoryProduct } from '../../inventory/entities/inventory-product.ent
 import { toDateOnlyString } from '../../common/utils/date';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import {
+  SuggestionEvidenceSourceId,
   SuggestionExplanationJson,
   SuggestionGapRecommendationJson,
   SuggestionSafetyFlagJson,
@@ -19,8 +20,11 @@ export const SYSTEM_PROMPT = [
   '3. Missing products belong in gapRecommendations only, never in application steps.',
   '4. If a recent journal entry shows a reaction signal, simplify the routine to barrier mode and set simplifiedForReaction=true.',
   '5. Never use diagnostic language. Avoid words like diagnose, treat, cure, or prescribe.',
-  '6. Output is strictly valid JSON conforming to the provided schema.',
+  '6. Base safety and recommendation reasoning on the trusted evidence summaries supplied in the prompt. Cite relevant sourceIds in safety flags, step warnings, and gap recommendations.',
+  '7. Output is strictly valid JSON conforming to the provided schema.',
 ].join(' ');
+
+const SOURCE_ID_ENUM = Object.values(SuggestionEvidenceSourceId);
 
 export const RESPONSE_FORMAT = {
   type: 'json_schema',
@@ -140,7 +144,12 @@ export const RESPONSE_FORMAT = {
               items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['severity', 'message', 'ingredientSlugs'],
+                required: [
+                  'severity',
+                  'message',
+                  'ingredientSlugs',
+                  'sourceIds',
+                ],
                 properties: {
                   severity: {
                     type: 'string',
@@ -150,6 +159,10 @@ export const RESPONSE_FORMAT = {
                   ingredientSlugs: {
                     type: 'array',
                     items: { type: 'string' },
+                  },
+                  sourceIds: {
+                    type: 'array',
+                    items: { type: 'string', enum: SOURCE_ID_ENUM },
                   },
                 },
               },
@@ -167,6 +180,7 @@ export const RESPONSE_FORMAT = {
             'reason',
             'budgetTier',
             'goalAlignment',
+            'sourceIds',
           ],
           properties: {
             ingredientOrCategory: { type: 'string' },
@@ -176,6 +190,10 @@ export const RESPONSE_FORMAT = {
               enum: ['starter', 'mid', 'premium', null],
             },
             goalAlignment: { type: ['string', 'null'] },
+            sourceIds: {
+              type: 'array',
+              items: { type: 'string', enum: SOURCE_ID_ENUM },
+            },
           },
         },
       },
@@ -184,7 +202,7 @@ export const RESPONSE_FORMAT = {
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['severity', 'message', 'ingredientSlugs'],
+          required: ['severity', 'message', 'ingredientSlugs', 'sourceIds'],
           properties: {
             severity: {
               type: 'string',
@@ -194,6 +212,10 @@ export const RESPONSE_FORMAT = {
             ingredientSlugs: {
               type: 'array',
               items: { type: 'string' },
+            },
+            sourceIds: {
+              type: 'array',
+              items: { type: 'string', enum: SOURCE_ID_ENUM },
             },
           },
         },
@@ -279,6 +301,12 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
         }, items=${log.items?.length ?? 0}`,
     )
     .join('\n');
+  const evidenceSources = inputs.contextSummary.evidenceSources
+    .map(
+      (source) =>
+        `- ${source.id}: ${source.organization}, ${source.title}. ${source.summary}`,
+    )
+    .join('\n');
 
   return [
     `Slot date: ${inputs.targetDate}, time: ${inputs.targetTime} (${inputs.daypart}).`,
@@ -294,12 +322,14 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
     `User-defined unlocked steps:\n${userSteps || '(none)'}`,
     `Recent journal summaries:\n${recentJournal || '(none)'}`,
     `Recent application summaries:\n${recentApplications || '(none)'}`,
+    `Trusted evidence summaries:\n${evidenceSources || '(none)'}`,
     `Scored context summary:\n${JSON.stringify(
       {
         reaction: inputs.contextSummary.reaction,
         productScores: inputs.contextSummary.productScores.slice(0, 20),
         applicationPatterns: inputs.contextSummary.applicationPatterns,
         safetyConstraints: inputs.contextSummary.safetyConstraints,
+        governance: inputs.contextSummary.governance,
         skippedCandidates: inputs.contextSummary.skippedCandidates,
       },
       null,

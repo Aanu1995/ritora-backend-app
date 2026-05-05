@@ -4,6 +4,7 @@ import {
   SuggestionMode,
   SuggestionSlotLifecycleStatus,
 } from '../suggestions.constants';
+import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { SuggestionInstanceResponseDto } from './suggestion-instance-response.dto';
 
 export class TodaysSuggestionWeatherSummaryDto {
@@ -24,14 +25,61 @@ export class TodaysSuggestionReactionAlertDto {
   @ApiProperty()
   detectedAt: string;
 
+  @ApiProperty({ nullable: true })
+  simplificationId: string | null;
+
+  @ApiProperty()
+  canUseNormalRoutine: boolean;
+
   @ApiProperty()
   photoEntryId: string;
 
-  @ApiProperty()
-  summary: string;
+  @ApiProperty({ nullable: true })
+  severity: string | null;
+
+  @ApiProperty({ nullable: true })
+  confidence: number | null;
 
   @ApiProperty({ type: [String] })
   pausedActiveNames: string[];
+
+  @ApiProperty({ type: [String] })
+  affectedZones: string[];
+
+  @ApiProperty({ type: [String] })
+  indicators: string[];
+
+  @ApiProperty({ type: [String] })
+  concernKeys: string[];
+
+  @ApiProperty()
+  barrierConcern: boolean;
+
+  @ApiProperty()
+  photosUntilClear: number;
+
+  @ApiProperty({ type: [String] })
+  clearCriteria: string[];
+
+  @ApiProperty()
+  summary: string;
+}
+
+export class TodaysSuggestionSpecialistDto {
+  @ApiProperty()
+  lockedStepCount: number;
+
+  @ApiProperty({ nullable: true })
+  providerName: string | null;
+
+  @ApiProperty({ nullable: true })
+  clinicName: string | null;
+
+  @ApiProperty({ nullable: true })
+  activeSince: string | null;
+
+  @ApiProperty({ nullable: true })
+  safetyNetMessage: string | null;
 }
 
 export class TodaysSuggestionRecordingDto {
@@ -79,6 +127,9 @@ export class TodaysSuggestionSlotDto {
   @ApiProperty()
   specialistLockedStepCount: number;
 
+  @ApiProperty({ nullable: true, type: () => TodaysSuggestionSpecialistDto })
+  specialist: TodaysSuggestionSpecialistDto | null;
+
   @ApiProperty()
   visibleAt: string;
 
@@ -111,6 +162,12 @@ export class TodaysSuggestionSlotDto {
 
   @ApiProperty({ nullable: true, type: () => TodaysSuggestionRecordingDto })
   recording: TodaysSuggestionRecordingDto | null;
+
+  @ApiProperty({ nullable: true })
+  recordingReminderSnoozedUntil: string | null;
+
+  @ApiProperty({ nullable: true, type: () => ApplicationLogResponseDto })
+  applicationLog: ApplicationLogResponseDto | null;
 
   @ApiProperty({ nullable: true, type: SuggestionInstanceResponseDto })
   suggestion: SuggestionInstanceResponseDto | null;

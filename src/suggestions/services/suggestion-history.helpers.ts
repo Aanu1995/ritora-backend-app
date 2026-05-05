@@ -16,9 +16,11 @@ export function computeSlotStatus(
   if (!log) return 'missed';
   const totalSteps = suggestion.steps?.length ?? 0;
   if (totalSteps === 0) return 'missed';
-  const appliedCount =
+  const exactAppliedCount =
     log.items?.filter((item) => item.status === 'applied').length ?? 0;
-  if (appliedCount === totalSteps) return 'applied';
+  const appliedCount =
+    log.items?.filter((item) => item.status !== 'skipped').length ?? 0;
+  if (exactAppliedCount === totalSteps) return 'applied';
   if (appliedCount === 0) return 'skipped';
   return 'partial';
 }
@@ -37,8 +39,15 @@ export function buildSummaryLine(
       totalSteps === 1 ? '' : 's'
     } suggested. No record yet.`;
   }
-  if (appliedCount === totalSteps) {
+  const exactAppliedCount =
+    log.items?.filter((item) => item.status === 'applied').length ?? 0;
+  const substitutionCount =
+    log.items?.filter((item) => item.status === 'substituted').length ?? 0;
+  if (exactAppliedCount === totalSteps) {
     return `${appliedCount} of ${totalSteps} applied. Matches the suggestion.`;
+  }
+  if (substitutionCount > 0) {
+    return `${appliedCount} of ${totalSteps} used, with substitutions.`;
   }
   return `${appliedCount} of ${totalSteps} applied.`;
 }

@@ -8,11 +8,16 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
+import {
+  SuggestionAiConsentResponseDto,
+  UpdateSuggestionAiConsentDto,
+} from './dto/suggestion-ai-consent.dto';
 import {
   RegenerateSuggestionDto,
   SuggestionHistoryDayDto,
@@ -20,14 +25,27 @@ import {
   SuggestionHistoryListResponseDto,
 } from './dto/suggestion-history.dto';
 import { SuggestionInstanceResponseDto } from './dto/suggestion-instance-response.dto';
+import {
+  NormalRoutineOverrideResponseDto,
+  RecordingReminderSnoozeResponseDto,
+  RecordSuggestionGapActionDto,
+  SnoozeRecordingReminderDto,
+  SuggestionGapActionResponseDto,
+} from './dto/suggestion-today-actions.dto';
 import { TodaysSuggestionResponseDto } from './dto/todays-suggestion-response.dto';
+import { SuggestionConsentService } from './services/suggestion-consent.service';
+import { SuggestionTodayActionService } from './services/suggestion-today-action.service';
 import { SuggestionsService } from './services/suggestions.service';
 
 @ApiBearerAuth()
 @ApiTags('suggestions')
 @Controller('suggestions')
 export class SuggestionsController {
-  constructor(private readonly suggestionsService: SuggestionsService) {}
+  constructor(
+    private readonly suggestionsService: SuggestionsService,
+    private readonly suggestionConsentService: SuggestionConsentService,
+    private readonly todayActionService: SuggestionTodayActionService,
+  ) {}
 
   /**
    * Today's Suggestion page payload. The slots are returned in
@@ -47,6 +65,41 @@ export class SuggestionsController {
     );
   }
 
+  @Post('today/reaction/normal-routine')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Use normal routine for today despite reaction mode',
+  })
+  async useNormalRoutineForToday(
+    @CurrentUser() user: User,
+    @Req() request: Request,
+  ): Promise<NormalRoutineOverrideResponseDto> {
+    return this.todayActionService.useNormalRoutineForToday(
+      user,
+      requestTimeZone(request),
+    );
+  }
+
+  @Post('gap-actions')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Save or dismiss a suggestion gap recommendation' })
+  async recordGapAction(
+    @CurrentUser() user: User,
+    @Body() body: RecordSuggestionGapActionDto,
+  ): Promise<SuggestionGapActionResponseDto> {
+    return this.todayActionService.recordGapAction(user, body);
+  }
+
+  @Post('today/reminders/later')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Snooze a Today recording reminder' })
+  async snoozeRecordingReminder(
+    @CurrentUser() user: User,
+    @Body() body: SnoozeRecordingReminderDto,
+  ): Promise<RecordingReminderSnoozeResponseDto> {
+    return this.todayActionService.snoozeRecordingReminder(user, body);
+  }
+
   @Get('history')
   @ApiOperation({ summary: 'Date-grouped suggestion history' })
   async getHistory(
@@ -61,6 +114,27 @@ export class SuggestionsController {
     );
   }
 
+  @Get('history/export')
+  @ApiOperation({ summary: 'CSV export for all matching suggestion history' })
+  async exportHistory(
+    @CurrentUser() user: User,
+    @Req() request: Request,
+    @Query() query: SuggestionHistoryListQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<string> {
+    const file = await this.suggestionsService.exportHistoryCsv(
+      user,
+      requestTimeZone(request),
+      query,
+    );
+    response.setHeader('Content-Type', file.contentType);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.fileName}"`,
+    );
+    return file.body;
+  }
+
   @Get('history/:date')
   @ApiOperation({ summary: 'Single past day in suggestion history' })
   async getHistoryDay(
@@ -72,6 +146,33 @@ export class SuggestionsController {
       user,
       requestTimeZone(request),
       date,
+    );
+  }
+
+  @Get('ai-consent')
+  @ApiOperation({ summary: 'AI suggestion processing consent status' })
+  async getAiConsent(
+    @CurrentUser() user: User,
+  ): Promise<SuggestionAiConsentResponseDto> {
+    return toAiConsentResponse(
+      await this.suggestionConsentService.evaluate(user.id),
+    );
+  }
+
+  @Post('ai-consent')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Grant or revoke AI suggestion processing consent' })
+  async updateAiConsent(
+    @CurrentUser() user: User,
+    @Req() request: Request,
+    @Body() body: UpdateSuggestionAiConsentDto,
+  ): Promise<SuggestionAiConsentResponseDto> {
+    return toAiConsentResponse(
+      await this.suggestionConsentService.updateAiSuggestionConsent(
+        user.id,
+        body.granted,
+        request.ip ?? null,
+      ),
     );
   }
 
@@ -102,4 +203,18 @@ function requestTimeZone(request: Request): string | null {
   const headerValue = request.header('x-time-zone');
   if (typeof headerValue !== 'string') return null;
   return headerValue.trim() || null;
+}
+
+function toAiConsentResponse(decision: {
+  aiPersonalizationAllowed: boolean;
+  canReadSensitiveContext: boolean;
+  blockedReason: string | null;
+  activeSensitiveConsentTypes: string[];
+}): SuggestionAiConsentResponseDto {
+  return {
+    granted: decision.aiPersonalizationAllowed,
+    canReadSensitiveContext: decision.canReadSensitiveContext,
+    blockedReason: decision.blockedReason,
+    activeSensitiveConsentTypes: decision.activeSensitiveConsentTypes,
+  };
 }

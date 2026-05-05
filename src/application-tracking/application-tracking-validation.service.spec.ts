@@ -79,6 +79,44 @@ describe('ApplicationTrackingValidationService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('keeps off-shelf substitutions as the applied source of truth', async () => {
+    inventoryRepo.find.mockResolvedValue([]);
+
+    const [draft] = await service.buildItemDrafts(
+      'user-1',
+      [
+        {
+          stepOrder: 0,
+          suggestionStepId: 'step-1',
+          status: 'substituted',
+          isAdHoc: true,
+          adHocBrand: 'Plain Lab',
+          adHocName: 'Recovery Balm',
+          substitutionReason: 'Skin felt dry.',
+        },
+      ],
+      suggestion(),
+    );
+
+    expect(draft.recommendedSnapshot).toEqual(
+      expect.objectContaining({
+        product_id: 'product-1',
+        brand: 'Ava Lab',
+        name: 'Gentle Cleanser',
+      }),
+    );
+    expect(draft.appliedSnapshot).toEqual(
+      expect.objectContaining({
+        product_id: null,
+        brand: 'Plain Lab',
+        name: 'Recovery Balm',
+        suggestion_step_id: 'step-1',
+        provenance: 'added_off_shelf',
+      }),
+    );
+    expect(draft.substitutionReason).toBe('Skin felt dry.');
+  });
+
   it('rejects suggestions that have not produced a ready recommendation', async () => {
     suggestionRepo.findOne.mockResolvedValue({
       ...suggestion(),

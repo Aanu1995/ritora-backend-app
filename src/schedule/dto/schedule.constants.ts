@@ -29,5 +29,9 @@ export const MAX_STEPS_PER_SLOT = 10;
 export const MAX_SLOT_NOTES_LENGTH = 1000;
 export const MAX_STEP_NOTES_LENGTH = 500;
 export const MAX_CUSTOM_LABEL_LENGTH = 100;
+export const MAX_SPECIALIST_PROVIDER_NAME_LENGTH = 120;
+export const MAX_SPECIALIST_CLINIC_NAME_LENGTH = 160;
+export const MAX_SPECIALIST_SAFETY_NOTES_LENGTH = 1000;
 
 export const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;

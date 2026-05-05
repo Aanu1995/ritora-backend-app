@@ -11,7 +11,11 @@ import {
 } from 'class-validator';
 import {
   DAYS_OF_WEEK,
+  DATE_ONLY_REGEX,
   type DayOfWeek,
+  MAX_SPECIALIST_CLINIC_NAME_LENGTH,
+  MAX_SPECIALIST_PROVIDER_NAME_LENGTH,
+  MAX_SPECIALIST_SAFETY_NOTES_LENGTH,
   MAX_SLOT_NOTES_LENGTH,
   SLOT_MODES,
   type SlotMode,
@@ -41,4 +45,28 @@ export class CreateSlotsDto {
   @IsString()
   @MaxLength(MAX_SLOT_NOTES_LENGTH)
   slotNotes?: string;
+
+  @ApiPropertyOptional({ maxLength: MAX_SPECIALIST_PROVIDER_NAME_LENGTH })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_SPECIALIST_PROVIDER_NAME_LENGTH)
+  specialistProviderName?: string | null;
+
+  @ApiPropertyOptional({ maxLength: MAX_SPECIALIST_CLINIC_NAME_LENGTH })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_SPECIALIST_CLINIC_NAME_LENGTH)
+  specialistClinicName?: string | null;
+
+  @ApiPropertyOptional({ example: '2026-03-12', nullable: true })
+  @IsOptional()
+  @IsString()
+  @Matches(DATE_ONLY_REGEX, { message: 'activeSince must be YYYY-MM-DD' })
+  specialistActiveSince?: string | null;
+
+  @ApiPropertyOptional({ maxLength: MAX_SPECIALIST_SAFETY_NOTES_LENGTH })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_SPECIALIST_SAFETY_NOTES_LENGTH)
+  specialistSafetyNotes?: string | null;
 }

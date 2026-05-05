@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, HttpException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
@@ -6,8 +6,13 @@ import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { SuggestionStep } from '../entities/suggestion-step.entity';
+import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionHistoryReader } from './suggestion-history-reader.service';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { SuggestionsService } from './suggestions.service';
+import { TodaysSuggestionReactionService } from './todays-suggestion-reaction.service';
+import { SuggestionTodayActionService } from './suggestion-today-action.service';
 
 describe('SuggestionsService', () => {
   const suggestionRepo = repo<SuggestionInstance>();
@@ -19,6 +24,22 @@ describe('SuggestionsService', () => {
     getHistory: jest.fn(),
     getHistoryDay: jest.fn(),
   } as unknown as jest.Mocked<SuggestionHistoryReader>;
+  const historyExporter = {
+    exportCsv: jest.fn(),
+  };
+  const usageGuard = {
+    evaluateRegeneration: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionAiUsageGuard>;
+  const observability = {
+    record: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionObservabilityService>;
+  const reactionService = {
+    getReactionAlert: jest.fn(),
+  } as unknown as jest.Mocked<TodaysSuggestionReactionService>;
+  const todayActionService = {
+    getGapActionMaps: jest.fn(),
+    getReminderSnoozeMap: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionTodayActionService>;
 
   const service = new SuggestionsService(
     suggestionRepo,
@@ -27,6 +48,11 @@ describe('SuggestionsService', () => {
     applicationLogRepo,
     preferenceRepo,
     historyReader,
+    historyExporter as never,
+    usageGuard,
+    observability,
+    reactionService,
+    todayActionService,
   );
 
   beforeEach(() => {
@@ -44,6 +70,16 @@ describe('SuggestionsService', () => {
       generatedMaps: [],
       raw: [],
     });
+    usageGuard.evaluateRegeneration.mockResolvedValue({
+      allowed: true,
+      blockedReason: null,
+      generationCountToday: 0,
+      regenerationCountToday: 0,
+      estimatedCostTodayUsd: 0,
+    });
+    reactionService.getReactionAlert.mockResolvedValue(null);
+    todayActionService.getGapActionMaps.mockResolvedValue(new Map());
+    todayActionService.getReminderSnoozeMap.mockResolvedValue(new Map());
   });
 
   afterEach(() => {
@@ -121,6 +157,194 @@ describe('SuggestionsService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(jobRepo.insert).not.toHaveBeenCalled();
   });
+
+  it('rate limits manual regeneration before superseding the current suggestion', async () => {
+    usageGuard.evaluateRegeneration.mockResolvedValue({
+      allowed: false,
+      blockedReason: 'daily_regeneration_limit',
+      generationCountToday: 5,
+      regenerationCountToday: 4,
+      estimatedCostTodayUsd: 0.12,
+    });
+    suggestionRepo.findOne.mockResolvedValue({
+      id: 'suggestion-1',
+      user_id: 'user-1',
+      slot_id: 'slot-1',
+      target_date: '2026-04-29',
+      target_time: '12:00',
+      daypart: 'noon',
+      mode: 'ai',
+      generation_status: 'ready',
+      visible_at: new Date('2026-04-29T10:00:00.000Z'),
+    } as SuggestionInstance);
+
+    await expect(
+      service.regenerateSuggestion(user(), 'suggestion-1', {}),
+    ).rejects.toBeInstanceOf(HttpException);
+
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'ai_budget_blocked',
+        severity: 'warning',
+      }),
+    );
+  });
+
+  it('builds today slots from schedule, visible suggestions, recording status, and lead time', async () => {
+    preferenceRepo.findOne.mockResolvedValue({
+      suggestion_lead_time_minutes: 120,
+    } as UserNotificationPreference);
+    slotRepo.find.mockResolvedValue([
+      scheduleSlot({
+        id: 'slot-ready',
+        slotTime: '12:00',
+        mode: 'ai',
+        lockedSteps: 0,
+      }),
+      scheduleSlot({
+        id: 'slot-locked',
+        slotTime: '18:00',
+        mode: 'manual',
+        lockedSteps: 1,
+      }),
+    ]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-ready',
+        slotId: 'slot-ready',
+        targetTime: '12:00',
+        generatedAt: new Date('2026-04-29T09:55:00.000Z'),
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([
+      applicationLog({
+        id: 'log-1',
+        suggestionId: 'suggestion-ready',
+        hasBeenEdited: true,
+      }),
+    ]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(slotRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { user_id: 'user-1', day_of_week: 'wed' },
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        date: '2026-04-29',
+        timeZone: 'UTC',
+        leadTimeMinutes: 120,
+      }),
+    );
+    expect(result.summary).toEqual(
+      expect.objectContaining({
+        total: 2,
+        locked: 1,
+        recorded: 1,
+        edited: 1,
+      }),
+    );
+    expect(result.slots[0]).toEqual(
+      expect.objectContaining({
+        slotId: 'slot-ready',
+        status: 'edited',
+        recording: expect.objectContaining({
+          applicationLogId: 'log-1',
+          hasBeenEdited: true,
+        }),
+        applicationLog: expect.objectContaining({
+          id: 'log-1',
+          items: expect.arrayContaining([
+            expect.objectContaining({ id: 'item-1' }),
+          ]),
+        }),
+        suggestion: expect.objectContaining({
+          id: 'suggestion-ready',
+          aiModel: 'gpt-test',
+        }),
+      }),
+    );
+    expect(result.slots[1]).toEqual(
+      expect.objectContaining({
+        slotId: 'slot-locked',
+        isVisible: false,
+        status: 'locked',
+        specialist: expect.objectContaining({
+          lockedStepCount: 1,
+        }),
+        suggestion: null,
+      }),
+    );
+    expect(reactionService.getReactionAlert).toHaveBeenCalledWith(
+      'user-1',
+      '2026-04-29',
+      [],
+    );
+  });
+
+  it('returns one suggestion with application link and delegates history reads', async () => {
+    const suggestion = suggestionInstance({
+      id: 'suggestion-1',
+      slotId: 'slot-1',
+      targetTime: '08:00',
+    });
+    suggestionRepo.findOne.mockResolvedValue(suggestion);
+    applicationLogRepo.findOne.mockResolvedValue(
+      applicationLog({
+        id: 'log-1',
+        suggestionId: 'suggestion-1',
+        hasBeenEdited: false,
+      }),
+    );
+    historyReader.getHistory.mockResolvedValue({
+      days: [],
+      nextCursor: null,
+      totalApplied: 0,
+      totalSlots: 0,
+      totalEdited: 0,
+      adherencePercent: null,
+    });
+    historyReader.getHistoryDay.mockResolvedValue({
+      date: '2026-04-28',
+      weatherSummary: null,
+      moodScore: null,
+      hydrationTrend: null,
+      reactionFlagged: false,
+      photoEntryId: null,
+      slots: [],
+    });
+
+    await expect(
+      service.getSuggestion(user(), 'suggestion-1'),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: 'suggestion-1',
+        applicationLogId: 'log-1',
+      }),
+    );
+    await service.getHistory(user(), null, {});
+    await service.getHistoryDay(user(), null, '2026-04-28');
+    historyExporter.exportCsv.mockResolvedValue({
+      fileName: 'ritora-history.csv',
+      contentType: 'text/csv; charset=utf-8',
+      body: 'Date\n',
+    });
+    await service.exportHistoryCsv(user(), null, { mode: 'mixed' });
+
+    expect(historyReader.getHistory).toHaveBeenCalledWith(user(), null, {});
+    expect(historyReader.getHistoryDay).toHaveBeenCalledWith(
+      user(),
+      null,
+      '2026-04-28',
+    );
+    expect(historyExporter.exportCsv).toHaveBeenCalledWith(user(), null, {
+      mode: 'mixed',
+    });
+  });
 });
 
 function repo<T extends ObjectLiteral>() {
@@ -139,4 +363,130 @@ function user(): User {
     id: 'user-1',
     time_zone: 'UTC',
   } as User;
+}
+
+function scheduleSlot(input: {
+  id: string;
+  slotTime: string;
+  mode: 'manual' | 'ai';
+  lockedSteps: number;
+}): ScheduleSlot {
+  const now = new Date('2026-04-29T08:00:00.000Z');
+  return {
+    id: input.id,
+    user_id: 'user-1',
+    day_of_week: 'wed',
+    slot_time: input.slotTime,
+    mode: input.mode,
+    slot_notes: null,
+    created_at: now,
+    updated_at: now,
+    steps: Array.from({ length: input.lockedSteps }, (_, index) => ({
+      id: `${input.id}-step-${index}`,
+      is_specialist_locked: true,
+      step_order: index,
+    })),
+  } as unknown as ScheduleSlot;
+}
+
+function suggestionInstance(input: {
+  id: string;
+  slotId: string;
+  targetTime: string;
+  generatedAt?: Date | null;
+}): SuggestionInstance {
+  const now = new Date('2026-04-29T09:55:00.000Z');
+  return {
+    id: input.id,
+    user_id: 'user-1',
+    slot_id: input.slotId,
+    target_date: '2026-04-29',
+    target_time: input.targetTime,
+    daypart: input.targetTime < '12:00' ? 'morning' : 'noon',
+    mode: 'ai',
+    generation_status: 'ready',
+    visible_at: new Date('2026-04-29T10:00:00.000Z'),
+    generated_at: input.generatedAt ?? now,
+    ai_model: 'gpt-test',
+    ai_prompt_version: 'prompt-v1',
+    ai_input_tokens: 10,
+    ai_output_tokens: 20,
+    ai_total_tokens: 30,
+    ai_estimated_cost_usd: 0.0001,
+    ai_duration_ms: 123,
+    ai_explanation: {
+      headline: 'Keep it steady',
+      body: [],
+      perStepReasons: [],
+      skipped: [],
+      inputs: [],
+    },
+    generation_context: null,
+    gap_recommendations: [],
+    safety_flags: [],
+    has_reaction_signal: false,
+    simplified_for_reaction: false,
+    supersedes_id: null,
+    ai_error: null,
+    ai_retry_count: 0,
+    created_at: now,
+    updated_at: now,
+    steps: [suggestionStep()],
+  } as unknown as SuggestionInstance;
+}
+
+function suggestionStep(): SuggestionStep {
+  return {
+    id: 'suggestion-step-1',
+    suggestion_instance_id: 'suggestion-1',
+    step_order: 0,
+    routine_step_id: null,
+    inventory_product_id: null,
+    product_brand_snapshot: 'Ava Lab',
+    product_name_snapshot: 'Barrier Serum',
+    step_label: 'serum',
+    custom_label: null,
+    application_method: null,
+    quantity: null,
+    wait_after_minutes: null,
+    explanation: 'Support the barrier.',
+    provenance: 'ai_added',
+    chips: [],
+    safety_warnings: [],
+    created_at: new Date('2026-04-29T09:55:00.000Z'),
+    product: null,
+  } as unknown as SuggestionStep;
+}
+
+function applicationLog(input: {
+  id: string;
+  suggestionId: string;
+  hasBeenEdited: boolean;
+}): ApplicationLog {
+  const now = new Date('2026-04-29T12:10:00.000Z');
+  return {
+    id: input.id,
+    user_id: 'user-1',
+    suggestion_instance_id: input.suggestionId,
+    slot_id: 'slot-ready',
+    target_date: '2026-04-29',
+    target_time: '12:00',
+    daypart: 'noon',
+    applied_at: now,
+    general_notes: null,
+    edit_reason: null,
+    edit_count: input.hasBeenEdited ? 1 : 0,
+    has_been_edited: input.hasBeenEdited,
+    first_recorded_at: now,
+    last_edited_at: input.hasBeenEdited ? now : null,
+    created_at: now,
+    updated_at: now,
+    items: [
+      {
+        id: 'item-1',
+        step_order: 0,
+        status: 'applied',
+      },
+    ],
+  } as unknown as ApplicationLog;
 }

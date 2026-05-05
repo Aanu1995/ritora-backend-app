@@ -1,4 +1,8 @@
 import type { ProductCategory } from '../shelf/shelf.types';
+import {
+  SuggestionEvidenceSourceId,
+  SuggestionEvidenceSourceJson,
+} from './suggestions.constants';
 
 export interface SuggestionContextSummary {
   cacheKey: string;
@@ -33,9 +37,17 @@ export interface SuggestionContextSummary {
     adherenceByCategory: Record<string, number>;
   };
   safetyConstraints: string[];
+  governance: {
+    safetyPolicyVersion: string;
+    safetyPolicyReviewedAt: string;
+    aiPersonalizationAllowed: boolean;
+    aiPersonalizationBlockedReason: string | null;
+  };
+  evidenceSources: SuggestionEvidenceSourceJson[];
   skippedCandidates: {
     productId: string;
     reason: string;
+    sourceIds: SuggestionEvidenceSourceId[];
   }[];
 }
 
@@ -51,4 +63,7 @@ export interface SuggestionProductScore {
   cautionReasons: string[];
   waitMinutes: number | null;
   inciQuality: 'available' | 'missing';
+  dataQuality: 'verified' | 'partial' | 'insufficient';
+  dataQualityWarnings: string[];
+  evidenceSourceIds: SuggestionEvidenceSourceId[];
 }

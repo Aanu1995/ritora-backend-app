@@ -4,10 +4,18 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
+  Min,
 } from 'class-validator';
-import { SuggestionDaypart, SuggestionMode } from '../suggestions.constants';
+import {
+  SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT,
+  SUGGESTION_HISTORY_PAGE_MAX_LIMIT,
+  SuggestionDaypart,
+  SuggestionMode,
+} from '../suggestions.constants';
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { SuggestionInstanceResponseDto } from './suggestion-instance-response.dto';
 import { TodaysSuggestionWeatherSummaryDto } from './todays-suggestion-response.dto';
@@ -40,6 +48,11 @@ export class SuggestionHistoryListQueryDto {
   @IsIn(['morning', 'noon', 'evening'])
   daypart?: SuggestionDaypart;
 
+  @ApiPropertyOptional({ enum: ['ai', 'manual', 'mixed'] })
+  @IsOptional()
+  @IsIn(['ai', 'manual', 'mixed'])
+  mode?: SuggestionMode;
+
   @ApiPropertyOptional({
     enum: ['applied', 'partial', 'skipped', 'simplified', 'missed'],
   })
@@ -57,6 +70,18 @@ export class SuggestionHistoryListQueryDto {
   @IsOptional()
   @IsString()
   cursor?: string;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: SUGGESTION_HISTORY_PAGE_MAX_LIMIT,
+    default: SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(SUGGESTION_HISTORY_PAGE_MAX_LIMIT)
+  limit?: number = SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT;
 }
 
 export class SuggestionHistorySlotSummaryDto {
@@ -146,13 +171,36 @@ export class SuggestionHistoryListResponseDto {
 
   @ApiProperty({ nullable: true })
   adherencePercent: number | null;
+
+  @ApiProperty()
+  totalEdited: number;
 }
+
+export type SuggestionHistoryExportFile = {
+  fileName: string;
+  contentType: 'text/csv; charset=utf-8';
+  body: string;
+};
 
 export class RegenerateSuggestionDto {
   @ApiPropertyOptional({
-    enum: ['user_requested', 'schedule_change', 'reaction_detected'],
+    enum: [
+      'user_requested',
+      'schedule_change',
+      'reaction_detected',
+      'normal_routine_requested',
+    ],
   })
   @IsOptional()
-  @IsIn(['user_requested', 'schedule_change', 'reaction_detected'])
-  reason?: 'user_requested' | 'schedule_change' | 'reaction_detected';
+  @IsIn([
+    'user_requested',
+    'schedule_change',
+    'reaction_detected',
+    'normal_routine_requested',
+  ])
+  reason?:
+    | 'user_requested'
+    | 'schedule_change'
+    | 'reaction_detected'
+    | 'normal_routine_requested';
 }

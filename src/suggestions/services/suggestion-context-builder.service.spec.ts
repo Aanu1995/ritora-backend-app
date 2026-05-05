@@ -11,6 +11,7 @@ import {
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
+import { SuggestionEvidenceSourceId } from '../suggestions.constants';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
 
 describe('SuggestionContextBuilder', () => {
@@ -80,11 +81,22 @@ describe('SuggestionContextBuilder', () => {
         'space_strong_actives',
       ]),
     );
+    expect(summary.governance).toEqual(
+      expect.objectContaining({
+        safetyPolicyVersion: expect.stringContaining('production'),
+        aiPersonalizationAllowed: true,
+      }),
+    );
     expect(summary.productScores).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           productId: 'retinoid-1',
+          dataQuality: 'partial',
           activeTags: expect.arrayContaining(['retinoid']),
+          evidenceSourceIds: expect.arrayContaining([
+            SuggestionEvidenceSourceId.AadRetinoidRetinol,
+            SuggestionEvidenceSourceId.DermNetTopicalRetinoids,
+          ]),
           cautionReasons: expect.arrayContaining([
             'pause strong actives while reaction signal is present',
             'retinoid is usually better suited to evening',
@@ -92,7 +104,9 @@ describe('SuggestionContextBuilder', () => {
         }),
         expect.objectContaining({
           productId: 'spf-1',
+          dataQuality: 'partial',
           activeTags: ['spf'],
+          evidenceSourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
           suitabilityReasons: expect.arrayContaining([
             'daytime sun protection fit',
           ]),
@@ -101,7 +115,22 @@ describe('SuggestionContextBuilder', () => {
     );
     expect(summary.skippedCandidates).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ productId: 'retinoid-1' }),
+        expect.objectContaining({
+          productId: 'retinoid-1',
+          sourceIds: expect.arrayContaining([
+            SuggestionEvidenceSourceId.AadRetinoidRetinol,
+          ]),
+        }),
+      ]),
+    );
+    expect(summary.evidenceSources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: SuggestionEvidenceSourceId.AadRetinoidRetinol,
+        }),
+        expect.objectContaining({
+          id: SuggestionEvidenceSourceId.AadSunscreenSelection,
+        }),
       ]),
     );
     expect(cacheRepo.insert).toHaveBeenCalledWith(

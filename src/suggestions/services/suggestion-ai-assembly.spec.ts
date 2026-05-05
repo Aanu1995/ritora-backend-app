@@ -102,6 +102,8 @@ function generationInputs(
     routineSteps,
     recentJournalEntries: [],
     recentApplications: [],
+    aiPersonalizationAllowed: true,
+    aiPersonalizationBlockedReason: null,
     contextSummary: contextSummary(),
   };
 }
@@ -140,6 +142,13 @@ function contextSummary(): SuggestionContextSummary {
       adherenceByCategory: {},
     },
     safetyConstraints: [],
+    governance: {
+      safetyPolicyVersion: 'test-policy',
+      safetyPolicyReviewedAt: '2026-05-04',
+      aiPersonalizationAllowed: true,
+      aiPersonalizationBlockedReason: null,
+    },
+    evidenceSources: [],
     skippedCandidates: [],
   };
 }

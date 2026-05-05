@@ -39,6 +39,11 @@ import {
   RESPONSE_FORMAT,
   SYSTEM_PROMPT,
 } from './suggestion-ai-contract';
+import {
+  buildDeterministicAiSteps,
+  buildDeterministicGapRecommendations,
+  deterministicExplanation,
+} from './suggestion-baseline-generator';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
 export const SUGGESTION_AI_TIMEOUT_MS = 45_000;
@@ -56,6 +61,8 @@ export interface SuggestionGenerationInputs {
   recentJournalEntries: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
   contextSummary: SuggestionContextSummary;
+  aiPersonalizationAllowed: boolean;
+  aiPersonalizationBlockedReason: string | null;
 }
 
 export interface SuggestionGenerationOutput {
@@ -110,6 +117,14 @@ export class SuggestionAiGenerator {
       'gpt-4.1-mini',
     );
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
+
+    if (!inputs.aiPersonalizationAllowed) {
+      return this.buildBaseline(
+        inputs,
+        startedAt,
+        `deterministic-baseline:${inputs.aiPersonalizationBlockedReason ?? 'ai_disabled'}`,
+      );
+    }
 
     if (isAllSpecialistLocked(inputs) || !apiKey || !model) {
       return this.buildBaseline(inputs, startedAt, 'deterministic-baseline');
@@ -238,15 +253,20 @@ export class SuggestionAiGenerator {
     const orderedSteps = [...inputs.routineSteps].sort(
       (a, b) => a.step_order - b.step_order,
     );
-    const steps = orderedSteps.map((step, index) =>
-      routineStepToOutput(step, index),
-    );
+    const steps =
+      orderedSteps.length > 0
+        ? orderedSteps.map((step, index) => routineStepToOutput(step, index))
+        : buildDeterministicAiSteps(inputs);
+    const hasReactionSignal = hasReactionSignalInInputs(inputs);
     return {
       mode: orderedSteps.length === 0 ? 'ai' : 'manual',
-      hasReactionSignal: hasReactionSignalInInputs(inputs),
-      simplifiedForReaction: false,
-      explanation: defaultExplanation(),
-      gapRecommendations: [],
+      hasReactionSignal,
+      simplifiedForReaction: hasReactionSignal && orderedSteps.length === 0,
+      explanation:
+        orderedSteps.length === 0
+          ? deterministicExplanation(inputs, steps)
+          : defaultExplanation(),
+      gapRecommendations: buildDeterministicGapRecommendations(inputs),
       safetyFlags: buildDeterministicSafetyFlags(inputs, steps),
       steps,
       metadata: {

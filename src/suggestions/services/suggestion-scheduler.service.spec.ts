@@ -64,6 +64,12 @@ describe('SuggestionScheduler', () => {
     const result = await scheduler.runOnce();
 
     expect(result.enqueued).toBe(1);
+    expect(slotRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        order: { id: 'ASC' },
+        take: expect.any(Number),
+      }),
+    );
     expect(suggestionRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: 'user-1',

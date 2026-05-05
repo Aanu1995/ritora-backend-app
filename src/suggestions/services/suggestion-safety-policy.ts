@@ -3,8 +3,12 @@ import {
   SuggestionContextSummary,
   SuggestionProductScore,
 } from '../suggestion-context.types';
-import { SuggestionSafetyFlagJson } from '../suggestions.constants';
+import {
+  SuggestionEvidenceSourceId,
+  SuggestionSafetyFlagJson,
+} from '../suggestions.constants';
 import type { SuggestionGenerationStepOutput } from './suggestion-ai-generator';
+import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
 import { isStrongActiveTag } from './suggestion-product-intelligence';
 
 export function buildSafetyConstraints(
@@ -51,21 +55,37 @@ export function buildPolicySafetyFlags(
       message:
         'Recent reaction or barrier signal found; keep this routine simple and avoid new strong actives.',
       ingredientSlugs: [],
+      sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
     });
   }
   if (selectedTags.has('retinoid') && selectedTags.has('aha')) {
     flags.push(
-      activeMixFlag('Retinoids and AHA exfoliants can be irritating together.'),
+      activeMixFlag(
+        'Retinoids and AHA exfoliants can be irritating together.',
+        [
+          SuggestionEvidenceSourceId.AadRetinoidRetinol,
+          SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
+        ],
+      ),
     );
   }
   if (selectedTags.has('retinoid') && selectedTags.has('bha')) {
     flags.push(
-      activeMixFlag('Retinoids and BHA exfoliants can be irritating together.'),
+      activeMixFlag(
+        'Retinoids and BHA exfoliants can be irritating together.',
+        [
+          SuggestionEvidenceSourceId.AadRetinoidRetinol,
+          SuggestionEvidenceSourceId.AadAcneTreatment,
+        ],
+      ),
     );
   }
   if (selectedTags.has('aha') && selectedTags.has('bha')) {
     flags.push(
-      activeMixFlag('AHA and BHA exfoliants should be spaced carefully.'),
+      activeMixFlag('AHA and BHA exfoliants should be spaced carefully.', [
+        SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
+        SuggestionEvidenceSourceId.AadAcneTreatment,
+      ]),
     );
   }
   if (
@@ -77,6 +97,10 @@ export function buildPolicySafetyFlags(
       message:
         'Retinoids usually fit evening routines unless a specialist advised this timing.',
       ingredientSlugs: ['retinoid'],
+      sourceIds: [
+        SuggestionEvidenceSourceId.AadRetinoidRetinol,
+        SuggestionEvidenceSourceId.DermNetTopicalRetinoids,
+      ],
     });
   }
   if (
@@ -92,6 +116,11 @@ export function buildPolicySafetyFlags(
       message:
         'Photosensitizing actives increase the importance of daytime sun protection.',
       ingredientSlugs: ['retinoid', 'aha', 'bha'],
+      sourceIds: [
+        SuggestionEvidenceSourceId.AadSunscreenSelection,
+        SuggestionEvidenceSourceId.AadRetinoidRetinol,
+        SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
+      ],
     });
   }
   return dedupeFlags(flags);
@@ -99,20 +128,25 @@ export function buildPolicySafetyFlags(
 
 export function skippedReasonsFromPolicy(
   context: SuggestionContextSummary,
-): { productId: string; reason: string }[] {
+): SuggestionContextSummary['skippedCandidates'] {
   return context.productScores
     .filter((product) => product.cautionReasons.length > 0)
     .map((product) => ({
       productId: product.productId,
       reason: product.cautionReasons[0],
+      sourceIds: product.evidenceSourceIds,
     }));
 }
 
-function activeMixFlag(message: string): SuggestionSafetyFlagJson {
+function activeMixFlag(
+  message: string,
+  sourceIds: SuggestionEvidenceSourceId[],
+): SuggestionSafetyFlagJson {
   return {
     severity: 'warning',
     message,
     ingredientSlugs: ['retinoid', 'aha', 'bha'],
+    sourceIds,
   };
 }
 
@@ -121,6 +155,7 @@ function dedupeFlags(
 ): SuggestionSafetyFlagJson[] {
   const seen = new Set<string>();
   return flags.filter((flag) => {
+    flag.sourceIds = mergeEvidenceSourceIds(flag.sourceIds ?? []);
     const key = `${flag.severity}:${flag.message}`;
     if (seen.has(key)) return false;
     seen.add(key);

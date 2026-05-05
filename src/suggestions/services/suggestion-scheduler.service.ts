@@ -6,14 +6,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { FindManyOptions, In, MoreThan, Not, Repository } from 'typeorm';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
-import { SUGGESTION_SCHEDULER_INTERVAL_MS } from '../suggestions.constants';
+import {
+  SUGGESTION_SCHEDULER_BATCH_SIZE,
+  SUGGESTION_SCHEDULER_INTERVAL_MS,
+} from '../suggestions.constants';
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
@@ -85,15 +88,27 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
   async runOnce(): Promise<{ enqueued: number }> {
     let enqueued = 0;
     const now = new Date();
+    let lastSeenId: string | null = null;
 
-    // Reading every user's slot in one pass; the query is bounded by
-    // total active slots which is small per-user.
-    const slots = await this.slotRepo.find({});
-    if (slots.length === 0) return { enqueued: 0 };
+    while (true) {
+      const slots = await this.loadSlotBatch(lastSeenId);
+      if (slots.length === 0) break;
+      lastSeenId = slots[slots.length - 1]?.id ?? lastSeenId;
+      enqueued += await this.processSlotBatch(slots, now);
+      if (slots.length < SUGGESTION_SCHEDULER_BATCH_SIZE) break;
+    }
 
+    return { enqueued };
+  }
+
+  private async processSlotBatch(
+    slots: ScheduleSlot[],
+    now: Date,
+  ): Promise<number> {
+    let enqueued = 0;
     const userIds = Array.from(new Set(slots.map((slot) => slot.user_id)));
     const users = await this.userRepo.find({
-      where: { id: In(userIds) },
+      where: { id: In(userIds), email_verified: true },
     });
     const usersById = new Map(users.map((user) => [user.id, user]));
     const prefs = await this.preferenceRepo.find({
@@ -155,7 +170,20 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    return { enqueued };
+    return enqueued;
+  }
+
+  private async loadSlotBatch(
+    lastSeenId: string | null,
+  ): Promise<ScheduleSlot[]> {
+    const options: FindManyOptions<ScheduleSlot> = {
+      order: { id: 'ASC' },
+      take: SUGGESTION_SCHEDULER_BATCH_SIZE,
+    };
+    if (lastSeenId) {
+      options.where = { id: MoreThan(lastSeenId) };
+    }
+    return this.slotRepo.find(options);
   }
 
   private async ensurePendingSuggestion(
