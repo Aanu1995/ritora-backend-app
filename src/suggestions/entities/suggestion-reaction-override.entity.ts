@@ -15,9 +15,13 @@ import { User } from '../../users/entities/user.entity';
 import { SuggestionReactionOverrideReason } from '../suggestions.constants';
 
 @Entity('suggestion_reaction_overrides')
-@Index('UQ_suggestion_reaction_overrides_user_date', ['user_id', 'target_date'], {
-  unique: true,
-})
+@Index(
+  'UQ_suggestion_reaction_overrides_user_date',
+  ['user_id', 'target_date'],
+  {
+    unique: true,
+  },
+)
 @Index('IDX_suggestion_reaction_overrides_expires_at', ['expires_at'])
 export class SuggestionReactionOverride {
   @PrimaryColumn({ type: 'varchar', length: 26 })

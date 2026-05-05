@@ -19,6 +19,8 @@ import {
 import { ApplicationLogItem } from './entities/application-log-item.entity';
 import { ApplicationLogVersion } from './entities/application-log-version.entity';
 import { ApplicationLog } from './entities/application-log.entity';
+import { createApplicationLogItems } from './application-log-item.mapper';
+import type { ApplicationItemDraft } from './application-log-item.mapper';
 import {
   buildApplicationLogSnapshot,
   incrementCount,
@@ -148,27 +150,10 @@ export class ApplicationTrackingService {
       // Replace items wholesale, easier than diffing.
       await itemRepo.delete({ application_log_id: lockedLog.id });
 
-      const items = itemDrafts.map((input, index) =>
-        itemRepo.create({
-          application_log_id: lockedLog.id,
-          step_order: input.stepOrder ?? index,
-          suggestion_step_id: input.suggestionStepId ?? null,
-          inventory_product_id: input.inventoryProductId ?? null,
-          substituted_with_product_id: input.substitutedWithProductId ?? null,
-          product_brand_snapshot: input.productBrand,
-          product_name_snapshot: input.productName,
-          step_label: input.stepLabel ?? null,
-          status: input.status,
-          is_ad_hoc: input.isAdHoc ?? false,
-          item_source: input.itemSource,
-          ad_hoc_brand: input.adHocBrand ?? null,
-          ad_hoc_name: input.adHocName ?? null,
-          notes: input.notes ?? null,
-          substitution_reason: input.substitutionReason,
-          recommended_snapshot: input.recommendedSnapshot,
-          applied_snapshot: input.appliedSnapshot,
-          applied_at: input.appliedAt ? new Date(input.appliedAt) : null,
-        }),
+      const items = createApplicationLogItems(
+        itemRepo,
+        lockedLog.id,
+        itemDrafts,
       );
       const savedItems = await itemRepo.save(items);
 
@@ -301,9 +286,7 @@ export class ApplicationTrackingService {
       targetTime: string | null;
       daypart: ApplicationLog['daypart'];
     },
-    itemDrafts: Awaited<
-      ReturnType<ApplicationTrackingValidationService['buildItemDrafts']>
-    >,
+    itemDrafts: ApplicationItemDraft[],
   ): Promise<ApplicationLogResponseDto> {
     try {
       return await this.dataSource.transaction(async (manager) => {
@@ -329,27 +312,10 @@ export class ApplicationTrackingService {
         });
         const savedLog = await logRepo.save(log);
 
-        const items = itemDrafts.map((input, index) =>
-          itemRepo.create({
-            application_log_id: savedLog.id,
-            step_order: input.stepOrder ?? index,
-            suggestion_step_id: input.suggestionStepId ?? null,
-            inventory_product_id: input.inventoryProductId ?? null,
-            substituted_with_product_id: input.substitutedWithProductId ?? null,
-            product_brand_snapshot: input.productBrand,
-            product_name_snapshot: input.productName,
-            step_label: input.stepLabel ?? null,
-            status: input.status,
-            is_ad_hoc: input.isAdHoc ?? false,
-            item_source: input.itemSource,
-            ad_hoc_brand: input.adHocBrand ?? null,
-            ad_hoc_name: input.adHocName ?? null,
-            notes: input.notes ?? null,
-            substitution_reason: input.substitutionReason,
-            recommended_snapshot: input.recommendedSnapshot,
-            applied_snapshot: input.appliedSnapshot,
-            applied_at: input.appliedAt ? new Date(input.appliedAt) : null,
-          }),
+        const items = createApplicationLogItems(
+          itemRepo,
+          savedLog.id,
+          itemDrafts,
         );
         const savedItems = await itemRepo.save(items);
 

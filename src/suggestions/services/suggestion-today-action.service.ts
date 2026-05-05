@@ -30,8 +30,7 @@ import {
 import { normalizeSuggestionGapKey } from './suggestion-gap-actions';
 
 const REACTION_LOOKBACK_DAYS = 7;
-const NORMAL_ROUTINE_REGENERATION_ERROR =
-  'regenerate:normal_routine_requested';
+const NORMAL_ROUTINE_REGENERATION_ERROR = 'regenerate:normal_routine_requested';
 const RECORDING_REMINDER_SNOOZE_DEFAULT_MINUTES = 60;
 
 @Injectable()
@@ -152,7 +151,9 @@ export class SuggestionTodayActionService {
     });
     const result = new Map<string, Map<string, SuggestionGapActionKind>>();
     for (const row of rows) {
-      const map = result.get(row.suggestion_instance_id) ?? new Map();
+      const map =
+        result.get(row.suggestion_instance_id) ??
+        new Map<string, SuggestionGapActionKind>();
       map.set(row.normalized_key, row.action);
       result.set(row.suggestion_instance_id, map);
     }
@@ -242,7 +243,8 @@ function hasGapRecommendation(
   normalizedKey: string,
 ): boolean {
   return (suggestion.gap_recommendations ?? []).some(
-    (gap) => normalizeSuggestionGapKey(gap.ingredientOrCategory) === normalizedKey,
+    (gap) =>
+      normalizeSuggestionGapKey(gap.ingredientOrCategory) === normalizedKey,
   );
 }
 
@@ -255,8 +257,8 @@ function startDate(targetDate: string): string {
 function hasReactionSignal(entry: SkinJournalEntry): boolean {
   return Boolean(
     entry.has_reaction_signal ||
-      entry.analysis_observations?.reaction_signals?.reaction_detected ||
-      entry.analysis_observations?.barrier_signs?.barrier_compromise,
+    entry.analysis_observations?.reaction_signals?.reaction_detected ||
+    entry.analysis_observations?.barrier_signs?.barrier_compromise,
   );
 }
 

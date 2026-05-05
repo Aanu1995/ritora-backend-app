@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
+import { toDateOnlyString } from '../../common/utils/date';
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
@@ -25,12 +25,20 @@ import {
   historyCursorFingerprint,
 } from './suggestion-history-cursor';
 import {
-  buildSummaryLine,
   computeRange,
   computeSlotStatus,
   isDateBefore,
   shiftIsoDate,
 } from './suggestion-history.helpers';
+import {
+  applyJournalMetadata,
+  buildHistorySlotSummary,
+  countAppliedItems,
+  emptyHistoryDay,
+  getOrCreateHistoryDay,
+  mapLogsBySuggestion,
+  sortHistoryDays,
+} from './suggestion-history-day.mapper';
 import { formatDateInTimeZone } from './suggestion-helpers';
 
 @Injectable()
@@ -99,14 +107,14 @@ export class SuggestionHistoryReader {
       const log = logBySuggestion.get(suggestion.id) ?? null;
       const status = computeSlotStatus(suggestion, log);
 
-      const appliedCount = countApplied(log);
+      const appliedCount = countAppliedItems(log);
       const totalSteps = suggestion.steps?.length ?? 0;
-      const day = getOrCreateDay(dayMap, suggestionDate);
+      const day = getOrCreateHistoryDay(dayMap, suggestionDate);
       applyJournalMetadata(day, journalEntryByDate.get(suggestionDate));
       day.reactionFlagged =
         day.reactionFlagged || suggestion.has_reaction_signal;
       day.slots.push(
-        buildSlotSummary(
+        buildHistorySlotSummary(
           suggestion,
           log,
           slotById.get(suggestion.slot_id ?? ''),
@@ -120,7 +128,7 @@ export class SuggestionHistoryReader {
       if (log?.has_been_edited) totalEdited += 1;
     }
 
-    const days = sortDays(dayMap);
+    const days = sortHistoryDays(dayMap);
     const lastPageRow = pageRows.at(-1);
     const adherencePercent =
       totalSlots > 0 ? Math.round((totalApplied / totalSlots) * 100) : null;
@@ -167,9 +175,9 @@ export class SuggestionHistoryReader {
       (suggestion) => {
         const log = logBySuggestion.get(suggestion.id) ?? null;
         const totalSteps = suggestion.steps?.length ?? 0;
-        const appliedCount = countApplied(log);
+        const appliedCount = countAppliedItems(log);
         return {
-          ...buildSlotSummary(
+          ...buildHistorySlotSummary(
             suggestion,
             log,
             slotById.get(suggestion.slot_id ?? ''),
@@ -293,104 +301,4 @@ export class SuggestionHistoryReader {
         Boolean(suggestion),
       );
   }
-}
-
-function buildSlotSummary(
-  suggestion: SuggestionInstance,
-  log: ApplicationLog | null,
-  slot: ScheduleSlot | undefined,
-  totalSteps: number,
-  appliedCount: number,
-): SuggestionHistorySlotSummaryDto {
-  return {
-    slotId: suggestion.slot_id,
-    suggestionId: suggestion.id,
-    applicationLogId: log?.id ?? null,
-    daypart: suggestion.daypart,
-    slotTime: toTimeOnlyString(slot?.slot_time ?? suggestion.target_time),
-    mode: suggestion.mode,
-    appliedCount,
-    totalSteps,
-    status: computeSlotStatus(suggestion, log),
-    hasBeenEdited: log?.has_been_edited ?? false,
-    summaryLine: buildSummaryLine(suggestion, log, totalSteps, appliedCount),
-  };
-}
-
-function getOrCreateDay(
-  dayMap: Map<string, SuggestionHistoryDayDto>,
-  date: string,
-): SuggestionHistoryDayDto {
-  return dayMap.get(date) ?? emptyHistoryDay(date);
-}
-
-function emptyHistoryDay(date: string): SuggestionHistoryDayDto {
-  return {
-    date,
-    weatherSummary: null,
-    moodScore: null,
-    hydrationTrend: null,
-    reactionFlagged: false,
-    photoEntryId: null,
-    slots: [],
-  };
-}
-
-function applyJournalMetadata(
-  day: SuggestionHistoryDayDto,
-  entry: SkinJournalEntry | undefined,
-): SuggestionHistoryDayDto {
-  if (!entry) return day;
-  day.photoEntryId = entry.photo_object_key ? entry.id : null;
-  day.moodScore = moodScore(entry.overall_feel);
-  day.hydrationTrend = hydrationTrend(entry);
-  day.reactionFlagged = day.reactionFlagged || entry.has_reaction_signal;
-  return day;
-}
-
-function moodScore(value: SkinJournalEntry['overall_feel']): number | null {
-  if (value === 'awful') return 1;
-  if (value === 'bad') return 2;
-  if (value === 'ok') return 3;
-  if (value === 'good') return 4;
-  if (value === 'great') return 5;
-  return null;
-}
-
-function hydrationTrend(
-  entry: SkinJournalEntry,
-): SuggestionHistoryDayDto['hydrationTrend'] {
-  const change = entry.analysis_observations?.overall_change_from_previous;
-  if (change === 'improved') return 'up';
-  if (change === 'worsened') return 'down';
-  if (change === 'stable') return 'flat';
-  return null;
-}
-
-function mapLogsBySuggestion(
-  logs: ApplicationLog[],
-): Map<string, ApplicationLog> {
-  const map = new Map<string, ApplicationLog>();
-  for (const log of logs) {
-    if (log.suggestion_instance_id) {
-      map.set(log.suggestion_instance_id, log);
-    }
-  }
-  return map;
-}
-
-function countApplied(log: ApplicationLog | null): number {
-  return log?.items?.filter((item) => item.status !== 'skipped').length ?? 0;
-}
-
-function sortDays(
-  dayMap: Map<string, SuggestionHistoryDayDto>,
-): SuggestionHistoryDayDto[] {
-  const days = Array.from(dayMap.values()).sort((a, b) =>
-    a.date < b.date ? 1 : -1,
-  );
-  for (const day of days) {
-    day.slots.sort((a, b) => a.slotTime.localeCompare(b.slotTime));
-  }
-  return days;
 }

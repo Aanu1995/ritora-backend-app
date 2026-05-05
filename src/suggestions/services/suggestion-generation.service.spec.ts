@@ -3,7 +3,6 @@ import { ApplicationLog } from '../../application-tracking/entities/application-
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
-import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { ProductCategory, ShelfStatus } from '../../shelf/shelf.types';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
@@ -19,6 +18,7 @@ import { SuggestionContextSummary } from '../suggestion-context.types';
 import { SuggestionAiGenerator } from './suggestion-ai-generator';
 import { SuggestionConsentService } from './suggestion-consent.service';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
+import { SuggestionGenerationContextService } from './suggestion-generation-context.service';
 import { SuggestionGenerationService } from './suggestion-generation.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
@@ -48,11 +48,7 @@ describe('SuggestionGenerationService', () => {
   const observability = {
     record: jest.fn(),
   } as unknown as jest.Mocked<SuggestionObservabilityService>;
-  const suggestionRepo = repo<SuggestionInstance>();
-  const suggestionStepRepo = repo<SuggestionStep>();
-  const jobRepo = repo<SuggestionGenerationJob>();
   const slotRepo = repo<ScheduleSlot>();
-  const routineStepRepo = repo<RoutineStep>();
   const inventoryRepo = repo<InventoryProduct>();
   const journalRepo = repo<SkinJournalEntry>();
   const skinProfileRepo = repo<SkinProfile>();
@@ -69,25 +65,25 @@ describe('SuggestionGenerationService', () => {
     txSuggestionRepo = repo<SuggestionInstance>();
     txStepRepo = repo<SuggestionStep>();
     dataSource = dataSourceWithRepos(txSuggestionRepo, txStepRepo);
-    service = new SuggestionGenerationService(
-      dataSource,
-      aiGenerator,
+    const contextService = new SuggestionGenerationContextService(
       usageGuard,
       consentService,
       contextBuilder,
       todayActionService,
-      notifications,
       observability,
       dataAccessLog,
-      suggestionRepo,
-      suggestionStepRepo,
-      jobRepo,
-      slotRepo,
-      routineStepRepo,
       inventoryRepo,
       journalRepo,
       skinProfileRepo,
       applicationLogRepo,
+    );
+    service = new SuggestionGenerationService(
+      dataSource,
+      aiGenerator,
+      contextService,
+      notifications,
+      observability,
+      slotRepo,
       userRepo,
       preferenceRepo,
     );

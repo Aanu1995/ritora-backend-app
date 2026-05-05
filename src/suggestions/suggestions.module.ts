@@ -25,6 +25,7 @@ import { SuggestionAiUsageGuard } from './services/suggestion-ai-usage-guard.ser
 import { SuggestionAiGenerator } from './services/suggestion-ai-generator';
 import { SuggestionConsentService } from './services/suggestion-consent.service';
 import { SuggestionContextBuilder } from './services/suggestion-context-builder.service';
+import { SuggestionGenerationContextService } from './services/suggestion-generation-context.service';
 import { SuggestionGenerationService } from './services/suggestion-generation.service';
 import { SuggestionGenerationWorker } from './services/suggestion-generation-worker.service';
 import { SuggestionHistoryExportService } from './services/suggestion-history-export.service';
@@ -79,6 +80,7 @@ import { SuggestionsController } from './suggestions.controller';
     SuggestionAiUsageGuard,
     SuggestionConsentService,
     SuggestionContextBuilder,
+    SuggestionGenerationContextService,
     SuggestionGenerationService,
     SuggestionGenerationWorker,
     SuggestionScheduler,

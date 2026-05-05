@@ -184,9 +184,7 @@ describe('SuggestionTodayActionService', () => {
     await expect(
       service.getReminderSnoozeMap('user-1', ['suggestion-1']),
     ).resolves.toEqual(
-      new Map([
-        ['suggestion-1', new Date('2026-05-04T10:30:00.000Z')],
-      ]),
+      new Map([['suggestion-1', new Date('2026-05-04T10:30:00.000Z')]]),
     );
   });
 });

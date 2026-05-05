@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateSuggestionTodayActionTables1715800000000
-  implements MigrationInterface
-{
+export class CreateSuggestionTodayActionTables1715800000000 implements MigrationInterface {
   name = 'CreateSuggestionTodayActionTables1715800000000';
 
   async up(queryRunner: QueryRunner): Promise<void> {

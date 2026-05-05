@@ -3,22 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Not, Repository } from 'typeorm';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
-import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
-import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
-import { RoutineStep } from '../../schedule/entities/routine-step.entity';
-import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
-import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
-import { ShelfStatus } from '../../shelf/shelf.types';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
 import { User } from '../../users/entities/user.entity';
-import { UserDataAccessLogService } from '../../users/user-data-access-log.service';
-import {
-  SensitiveSkinProfileConsentType,
-  UserDataAccessActorType,
-  UserDataAccessPurpose,
-} from '../../users/user-consent.constants';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
@@ -27,16 +15,16 @@ import {
   SuggestionGenerationInputs,
   SuggestionGenerationOutput,
 } from './suggestion-ai-generator';
-import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
-import { SuggestionConsentService } from './suggestion-consent.service';
-import { SuggestionContextBuilder } from './suggestion-context-builder.service';
-import { SuggestionTodayActionService } from './suggestion-today-action.service';
+import { SuggestionGenerationContextService } from './suggestion-generation-context.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
-import {
-  buildSlotInstant,
-  clampLeadTimeMinutes,
-  deriveSuggestionDaypart,
-} from './suggestion-helpers';
+import { buildSlotInstant, clampLeadTimeMinutes } from './suggestion-helpers';
+
+type SuggestionJobSubjects = {
+  targetDate: string;
+  targetTime: string;
+  slot: ScheduleSlot;
+  user: User;
+};
 
 @Injectable()
 export class SuggestionGenerationService {
@@ -45,31 +33,11 @@ export class SuggestionGenerationService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly aiGenerator: SuggestionAiGenerator,
-    private readonly usageGuard: SuggestionAiUsageGuard,
-    private readonly consentService: SuggestionConsentService,
-    private readonly contextBuilder: SuggestionContextBuilder,
-    private readonly todayActionService: SuggestionTodayActionService,
+    private readonly contextService: SuggestionGenerationContextService,
     private readonly notifications: NotificationsService,
     private readonly observability: SuggestionObservabilityService,
-    private readonly dataAccessLog: UserDataAccessLogService,
-    @InjectRepository(SuggestionInstance)
-    private readonly suggestionRepo: Repository<SuggestionInstance>,
-    @InjectRepository(SuggestionStep)
-    private readonly suggestionStepRepo: Repository<SuggestionStep>,
-    @InjectRepository(SuggestionGenerationJob)
-    private readonly jobRepo: Repository<SuggestionGenerationJob>,
     @InjectRepository(ScheduleSlot)
     private readonly slotRepo: Repository<ScheduleSlot>,
-    @InjectRepository(RoutineStep)
-    private readonly routineStepRepo: Repository<RoutineStep>,
-    @InjectRepository(InventoryProduct)
-    private readonly inventoryRepo: Repository<InventoryProduct>,
-    @InjectRepository(SkinJournalEntry)
-    private readonly journalRepo: Repository<SkinJournalEntry>,
-    @InjectRepository(SkinProfile)
-    private readonly skinProfileRepo: Repository<SkinProfile>,
-    @InjectRepository(ApplicationLog)
-    private readonly applicationLogRepo: Repository<ApplicationLog>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectRepository(UserNotificationPreference)
@@ -77,6 +45,34 @@ export class SuggestionGenerationService {
   ) {}
 
   async generateForJob(job: SuggestionGenerationJob): Promise<void> {
+    const subjects = await this.loadJobSubjects(job);
+    if (!subjects) return;
+
+    const { targetDate, targetTime, slot, user } = subjects;
+    const inputs = await this.contextService.build({
+      user,
+      job,
+      slot,
+      targetDate,
+      targetTime,
+    });
+
+    const output = await this.aiGenerator.generate(inputs);
+
+    const savedInstance = await this.persist(user, job, slot, inputs, output);
+    await this.recordGenerationOutcome(user.id, job.id, savedInstance, output);
+    await this.dispatchSuggestionReadyNotification(
+      user.id,
+      slot.id,
+      targetDate,
+      savedInstance.id,
+      job.id,
+    );
+  }
+
+  private async loadJobSubjects(
+    job: SuggestionGenerationJob,
+  ): Promise<SuggestionJobSubjects | null> {
     const targetDate = toDateOnlyString(job.target_date);
     const targetTime = toTimeOnlyString(job.target_time);
     job.target_date = targetDate;
@@ -88,144 +84,45 @@ export class SuggestionGenerationService {
     });
     if (!slot) {
       this.logger.warn(`Slot ${job.slot_id} not found for job ${job.id}`);
-      return;
+      return null;
     }
+
     const user = await this.userRepo.findOne({ where: { id: job.user_id } });
     if (!user) {
       this.logger.warn(`User ${job.user_id} not found for job ${job.id}`);
-      return;
+      return null;
     }
 
-    const consentDecision = await this.consentService.evaluate(user.id);
-    const usageDecision = consentDecision.aiPersonalizationAllowed
-      ? await this.usageGuard.evaluate(user.id)
-      : null;
-    const aiPersonalizationAllowed =
-      consentDecision.aiPersonalizationAllowed &&
-      (usageDecision?.allowed ?? true);
-    const personalizationBlockedReason =
-      !consentDecision.aiPersonalizationAllowed
-        ? consentDecision.blockedReason
-        : (usageDecision?.blockedReason ?? consentDecision.blockedReason);
-    if (!consentDecision.aiPersonalizationAllowed) {
-      await this.observability.record({
-        kind: 'consent_degraded',
-        severity: 'warning',
-        userId: user.id,
-        jobId: job.id,
-        metadata: { reason: consentDecision.blockedReason },
-      });
-    }
-    if (usageDecision && !usageDecision.allowed) {
-      await this.observability.record({
-        kind: 'ai_budget_blocked',
-        severity: 'warning',
-        userId: user.id,
-        jobId: job.id,
-        metadata: {
-          reason: usageDecision.blockedReason,
-          generationCountToday: usageDecision.generationCountToday,
-          regenerationCountToday: usageDecision.regenerationCountToday,
-          estimatedCostTodayUsd: usageDecision.estimatedCostTodayUsd,
-        },
-      });
-    }
+    return { targetDate, targetTime, slot, user };
+  }
 
-    const canReadSensitiveContext = consentDecision.canReadSensitiveContext;
-    const profile = canReadSensitiveContext
-      ? await this.skinProfileRepo.findOne({
-          where: { user_id: user.id },
-        })
-      : null;
-    const activeProducts = await this.inventoryRepo.find({
-      where: { user_id: user.id, status: ShelfStatus.Active },
-    });
-    const finishedProducts = await this.inventoryRepo.find({
-      where: { user_id: user.id, status: ShelfStatus.FinishedUp },
-      select: ['id'],
-    });
-    const ignoreReactionContext =
-      await this.todayActionService.shouldIgnoreReactionContext(
-        user.id,
-        targetDate,
-        job.last_error,
-      );
-    const recentJournal = canReadSensitiveContext && !ignoreReactionContext
-      ? await this.journalRepo.find({
-          where: { user_id: user.id },
-          order: { entry_date: 'DESC' },
-          take: 7,
-        })
-      : [];
-    const recentApplications = canReadSensitiveContext
-      ? await this.applicationLogRepo.find({
-          where: { user_id: user.id },
-          relations: ['items'],
-          order: { target_date: 'DESC' },
-          take: 30,
-        })
-      : [];
-    await this.recordRecommendationDataAccess(
-      user.id,
-      consentDecision.activeSensitiveConsentTypes,
-    );
-    const daypart = deriveSuggestionDaypart(slot.slot_time);
-    const contextSummary = await this.contextBuilder.build({
-      userId: user.id,
-      targetDate,
-      targetTime,
-      daypart,
-      skinProfile: profile,
-      shelfActiveProducts: activeProducts,
-      routineSteps: slot.steps ?? [],
-      recentJournalEntries: recentJournal,
-      recentApplications,
-      aiPersonalizationAllowed,
-      aiPersonalizationBlockedReason: personalizationBlockedReason,
-    });
-
-    const inputs: SuggestionGenerationInputs = {
-      slotId: slot.id,
-      targetDate,
-      targetTime,
-      daypart,
-      skinProfile: profile,
-      shelfActiveProducts: activeProducts,
-      shelfFinishedProductIds: finishedProducts.map((p) => p.id),
-      routineSteps: slot.steps ?? [],
-      recentJournalEntries: recentJournal,
-      recentApplications,
-      contextSummary,
-      aiPersonalizationAllowed,
-      aiPersonalizationBlockedReason: personalizationBlockedReason,
-    };
-
-    const output = await this.aiGenerator.generate(inputs);
-
-    const savedInstance = await this.persist(user, job, slot, inputs, output);
-    await this.recordGenerationOutcome(user.id, job.id, savedInstance, output);
-
-    // Fire suggestion_ready notification.
+  private async dispatchSuggestionReadyNotification(
+    userId: string,
+    slotId: string,
+    targetDate: string,
+    suggestionInstanceId: string,
+    jobId: string,
+  ): Promise<void> {
     try {
       await this.notifications.dispatch({
-        userId: user.id,
+        userId,
         kind: 'suggestion_ready',
         titleKey: 'notificationsPage.kinds.suggestion_ready.title',
         bodyKey: 'notificationsPage.kinds.suggestion_ready.body',
         deepLink: '/todays-suggestion',
         payload: {
-          slotId: slot.id,
+          slotId,
           targetDate,
         },
-        dedupeKey: `suggestion_ready:${targetDate}:${slot.id}`,
+        dedupeKey: `suggestion_ready:${targetDate}:${slotId}`,
       });
     } catch (error) {
       await this.observability.record({
         kind: 'notification_failed',
         severity: 'warning',
-        userId: user.id,
-        suggestionInstanceId: savedInstance.id,
-        jobId: job.id,
+        userId,
+        suggestionInstanceId,
+        jobId,
         metadata: {
           notificationKind: 'suggestion_ready',
           message: error instanceof Error ? error.message : 'unknown error',
@@ -350,19 +247,6 @@ export class SuggestionGenerationService {
       where: { user_id: userId },
     });
     return clampLeadTimeMinutes(prefs?.suggestion_lead_time_minutes ?? 120);
-  }
-
-  private async recordRecommendationDataAccess(
-    userId: string,
-    consentTypes: SensitiveSkinProfileConsentType[],
-  ): Promise<void> {
-    if (consentTypes.length === 0) return;
-    await this.dataAccessLog.recordDataAccess(
-      userId,
-      consentTypes,
-      UserDataAccessPurpose.RecommendationAnalysis,
-      UserDataAccessActorType.System,
-    );
   }
 
   private async recordGenerationOutcome(

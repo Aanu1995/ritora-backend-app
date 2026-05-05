@@ -88,8 +88,8 @@ export class TodaysSuggestionReactionService {
 function hasReactionSignal(entry: SkinJournalEntry): boolean {
   return Boolean(
     entry.has_reaction_signal ||
-      entry.analysis_observations?.reaction_signals?.reaction_detected ||
-      entry.analysis_observations?.barrier_signs?.barrier_compromise,
+    entry.analysis_observations?.reaction_signals?.reaction_detected ||
+    entry.analysis_observations?.barrier_signs?.barrier_compromise,
   );
 }
 
@@ -134,7 +134,7 @@ function hasBarrierConcern(
 ): boolean {
   return Boolean(
     observations?.barrier_signs?.barrier_compromise ||
-      concernKeys.includes('skin_barrier_damage'),
+    concernKeys.includes('skin_barrier_damage'),
   );
 }
 
@@ -143,7 +143,8 @@ function photosUntilClear(
   latest: SkinJournalEntry,
 ): number {
   const clearFollowUps = entries.filter(
-    (entry) => entry.entry_date > latest.entry_date && !hasReactionSignal(entry),
+    (entry) =>
+      entry.entry_date > latest.entry_date && !hasReactionSignal(entry),
   ).length;
   return Math.max(0, CLEAR_PHOTO_TARGET - clearFollowUps);
 }
