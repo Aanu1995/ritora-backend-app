@@ -21,6 +21,8 @@ describe('suggestion AI contract', () => {
     const schema = RESPONSE_FORMAT.schema.properties;
 
     expect(SYSTEM_PROMPT).toContain('trusted evidence summaries');
+    expect(SYSTEM_PROMPT).toContain('short and human');
+    expect(SYSTEM_PROMPT).toContain('Do not mention prompts');
     expect(schema.safetyFlags.items.required).toContain('sourceIds');
     expect(schema.gapRecommendations.items.required).toContain('sourceIds');
     expect(
@@ -32,6 +34,7 @@ describe('suggestion AI contract', () => {
     const prompt = buildPrompt(generationInputs());
 
     expect(prompt).toContain('Trusted evidence summaries');
+    expect(prompt).toContain('plain user-facing words');
     expect(prompt).toContain(SuggestionEvidenceSourceId.AadSunscreenSelection);
     expect(prompt).toContain('Daily SPF 50');
     expect(prompt).toContain('productScores');

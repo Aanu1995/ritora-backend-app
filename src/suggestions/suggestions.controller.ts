@@ -55,12 +55,6 @@ export class SuggestionsController {
     private readonly routineBreakService: RoutineBreakService,
   ) {}
 
-  /**
-   * Today's Suggestion page payload. The slots are returned in
-   * chronological order. Slots whose visibility window has not yet opened
-   * appear as `isVisible=false` so the UI can show the locked state with
-   * a countdown.
-   */
   @Get('today')
   @ApiOperation({ summary: "Today's slots and their suggestions" })
   async getTodaysSuggestion(

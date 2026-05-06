@@ -1,9 +1,3 @@
-/**
- * Constants and snapshot shapes for the application tracking module.
- * The frontend mirrors these in
- * `ritora-user-webapp/src/types/application-tracking.ts`.
- */
-
 export type ApplicationItemStatus = 'applied' | 'skipped' | 'substituted';
 export const APPLICATION_ITEM_STATUSES: readonly ApplicationItemStatus[] = [
   'applied',
@@ -27,11 +21,6 @@ export interface ApplicationItemProductSnapshot {
   provenance?: string | null;
 }
 
-/**
- * Frozen snapshot of an application_log + items at the moment of save.
- * Stored on application_log_versions so that prior versions are never
- * silently overwritten when the user edits a record.
- */
 export interface ApplicationLogSnapshot {
   version: number;
   applied_at: string | null;

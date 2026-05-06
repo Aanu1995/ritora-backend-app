@@ -17,12 +17,6 @@ import { ApplicationReactiveRegenerationService } from './application-reactive-r
 import { ApplicationTrackingService } from './application-tracking.service';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
 
-/**
- * Routine application records: per-slot logs of what the user actually
- * applied, with full version history. Imported lazily into the
- * suggestions module to avoid a circular dependency on Suggestion
- * entities.
- */
 @Module({
   imports: [
     TypeOrmModule.forFeature([

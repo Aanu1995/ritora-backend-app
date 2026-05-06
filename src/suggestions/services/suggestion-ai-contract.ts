@@ -22,6 +22,7 @@ export const SYSTEM_PROMPT = [
   '5. Never use diagnostic language. Avoid words like diagnose, treat, cure, or prescribe.',
   '6. Base safety and recommendation reasoning on the trusted evidence summaries supplied in the prompt. Cite relevant sourceIds in safety flags, step warnings, and gap recommendations.',
   '7. Output is strictly valid JSON conforming to the provided schema.',
+  '8. Write like a calm skincare app, not a report. Keep copy short and human: headlines under 8 words, step reasons under 18 words, safety and gap reasons under 22 words. Do not mention prompts, schemas, tokens, fallback internals, or legal wording.',
 ].join(' ');
 
 const SOURCE_ID_ENUM = Object.values(SuggestionEvidenceSourceId);
@@ -336,6 +337,7 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
       null,
       2,
     )}`,
+    'Voice: use plain user-facing words, short sentences, and no verbose paragraphs.',
     'Return strictly valid JSON matching the schema.',
   ].join('\n\n');
 }

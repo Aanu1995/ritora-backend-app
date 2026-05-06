@@ -16,7 +16,10 @@ import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionContextSummary } from '../suggestion-context.types';
-import { SuggestionAiGenerator } from './suggestion-ai-generator';
+import {
+  SuggestionAiGenerator,
+  SuggestionGenerationOutput,
+} from './suggestion-ai-generator';
 import { SuggestionConsentService } from './suggestion-consent.service';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
 import { SuggestionGenerationContextService } from './suggestion-generation-context.service';
@@ -204,6 +207,65 @@ describe('SuggestionGenerationService', () => {
         userId: 'user-1',
       }),
     );
+  });
+
+  it('clips generated step metadata to database column lengths before saving', async () => {
+    const output = generationOutput();
+    output.metadata.model = 'm'.repeat(90);
+    output.metadata.promptVersion = 'p'.repeat(120);
+    output.steps[0].productBrand = 'b'.repeat(300);
+    output.steps[0].productName = 'n'.repeat(300);
+    output.steps[0].customLabel = 'c'.repeat(140);
+    output.steps[0].applicationMethod =
+      'apply with a deliberately verbose method that came from old shelf data';
+    output.steps[0].quantity =
+      'a deliberately verbose amount that is not an enum value';
+
+    slotRepo.findOne.mockResolvedValue(slot());
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find.mockResolvedValue([]);
+    applicationLogRepo.find.mockResolvedValue([]);
+    preferenceRepo.findOne.mockResolvedValue(null);
+    contextBuilder.build.mockResolvedValue(contextSummary());
+    aiGenerator.generate.mockResolvedValue(output);
+    txSuggestionRepo.findOne.mockResolvedValue(null);
+    txSuggestionRepo.createQueryBuilder.mockReturnValue(updateBuilder());
+    txSuggestionRepo.create.mockImplementation(
+      (value) => value as SuggestionInstance,
+    );
+    txSuggestionRepo.save.mockImplementation(
+      async (value) =>
+        ({
+          ...(value as SuggestionInstance),
+          id: 'suggestion-1',
+          created_at: new Date(),
+          updated_at: new Date(),
+        }) as SuggestionInstance,
+    );
+    txStepRepo.create.mockImplementation((value) => value as SuggestionStep);
+    mockSaveArray(txStepRepo).mockResolvedValue([]);
+
+    await service.generateForJob(job());
+
+    expect(txSuggestionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ai_model: 'm'.repeat(60),
+        ai_prompt_version: 'p'.repeat(80),
+      }),
+    );
+    expect(txStepRepo.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        product_brand_snapshot: 'b'.repeat(255),
+        product_name_snapshot: 'n'.repeat(255),
+        custom_label: 'c'.repeat(100),
+        application_method: 'As directed',
+        quantity: 'As needed',
+      }),
+    ]);
   });
 
   it('degrades without explicit AI suggestion consent and avoids sensitive context reads', async () => {
@@ -496,7 +558,7 @@ function contextSummary(): SuggestionContextSummary {
   };
 }
 
-function generationOutput() {
+function generationOutput(): SuggestionGenerationOutput {
   return {
     mode: 'ai' as const,
     hasReactionSignal: false,

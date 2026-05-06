@@ -17,18 +17,6 @@ import type { AnalysisResult } from './ingredients.types';
 
 const isTest = process.env.NODE_ENV === 'test';
 
-/**
- * `/ingredients/analyze` is the only endpoint. It runs in two modes:
- *   - Focus: `{ focusProductId }` → educational `actives[]` payload for the
- *     product-detail Ingredients tab.
- *   - Multi: `{ productIds }` → full conflict/overlap/layering analysis for
- *     the set of products in a routine. This is the primitive that future
- *     Today's Suggestion will use.
- *
- * The old `GET /ingredients/shelf-summary` endpoint is intentionally
- * removed — it modelled "all shelf products used together," which is never
- * actually true.
- */
 const analyzeThrottle = {
   default: {
     ttl: 60_000,

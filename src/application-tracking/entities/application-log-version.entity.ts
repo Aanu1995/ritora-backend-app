@@ -27,12 +27,6 @@ const encryptedVersionEditReasonTransformer =
     'application_log_versions.edit_reason',
   );
 
-/**
- * Frozen snapshot of the application_log + items at the moment a save
- * happened. The first save creates v1; every subsequent edit creates
- * v2, v3, ... so prior versions are never silently overwritten. This is
- * the legal-protection record the mockup references.
- */
 @Entity('application_log_versions')
 @Index(
   'UQ_application_versions_log_version',

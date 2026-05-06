@@ -7,6 +7,7 @@ import {
   isAllSpecialistLocked,
   lockedStepsAreIntact,
   resolveRawStep,
+  sanitizeExplanation,
 } from './suggestion-ai-assembly';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 
@@ -45,6 +46,79 @@ describe('suggestion AI assembly validation', () => {
     );
 
     expect(resolved).toBeNull();
+  });
+
+  it('keeps generated copy short and converts verbose guidance to human labels', () => {
+    const inputs = generationInputs([]);
+    inputs.shelfActiveProducts = [productWithVerboseGuidance()];
+    const context = buildAssemblyContext(inputs);
+
+    const resolved = resolveRawStep(
+      {
+        stepOrder: 0,
+        inventoryProductId: 'product-1',
+        stepLabel: ProductCategory.Cleanser,
+        provenance: 'ai_added',
+        explanation:
+          'This will treat the skin concern with a very long explanation that should not appear as a dense paragraph in the UI because users need short guidance.',
+        chips: [{ tone: 'reason', text: 'A very long badge label for UI' }],
+      },
+      0,
+      context,
+    );
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        applicationMethod: 'As directed',
+        quantity: 'As needed',
+      }),
+    );
+    expect(resolved?.explanation).not.toContain('treat');
+    expect(resolved?.explanation?.length).toBeLessThanOrEqual(140);
+    expect(resolved?.chips[0].text.length).toBeLessThanOrEqual(32);
+  });
+
+  it('sanitizes explanation copy into concise user-facing text', () => {
+    const explanation = sanitizeExplanation({
+      headline: 'Diagnose and prescribe a very detailed routine for today',
+      body: [
+        'This paragraph is intentionally verbose and includes too much detail for a routine card. It should keep only the first sentence.',
+      ],
+      perStepReasons: [
+        {
+          stepOrder: 0,
+          reason:
+            'Treat the concern with a careful routine because this step has many possible benefits and constraints that would make the card hard to scan.',
+        },
+      ],
+      skipped: [
+        {
+          name: 'Retinoid',
+          reason:
+            'Skipped because the recent journal suggests dryness and this explanation is longer than it needs to be.',
+        },
+      ],
+      inputs: [
+        {
+          label: 'Recommendation analysis context',
+          detail:
+            'This used shelf, profile, schedule, recent logs, edited history, and journal observations.',
+        },
+      ],
+    });
+
+    expect(explanation.headline).toContain('assess');
+    expect(explanation.headline).toContain('recommend');
+    expect(explanation.headline).not.toContain('Diagnose');
+    expect(explanation.headline).not.toContain('prescribe');
+    expect(explanation.body[0]).toBe(
+      'This paragraph is intentionally verbose and includes too much detail for a routine card.',
+    );
+    expect(explanation.perStepReasons[0].reason).not.toContain('Treat');
+    expect(explanation.perStepReasons[0].reason.length).toBeLessThanOrEqual(
+      140,
+    );
+    expect(explanation.inputs[0].label.length).toBeLessThanOrEqual(40);
   });
 
   it('keeps specialist-locked steps at their original routine order', () => {
@@ -168,6 +242,21 @@ function product(): InventoryProduct {
     status: ShelfStatus.Active,
     guidance: {},
   } as InventoryProduct;
+}
+
+function productWithVerboseGuidance(): InventoryProduct {
+  return {
+    ...product(),
+    guidance: {
+      applicationMethod:
+        'apply by massaging slowly across every facial zone until fully absorbed',
+      quantity:
+        'use a flexible amount based on how dry the skin feels in the moment',
+      steps: [],
+      cautions: [],
+      waitMinutes: null,
+    },
+  } as unknown as InventoryProduct;
 }
 
 function routineStep(id: string, isSpecialistLocked: boolean): RoutineStep {

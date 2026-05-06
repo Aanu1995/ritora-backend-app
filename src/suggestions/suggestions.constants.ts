@@ -1,9 +1,3 @@
-/**
- * Lifecycle, mode, daypart, and provenance constants shared across the
- * suggestion engine. The frontend mirrors these in
- * `ritora-user-webapp/src/types/suggestions.ts`.
- */
-
 export type SuggestionDaypart = 'morning' | 'noon' | 'evening';
 export const SUGGESTION_DAYPARTS: readonly SuggestionDaypart[] = [
   'morning',
@@ -81,54 +75,33 @@ export type SuggestionObservabilityEventKind =
 
 export type SuggestionObservabilitySeverity = 'info' | 'warning' | 'critical';
 
-/**
- * Daypart boundaries used to bucket a slot's time into morning, noon
- * (mid-day), or evening. Matches the mockup naming.
- */
 export const DAYPART_BOUNDARY_NOON_MINUTES = 12 * 60;
 export const DAYPART_BOUNDARY_EVENING_MINUTES = 18 * 60;
 
-/** Default lead time in minutes the user pref falls back to. */
 export const SUGGESTION_LEAD_TIME_DEFAULT_MINUTES = 120;
 export const SUGGESTION_LEAD_TIME_MIN_MINUTES = 30;
 export const SUGGESTION_LEAD_TIME_MAX_MINUTES = 720;
 
-/** Polling cadence for the generation worker, in milliseconds. */
 export const SUGGESTION_GENERATION_POLL_INTERVAL_MS = 10_000;
-/** Attempts before a generation job is permanently failed. */
 export const SUGGESTION_GENERATION_MAX_ATTEMPTS = 3;
-/** Running jobs older than this are reset or dead-lettered. */
 export const SUGGESTION_JOB_LOCK_TIMEOUT_MINUTES = 15;
-/** Number of stale running jobs the worker reaps per poll. */
 export const SUGGESTION_STALE_JOB_REAPER_BATCH_SIZE = 25;
-/** Window during which the scheduler enqueues upcoming suggestion jobs. */
 export const SUGGESTION_SCHEDULER_LOOKAHEAD_HOURS = 26;
-/** Cadence at which the scheduler scans for new jobs to enqueue. */
 export const SUGGESTION_SCHEDULER_INTERVAL_MS = 60_000;
-/** Scheduler page size to avoid unbounded schedule-slot scans. */
 export const SUGGESTION_SCHEDULER_BATCH_SIZE = 500;
 
-/**
- * Recording reminder cadence. Mockup 13 shows a reminder thirty minutes
- * after slot start if the user has not recorded yet, with another at the
- * next slot boundary the following morning.
- */
 export const RECORDING_REMINDER_DELAY_MINUTES = 30;
 export const RECORDING_REMINDER_RETRY_NEXT_MORNING_HOURS = 8;
 
-/** Identifies the prompt schema in case we change it later. */
-export const SUGGESTION_PROMPT_VERSION = '2026-05-03.v1';
+export const SUGGESTION_PROMPT_VERSION = '2026-05-06.v1';
 export const SUGGESTION_AI_CONSENT_VERSION = '2026-05-04.v1';
-/** Identifies deterministic rule governance used around AI output. */
 export const SUGGESTION_SAFETY_POLICY_VERSION = '2026-05-04.production.v1';
 export const SUGGESTION_SAFETY_POLICY_REVIEWED_AT = '2026-05-04';
 
-/** AI cost and abuse guardrails. Kept in code for predictable behavior. */
 export const SUGGESTION_AI_DAILY_USER_GENERATION_LIMIT = 12;
 export const SUGGESTION_AI_DAILY_USER_REGENERATION_LIMIT = 4;
 export const SUGGESTION_AI_DAILY_USER_COST_LIMIT_USD = 1.5;
 
-/** Sensitive cache/context retention windows. */
 export const SUGGESTION_CONTEXT_CACHE_RETENTION_DAYS = 30;
 export const SUGGESTION_GENERATION_CONTEXT_RETENTION_DAYS = 90;
 export const SUGGESTION_RETENTION_INITIAL_DELAY_MS = 5 * 60 * 1000;

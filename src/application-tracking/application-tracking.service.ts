@@ -29,13 +29,6 @@ import {
 import { ApplicationReactiveRegenerationService } from './application-reactive-regeneration.service';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
 
-/**
- * Records what the user actually applied for each scheduled slot. Every
- * record (first save and every subsequent edit) writes a new row to
- * `application_log_versions` so prior versions are never silently
- * overwritten. After the first edit the parent log carries
- * `has_been_edited=true` and the UI shows the Edited pill.
- */
 @Injectable()
 export class ApplicationTrackingService {
   constructor(
@@ -48,11 +41,6 @@ export class ApplicationTrackingService {
     private readonly reactiveRegeneration: ApplicationReactiveRegenerationService,
   ) {}
 
-  /**
-   * Create a new application log for a given suggestion (or ad-hoc slot).
-   * Throws 409 if a non-superseded log already exists for the same
-   * (user, suggestion).
-   */
   async record(
     user: User,
     payload: RecordApplicationDto,
@@ -96,10 +84,6 @@ export class ApplicationTrackingService {
     return response;
   }
 
-  /**
-   * Edit an existing log. Replaces the items, bumps `edit_count`, sets
-   * `has_been_edited=true`, and writes a new version snapshot.
-   */
   async edit(
     user: User,
     logId: string,
@@ -147,7 +131,6 @@ export class ApplicationTrackingService {
         );
       }
 
-      // Replace items wholesale, easier than diffing.
       await itemRepo.delete({ application_log_id: lockedLog.id });
 
       const items = createApplicationLogItems(
@@ -174,7 +157,7 @@ export class ApplicationTrackingService {
       lockedLog.last_edited_at = now;
       const savedLog = await logRepo.save(lockedLog);
 
-      const nextVersion = lockedLog.edit_count + 1; // version starts at 1 (first save), edit_count was incremented above
+      const nextVersion = lockedLog.edit_count + 1;
       const snapshot = buildApplicationLogSnapshot(
         savedLog,
         savedItems,

@@ -7,9 +7,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *    what they actually applied. `has_been_edited`, `edit_count`, and
  *    `last_edited_at` drive the Edited pill in the UI. The first save
  *    creates a v1 row in application_log_versions; every subsequent
- *    save creates v2, v3, ... so the prior versions are never silently
- *    overwritten. This is the legal-protection record the mockup
- *    references.
+ *    save creates v2, v3, ... so prior versions are never silently
+ *    overwritten.
  *  - application_log_items: per-step record. Status is one of applied,
  *    skipped, or substituted. Ad-hoc rows let the user record products
  *    not on shelf, or steps that were not in the suggestion.

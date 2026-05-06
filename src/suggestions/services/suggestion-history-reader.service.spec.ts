@@ -196,7 +196,7 @@ describe('SuggestionHistoryReader', () => {
         visible_at: new Date('2026-04-29T06:00:00.000Z'),
         generated_at: new Date('2026-04-29T06:01:00.000Z'),
         ai_model: 'gpt-4.1-mini',
-        ai_prompt_version: '2026-05-03.v1',
+        ai_prompt_version: '2026-05-06.v1',
         simplified_for_reaction: false,
         has_reaction_signal: false,
         steps: [],

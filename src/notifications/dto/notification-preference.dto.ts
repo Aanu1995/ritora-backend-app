@@ -45,24 +45,16 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() wrapped_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() photo_tutorial_completed?: boolean;
 
-  // Today's Suggestion notification kinds.
   @IsOptional() @IsBoolean() suggestion_ready_enabled?: boolean;
   @IsOptional() @IsBoolean() slot_start_enabled?: boolean;
   @IsOptional() @IsBoolean() recording_reminder_enabled?: boolean;
 
-  /**
-   * Lead time used by the suggestion engine and by the suggestion_ready
-   * notification. Suggestions become visible on Today's Suggestion this
-   * many minutes before each scheduled slot.
-   */
   @IsOptional()
   @IsInt()
   @Min(SUGGESTION_LEAD_TIME_MIN_MINUTES)
   @Max(SUGGESTION_LEAD_TIME_MAX_MINUTES)
   suggestion_lead_time_minutes?: number;
 
-  // Quiet hours. Reaction alerts always come through; everything else is
-  // suppressed inside the window.
   @IsOptional() @IsBoolean() quiet_hours_enabled?: boolean;
 
   @IsOptional()

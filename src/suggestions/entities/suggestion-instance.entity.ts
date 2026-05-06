@@ -25,12 +25,6 @@ import {
 } from '../suggestions.constants';
 import { SuggestionStep } from './suggestion-step.entity';
 
-/**
- * Snapshot of all the inputs the AI used. Stored alongside each
- * suggestion so we can reproduce why a particular routine was generated.
- * The journal and shelf snapshots are intentionally light-weight: just
- * counts and trends, not full payloads, to avoid bloating storage.
- */
 export type SuggestionGenerationContext = SuggestionContextSummary;
 
 const encryptedExplanationTransformer =

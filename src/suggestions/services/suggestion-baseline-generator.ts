@@ -11,6 +11,11 @@ import {
 } from '../suggestions.constants';
 import { SuggestionProductScore } from '../suggestion-context.types';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
+import {
+  sanitizeSuggestionText,
+  toHumanApplicationMethod,
+  toHumanQuantity,
+} from './suggestion-language';
 
 export function buildDeterministicAiSteps(
   inputs: SuggestionGenerationInputs,
@@ -32,19 +37,16 @@ export function deterministicExplanation(
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionExplanationJson {
   return {
-    headline: 'Source-backed fallback suggestion',
+    headline: 'Using your shelf today',
     body: [
-      'OpenAI was unavailable or not configured, so Ritora used your scored shelf context and deterministic safety rules.',
+      'Ritora used your shelf and safety rules for this slot.',
       ...(inputs.contextSummary.routineBreak.recentlyResumed
-        ? [
-            'Your routine recently resumed, so the fallback stays conservative and avoids strong actives.',
-          ]
+        ? ['Restarting gently after your break.']
         : []),
     ],
     perStepReasons: steps.map((step) => ({
       stepOrder: step.stepOrder,
-      reason:
-        step.explanation ?? 'Selected from the highest scoring shelf fit.',
+      reason: step.explanation ?? 'Good fit for this slot.',
     })),
     skipped: inputs.contextSummary.skippedCandidates.map((candidate) => {
       const product = inputs.contextSummary.productScores.find(
@@ -54,13 +56,17 @@ export function deterministicExplanation(
         name: product
           ? `${product.brand} ${product.name}`
           : candidate.productId,
-        reason: candidate.reason,
+        reason:
+          sanitizeSuggestionText(candidate.reason, {
+            maxLength: 140,
+            maxSentences: 1,
+          }) ?? '',
       };
     }),
     inputs: [
       {
         label: 'Evidence',
-        detail: `${inputs.contextSummary.evidenceSources.length} trusted source summaries were available to the safety rules.`,
+        detail: `${inputs.contextSummary.evidenceSources.length} trusted sources informed the safety check.`,
       },
     ],
   };
@@ -84,8 +90,7 @@ export function buildDeterministicGapRecommendations(
   ) {
     gaps.push({
       ingredientOrCategory: 'Broad-spectrum sunscreen SPF 30+',
-      reason:
-        'Daytime routines need a sunscreen option, especially when recent or planned actives may increase sun sensitivity.',
+      reason: 'Daytime routines need a sunscreen option.',
       budgetTier: null,
       goalAlignment: inputs.skinProfile?.primary_goal ?? null,
       sourceIds: [
@@ -102,8 +107,7 @@ export function buildDeterministicGapRecommendations(
   ) {
     gaps.push({
       ingredientOrCategory: 'Fragrance-free barrier moisturizer',
-      reason:
-        'Recent reaction or barrier signals make a simple moisturizer useful for fallback routines.',
+      reason: 'A simple moisturizer can support barrier recovery.',
       budgetTier: null,
       goalAlignment: 'barrier support',
       sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
@@ -197,10 +201,16 @@ function productScoreToStep(
     productName: product.name,
     stepLabel: product.category,
     customLabel: null,
-    applicationMethod: product.guidance?.applicationMethod ?? null,
-    quantity: product.guidance?.quantity ?? null,
+    applicationMethod: toHumanApplicationMethod(
+      product.guidance?.applicationMethod ?? null,
+    ),
+    quantity: toHumanQuantity(product.guidance?.quantity ?? null),
     waitAfterMinutes: score.waitMinutes,
-    explanation: score.suitabilityReasons[0] ?? 'Selected from your shelf.',
+    explanation:
+      sanitizeSuggestionText(score.suitabilityReasons[0], {
+        maxLength: 140,
+        maxSentences: 1,
+      }) ?? 'Selected from your shelf.',
     provenance: 'ai_added',
     chips: [
       {
@@ -212,7 +222,11 @@ function productScoreToStep(
       ? [
           {
             severity: 'info',
-            message: score.cautionReasons[0],
+            message:
+              sanitizeSuggestionText(score.cautionReasons[0], {
+                maxLength: 160,
+                maxSentences: 1,
+              }) ?? '',
             ingredientSlugs: score.activeTags,
             sourceIds: score.evidenceSourceIds,
           },

@@ -42,13 +42,6 @@ import { SuggestionsService } from './services/suggestions.service';
 import { TodaysSuggestionReactionService } from './services/todays-suggestion-reaction.service';
 import { SuggestionsController } from './suggestions.controller';
 
-/**
- * Owns the AI-powered suggestion engine. The TypeOrmModule.forFeature
- * includes both this module's entities and the cross-module reads
- * (schedule, inventory, application tracking, journal, profile) so the
- * services can issue queries without going through other modules'
- * services.
- */
 @Module({
   imports: [
     TypeOrmModule.forFeature([

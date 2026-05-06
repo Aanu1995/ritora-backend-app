@@ -47,18 +47,12 @@ export class SuggestionStep {
   @Column({ type: 'integer' })
   step_order: number;
 
-  /** Source RoutineStep when the step came from the user's schedule. */
   @Column({ type: 'varchar', length: 26, nullable: true })
   routine_step_id: string | null;
 
   @Column({ type: 'varchar', length: 26, nullable: true })
   inventory_product_id: string | null;
 
-  /**
-   * Snapshot of the product brand and name. Lets the suggestion still
-   * render correctly in history if the product is later deleted from
-   * the user's shelf.
-   */
   @Column({ type: 'varchar', length: 255, nullable: true })
   product_brand_snapshot: string | null;
 

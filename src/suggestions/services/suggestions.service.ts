@@ -54,23 +54,6 @@ import {
 import { TodaysSuggestionReactionService } from './todays-suggestion-reaction.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
 
-/**
- * Read-and-orchestrate service for the suggestion engine.
- *
- *  - `getTodaysSuggestion` assembles the Today's Suggestion page response
- *    by joining the user's schedule for today's day-of-week with their
- *    suggestion_instances for the current calendar date and the latest
- *    application log per slot.
- *  - `getSuggestion` returns a single suggestion (used by the "Why this
- *    routine" drawer).
- *  - `regenerateSuggestion` supersedes an existing instance and queues a
- *    new generation job. The actual generation happens in the worker.
- *  - `getHistory` returns the date-grouped past records for the History
- *    page; `getHistoryDay` returns a single past day with full slot
- *    detail.
- *
- * Notifications and AI generation belong to other services.
- */
 @Injectable()
 export class SuggestionsService {
   constructor(
@@ -136,7 +119,6 @@ export class SuggestionsService {
         suggestionBySlot.set(suggestion.slot_id, suggestion);
         continue;
       }
-      // Prefer the most recently generated, non-superseded one.
       if (
         (suggestion.generated_at?.getTime() ?? 0) >
         (existing.generated_at?.getTime() ?? 0)
@@ -297,11 +279,9 @@ export class SuggestionsService {
       );
     }
 
-    // Mark the prior instance superseded so the new one becomes active.
     existing.generation_status = 'superseded';
     await this.suggestionRepo.save(existing);
 
-    // Queue a fresh job for the same slot+date so the worker picks it up.
     if (!existing.slot_id) {
       throw new ConflictException(
         'This suggestion is no longer linked to a schedule slot.',

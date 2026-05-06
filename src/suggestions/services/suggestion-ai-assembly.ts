@@ -16,6 +16,11 @@ import type {
 import { RawSuggestionStepResponse } from './suggestion-ai-contract';
 import { buildPolicySafetyFlags } from './suggestion-safety-policy';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
+import {
+  sanitizeSuggestionText,
+  toHumanApplicationMethod,
+  toHumanQuantity,
+} from './suggestion-language';
 
 export type AssemblyContext = {
   lockedSteps: RoutineStep[];
@@ -75,14 +80,20 @@ export function resolveRawStep(
     productName: sourceProduct?.name ?? null,
     stepLabel: toStepLabel(rawStep.stepLabel ?? routineSource?.step_label),
     customLabel: rawStep.customLabel ?? routineSource?.custom_label ?? null,
-    applicationMethod:
+    applicationMethod: toHumanApplicationMethod(
       rawStep.applicationMethod ??
-      sourceProduct?.guidance?.applicationMethod ??
-      null,
-    quantity: rawStep.quantity ?? sourceProduct?.guidance?.quantity ?? null,
+        sourceProduct?.guidance?.applicationMethod ??
+        null,
+    ),
+    quantity: toHumanQuantity(
+      rawStep.quantity ?? sourceProduct?.guidance?.quantity ?? null,
+    ),
     waitAfterMinutes:
       rawStep.waitAfterMinutes ?? sourceProduct?.guidance?.waitMinutes ?? null,
-    explanation: sanitizeText(rawStep.explanation ?? null),
+    explanation: sanitizeSuggestionText(rawStep.explanation ?? null, {
+      maxLength: 140,
+      maxSentences: 1,
+    }),
     provenance,
     chips: sanitizeChips(rawStep.chips ?? []),
     safetyWarnings: sanitizeSafetyFlags(rawStep.safetyWarnings ?? []),
@@ -132,10 +143,15 @@ export function routineStepToOutput(
     productName: step.product?.name ?? null,
     stepLabel: step.step_label,
     customLabel: step.custom_label,
-    applicationMethod: step.product?.guidance?.applicationMethod ?? null,
-    quantity: step.product?.guidance?.quantity ?? null,
+    applicationMethod: toHumanApplicationMethod(
+      step.product?.guidance?.applicationMethod ?? null,
+    ),
+    quantity: toHumanQuantity(step.product?.guidance?.quantity ?? null),
     waitAfterMinutes: step.product?.guidance?.waitMinutes ?? null,
-    explanation: sanitizeText(overrides?.explanation ?? null),
+    explanation: sanitizeSuggestionText(overrides?.explanation ?? null, {
+      maxLength: 140,
+      maxSentences: 1,
+    }),
     provenance: step.is_specialist_locked
       ? 'specialist_locked'
       : 'user_routine',
@@ -194,19 +210,41 @@ export function sanitizeExplanation(
   explanation: SuggestionExplanationJson,
 ): SuggestionExplanationJson {
   return {
-    headline: sanitizeText(explanation.headline) ?? '',
-    body: explanation.body.map((value) => sanitizeText(value) ?? ''),
+    headline:
+      sanitizeSuggestionText(explanation.headline, {
+        maxLength: 80,
+        maxSentences: 1,
+      }) ?? '',
+    body: explanation.body.map(
+      (value) =>
+        sanitizeSuggestionText(value, {
+          maxLength: 160,
+          maxSentences: 1,
+        }) ?? '',
+    ),
     perStepReasons: explanation.perStepReasons.map((reason) => ({
       stepOrder: reason.stepOrder,
-      reason: sanitizeText(reason.reason) ?? '',
+      reason:
+        sanitizeSuggestionText(reason.reason, {
+          maxLength: 140,
+          maxSentences: 1,
+        }) ?? '',
     })),
     skipped: explanation.skipped.map((item) => ({
-      name: sanitizeText(item.name) ?? '',
-      reason: sanitizeText(item.reason) ?? '',
+      name: sanitizeSuggestionText(item.name, { maxLength: 80 }) ?? '',
+      reason:
+        sanitizeSuggestionText(item.reason, {
+          maxLength: 140,
+          maxSentences: 1,
+        }) ?? '',
     })),
     inputs: explanation.inputs.map((input) => ({
-      label: sanitizeText(input.label) ?? '',
-      detail: sanitizeText(input.detail) ?? '',
+      label: sanitizeSuggestionText(input.label, { maxLength: 40 }) ?? '',
+      detail:
+        sanitizeSuggestionText(input.detail, {
+          maxLength: 120,
+          maxSentences: 1,
+        }) ?? '',
     })),
   };
 }
@@ -215,10 +253,18 @@ export function sanitizeGapRecommendations(
   gaps: SuggestionGapRecommendationJson[],
 ): SuggestionGapRecommendationJson[] {
   return gaps.map((gap) => ({
-    ingredientOrCategory: sanitizeText(gap.ingredientOrCategory) ?? '',
-    reason: sanitizeText(gap.reason) ?? '',
+    ingredientOrCategory:
+      sanitizeSuggestionText(gap.ingredientOrCategory, { maxLength: 80 }) ?? '',
+    reason:
+      sanitizeSuggestionText(gap.reason, {
+        maxLength: 150,
+        maxSentences: 1,
+      }) ?? '',
     budgetTier: gap.budgetTier,
-    goalAlignment: sanitizeText(gap.goalAlignment),
+    goalAlignment: sanitizeSuggestionText(gap.goalAlignment, {
+      maxLength: 80,
+      maxSentences: 1,
+    }),
     sourceIds: mergeEvidenceSourceIds(gap.sourceIds ?? []),
   }));
 }
@@ -228,7 +274,11 @@ export function sanitizeSafetyFlags(
 ): SuggestionSafetyFlagJson[] {
   return flags.map((flag) => ({
     severity: flag.severity,
-    message: sanitizeText(flag.message) ?? '',
+    message:
+      sanitizeSuggestionText(flag.message, {
+        maxLength: 160,
+        maxSentences: 1,
+      }) ?? '',
     ingredientSlugs: flag.ingredientSlugs ?? [],
     sourceIds: mergeEvidenceSourceIds(flag.sourceIds ?? []),
   }));
@@ -262,18 +312,12 @@ function sanitizeChips(
 ): SuggestionStepChipJson[] {
   return chips.map((chip) => ({
     tone: chip.tone,
-    text: sanitizeText(chip.text) ?? '',
+    text:
+      sanitizeSuggestionText(chip.text, {
+        maxLength: 32,
+        maxSentences: 1,
+      }) ?? '',
   }));
-}
-
-function sanitizeText(value: string | null | undefined): string | null {
-  if (!value) return value ?? null;
-  return value
-    .replace(/\bdiagnos(?:e|es|ed|ing|is)\b/gi, 'assess')
-    .replace(/\btreat(?:s|ed|ing|ment)?\b/gi, 'care')
-    .replace(/\bcure(?:s|d|ing)?\b/gi, 'resolve')
-    .replace(/\bprescrib(?:e|es|ed|ing)\b/gi, 'recommend')
-    .replace(/\bprescription\b/gi, 'routine');
 }
 
 function productKey(brand: string, name: string): string {

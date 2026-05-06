@@ -20,6 +20,10 @@ import { SuggestionObservabilityService } from './suggestion-observability.servi
 import { buildSlotInstant, clampLeadTimeMinutes } from './suggestion-helpers';
 import { RoutineBreakService } from './routine-break.service';
 import { ROUTINE_BREAK_SUPPRESSED_JOB_REASON } from '../suggestions.constants';
+import {
+  toHumanApplicationMethod,
+  toHumanQuantity,
+} from './suggestion-language';
 
 type SuggestionJobSubjects = {
   targetDate: string;
@@ -27,6 +31,13 @@ type SuggestionJobSubjects = {
   slot: ScheduleSlot;
   user: User;
 };
+
+const SUGGESTION_AI_MODEL_MAX_LENGTH = 60;
+const SUGGESTION_AI_PROMPT_VERSION_MAX_LENGTH = 80;
+const SUGGESTION_STEP_PRODUCT_SNAPSHOT_MAX_LENGTH = 255;
+const SUGGESTION_STEP_CUSTOM_LABEL_MAX_LENGTH = 100;
+const SUGGESTION_STEP_METHOD_MAX_LENGTH = 40;
+const SUGGESTION_STEP_QUANTITY_MAX_LENGTH = 40;
 
 @Injectable()
 export class SuggestionGenerationService {
@@ -215,7 +226,6 @@ export class SuggestionGenerationService {
           ? activeBeforePersist.id
           : null);
 
-      // Supersede any existing non-superseded instance for the same slot+date.
       await suggestionRepo
         .createQueryBuilder()
         .update()
@@ -249,8 +259,14 @@ export class SuggestionGenerationService {
         generation_status: 'ready',
         visible_at: new Date(visibleAtMs),
         generated_at: new Date(),
-        ai_model: output.metadata.model,
-        ai_prompt_version: output.metadata.promptVersion,
+        ai_model: fitNullableColumnText(
+          output.metadata.model,
+          SUGGESTION_AI_MODEL_MAX_LENGTH,
+        ),
+        ai_prompt_version: fitNullableColumnText(
+          output.metadata.promptVersion,
+          SUGGESTION_AI_PROMPT_VERSION_MAX_LENGTH,
+        ),
         ai_input_tokens: output.metadata.inputTokens,
         ai_output_tokens: output.metadata.outputTokens,
         ai_total_tokens: output.metadata.totalTokens,
@@ -274,12 +290,27 @@ export class SuggestionGenerationService {
           step_order: step.stepOrder,
           routine_step_id: step.routineStepId,
           inventory_product_id: step.inventoryProductId,
-          product_brand_snapshot: step.productBrand,
-          product_name_snapshot: step.productName,
+          product_brand_snapshot: fitNullableColumnText(
+            step.productBrand,
+            SUGGESTION_STEP_PRODUCT_SNAPSHOT_MAX_LENGTH,
+          ),
+          product_name_snapshot: fitNullableColumnText(
+            step.productName,
+            SUGGESTION_STEP_PRODUCT_SNAPSHOT_MAX_LENGTH,
+          ),
           step_label: step.stepLabel,
-          custom_label: step.customLabel,
-          application_method: step.applicationMethod,
-          quantity: step.quantity,
+          custom_label: fitNullableColumnText(
+            step.customLabel,
+            SUGGESTION_STEP_CUSTOM_LABEL_MAX_LENGTH,
+          ),
+          application_method: fitNullableColumnText(
+            toHumanApplicationMethod(step.applicationMethod),
+            SUGGESTION_STEP_METHOD_MAX_LENGTH,
+          ),
+          quantity: fitNullableColumnText(
+            toHumanQuantity(step.quantity),
+            SUGGESTION_STEP_QUANTITY_MAX_LENGTH,
+          ),
           wait_after_minutes: step.waitAfterMinutes,
           explanation: step.explanation,
           provenance: step.provenance,
@@ -323,4 +354,14 @@ export class SuggestionGenerationService {
       },
     });
   }
+}
+
+function fitNullableColumnText(
+  value: unknown,
+  maxLength: number,
+): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
 }

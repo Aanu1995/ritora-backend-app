@@ -1,11 +1,5 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-/**
- * Extends the in_app_notifications kind enum check with the three new
- * Today's Suggestion notification kinds. The matching i18n keys live
- * under notificationsPage.kinds.{suggestion_ready, slot_start,
- * recording_reminder} on the frontend.
- */
 export class ExtendNotificationKinds1715100000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

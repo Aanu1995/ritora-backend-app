@@ -280,8 +280,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ---------- ENTRY UPSERT ----------
-
   async upsertEntryForResolvedDate(params: {
     userId: string;
     targetDate: string;
@@ -959,8 +957,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  // ---------- ANALYSIS ----------
-
   async processAnalysisJob(job: SkinJournalAnalysisJob): Promise<void> {
     const entry = await this.entries.findOne({
       where: { id: job.entry_id, user_id: job.user_id },
@@ -1433,8 +1429,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // ---------- EVENTS ----------
-
   async recordEvent(
     userId: string,
     entryId: string,
@@ -1564,8 +1558,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     await this.events.save(event);
     return JournalEventResponseDto.fromEntity(event);
   }
-
-  // ---------- INSIGHTS ----------
 
   async listInsights(
     userId: string,
@@ -2142,8 +2134,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     return dto;
   }
 
-  // ---------- WRAPPED ----------
-
   async listWrapped(userId: string): Promise<WrappedResponseDto[]> {
     if (!SKIN_JOURNAL_WRAPPED_ENABLED) {
       await this.recordDataAccess(
@@ -2184,8 +2174,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       this.photoStorage.getSignedUrl(objectKey, options),
     );
   }
-
-  // ---------- SIMPLIFICATION ----------
 
   async getActiveSimplification(
     userId: string,
@@ -2256,8 +2244,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     return SimplificationResponseDto.fromEntity(evt);
   }
 
-  // ---------- STATS ----------
-
   async getStats(userId: string): Promise<JournalStatsResponseDto> {
     const all = await this.entries.find({
       where: { user_id: userId },
@@ -2297,8 +2283,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       first_entry_date: firstEntry,
     };
   }
-
-  // ---------- EXPORT ----------
 
   async createExport(
     userId: string,
@@ -2381,8 +2365,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       this.photoStorage.getSignedUrl(objectKey, options),
     );
   }
-
-  // ---------- INTERNAL HELPERS ----------
 
   private async findPreviousPhotoEntry(
     userId: string,
