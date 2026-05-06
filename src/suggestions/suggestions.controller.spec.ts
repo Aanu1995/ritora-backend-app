@@ -4,6 +4,7 @@ import { UserConsentType } from '../users/user-consent.constants';
 import { SuggestionConsentService } from './services/suggestion-consent.service';
 import { SuggestionsService } from './services/suggestions.service';
 import { SuggestionTodayActionService } from './services/suggestion-today-action.service';
+import { RoutineBreakService } from './services/routine-break.service';
 import { SuggestionsController } from './suggestions.controller';
 
 describe('SuggestionsController', () => {
@@ -24,10 +25,17 @@ describe('SuggestionsController', () => {
     recordGapAction: jest.fn(),
     snoozeRecordingReminder: jest.fn(),
   } as unknown as jest.Mocked<SuggestionTodayActionService>;
+  const routineBreakService = {
+    getBreakState: jest.fn(),
+    startBreak: jest.fn(),
+    resumeActiveBreak: jest.fn(),
+    updateBreak: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
   const controller = new SuggestionsController(
     service,
     consentService,
     todayActionService,
+    routineBreakService,
   );
 
   beforeEach(() => {
@@ -188,6 +196,54 @@ describe('SuggestionsController', () => {
     expect(todayActionService.snoozeRecordingReminder).toHaveBeenCalledWith(
       user(),
       { suggestionInstanceId: 'suggestion-1', minutes: 60 },
+    );
+  });
+
+  it('delegates routine break read, start, resume, and update actions', async () => {
+    const state = {
+      routineBreak: {
+        id: 'break-1',
+        status: 'active' as const,
+        startedAt: '2026-05-06T08:00:00.000Z',
+        endsAt: null,
+        canResumeNow: true,
+        message:
+          'Your routine is paused. Ritora will not generate new skincare suggestions until you resume.',
+      },
+    };
+    routineBreakService.getBreakState.mockResolvedValue(state);
+    routineBreakService.startBreak.mockResolvedValue(state);
+    routineBreakService.resumeActiveBreak.mockResolvedValue({
+      routineBreak: null,
+    });
+    routineBreakService.updateBreak.mockResolvedValue(state);
+
+    await expect(controller.getRoutineBreak(user())).resolves.toBe(state);
+    await expect(
+      controller.startRoutineBreak(user(), {
+        endsAt: '2026-05-07T08:00:00.000Z',
+        reason: 'Travelling',
+      }),
+    ).resolves.toBe(state);
+    await expect(controller.resumeRoutineBreak(user())).resolves.toEqual({
+      routineBreak: null,
+    });
+    await expect(
+      controller.updateRoutineBreak(user(), 'break-1', {
+        endsAt: null,
+      }),
+    ).resolves.toBe(state);
+
+    expect(routineBreakService.getBreakState).toHaveBeenCalledWith(user());
+    expect(routineBreakService.startBreak).toHaveBeenCalledWith(user(), {
+      endsAt: '2026-05-07T08:00:00.000Z',
+      reason: 'Travelling',
+    });
+    expect(routineBreakService.resumeActiveBreak).toHaveBeenCalledWith(user());
+    expect(routineBreakService.updateBreak).toHaveBeenCalledWith(
+      user(),
+      'break-1',
+      { endsAt: null },
     );
   });
 });

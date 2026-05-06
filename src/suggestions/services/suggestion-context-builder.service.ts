@@ -9,6 +9,7 @@ import { InventoryProduct } from '../../inventory/entities/inventory-product.ent
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
+import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
 import {
@@ -24,6 +25,10 @@ import {
   mergeEvidenceSourceIds,
 } from './suggestion-evidence-sources';
 import { scoreProductForSuggestion } from './suggestion-product-intelligence';
+import {
+  buildRoutineBreakSummary,
+  routineBreakCacheParts,
+} from './suggestion-routine-break-context';
 
 @Injectable()
 export class SuggestionContextBuilder {
@@ -94,6 +99,10 @@ export class SuggestionContextBuilder {
         pregnancyStatus: normalizedInputs.skinProfile?.pregnancy_status ?? null,
       },
       reaction,
+      routineBreak: buildRoutineBreakSummary(
+        normalizedInputs.recentRoutineBreaks ?? [],
+        normalizedInputs.targetDate,
+      ),
       productScores,
       applicationPatterns: buildApplicationPatterns(
         normalizedInputs.recentApplications,
@@ -167,6 +176,7 @@ export interface SuggestionContextBuilderInput {
   routineSteps: RoutineStep[];
   recentJournalEntries: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
+  recentRoutineBreaks?: RoutineBreak[];
   aiPersonalizationAllowed?: boolean;
   aiPersonalizationBlockedReason?: string | null;
 }
@@ -328,6 +338,7 @@ function buildCacheKey(inputs: SuggestionContextBuilderInput): string {
                 item.is_ad_hoc,
               ]),
           ]),
+        routineBreaks: routineBreakCacheParts(inputs.recentRoutineBreaks ?? []),
         aiPersonalizationAllowed: inputs.aiPersonalizationAllowed ?? true,
         aiPersonalizationBlockedReason:
           inputs.aiPersonalizationBlockedReason ?? null,

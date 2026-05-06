@@ -326,6 +326,7 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
     `Scored context summary:\n${JSON.stringify(
       {
         reaction: inputs.contextSummary.reaction,
+        routineBreak: inputs.contextSummary.routineBreak,
         productScores: inputs.contextSummary.productScores.slice(0, 20),
         applicationPatterns: inputs.contextSummary.applicationPatterns,
         safetyConstraints: inputs.contextSummary.safetyConstraints,

@@ -3,6 +3,7 @@ import { UserNotificationPreference } from '../notifications/entities/user-notif
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { SuggestionGenerationJob } from '../suggestions/entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
+import { RoutineBreakService } from '../suggestions/services/routine-break.service';
 import { User } from '../users/entities/user.entity';
 import { ApplicationLogResponseDto } from './dto/application-log-response.dto';
 import { ApplicationReactiveRegenerationService } from './application-reactive-regeneration.service';
@@ -12,16 +13,21 @@ describe('ApplicationReactiveRegenerationService', () => {
   const suggestionRepo = repo<SuggestionInstance>();
   const jobRepo = repo<SuggestionGenerationJob>();
   const preferenceRepo = repo<UserNotificationPreference>();
+  const routineBreakService = {
+    isRoutineBreakActive: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
   const service = new ApplicationReactiveRegenerationService(
     slotRepo,
     suggestionRepo,
     jobRepo,
     preferenceRepo,
+    routineBreakService,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T10:00:00.000Z'));
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -105,6 +111,16 @@ describe('ApplicationReactiveRegenerationService', () => {
     } as ApplicationLogResponseDto);
 
     expect(slotRepo.find).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
+  });
+
+  it('does not queue reactive regeneration while the user is on a routine break', async () => {
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
+
+    await service.queueAfterApplicationChange(user(), skippedMorningLog());
+
+    expect(slotRepo.find).not.toHaveBeenCalled();
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
     expect(jobRepo.insert).not.toHaveBeenCalled();
   });
 });

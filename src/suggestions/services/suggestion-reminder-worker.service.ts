@@ -16,6 +16,7 @@ import {
   RECORDING_REMINDER_DELAY_MINUTES,
   SUGGESTION_GENERATION_POLL_INTERVAL_MS,
 } from '../suggestions.constants';
+import { RoutineBreakService } from './routine-break.service';
 import { buildSlotInstant } from './suggestion-helpers';
 
 /**
@@ -46,6 +47,7 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
     private readonly applicationLogRepo: Repository<ApplicationLog>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly routineBreakService: RoutineBreakService,
   ) {
     this.enabled = this.configService.get<string>('NODE_ENV') !== 'test';
   }
@@ -99,6 +101,10 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
       where: { id: In(userIds) },
     });
     const usersById = new Map(users.map((u) => [u.id, u]));
+    const activeBreakUserIds = await this.routineBreakService.getActiveUserIds(
+      userIds,
+      now,
+    );
 
     const suggestionIds = readySuggestions.map((s) => s.id);
     const logs = await this.applicationLogRepo.find({
@@ -111,6 +117,7 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
     );
 
     for (const suggestion of readySuggestions) {
+      if (activeBreakUserIds.has(suggestion.user_id)) continue;
       const user = usersById.get(suggestion.user_id);
       if (!user) continue;
       const timeZone = resolveEffectiveTimeZone(user.time_zone, null);

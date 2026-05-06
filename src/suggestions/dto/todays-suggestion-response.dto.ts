@@ -5,6 +5,7 @@ import {
   SuggestionSlotLifecycleStatus,
 } from '../suggestions.constants';
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
+import { RoutineBreakResponseDto } from './suggestion-routine-break.dto';
 import { SuggestionInstanceResponseDto } from './suggestion-instance-response.dto';
 
 export class TodaysSuggestionWeatherSummaryDto {
@@ -223,4 +224,7 @@ export class TodaysSuggestionResponseDto {
 
   @ApiProperty({ nullable: true, type: TodaysSuggestionReactionAlertDto })
   reactionAlert: TodaysSuggestionReactionAlertDto | null;
+
+  @ApiProperty({ nullable: true, type: RoutineBreakResponseDto })
+  routineBreak: RoutineBreakResponseDto | null;
 }

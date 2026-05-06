@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -26,6 +27,11 @@ import {
 } from './dto/suggestion-history.dto';
 import { SuggestionInstanceResponseDto } from './dto/suggestion-instance-response.dto';
 import {
+  RoutineBreakStateResponseDto,
+  StartRoutineBreakDto,
+  UpdateRoutineBreakDto,
+} from './dto/suggestion-routine-break.dto';
+import {
   NormalRoutineOverrideResponseDto,
   RecordingReminderSnoozeResponseDto,
   RecordSuggestionGapActionDto,
@@ -34,6 +40,7 @@ import {
 } from './dto/suggestion-today-actions.dto';
 import { TodaysSuggestionResponseDto } from './dto/todays-suggestion-response.dto';
 import { SuggestionConsentService } from './services/suggestion-consent.service';
+import { RoutineBreakService } from './services/routine-break.service';
 import { SuggestionTodayActionService } from './services/suggestion-today-action.service';
 import { SuggestionsService } from './services/suggestions.service';
 
@@ -45,6 +52,7 @@ export class SuggestionsController {
     private readonly suggestionsService: SuggestionsService,
     private readonly suggestionConsentService: SuggestionConsentService,
     private readonly todayActionService: SuggestionTodayActionService,
+    private readonly routineBreakService: RoutineBreakService,
   ) {}
 
   /**
@@ -174,6 +182,44 @@ export class SuggestionsController {
         request.ip ?? null,
       ),
     );
+  }
+
+  @Get('break')
+  @ApiOperation({ summary: 'Current routine break state' })
+  async getRoutineBreak(
+    @CurrentUser() user: User,
+  ): Promise<RoutineBreakStateResponseDto> {
+    return this.routineBreakService.getBreakState(user);
+  }
+
+  @Post('break')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Start a user-wide routine break' })
+  async startRoutineBreak(
+    @CurrentUser() user: User,
+    @Body() body: StartRoutineBreakDto,
+  ): Promise<RoutineBreakStateResponseDto> {
+    return this.routineBreakService.startBreak(user, body ?? {});
+  }
+
+  @Post('break/resume')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resume the active routine break immediately' })
+  async resumeRoutineBreak(
+    @CurrentUser() user: User,
+  ): Promise<RoutineBreakStateResponseDto> {
+    return this.routineBreakService.resumeActiveBreak(user);
+  }
+
+  @Patch('break/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update a planned routine resume date' })
+  async updateRoutineBreak(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body() body: UpdateRoutineBreakDto,
+  ): Promise<RoutineBreakStateResponseDto> {
+    return this.routineBreakService.updateBreak(user, id, body ?? {});
   }
 
   @Get(':id')

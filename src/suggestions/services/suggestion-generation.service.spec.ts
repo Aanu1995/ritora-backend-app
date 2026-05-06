@@ -12,6 +12,7 @@ import { UserDataAccessLogService } from '../../users/user-data-access-log.servi
 import { UserConsentType } from '../../users/user-consent.constants';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionContextSummary } from '../suggestion-context.types';
@@ -21,6 +22,7 @@ import { SuggestionContextBuilder } from './suggestion-context-builder.service';
 import { SuggestionGenerationContextService } from './suggestion-generation-context.service';
 import { SuggestionGenerationService } from './suggestion-generation.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
+import { RoutineBreakService } from './routine-break.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
 
 describe('SuggestionGenerationService', () => {
@@ -48,11 +50,16 @@ describe('SuggestionGenerationService', () => {
   const observability = {
     record: jest.fn(),
   } as unknown as jest.Mocked<SuggestionObservabilityService>;
+  const routineBreakService = {
+    isRoutineBreakActive: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
   const slotRepo = repo<ScheduleSlot>();
+  const suggestionRepo = repo<SuggestionInstance>();
   const inventoryRepo = repo<InventoryProduct>();
   const journalRepo = repo<SkinJournalEntry>();
   const skinProfileRepo = repo<SkinProfile>();
   const applicationLogRepo = repo<ApplicationLog>();
+  const routineBreakRepo = repo<RoutineBreak>();
   const userRepo = repo<User>();
   const preferenceRepo = repo<UserNotificationPreference>();
   let txSuggestionRepo: jest.Mocked<Repository<SuggestionInstance>>;
@@ -76,6 +83,7 @@ describe('SuggestionGenerationService', () => {
       journalRepo,
       skinProfileRepo,
       applicationLogRepo,
+      routineBreakRepo,
     );
     service = new SuggestionGenerationService(
       dataSource,
@@ -83,9 +91,11 @@ describe('SuggestionGenerationService', () => {
       contextService,
       notifications,
       observability,
+      suggestionRepo,
       slotRepo,
       userRepo,
       preferenceRepo,
+      routineBreakService,
     );
     consentService.evaluate.mockResolvedValue({
       aiPersonalizationAllowed: true,
@@ -104,6 +114,9 @@ describe('SuggestionGenerationService', () => {
       estimatedCostTodayUsd: 0,
     });
     todayActionService.shouldIgnoreReactionContext.mockResolvedValue(false);
+    routineBreakRepo.find.mockResolvedValue([]);
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
+    suggestionRepo.update.mockResolvedValue({ affected: 1 } as never);
   });
 
   it('builds minimized context, persists a ready suggestion, and dispatches a deduped notification', async () => {
@@ -257,6 +270,44 @@ describe('SuggestionGenerationService', () => {
     );
   });
 
+  it('suppresses persistence and notification if a routine break starts during generation', async () => {
+    slotRepo.findOne.mockResolvedValue(slot());
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find.mockResolvedValue([]);
+    applicationLogRepo.find.mockResolvedValue([]);
+    contextBuilder.build.mockResolvedValue(contextSummary());
+    aiGenerator.generate.mockResolvedValue(generationOutput());
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
+
+    await service.generateForJob(job());
+
+    expect(aiGenerator.generate).toHaveBeenCalled();
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+      }),
+      expect.objectContaining({
+        generation_status: 'superseded',
+        ai_error: 'routine_break_active',
+      }),
+    );
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(notifications.dispatch).not.toHaveBeenCalled();
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'generation_failed',
+        severity: 'warning',
+        metadata: { reason: 'routine_break_active' },
+      }),
+    );
+  });
+
   it('does not crash when the slot or user no longer exists', async () => {
     slotRepo.findOne.mockResolvedValue(null);
     await expect(service.generateForJob(job())).resolves.toBeUndefined();
@@ -275,6 +326,7 @@ function repo<T extends ObjectLiteral>() {
     find: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn(),
+    update: jest.fn(),
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
@@ -417,6 +469,11 @@ function contextSummary(): SuggestionContextSummary {
       concernKeys: [],
       daysSinceLatestSignal: null,
       barrierCompromised: false,
+    },
+    routineBreak: {
+      recentlyResumed: false,
+      lastPausedFrom: null,
+      lastPausedUntil: null,
     },
     productScores: [],
     applicationPatterns: {

@@ -18,6 +18,8 @@ import {
 import { SuggestionGenerationContextService } from './suggestion-generation-context.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { buildSlotInstant, clampLeadTimeMinutes } from './suggestion-helpers';
+import { RoutineBreakService } from './routine-break.service';
+import { ROUTINE_BREAK_SUPPRESSED_JOB_REASON } from '../suggestions.constants';
 
 type SuggestionJobSubjects = {
   targetDate: string;
@@ -36,12 +38,15 @@ export class SuggestionGenerationService {
     private readonly contextService: SuggestionGenerationContextService,
     private readonly notifications: NotificationsService,
     private readonly observability: SuggestionObservabilityService,
+    @InjectRepository(SuggestionInstance)
+    private readonly suggestionRepo: Repository<SuggestionInstance>,
     @InjectRepository(ScheduleSlot)
     private readonly slotRepo: Repository<ScheduleSlot>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     @InjectRepository(UserNotificationPreference)
     private readonly preferenceRepo: Repository<UserNotificationPreference>,
+    private readonly routineBreakService: RoutineBreakService,
   ) {}
 
   async generateForJob(job: SuggestionGenerationJob): Promise<void> {
@@ -58,9 +63,18 @@ export class SuggestionGenerationService {
     });
 
     const output = await this.aiGenerator.generate(inputs);
+    if (await this.supersedeIfRoutineBreakStarted(user.id, job, targetDate)) {
+      return;
+    }
 
     const savedInstance = await this.persist(user, job, slot, inputs, output);
     await this.recordGenerationOutcome(user.id, job.id, savedInstance, output);
+    if (await this.routineBreakService.isRoutineBreakActive(user.id)) {
+      this.logger.log(
+        `Suggestion ${savedInstance.id} generated before routine break notification dispatch; suppressing suggestion_ready.`,
+      );
+      return;
+    }
     await this.dispatchSuggestionReadyNotification(
       user.id,
       slot.id,
@@ -94,6 +108,43 @@ export class SuggestionGenerationService {
     }
 
     return { targetDate, targetTime, slot, user };
+  }
+
+  private async supersedeIfRoutineBreakStarted(
+    userId: string,
+    job: SuggestionGenerationJob,
+    targetDate: string,
+  ): Promise<boolean> {
+    if (!(await this.routineBreakService.isRoutineBreakActive(userId))) {
+      return false;
+    }
+
+    await this.suggestionRepo.update(
+      {
+        user_id: userId,
+        slot_id: job.slot_id,
+        target_date: targetDate,
+        generation_status: Not('superseded' as const),
+      },
+      {
+        generation_status: 'superseded',
+        ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+        ai_retry_count: job.attempt_count,
+      },
+    );
+    await this.observability.record({
+      kind: 'generation_failed',
+      severity: 'warning',
+      userId,
+      jobId: job.id,
+      metadata: {
+        reason: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+      },
+    });
+    this.logger.log(
+      `Suppressed suggestion generation for job ${job.id} because a routine break became active.`,
+    );
+    return true;
   }
 
   private async dispatchSuggestionReadyNotification(

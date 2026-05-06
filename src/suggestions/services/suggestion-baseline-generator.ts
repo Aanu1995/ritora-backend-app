@@ -35,6 +35,11 @@ export function deterministicExplanation(
     headline: 'Source-backed fallback suggestion',
     body: [
       'OpenAI was unavailable or not configured, so Ritora used your scored shelf context and deterministic safety rules.',
+      ...(inputs.contextSummary.routineBreak.recentlyResumed
+        ? [
+            'Your routine recently resumed, so the fallback stays conservative and avoids strong actives.',
+          ]
+        : []),
     ],
     perStepReasons: steps.map((step) => ({
       stepOrder: step.stepOrder,
@@ -120,8 +125,7 @@ function selectBaselineProducts(
   const candidates = inputs.contextSummary.productScores
     .filter((score) => score.suitabilityScore >= 40)
     .filter((score) =>
-      inputs.contextSummary.reaction.hasSignal ||
-      inputs.contextSummary.reaction.barrierCompromised
+      shouldAvoidStrongActives(inputs)
         ? !score.activeTags.some((tag) =>
             ['retinoid', 'aha', 'bha', 'benzoyl_peroxide'].includes(tag),
           )
@@ -144,10 +148,7 @@ function selectBaselineProducts(
 function preferredCategoryOrder(
   inputs: SuggestionGenerationInputs,
 ): ProductCategory[] {
-  if (
-    inputs.contextSummary.reaction.hasSignal ||
-    inputs.contextSummary.reaction.barrierCompromised
-  ) {
+  if (shouldAvoidStrongActives(inputs)) {
     return inputs.daypart === 'evening'
       ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
       : [
@@ -173,6 +174,14 @@ function preferredCategoryOrder(
     ProductCategory.Moisturizer,
     ProductCategory.SunProtection,
   ];
+}
+
+function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
+  return (
+    inputs.contextSummary.reaction.hasSignal ||
+    inputs.contextSummary.reaction.barrierCompromised ||
+    inputs.contextSummary.routineBreak.recentlyResumed
+  );
 }
 
 function productScoreToStep(

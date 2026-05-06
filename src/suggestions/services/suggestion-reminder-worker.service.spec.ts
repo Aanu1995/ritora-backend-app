@@ -5,6 +5,7 @@ import { InAppNotification } from '../../notifications/entities/in-app-notificat
 import { NotificationsService } from '../../notifications/notifications.service';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { RoutineBreakService } from './routine-break.service';
 import { SuggestionReminderWorker } from './suggestion-reminder-worker.service';
 
 describe('SuggestionReminderWorker', () => {
@@ -17,18 +18,23 @@ describe('SuggestionReminderWorker', () => {
   const suggestionRepo = repo<SuggestionInstance>();
   const applicationLogRepo = repo<ApplicationLog>();
   const userRepo = repo<User>();
+  const routineBreakService = {
+    getActiveUserIds: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
   const worker = new SuggestionReminderWorker(
     configService,
     notifications,
     suggestionRepo,
     applicationLogRepo,
     userRepo,
+    routineBreakService,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T10:00:00.000Z'));
     notifications.dispatch.mockResolvedValue(null as InAppNotification | null);
+    routineBreakService.getActiveUserIds.mockResolvedValue(new Set());
   });
 
   afterEach(() => {
@@ -74,6 +80,29 @@ describe('SuggestionReminderWorker', () => {
         dedupeKey: 'recording_reminder:suggestion-1',
       }),
     );
+  });
+
+  it('suppresses slot and recording reminders during an active routine break', async () => {
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'suggestion-1',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    applicationLogRepo.find.mockResolvedValue([]);
+    routineBreakService.getActiveUserIds.mockResolvedValue(new Set(['user-1']));
+
+    const result = await worker.runOnce();
+
+    expect(result).toEqual({ slotStart: 0, recordingReminder: 0 });
+    expect(notifications.dispatch).not.toHaveBeenCalled();
   });
 });
 

@@ -27,6 +27,11 @@ export interface SuggestionContextSummary {
     daysSinceLatestSignal: number | null;
     barrierCompromised: boolean;
   };
+  routineBreak: {
+    recentlyResumed: boolean;
+    lastPausedFrom: string | null;
+    lastPausedUntil: string | null;
+  };
   productScores: SuggestionProductScore[];
   applicationPatterns: {
     days: number;

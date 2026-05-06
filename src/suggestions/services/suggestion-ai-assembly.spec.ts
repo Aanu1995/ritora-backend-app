@@ -132,6 +132,11 @@ function contextSummary(): SuggestionContextSummary {
       daysSinceLatestSignal: null,
       barrierCompromised: false,
     },
+    routineBreak: {
+      recentlyResumed: false,
+      lastPausedFrom: null,
+      lastPausedUntil: null,
+    },
     productScores: [],
     applicationPatterns: {
       days: 0,

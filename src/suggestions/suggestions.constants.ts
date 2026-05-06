@@ -191,6 +191,28 @@ export type SuggestionReactionOverrideReason = 'normal_routine_requested';
 export const SUGGESTION_REACTION_OVERRIDE_REASONS: readonly SuggestionReactionOverrideReason[] =
   ['normal_routine_requested'] as const;
 
+export type RoutineBreakStatus = 'active' | 'resumed';
+export const ROUTINE_BREAK_STATUSES: readonly RoutineBreakStatus[] = [
+  'active',
+  'resumed',
+] as const;
+
+export type RoutineBreakViewStatus = 'active' | 'upcoming';
+export const ROUTINE_BREAK_VIEW_STATUSES: readonly RoutineBreakViewStatus[] = [
+  'active',
+  'upcoming',
+] as const;
+
+export const ROUTINE_BREAK_ACTIVE_MESSAGE =
+  'Your routine is paused. Ritora will not generate new skincare suggestions until you resume.';
+export const ROUTINE_BREAK_NOTIFICATION_CANCEL_REASON = 'routine_break_active';
+export const ROUTINE_BREAK_SUPPRESSED_JOB_REASON = 'routine_break_active';
+export const ROUTINE_BREAK_NOTIFICATION_KINDS = [
+  'suggestion_ready',
+  'slot_start',
+  'recording_reminder',
+] as const;
+
 export interface SuggestionSafetyFlagJson {
   severity: 'info' | 'warning' | 'critical';
   message: string;

@@ -6,6 +6,7 @@ import { UserNotificationPreference } from '../notifications/entities/user-notif
 import { User } from '../users/entities/user.entity';
 import { SuggestionGenerationJob } from '../suggestions/entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
+import { RoutineBreakService } from '../suggestions/services/routine-break.service';
 import { mapDayOfWeekShort } from '../suggestions/services/suggestion-history.helpers';
 import {
   buildSlotInstant,
@@ -26,6 +27,7 @@ export class ApplicationReactiveRegenerationService {
     private readonly jobRepo: Repository<SuggestionGenerationJob>,
     @InjectRepository(UserNotificationPreference)
     private readonly preferenceRepo: Repository<UserNotificationPreference>,
+    private readonly routineBreakService: RoutineBreakService,
   ) {}
 
   async queueAfterApplicationChange(
@@ -33,6 +35,7 @@ export class ApplicationReactiveRegenerationService {
     log: ApplicationLogResponseDto,
   ): Promise<void> {
     if (!log.targetTime || !hasRegenerationSignal(log)) return;
+    if (await this.routineBreakService.isRoutineBreakActive(user.id)) return;
     const timeZone = user.time_zone ?? 'UTC';
     const dayOfWeek = mapDayOfWeekShort(
       timeZone,

@@ -17,6 +17,7 @@ import {
   SUGGESTION_SCHEDULER_BATCH_SIZE,
   SUGGESTION_SCHEDULER_INTERVAL_MS,
 } from '../suggestions.constants';
+import { RoutineBreakService } from './routine-break.service';
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
@@ -60,6 +61,7 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
     private readonly userRepo: Repository<User>,
     @InjectRepository(UserNotificationPreference)
     private readonly preferenceRepo: Repository<UserNotificationPreference>,
+    private readonly routineBreakService: RoutineBreakService,
   ) {
     this.enabled = this.configService.get<string>('NODE_ENV') !== 'test';
   }
@@ -111,12 +113,17 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
       where: { id: In(userIds), email_verified: true },
     });
     const usersById = new Map(users.map((user) => [user.id, user]));
+    const activeBreakUserIds = await this.routineBreakService.getActiveUserIds(
+      userIds,
+      now,
+    );
     const prefs = await this.preferenceRepo.find({
       where: { user_id: In(userIds) },
     });
     const prefsById = new Map(prefs.map((pref) => [pref.user_id, pref]));
 
     for (const slot of slots) {
+      if (activeBreakUserIds.has(slot.user_id)) continue;
       const user = usersById.get(slot.user_id);
       if (!user) continue;
       const pref = prefsById.get(slot.user_id);
@@ -141,10 +148,10 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
           slotInstant.getTime() - leadMinutes * 60_000,
         );
         if (visibleAt.getTime() > now.getTime()) continue;
-        // Skip if the visibility window is already past + slot started
-        // long enough ago that there is no point generating.
-        if (slotInstant.getTime() + 4 * 60 * 60 * 1000 < now.getTime())
-          continue;
+        // Suggestions are shown before a slot starts. If the slot time has
+        // passed, keep History suggestion-only instead of backfilling a missed
+        // routine after a break, outage, or delayed scheduler run.
+        if (slotInstant.getTime() <= now.getTime()) continue;
 
         try {
           await this.ensurePendingSuggestion(slot, targetDate, visibleAt);

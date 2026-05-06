@@ -9,10 +9,12 @@ import { RoutineSimplificationEvent } from '../skin-journal/entities/routine-sim
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserNotificationPreference } from '../notifications/entities/user-notification-preference.entity';
+import { ScheduledNotification } from '../notifications/entities/scheduled-notification.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { User } from '../users/entities/user.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
+import { RoutineBreak } from './entities/routine-break.entity';
 import { SuggestionInstance } from './entities/suggestion-instance.entity';
 import { SuggestionStep } from './entities/suggestion-step.entity';
 import { SuggestionGenerationJob } from './entities/suggestion-generation-job.entity';
@@ -32,6 +34,7 @@ import { SuggestionHistoryExportService } from './services/suggestion-history-ex
 import { SuggestionHistoryReader } from './services/suggestion-history-reader.service';
 import { SuggestionObservabilityService } from './services/suggestion-observability.service';
 import { SuggestionRetentionService } from './services/suggestion-retention.service';
+import { RoutineBreakService } from './services/routine-break.service';
 import { SuggestionScheduler } from './services/suggestion-scheduler.service';
 import { SuggestionReminderWorker } from './services/suggestion-reminder-worker.service';
 import { SuggestionTodayActionService } from './services/suggestion-today-action.service';
@@ -57,6 +60,7 @@ import { SuggestionsController } from './suggestions.controller';
       SuggestionGapAction,
       SuggestionRecordingReminderSnooze,
       SuggestionReactionOverride,
+      RoutineBreak,
       ScheduleSlot,
       RoutineStep,
       InventoryProduct,
@@ -66,6 +70,7 @@ import { SuggestionsController } from './suggestions.controller';
       RoutineSimplificationEvent,
       SkinProfile,
       UserNotificationPreference,
+      ScheduledNotification,
       User,
       UserConsent,
     ]),
@@ -87,6 +92,7 @@ import { SuggestionsController } from './suggestions.controller';
     SuggestionReminderWorker,
     SuggestionObservabilityService,
     SuggestionRetentionService,
+    RoutineBreakService,
     SuggestionTodayActionService,
     TodaysSuggestionReactionService,
   ],

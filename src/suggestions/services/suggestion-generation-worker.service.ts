@@ -16,7 +16,9 @@ import {
   SUGGESTION_GENERATION_POLL_INTERVAL_MS,
   SUGGESTION_JOB_LOCK_TIMEOUT_MINUTES,
   SUGGESTION_STALE_JOB_REAPER_BATCH_SIZE,
+  ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
 } from '../suggestions.constants';
+import { RoutineBreakService } from './routine-break.service';
 import { SuggestionGenerationService } from './suggestion-generation.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 
@@ -48,6 +50,7 @@ export class SuggestionGenerationWorker
     @InjectRepository(SuggestionInstance)
     private readonly suggestionRepo: Repository<SuggestionInstance>,
     private readonly observability: SuggestionObservabilityService,
+    private readonly routineBreakService: RoutineBreakService,
   ) {
     this.enabled = this.configService.get<string>('NODE_ENV') !== 'test';
   }
@@ -84,6 +87,10 @@ export class SuggestionGenerationWorker
       const job = await this.claimNextJob();
       if (!job) return;
       try {
+        if (await this.routineBreakService.isRoutineBreakActive(job.user_id)) {
+          await this.cancelJobForRoutineBreak(job);
+          return;
+        }
         await this.markSuggestionGenerating(job);
         await this.generationService.generateForJob(job);
         await this.jobRepo.update(
@@ -148,6 +155,32 @@ export class SuggestionGenerationWorker
         generation_status: 'failed',
         ai_error: message,
         ai_retry_count: job.attempt_count + 1,
+      },
+    );
+  }
+
+  private async cancelJobForRoutineBreak(
+    job: SuggestionGenerationJob,
+  ): Promise<void> {
+    await this.suggestionRepo.update(
+      {
+        user_id: job.user_id,
+        slot_id: job.slot_id,
+        target_date: job.target_date,
+        generation_status: 'pending',
+      },
+      {
+        generation_status: 'superseded',
+        ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+      },
+    );
+    await this.jobRepo.update(
+      { id: job.id },
+      {
+        status: 'cancelled',
+        last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+        locked_at: null,
+        locked_by: null,
       },
     );
   }

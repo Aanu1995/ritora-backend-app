@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { RoutineBreakService } from './routine-break.service';
 import { SuggestionGenerationService } from './suggestion-generation.service';
 import { SuggestionGenerationWorker } from './suggestion-generation-worker.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
@@ -15,6 +16,9 @@ describe('SuggestionGenerationWorker', () => {
   const observability = {
     record: jest.fn(),
   } as unknown as jest.Mocked<SuggestionObservabilityService>;
+  const routineBreakService = {
+    isRoutineBreakActive: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
   const queryBuilder = updateQueryBuilder();
   const worker = new SuggestionGenerationWorker(
     {
@@ -24,6 +28,7 @@ describe('SuggestionGenerationWorker', () => {
     jobRepo,
     suggestionRepo,
     observability,
+    routineBreakService,
   );
 
   beforeEach(() => {
@@ -43,6 +48,7 @@ describe('SuggestionGenerationWorker', () => {
       ],
     });
     generationService.generateForJob.mockResolvedValue(undefined);
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
     jobRepo.update.mockResolvedValue({
       affected: 1,
       raw: [],
@@ -113,6 +119,33 @@ describe('SuggestionGenerationWorker', () => {
     expect(generationService.generateForJob).toHaveBeenCalledWith(
       expect.objectContaining({
         target_date: '2026-05-04',
+      }),
+    );
+  });
+
+  it('cancels claimed queued work when a break becomes active before generation', async () => {
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
+
+    await worker.pollOnce();
+
+    expect(generationService.generateForJob).not.toHaveBeenCalled();
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      {
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        generation_status: 'pending',
+      },
+      {
+        generation_status: 'superseded',
+        ai_error: 'routine_break_active',
+      },
+    );
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'job-1' },
+      expect.objectContaining({
+        status: 'cancelled',
+        last_error: 'routine_break_active',
       }),
     );
   });

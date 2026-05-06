@@ -121,6 +121,11 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
       daysSinceLatestSignal: null,
       barrierCompromised: false,
     },
+    routineBreak: {
+      recentlyResumed: false,
+      lastPausedFrom: null,
+      lastPausedUntil: null,
+    },
     productScores: [productScore],
     applicationPatterns: {
       days: 0,

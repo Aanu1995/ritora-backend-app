@@ -48,6 +48,11 @@ describe('SuggestionAiGenerator', () => {
           daysSinceLatestSignal: 0,
           barrierCompromised: true,
         },
+        routineBreak: {
+          recentlyResumed: false,
+          lastPausedFrom: null,
+          lastPausedUntil: null,
+        },
         productScores: [],
         applicationPatterns: {
           days: 0,
@@ -194,6 +199,11 @@ function inputsWithScoredShelfProducts(
         concernKeys: [],
         daysSinceLatestSignal: null,
         barrierCompromised: false,
+      },
+      routineBreak: {
+        recentlyResumed: false,
+        lastPausedFrom: null,
+        lastPausedUntil: null,
       },
       productScores: [
         productScore('cleanser-1', ProductCategory.Cleanser, 88, []),

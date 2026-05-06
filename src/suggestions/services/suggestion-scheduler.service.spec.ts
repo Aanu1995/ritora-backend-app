@@ -5,6 +5,7 @@ import { UserNotificationPreference } from '../../notifications/entities/user-no
 import { User } from '../../users/entities/user.entity';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { RoutineBreakService } from './routine-break.service';
 import { SuggestionScheduler } from './suggestion-scheduler.service';
 
 describe('SuggestionScheduler', () => {
@@ -13,6 +14,9 @@ describe('SuggestionScheduler', () => {
   const slotRepo = repo<ScheduleSlot>();
   const userRepo = repo<User>();
   const preferenceRepo = repo<UserNotificationPreference>();
+  const routineBreakService = {
+    getActiveUserIds: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
   const scheduler = new SuggestionScheduler(
     { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
     jobRepo,
@@ -20,11 +24,13 @@ describe('SuggestionScheduler', () => {
     slotRepo,
     userRepo,
     preferenceRepo,
+    routineBreakService,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T04:00:00.000Z'));
+    routineBreakService.getActiveUserIds.mockResolvedValue(new Set());
   });
 
   afterEach(() => {
@@ -114,6 +120,31 @@ describe('SuggestionScheduler', () => {
     expect(jobRepo.insert).not.toHaveBeenCalled();
   });
 
+  it('does not backfill slots whose scheduled start time has already passed', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T09:00:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        day_of_week: 'wed',
+        slot_time: '08:00',
+        mode: 'ai',
+      } as ScheduleSlot,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    preferenceRepo.find.mockResolvedValue([
+      { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
+    ] as UserNotificationPreference[]);
+
+    const result = await scheduler.runOnce();
+
+    expect(result.enqueued).toBe(0);
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
+  });
+
   it('does not requeue a job that already exists for the slot and date', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T06:00:00.000Z'));
     slotRepo.find.mockResolvedValue([
@@ -143,6 +174,33 @@ describe('SuggestionScheduler', () => {
     expect(result.enqueued).toBe(0);
     expect(jobRepo.insert).toHaveBeenCalledTimes(1);
     expect(jobRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('does not create pending suggestions or jobs while the user is on a routine break', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T06:00:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        day_of_week: 'wed',
+        slot_time: '08:00',
+        mode: 'ai',
+      } as ScheduleSlot,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    preferenceRepo.find.mockResolvedValue([
+      { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
+    ] as UserNotificationPreference[]);
+    routineBreakService.getActiveUserIds.mockResolvedValue(new Set(['user-1']));
+
+    const result = await scheduler.runOnce();
+
+    expect(result.enqueued).toBe(0);
+    expect(suggestionRepo.findOne).not.toHaveBeenCalled();
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
   });
 });
 

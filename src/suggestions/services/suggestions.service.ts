@@ -45,6 +45,7 @@ import { computeSuggestionLifecycle } from './suggestion-lifecycle';
 import { requeueSuggestionGenerationJob } from './suggestion-generation-job-queue';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
+import { RoutineBreakService } from './routine-break.service';
 import {
   buildPausedActiveNames,
   buildTodaySlotDto,
@@ -89,6 +90,7 @@ export class SuggestionsService {
     private readonly observability: SuggestionObservabilityService,
     private readonly reactionService: TodaysSuggestionReactionService,
     private readonly todayActionService: SuggestionTodayActionService,
+    private readonly routineBreakService: RoutineBreakService,
   ) {}
 
   async getTodaysSuggestion(
@@ -100,6 +102,7 @@ export class SuggestionsService {
     const today = formatDateInTimeZone(timeZone, now);
     const dayOfWeek = mapDayOfWeekShort(timeZone, now);
     const leadTimeMinutes = await this.resolveLeadTimeMinutes(user.id);
+    const { routineBreak } = await this.routineBreakService.getBreakState(user);
 
     const slots = await this.slotRepo.find({
       where: { user_id: user.id, day_of_week: dayOfWeek },
@@ -203,16 +206,23 @@ export class SuggestionsService {
       today,
       buildPausedActiveNames(suggestions),
     );
+    const responseSlots =
+      routineBreak?.status === 'active'
+        ? slotDtos.filter(
+            (slot) => slot.suggestion?.generationStatus === 'ready',
+          )
+        : slotDtos;
 
     return {
       date: today,
       timeZone,
       generatedAt: toIsoString(now),
       leadTimeMinutes,
-      summary: buildTodaySummary(slotDtos),
+      summary: buildTodaySummary(responseSlots),
       weatherSummary: null,
-      slots: slotDtos,
+      slots: responseSlots,
       reactionAlert,
+      routineBreak: routineBreak?.status === 'active' ? routineBreak : null,
     };
   }
 
@@ -261,6 +271,11 @@ export class SuggestionsService {
     }
     if (existing.user_id !== user.id) {
       throw new ForbiddenException('Suggestion belongs to another user.');
+    }
+    if (await this.routineBreakService.isRoutineBreakActive(user.id)) {
+      throw new ConflictException(
+        'Routine is paused. Resume before regenerating suggestions.',
+      );
     }
     const usageDecision = await this.usageGuard.evaluateRegeneration(user.id);
     if (!usageDecision.allowed) {

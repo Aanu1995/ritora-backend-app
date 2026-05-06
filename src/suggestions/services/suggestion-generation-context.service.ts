@@ -15,6 +15,7 @@ import {
   UserDataAccessPurpose,
 } from '../../users/user-consent.constants';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
+import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionConsentService } from './suggestion-consent.service';
@@ -42,6 +43,7 @@ type GenerationContextData = {
   finishedProductIds: string[];
   recentJournal: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
+  recentRoutineBreaks: RoutineBreak[];
 };
 
 export type SuggestionGenerationContextBuildInput = {
@@ -69,6 +71,8 @@ export class SuggestionGenerationContextService {
     private readonly skinProfileRepo: Repository<SkinProfile>,
     @InjectRepository(ApplicationLog)
     private readonly applicationLogRepo: Repository<ApplicationLog>,
+    @InjectRepository(RoutineBreak)
+    private readonly routineBreakRepo: Repository<RoutineBreak>,
   ) {}
 
   async build(
@@ -98,6 +102,7 @@ export class SuggestionGenerationContextService {
       routineSteps: slot.steps ?? [],
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
+      recentRoutineBreaks: contextData.recentRoutineBreaks,
       aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
       aiPersonalizationBlockedReason: personalization.blockedReason,
     });
@@ -221,6 +226,11 @@ export class SuggestionGenerationContextService {
           take: 30,
         })
       : [];
+    const recentRoutineBreaks = await this.routineBreakRepo.find({
+      where: { user_id: userId },
+      order: { starts_at: 'DESC' },
+      take: 3,
+    });
 
     return {
       skinProfile,
@@ -228,6 +238,7 @@ export class SuggestionGenerationContextService {
       finishedProductIds: finishedProducts.map((product) => product.id),
       recentJournal,
       recentApplications,
+      recentRoutineBreaks,
     };
   }
 

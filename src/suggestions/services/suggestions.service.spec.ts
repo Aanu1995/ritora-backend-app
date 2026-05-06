@@ -13,6 +13,7 @@ import { SuggestionObservabilityService } from './suggestion-observability.servi
 import { SuggestionsService } from './suggestions.service';
 import { TodaysSuggestionReactionService } from './todays-suggestion-reaction.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
+import { RoutineBreakService } from './routine-break.service';
 
 describe('SuggestionsService', () => {
   const suggestionRepo = repo<SuggestionInstance>();
@@ -40,6 +41,10 @@ describe('SuggestionsService', () => {
     getGapActionMaps: jest.fn(),
     getReminderSnoozeMap: jest.fn(),
   } as unknown as jest.Mocked<SuggestionTodayActionService>;
+  const routineBreakService = {
+    getBreakState: jest.fn(),
+    isRoutineBreakActive: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
 
   const service = new SuggestionsService(
     suggestionRepo,
@@ -53,6 +58,7 @@ describe('SuggestionsService', () => {
     observability,
     reactionService,
     todayActionService,
+    routineBreakService,
   );
 
   beforeEach(() => {
@@ -80,6 +86,10 @@ describe('SuggestionsService', () => {
     reactionService.getReactionAlert.mockResolvedValue(null);
     todayActionService.getGapActionMaps.mockResolvedValue(new Map());
     todayActionService.getReminderSnoozeMap.mockResolvedValue(new Map());
+    routineBreakService.getBreakState.mockResolvedValue({
+      routineBreak: null,
+    });
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -284,6 +294,83 @@ describe('SuggestionsService', () => {
       '2026-04-29',
       [],
     );
+  });
+
+  it('returns the active routine break and hides unprovided paused slots from Today', async () => {
+    routineBreakService.getBreakState.mockResolvedValue({
+      routineBreak: {
+        id: 'break-1',
+        status: 'active',
+        startedAt: '2026-04-29T09:00:00.000Z',
+        endsAt: '2026-04-30T08:00:00.000Z',
+        canResumeNow: true,
+        message:
+          'Your routine is paused. Ritora will not generate new skincare suggestions until you resume.',
+      },
+    });
+    slotRepo.find.mockResolvedValue([
+      scheduleSlot({
+        id: 'slot-ready',
+        slotTime: '08:00',
+        mode: 'ai',
+        lockedSteps: 0,
+      }),
+      scheduleSlot({
+        id: 'slot-paused',
+        slotTime: '18:00',
+        mode: 'ai',
+        lockedSteps: 0,
+      }),
+    ]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-ready',
+        slotId: 'slot-ready',
+        targetTime: '08:00',
+        generatedAt: new Date('2026-04-29T06:00:00.000Z'),
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(result.routineBreak).toEqual(
+      expect.objectContaining({
+        id: 'break-1',
+        status: 'active',
+        canResumeNow: true,
+      }),
+    );
+    expect(result.slots).toHaveLength(1);
+    expect(result.slots[0]).toEqual(
+      expect.objectContaining({
+        slotId: 'slot-ready',
+        suggestion: expect.objectContaining({ id: 'suggestion-ready' }),
+      }),
+    );
+  });
+
+  it('blocks manual regeneration while the user is on a routine break', async () => {
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
+    suggestionRepo.findOne.mockResolvedValue({
+      id: 'suggestion-1',
+      user_id: 'user-1',
+      slot_id: 'slot-1',
+      target_date: '2026-04-29',
+      target_time: '12:00',
+      daypart: 'noon',
+      mode: 'ai',
+      generation_status: 'ready',
+      visible_at: new Date('2026-04-29T10:00:00.000Z'),
+    } as SuggestionInstance);
+
+    await expect(
+      service.regenerateSuggestion(user(), 'suggestion-1', {}),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(usageGuard.evaluateRegeneration).not.toHaveBeenCalled();
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
   });
 
   it('returns one suggestion with application link and delegates history reads', async () => {
