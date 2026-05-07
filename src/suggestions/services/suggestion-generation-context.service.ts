@@ -16,6 +16,7 @@ import {
 } from '../../users/user-consent.constants';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { RoutineBreak } from '../entities/routine-break.entity';
+import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionConsentService } from './suggestion-consent.service';
@@ -46,10 +47,18 @@ type GenerationContextData = {
   recentRoutineBreaks: RoutineBreak[];
 };
 
-export type SuggestionGenerationContextBuildInput = {
+export type ScheduledSuggestionGenerationContextBuildInput = {
   user: User;
   job: SuggestionGenerationJob;
   slot: ScheduleSlot;
+  targetDate: string;
+  targetTime: string;
+};
+
+export type OnDemandSuggestionGenerationContextBuildInput = {
+  user: User;
+  job: SuggestionGenerationJob;
+  suggestion: SuggestionInstance;
   targetDate: string;
   targetTime: string;
 };
@@ -75,8 +84,8 @@ export class SuggestionGenerationContextService {
     private readonly routineBreakRepo: Repository<RoutineBreak>,
   ) {}
 
-  async build(
-    input: SuggestionGenerationContextBuildInput,
+  async buildScheduled(
+    input: ScheduledSuggestionGenerationContextBuildInput,
   ): Promise<SuggestionGenerationInputs> {
     const { user, job, slot, targetDate, targetTime } = input;
     const personalization = await this.evaluatePersonalization(user.id, job.id);
@@ -97,6 +106,8 @@ export class SuggestionGenerationContextService {
       targetDate,
       targetTime,
       daypart,
+      requestSource: 'scheduled',
+      requestContext: null,
       skinProfile: contextData.skinProfile,
       shelfActiveProducts: contextData.activeProducts,
       routineSteps: slot.steps ?? [],
@@ -109,6 +120,12 @@ export class SuggestionGenerationContextService {
 
     return {
       slotId: slot.id,
+      requestSource: 'scheduled',
+      requestContext: null,
+      scheduledSlotContext: {
+        slotNotes: slot.slot_notes ?? null,
+        specialistSafetyNotes: slot.specialist_safety_notes ?? null,
+      },
       targetDate,
       targetTime,
       daypart,
@@ -116,6 +133,60 @@ export class SuggestionGenerationContextService {
       shelfActiveProducts: contextData.activeProducts,
       shelfFinishedProductIds: contextData.finishedProductIds,
       routineSteps: slot.steps ?? [],
+      recentJournalEntries: contextData.recentJournal,
+      recentApplications: contextData.recentApplications,
+      contextSummary,
+      aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
+      aiPersonalizationBlockedReason: personalization.blockedReason,
+    };
+  }
+
+  async buildOnDemand(
+    input: OnDemandSuggestionGenerationContextBuildInput,
+  ): Promise<SuggestionGenerationInputs> {
+    const { user, job, suggestion, targetDate, targetTime } = input;
+    const personalization = await this.evaluatePersonalization(user.id, job.id);
+    const contextData = await this.loadGenerationContextData(
+      user.id,
+      targetDate,
+      job.last_error,
+      personalization.consentDecision,
+    );
+    await this.recordRecommendationDataAccess(
+      user.id,
+      personalization.consentDecision.activeSensitiveConsentTypes,
+    );
+
+    const daypart = deriveSuggestionDaypart(targetTime);
+    const contextSummary = await this.contextBuilder.build({
+      userId: user.id,
+      targetDate,
+      targetTime,
+      daypart,
+      requestSource: 'on_demand',
+      requestContext: suggestion.request_context,
+      skinProfile: contextData.skinProfile,
+      shelfActiveProducts: contextData.activeProducts,
+      routineSteps: [],
+      recentJournalEntries: contextData.recentJournal,
+      recentApplications: contextData.recentApplications,
+      recentRoutineBreaks: contextData.recentRoutineBreaks,
+      aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
+      aiPersonalizationBlockedReason: personalization.blockedReason,
+    });
+
+    return {
+      slotId: null,
+      requestSource: 'on_demand',
+      requestContext: suggestion.request_context,
+      scheduledSlotContext: null,
+      targetDate,
+      targetTime,
+      daypart,
+      skinProfile: contextData.skinProfile,
+      shelfActiveProducts: contextData.activeProducts,
+      shelfFinishedProductIds: contextData.finishedProductIds,
+      routineSteps: [],
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
       contextSummary,

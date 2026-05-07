@@ -12,6 +12,8 @@ import {
   SuggestionExplanationJson,
   SuggestionGapRecommendationJson,
   SuggestionMode,
+  SuggestionRequestContextJson,
+  SuggestionRequestSource,
   SuggestionSafetyFlagJson,
   SuggestionStepChipJson,
   SuggestionStepProvenance,
@@ -50,7 +52,13 @@ export const SUGGESTION_AI_TIMEOUT_MS = 45_000;
 export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 1500;
 
 export interface SuggestionGenerationInputs {
-  slotId: string;
+  slotId: string | null;
+  requestSource: SuggestionRequestSource;
+  requestContext: SuggestionRequestContextJson | null;
+  scheduledSlotContext?: {
+    slotNotes: string | null;
+    specialistSafetyNotes: string | null;
+  } | null;
   targetDate: string;
   targetTime: string;
   daypart: 'morning' | 'noon' | 'evening';
@@ -96,6 +104,7 @@ export interface SuggestionGenerationStepOutput {
   quantity: string | null;
   waitAfterMinutes: number | null;
   explanation: string | null;
+  routineNote: string | null;
   provenance: SuggestionStepProvenance;
   chips: SuggestionStepChipJson[];
   safetyWarnings: SuggestionSafetyFlagJson[];

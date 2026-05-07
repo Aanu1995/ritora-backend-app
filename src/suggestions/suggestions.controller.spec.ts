@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { User } from '../users/entities/user.entity';
 import { UserConsentType } from '../users/user-consent.constants';
 import { SuggestionConsentService } from './services/suggestion-consent.service';
+import { SuggestionOnDemandService } from './services/suggestion-on-demand.service';
 import { SuggestionsService } from './services/suggestions.service';
 import { SuggestionTodayActionService } from './services/suggestion-today-action.service';
 import { RoutineBreakService } from './services/routine-break.service';
@@ -31,11 +32,16 @@ describe('SuggestionsController', () => {
     resumeActiveBreak: jest.fn(),
     updateBreak: jest.fn(),
   } as unknown as jest.Mocked<RoutineBreakService>;
+  const onDemandService = {
+    create: jest.fn(),
+    retryFailed: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionOnDemandService>;
   const controller = new SuggestionsController(
     service,
     consentService,
     todayActionService,
     routineBreakService,
+    onDemandService,
   );
 
   beforeEach(() => {
@@ -123,18 +129,21 @@ describe('SuggestionsController', () => {
       aiPersonalizationAllowed: true,
       canReadSensitiveContext: false,
       blockedReason: 'sensitive_recommendation_context_consent_missing',
+      grantedAt: new Date('2026-05-07T09:00:00.000Z'),
       activeSensitiveConsentTypes: [],
     });
     consentService.updateAiSuggestionConsent.mockResolvedValue({
       aiPersonalizationAllowed: true,
       canReadSensitiveContext: true,
       blockedReason: null,
+      grantedAt: new Date('2026-05-07T09:05:00.000Z'),
       activeSensitiveConsentTypes: [UserConsentType.HealthContextProcessing],
     });
     const request = { ip: '127.0.0.1' } as Request;
 
     await expect(controller.getAiConsent(user())).resolves.toEqual({
       granted: true,
+      grantedAt: '2026-05-07T09:00:00.000Z',
       canReadSensitiveContext: false,
       blockedReason: 'sensitive_recommendation_context_consent_missing',
       activeSensitiveConsentTypes: [],
@@ -143,6 +152,7 @@ describe('SuggestionsController', () => {
       controller.updateAiConsent(user(), request, { granted: true }),
     ).resolves.toEqual({
       granted: true,
+      grantedAt: '2026-05-07T09:05:00.000Z',
       canReadSensitiveContext: true,
       blockedReason: null,
       activeSensitiveConsentTypes: [UserConsentType.HealthContextProcessing],
@@ -196,6 +206,61 @@ describe('SuggestionsController', () => {
     expect(todayActionService.snoozeRecordingReminder).toHaveBeenCalledWith(
       user(),
       { suggestionInstanceId: 'suggestion-1', minutes: 60 },
+    );
+  });
+
+  it('queues on-demand suggestions with the request timezone', async () => {
+    onDemandService.create.mockResolvedValue({
+      id: 'suggestion-on-demand-1',
+      slotId: null,
+      requestSource: 'on_demand',
+    } as never);
+    const request = requestWithTimeZone('Europe/Stockholm');
+
+    await expect(
+      controller.createOnDemandSuggestion(user(), request, {
+        intent: 'post_workout',
+        intensity: 'minimal',
+        note: 'Back from training.',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: 'suggestion-on-demand-1',
+        requestSource: 'on_demand',
+      }),
+    );
+
+    expect(onDemandService.create).toHaveBeenCalledWith(
+      user(),
+      'Europe/Stockholm',
+      {
+        intent: 'post_workout',
+        intensity: 'minimal',
+        note: 'Back from training.',
+      },
+    );
+  });
+
+  it('retries failed on-demand suggestions without a request body', async () => {
+    onDemandService.retryFailed.mockResolvedValue({
+      id: 'suggestion-on-demand-1',
+      slotId: null,
+      requestSource: 'on_demand',
+      generationStatus: 'generating',
+    } as never);
+
+    await expect(
+      controller.retryOnDemandSuggestion(user(), 'suggestion-on-demand-1'),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: 'suggestion-on-demand-1',
+        generationStatus: 'generating',
+      }),
+    );
+
+    expect(onDemandService.retryFailed).toHaveBeenCalledWith(
+      user(),
+      'suggestion-on-demand-1',
     );
   });
 

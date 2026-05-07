@@ -94,6 +94,7 @@ export function resolveRawStep(
       maxLength: 140,
       maxSentences: 1,
     }),
+    routineNote: normalizeRoutineNote(routineSource?.notes ?? null),
     provenance,
     chips: sanitizeChips(rawStep.chips ?? []),
     safetyWarnings: sanitizeSafetyFlags(rawStep.safetyWarnings ?? []),
@@ -152,6 +153,7 @@ export function routineStepToOutput(
       maxLength: 140,
       maxSentences: 1,
     }),
+    routineNote: normalizeRoutineNote(step.notes),
     provenance: step.is_specialist_locked
       ? 'specialist_locked'
       : 'user_routine',
@@ -160,6 +162,12 @@ export function routineStepToOutput(
       : [],
     safetyWarnings: sanitizeSafetyFlags(overrides?.safetyWarnings ?? []),
   };
+}
+
+function normalizeRoutineNote(note: string | null | undefined): string | null {
+  if (typeof note !== 'string') return null;
+  const trimmed = note.trim();
+  return trimmed || null;
 }
 
 export function isAllSpecialistLocked(

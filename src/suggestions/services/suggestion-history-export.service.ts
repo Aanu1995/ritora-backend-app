@@ -40,6 +40,8 @@ const HISTORY_EXPORT_HEADERS = [
   'Time',
   'Daypart',
   'Mode',
+  'Source',
+  'On-Demand Intent',
   'Status',
   'Applied Count',
   'Total Steps',
@@ -114,6 +116,10 @@ export class SuggestionHistoryExportService {
         slotTime,
         suggestion.daypart,
         suggestion.mode,
+        suggestion.request_source ?? 'scheduled',
+        suggestion.request_source === 'on_demand'
+          ? (suggestion.request_context?.intent ?? '')
+          : '',
         computeSlotStatus(suggestion, log),
         String(appliedCount),
         String(totalSteps),

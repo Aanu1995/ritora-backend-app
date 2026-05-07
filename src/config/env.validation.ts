@@ -114,6 +114,14 @@ export const envValidationSchema = Joi.object({
   LOG_LEVEL: Joi.string()
     .valid('error', 'warn', 'log', 'debug', 'verbose')
     .required(),
+  OTEL_ENABLED: Joi.boolean().required(),
+  OTEL_SERVICE_NAME: Joi.string().trim().min(1).required(),
+  OTEL_EXPORTER_OTLP_ENDPOINT: Joi.string()
+    .trim()
+    .uri({ scheme: ['http', 'https'] })
+    .allow('')
+    .required(),
+  OTEL_EXPORTER_OTLP_HEADERS: Joi.string().trim().allow('').required(),
 
   DATABASE_HOST: Joi.string().trim().required(),
   DATABASE_PORT: Joi.number().port().required(),

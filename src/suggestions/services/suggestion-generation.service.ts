@@ -1,29 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Not, Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
-import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
-import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
-import { SuggestionStep } from '../entities/suggestion-step.entity';
 import {
   SuggestionAiGenerator,
-  SuggestionGenerationInputs,
   SuggestionGenerationOutput,
 } from './suggestion-ai-generator';
 import { SuggestionGenerationContextService } from './suggestion-generation-context.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
-import { buildSlotInstant, clampLeadTimeMinutes } from './suggestion-helpers';
 import { RoutineBreakService } from './routine-break.service';
 import { ROUTINE_BREAK_SUPPRESSED_JOB_REASON } from '../suggestions.constants';
-import {
-  toHumanApplicationMethod,
-  toHumanQuantity,
-} from './suggestion-language';
+import { SuggestionGenerationPersistenceService } from './suggestion-generation-persistence.service';
 
 type SuggestionJobSubjects = {
   targetDate: string;
@@ -32,21 +24,21 @@ type SuggestionJobSubjects = {
   user: User;
 };
 
-const SUGGESTION_AI_MODEL_MAX_LENGTH = 60;
-const SUGGESTION_AI_PROMPT_VERSION_MAX_LENGTH = 80;
-const SUGGESTION_STEP_PRODUCT_SNAPSHOT_MAX_LENGTH = 255;
-const SUGGESTION_STEP_CUSTOM_LABEL_MAX_LENGTH = 100;
-const SUGGESTION_STEP_METHOD_MAX_LENGTH = 40;
-const SUGGESTION_STEP_QUANTITY_MAX_LENGTH = 40;
+type OnDemandSuggestionJobSubjects = {
+  targetDate: string;
+  targetTime: string;
+  suggestion: SuggestionInstance;
+  user: User;
+};
 
 @Injectable()
 export class SuggestionGenerationService {
   private readonly logger = new Logger(SuggestionGenerationService.name);
 
   constructor(
-    private readonly dataSource: DataSource,
     private readonly aiGenerator: SuggestionAiGenerator,
     private readonly contextService: SuggestionGenerationContextService,
+    private readonly persistence: SuggestionGenerationPersistenceService,
     private readonly notifications: NotificationsService,
     private readonly observability: SuggestionObservabilityService,
     @InjectRepository(SuggestionInstance)
@@ -55,17 +47,24 @@ export class SuggestionGenerationService {
     private readonly slotRepo: Repository<ScheduleSlot>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
-    @InjectRepository(UserNotificationPreference)
-    private readonly preferenceRepo: Repository<UserNotificationPreference>,
     private readonly routineBreakService: RoutineBreakService,
   ) {}
 
   async generateForJob(job: SuggestionGenerationJob): Promise<void> {
-    const subjects = await this.loadJobSubjects(job);
+    if (job.request_source === 'on_demand') {
+      await this.generateOnDemandForJob(job);
+      return;
+    }
+
+    const subjects = await this.loadScheduledJobSubjects(job);
     if (!subjects) return;
 
     const { targetDate, targetTime, slot, user } = subjects;
-    const inputs = await this.contextService.build({
+    if (await this.suppressScheduledIfRoutineBreakStarted(user.id, job)) {
+      return;
+    }
+
+    const inputs = await this.contextService.buildScheduled({
       user,
       job,
       slot,
@@ -74,11 +73,17 @@ export class SuggestionGenerationService {
     });
 
     const output = await this.aiGenerator.generate(inputs);
-    if (await this.supersedeIfRoutineBreakStarted(user.id, job, targetDate)) {
+    if (await this.suppressScheduledIfRoutineBreakStarted(user.id, job)) {
       return;
     }
 
-    const savedInstance = await this.persist(user, job, slot, inputs, output);
+    const savedInstance = await this.persistence.persistScheduled(
+      user,
+      job,
+      slot,
+      inputs,
+      output,
+    );
     await this.recordGenerationOutcome(user.id, job.id, savedInstance, output);
     if (await this.routineBreakService.isRoutineBreakActive(user.id)) {
       this.logger.log(
@@ -95,13 +100,63 @@ export class SuggestionGenerationService {
     );
   }
 
-  private async loadJobSubjects(
+  private async generateOnDemandForJob(
+    job: SuggestionGenerationJob,
+  ): Promise<void> {
+    const subjects = await this.loadOnDemandJobSubjects(job);
+    if (!subjects) return;
+
+    const { targetDate, targetTime, suggestion, user } = subjects;
+    if (await this.failOnDemandIfRoutineBreakStarted(user.id, job)) {
+      return;
+    }
+
+    const inputs = await this.contextService.buildOnDemand({
+      user,
+      job,
+      suggestion,
+      targetDate,
+      targetTime,
+    });
+    const output = await this.aiGenerator.generate(inputs);
+    if (await this.failOnDemandIfRoutineBreakStarted(user.id, job)) {
+      return;
+    }
+
+    const savedInstance = await this.persistence.persistOnDemand(
+      user,
+      job,
+      suggestion,
+      inputs,
+      output,
+    );
+    await this.recordGenerationOutcome(user.id, job.id, savedInstance, output);
+    if (await this.routineBreakService.isRoutineBreakActive(user.id)) {
+      this.logger.log(
+        `On-demand suggestion ${savedInstance.id} generated before routine break notification dispatch; suppressing suggestion_ready.`,
+      );
+      return;
+    }
+    await this.dispatchSuggestionReadyNotification(
+      user.id,
+      null,
+      targetDate,
+      savedInstance.id,
+      job.id,
+    );
+  }
+
+  private async loadScheduledJobSubjects(
     job: SuggestionGenerationJob,
   ): Promise<SuggestionJobSubjects | null> {
     const targetDate = toDateOnlyString(job.target_date);
     const targetTime = toTimeOnlyString(job.target_time);
     job.target_date = targetDate;
     job.target_time = targetTime;
+    if (!job.slot_id) {
+      this.logger.warn(`Scheduled job ${job.id} is missing slot_id`);
+      return null;
+    }
 
     const slot = await this.slotRepo.findOne({
       where: { id: job.slot_id },
@@ -121,19 +176,55 @@ export class SuggestionGenerationService {
     return { targetDate, targetTime, slot, user };
   }
 
-  private async supersedeIfRoutineBreakStarted(
+  private async loadOnDemandJobSubjects(
+    job: SuggestionGenerationJob,
+  ): Promise<OnDemandSuggestionJobSubjects | null> {
+    const targetDate = toDateOnlyString(job.target_date);
+    const targetTime = toTimeOnlyString(job.target_time);
+    job.target_date = targetDate;
+    job.target_time = targetTime;
+    if (!job.suggestion_instance_id) {
+      this.logger.warn(`On-demand job ${job.id} is missing suggestion id`);
+      return null;
+    }
+
+    const suggestion = await this.suggestionRepo.findOne({
+      where: { id: job.suggestion_instance_id },
+    });
+    if (!suggestion) {
+      this.logger.warn(
+        `On-demand suggestion ${job.suggestion_instance_id} not found for job ${job.id}`,
+      );
+      return null;
+    }
+    if (suggestion.generation_status === 'ready') {
+      return null;
+    }
+
+    const user = await this.userRepo.findOne({ where: { id: job.user_id } });
+    if (!user) {
+      this.logger.warn(`User ${job.user_id} not found for job ${job.id}`);
+      return null;
+    }
+
+    return { targetDate, targetTime, suggestion, user };
+  }
+
+  private async suppressScheduledIfRoutineBreakStarted(
     userId: string,
     job: SuggestionGenerationJob,
-    targetDate: string,
   ): Promise<boolean> {
     if (!(await this.routineBreakService.isRoutineBreakActive(userId))) {
       return false;
     }
+    const slotId = job.slot_id;
+    if (!slotId) return false;
+    const targetDate = toDateOnlyString(job.target_date);
 
     await this.suggestionRepo.update(
       {
         user_id: userId,
-        slot_id: job.slot_id,
+        slot_id: slotId,
         target_date: targetDate,
         generation_status: Not('superseded' as const),
       },
@@ -158,9 +249,42 @@ export class SuggestionGenerationService {
     return true;
   }
 
+  private async failOnDemandIfRoutineBreakStarted(
+    userId: string,
+    job: SuggestionGenerationJob,
+  ): Promise<boolean> {
+    if (!(await this.routineBreakService.isRoutineBreakActive(userId))) {
+      return false;
+    }
+    await this.suggestionRepo.update(
+      {
+        user_id: userId,
+        id: job.suggestion_instance_id ?? '',
+        generation_status: Not('superseded' as const),
+      },
+      {
+        generation_status: 'failed',
+        ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+        ai_retry_count: job.attempt_count,
+      },
+    );
+    await this.observability.record({
+      kind: 'generation_failed',
+      severity: 'warning',
+      userId,
+      jobId: job.id,
+      suggestionInstanceId: job.suggestion_instance_id ?? null,
+      metadata: {
+        reason: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+        requestSource: 'on_demand',
+      },
+    });
+    return true;
+  }
+
   private async dispatchSuggestionReadyNotification(
     userId: string,
-    slotId: string,
+    slotId: string | null,
     targetDate: string,
     suggestionInstanceId: string,
     jobId: string,
@@ -175,8 +299,11 @@ export class SuggestionGenerationService {
         payload: {
           slotId,
           targetDate,
+          requestSource: slotId ? 'scheduled' : 'on_demand',
         },
-        dedupeKey: `suggestion_ready:${targetDate}:${slotId}`,
+        dedupeKey: slotId
+          ? `suggestion_ready:${targetDate}:${slotId}`
+          : `suggestion_ready:on_demand:${suggestionInstanceId}`,
       });
     } catch (error) {
       await this.observability.record({
@@ -196,139 +323,6 @@ export class SuggestionGenerationService {
         }`,
       );
     }
-  }
-
-  private async persist(
-    user: User,
-    job: SuggestionGenerationJob,
-    slot: ScheduleSlot,
-    inputs: SuggestionGenerationInputs,
-    output: SuggestionGenerationOutput,
-  ): Promise<SuggestionInstance> {
-    const targetDate = toDateOnlyString(job.target_date);
-    const targetTime = toTimeOnlyString(job.target_time);
-    return this.dataSource.transaction(async (manager) => {
-      const suggestionRepo = manager.getRepository(SuggestionInstance);
-      const stepRepo = manager.getRepository(SuggestionStep);
-
-      const activeBeforePersist = await suggestionRepo.findOne({
-        where: {
-          user_id: user.id,
-          slot_id: slot.id,
-          target_date: targetDate,
-          generation_status: Not('superseded' as const),
-        },
-        order: { generated_at: 'DESC', created_at: 'DESC' },
-      });
-      const supersedesId =
-        activeBeforePersist?.supersedes_id ??
-        (activeBeforePersist?.generation_status === 'ready'
-          ? activeBeforePersist.id
-          : null);
-
-      await suggestionRepo
-        .createQueryBuilder()
-        .update()
-        .set({ generation_status: 'superseded' })
-        .where(
-          'user_id = :userId AND slot_id = :slotId AND target_date = :targetDate AND generation_status <> :superseded',
-          {
-            userId: user.id,
-            slotId: slot.id,
-            targetDate,
-            superseded: 'superseded',
-          },
-        )
-        .execute();
-
-      const visibleAt = buildSlotInstant(
-        targetDate,
-        slot.slot_time,
-        resolveEffectiveTimeZone(user.time_zone, null),
-      );
-      const leadTimeMinutes = await this.resolveLeadTimeMinutes(user.id);
-      const visibleAtMs = visibleAt.getTime() - leadTimeMinutes * 60_000;
-
-      const instance = suggestionRepo.create({
-        user_id: user.id,
-        slot_id: slot.id,
-        target_date: targetDate,
-        target_time: targetTime,
-        daypart: inputs.daypart,
-        mode: output.mode,
-        generation_status: 'ready',
-        visible_at: new Date(visibleAtMs),
-        generated_at: new Date(),
-        ai_model: fitNullableColumnText(
-          output.metadata.model,
-          SUGGESTION_AI_MODEL_MAX_LENGTH,
-        ),
-        ai_prompt_version: fitNullableColumnText(
-          output.metadata.promptVersion,
-          SUGGESTION_AI_PROMPT_VERSION_MAX_LENGTH,
-        ),
-        ai_input_tokens: output.metadata.inputTokens,
-        ai_output_tokens: output.metadata.outputTokens,
-        ai_total_tokens: output.metadata.totalTokens,
-        ai_estimated_cost_usd: output.metadata.estimatedCostUsd,
-        ai_duration_ms: output.metadata.durationMs,
-        ai_explanation: output.explanation,
-        gap_recommendations: output.gapRecommendations,
-        safety_flags: output.safetyFlags,
-        has_reaction_signal: output.hasReactionSignal,
-        simplified_for_reaction: output.simplifiedForReaction,
-        supersedes_id: supersedesId,
-        ai_error: null,
-        ai_retry_count: job.attempt_count,
-        generation_context: inputs.contextSummary,
-      });
-      const savedInstance = await suggestionRepo.save(instance);
-
-      const steps = output.steps.map((step) =>
-        stepRepo.create({
-          suggestion_instance_id: savedInstance.id,
-          step_order: step.stepOrder,
-          routine_step_id: step.routineStepId,
-          inventory_product_id: step.inventoryProductId,
-          product_brand_snapshot: fitNullableColumnText(
-            step.productBrand,
-            SUGGESTION_STEP_PRODUCT_SNAPSHOT_MAX_LENGTH,
-          ),
-          product_name_snapshot: fitNullableColumnText(
-            step.productName,
-            SUGGESTION_STEP_PRODUCT_SNAPSHOT_MAX_LENGTH,
-          ),
-          step_label: step.stepLabel,
-          custom_label: fitNullableColumnText(
-            step.customLabel,
-            SUGGESTION_STEP_CUSTOM_LABEL_MAX_LENGTH,
-          ),
-          application_method: fitNullableColumnText(
-            toHumanApplicationMethod(step.applicationMethod),
-            SUGGESTION_STEP_METHOD_MAX_LENGTH,
-          ),
-          quantity: fitNullableColumnText(
-            toHumanQuantity(step.quantity),
-            SUGGESTION_STEP_QUANTITY_MAX_LENGTH,
-          ),
-          wait_after_minutes: step.waitAfterMinutes,
-          explanation: step.explanation,
-          provenance: step.provenance,
-          chips: step.chips,
-          safety_warnings: step.safetyWarnings,
-        }),
-      );
-      await stepRepo.save(steps);
-
-      return savedInstance;
-    });
-  }
-
-  private async resolveLeadTimeMinutes(userId: string): Promise<number> {
-    const prefs = await this.preferenceRepo.findOne({
-      where: { user_id: userId },
-    });
-    return clampLeadTimeMinutes(prefs?.suggestion_lead_time_minutes ?? 120);
   }
 
   private async recordGenerationOutcome(
@@ -351,17 +345,8 @@ export class SuggestionGenerationService {
         promptVersion: output.metadata.promptVersion,
         durationMs: output.metadata.durationMs,
         estimatedCostUsd: output.metadata.estimatedCostUsd,
+        requestSource: instance.request_source ?? 'scheduled',
       },
     });
   }
-}
-
-function fitNullableColumnText(
-  value: unknown,
-  maxLength: number,
-): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
 }

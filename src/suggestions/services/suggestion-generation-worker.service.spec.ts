@@ -98,6 +98,54 @@ describe('SuggestionGenerationWorker', () => {
     jest.useRealTimers();
   });
 
+  it('dead-letters stale on-demand jobs and marks the suggestion failed by id', async () => {
+    const staleLockedAt = new Date('2026-05-04T05:40:00.000Z');
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T06:00:00.000Z'));
+    jobRepo.find.mockResolvedValue([
+      {
+        id: 'stale-on-demand',
+        user_id: 'user-1',
+        slot_id: null,
+        suggestion_instance_id: 'suggestion-on-demand-1',
+        request_source: 'on_demand',
+        target_date: '2026-05-04',
+        target_time: '12:00',
+        attempt_count: 2,
+        locked_at: staleLockedAt,
+      } as SuggestionGenerationJob,
+    ]);
+    queryBuilder.execute.mockResolvedValue({ raw: [] });
+
+    await worker.pollOnce();
+
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      {
+        user_id: 'user-1',
+        id: 'suggestion-on-demand-1',
+        generation_status: expect.anything(),
+      },
+      expect.objectContaining({
+        generation_status: 'failed',
+        ai_error: expect.stringContaining('stale lock recovered'),
+        ai_retry_count: 3,
+      }),
+    );
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'stale-on-demand' },
+      expect.objectContaining({
+        status: 'failed',
+        attempt_count: 3,
+      }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'job_dead_lettered',
+        jobId: 'stale-on-demand',
+      }),
+    );
+    jest.useRealTimers();
+  });
+
   it('marks the pending suggestion as generating before invoking AI generation', async () => {
     await worker.pollOnce();
 

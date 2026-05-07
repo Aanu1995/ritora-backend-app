@@ -14,6 +14,10 @@ import {
 } from './user-consent.constants';
 
 const DEFAULT_LOG_LIMIT = 100;
+const PRIVACY_ACCESS_LOG_CONSENT_TYPES = [
+  ...SENSITIVE_SKIN_PROFILE_CONSENT_TYPES,
+  UserConsentType.AiSuggestionProcessing,
+] as const;
 
 @Injectable()
 export class UserDataAccessLogService {
@@ -87,7 +91,7 @@ export class UserDataAccessLogService {
     return this.accessLogRepository.find({
       where: {
         user_id: userId,
-        consent_type: In([...SENSITIVE_SKIN_PROFILE_CONSENT_TYPES]),
+        consent_type: In([...PRIVACY_ACCESS_LOG_CONSENT_TYPES]),
       },
       order: { created_at: 'DESC' },
       take: limit,

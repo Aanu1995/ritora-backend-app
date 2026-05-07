@@ -350,6 +350,58 @@ describe('SuggestionsService', () => {
     );
   });
 
+  it('returns same-day on-demand suggestions separately from scheduled slots', async () => {
+    slotRepo.find.mockResolvedValue([]);
+    suggestionRepo.find.mockResolvedValue([
+      onDemandSuggestionInstance({
+        id: 'suggestion-on-demand-1',
+        targetTime: '12:15',
+        generationStatus: 'generating',
+      }),
+      onDemandSuggestionInstance({
+        id: 'suggestion-on-demand-ready',
+        targetTime: '12:30',
+        generationStatus: 'ready',
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([
+      applicationLog({
+        id: 'log-on-demand',
+        suggestionId: 'suggestion-on-demand-ready',
+        hasBeenEdited: false,
+      }),
+    ]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(result.slots).toEqual([]);
+    expect(result.summary).toEqual(
+      expect.objectContaining({
+        onDemand: 2,
+        recorded: 1,
+      }),
+    );
+    expect(result.onDemandSuggestions).toEqual([
+      expect.objectContaining({
+        id: 'suggestion-on-demand-1',
+        status: 'generating',
+        suggestion: expect.objectContaining({
+          requestSource: 'on_demand',
+          requestContext: expect.objectContaining({
+            intent: 'post_workout',
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        id: 'suggestion-on-demand-ready',
+        status: 'recorded',
+        applicationLog: expect.objectContaining({
+          id: 'log-on-demand',
+        }),
+      }),
+    ]);
+  });
+
   it('blocks manual regeneration while the user is on a routine break', async () => {
     routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
     suggestionRepo.findOne.mockResolvedValue({
@@ -487,6 +539,8 @@ function suggestionInstance(input: {
     id: input.id,
     user_id: 'user-1',
     slot_id: input.slotId,
+    request_source: 'scheduled',
+    request_context: null,
     target_date: '2026-04-29',
     target_time: input.targetTime,
     daypart: input.targetTime < '12:00' ? 'morning' : 'noon',
@@ -519,6 +573,38 @@ function suggestionInstance(input: {
     created_at: now,
     updated_at: now,
     steps: [suggestionStep()],
+  } as unknown as SuggestionInstance;
+}
+
+function onDemandSuggestionInstance(input: {
+  id: string;
+  targetTime: string;
+  generationStatus: 'generating' | 'ready' | 'failed';
+}): SuggestionInstance {
+  const requestedAt = new Date('2026-04-29T10:15:00.000Z');
+  return {
+    ...suggestionInstance({
+      id: input.id,
+      slotId: 'slot-unused',
+      targetTime: input.targetTime,
+      generatedAt:
+        input.generationStatus === 'ready'
+          ? new Date('2026-04-29T10:16:00.000Z')
+          : null,
+    }),
+    slot_id: null,
+    request_source: 'on_demand',
+    request_context: {
+      intent: 'post_workout',
+      intensity: 'minimal',
+      note: 'Back from training.',
+      activityAt: null,
+      requestedAt: requestedAt.toISOString(),
+    },
+    generation_status: input.generationStatus,
+    visible_at: requestedAt,
+    created_at: requestedAt,
+    updated_at: requestedAt,
   } as unknown as SuggestionInstance;
 }
 

@@ -18,6 +18,7 @@ export interface SuggestionConsentDecision {
   aiPersonalizationAllowed: boolean;
   canReadSensitiveContext: boolean;
   blockedReason: string | null;
+  grantedAt: Date | null;
   activeSensitiveConsentTypes: SensitiveSkinProfileConsentType[];
 }
 
@@ -45,6 +46,10 @@ export class SuggestionConsentService {
     const activeTypes = new Set(
       consents.map((consent) => consent.consent_type),
     );
+    const aiConsent = consents.find(
+      (consent) =>
+        consent.consent_type === UserConsentType.AiSuggestionProcessing,
+    );
     const aiPersonalizationAllowed = activeTypes.has(
       UserConsentType.AiSuggestionProcessing,
     );
@@ -58,6 +63,7 @@ export class SuggestionConsentService {
         aiPersonalizationAllowed: false,
         canReadSensitiveContext: false,
         blockedReason: 'ai_suggestion_processing_consent_missing',
+        grantedAt: null,
         activeSensitiveConsentTypes: [],
       };
     }
@@ -69,6 +75,7 @@ export class SuggestionConsentService {
         activeSensitiveConsentTypes.length > 0
           ? null
           : 'sensitive_recommendation_context_consent_missing',
+      grantedAt: aiConsent?.granted_at ?? null,
       activeSensitiveConsentTypes,
     };
   }

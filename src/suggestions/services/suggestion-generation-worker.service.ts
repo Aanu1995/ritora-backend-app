@@ -22,15 +22,6 @@ import { RoutineBreakService } from './routine-break.service';
 import { SuggestionGenerationService } from './suggestion-generation.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 
-/**
- * Polls `suggestion_generation_jobs` and runs them. Mirrors the existing
- * skin-journal-analysis worker pattern: at-most-one in-flight poll per
- * instance, atomic claim via an UPDATE that sets locked_at + locked_by,
- * retry up to 3 times then mark failed.
- *
- * Disabled only in tests. The scheduler in this same process inserts new jobs
- * as visibility windows open.
- */
 @Injectable()
 export class SuggestionGenerationWorker
   implements OnModuleInit, OnModuleDestroy
@@ -74,11 +65,6 @@ export class SuggestionGenerationWorker
     }
   }
 
-  /**
-   * Public for tests + manual triggering. Claims at most one job and
-   * processes it. Idempotent: concurrent calls are serialised via the
-   * `polling` flag.
-   */
   async pollOnce(): Promise<void> {
     if (this.polling) return;
     this.polling = true;
@@ -106,7 +92,7 @@ export class SuggestionGenerationWorker
         const message =
           error instanceof Error ? error.message : 'unknown error';
         this.logger.error(
-          `Job ${job.id} failed for slot ${job.slot_id} on ${job.target_date}: ${message}`,
+          `Job ${job.id} failed for ${formatJobTarget(job)} on ${job.target_date}: ${message}`,
         );
         const nextAttemptCount = job.attempt_count + 1;
         const nextStatus =
@@ -120,7 +106,12 @@ export class SuggestionGenerationWorker
             severity: 'critical',
             userId: job.user_id,
             jobId: job.id,
-            metadata: { message, attemptCount: nextAttemptCount },
+            suggestionInstanceId: job.suggestion_instance_id ?? null,
+            metadata: {
+              message,
+              attemptCount: nextAttemptCount,
+              requestSource: job.request_source,
+            },
           });
         }
         await this.jobRepo.update(
@@ -144,10 +135,27 @@ export class SuggestionGenerationWorker
     job: SuggestionGenerationJob,
     message: string,
   ): Promise<void> {
+    if (job.request_source === 'on_demand') {
+      await this.suggestionRepo.update(
+        {
+          user_id: job.user_id,
+          id: job.suggestion_instance_id ?? '',
+          generation_status: Not('superseded' as const),
+        },
+        {
+          generation_status: 'failed',
+          ai_error: message,
+          ai_retry_count: job.attempt_count + 1,
+        },
+      );
+      return;
+    }
+
+    const slotId = getScheduledSlotId(job);
     await this.suggestionRepo.update(
       {
         user_id: job.user_id,
-        slot_id: job.slot_id,
+        slot_id: slotId,
         target_date: job.target_date,
         generation_status: Not('superseded' as const),
       },
@@ -162,10 +170,35 @@ export class SuggestionGenerationWorker
   private async cancelJobForRoutineBreak(
     job: SuggestionGenerationJob,
   ): Promise<void> {
+    if (job.request_source === 'on_demand') {
+      await this.suggestionRepo.update(
+        {
+          user_id: job.user_id,
+          id: job.suggestion_instance_id ?? '',
+          generation_status: Not('ready' as const),
+        },
+        {
+          generation_status: 'failed',
+          ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+        },
+      );
+      await this.jobRepo.update(
+        { id: job.id },
+        {
+          status: 'cancelled',
+          last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+          locked_at: null,
+          locked_by: null,
+        },
+      );
+      return;
+    }
+
+    const slotId = getScheduledSlotId(job);
     await this.suggestionRepo.update(
       {
         user_id: job.user_id,
-        slot_id: job.slot_id,
+        slot_id: slotId,
         target_date: job.target_date,
         generation_status: 'pending',
       },
@@ -247,10 +280,26 @@ export class SuggestionGenerationWorker
   private async markSuggestionGenerating(
     job: SuggestionGenerationJob,
   ): Promise<void> {
+    if (job.request_source === 'on_demand') {
+      await this.suggestionRepo.update(
+        {
+          user_id: job.user_id,
+          id: job.suggestion_instance_id ?? '',
+          generation_status: Not('ready' as const),
+        },
+        {
+          generation_status: 'generating',
+          ai_error: null,
+        },
+      );
+      return;
+    }
+
+    const slotId = getScheduledSlotId(job);
     await this.suggestionRepo.update(
       {
         user_id: job.user_id,
-        slot_id: job.slot_id,
+        slot_id: slotId,
         target_date: job.target_date,
         generation_status: 'pending',
       },
@@ -324,6 +373,19 @@ function normalizeClaimedJob(
     target_date: toDateOnlyString(raw.target_date),
     target_time: toTimeOnlyString(raw.target_time),
   };
+}
+
+function formatJobTarget(job: SuggestionGenerationJob): string {
+  return job.request_source === 'on_demand'
+    ? `on-demand suggestion ${job.suggestion_instance_id ?? 'unknown'}`
+    : `slot ${job.slot_id ?? 'unknown'}`;
+}
+
+function getScheduledSlotId(job: SuggestionGenerationJob): string {
+  if (job.slot_id) {
+    return job.slot_id;
+  }
+  throw new Error(`Scheduled suggestion job ${job.id} is missing slot_id`);
 }
 
 function retryDelayMs(attemptCount: number): number {

@@ -48,6 +48,7 @@ import { SuggestionObservabilityService } from './suggestion-observability.servi
 import { RoutineBreakService } from './routine-break.service';
 import {
   buildPausedActiveNames,
+  buildTodayOnDemandDto,
   buildTodaySlotDto,
   buildTodaySummary,
 } from './todays-suggestion-response.mapper';
@@ -101,6 +102,13 @@ export class SuggestionsService {
       },
       relations: ['steps', 'steps.product'],
     });
+    const scheduledSuggestions = suggestions.filter(
+      (suggestion) =>
+        (suggestion.request_source ?? 'scheduled') === 'scheduled',
+    );
+    const onDemandSuggestions = suggestions.filter(
+      (suggestion) => suggestion.request_source === 'on_demand',
+    );
 
     const applications = await this.applicationLogRepo.find({
       where: {
@@ -112,7 +120,7 @@ export class SuggestionsService {
     });
 
     const suggestionBySlot = new Map<string, SuggestionInstance>();
-    for (const suggestion of suggestions) {
+    for (const suggestion of scheduledSuggestions) {
       if (!suggestion.slot_id) continue;
       const existing = suggestionBySlot.get(suggestion.slot_id);
       if (!existing) {
@@ -182,11 +190,20 @@ export class SuggestionsService {
         lifecycle,
       });
     });
+    const onDemandDtos = onDemandSuggestions
+      .map((suggestion) =>
+        buildTodayOnDemandDto({
+          suggestion,
+          applicationLog: applicationLogBySuggestion.get(suggestion.id) ?? null,
+          gapActionByKey: gapActionMaps.get(suggestion.id),
+        }),
+      )
+      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
 
     const reactionAlert = await this.reactionService.getReactionAlert(
       user.id,
       today,
-      buildPausedActiveNames(suggestions),
+      buildPausedActiveNames(scheduledSuggestions),
     );
     const responseSlots =
       routineBreak?.status === 'active'
@@ -194,15 +211,22 @@ export class SuggestionsService {
             (slot) => slot.suggestion?.generationStatus === 'ready',
           )
         : slotDtos;
+    const responseOnDemand =
+      routineBreak?.status === 'active'
+        ? onDemandDtos.filter(
+            (suggestion) => suggestion.suggestion.generationStatus === 'ready',
+          )
+        : onDemandDtos;
 
     return {
       date: today,
       timeZone,
       generatedAt: toIsoString(now),
       leadTimeMinutes,
-      summary: buildTodaySummary(responseSlots),
+      summary: buildTodaySummary(responseSlots, responseOnDemand),
       weatherSummary: null,
       slots: responseSlots,
+      onDemandSuggestions: responseOnDemand,
       reactionAlert,
       routineBreak: routineBreak?.status === 'active' ? routineBreak : null,
     };
@@ -295,6 +319,9 @@ export class SuggestionsService {
       this.suggestionRepo.create({
         user_id: user.id,
         slot_id: existing.slot_id,
+        request_source: 'scheduled',
+        request_id: null,
+        request_context: null,
         target_date: targetDate,
         target_time: targetTime,
         daypart: existing.daypart,

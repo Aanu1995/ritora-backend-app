@@ -37,9 +37,14 @@ export function deterministicExplanation(
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionExplanationJson {
   return {
-    headline: 'Using your shelf today',
+    headline:
+      inputs.requestSource === 'on_demand'
+        ? 'Quick shelf suggestion'
+        : 'Using your shelf today',
     body: [
-      'Ritora used your shelf and safety rules for this slot.',
+      inputs.requestSource === 'on_demand'
+        ? 'Ritora used your shelf and safety rules for this request.'
+        : 'Ritora used your shelf and safety rules for this slot.',
       ...(inputs.contextSummary.routineBreak.recentlyResumed
         ? ['Restarting gently after your break.']
         : []),
@@ -146,12 +151,47 @@ function selectBaselineProducts(
     usedCategories.add(match.category);
   }
 
-  return selected.slice(0, 4);
+  return selected.slice(
+    0,
+    inputs.requestContext?.intensity === 'minimal' ? 2 : 4,
+  );
 }
 
 function preferredCategoryOrder(
   inputs: SuggestionGenerationInputs,
 ): ProductCategory[] {
+  if (inputs.requestSource === 'on_demand') {
+    switch (inputs.requestContext?.intent) {
+      case 'post_workout':
+      case 'post_makeup_or_shower':
+        return [
+          ProductCategory.Cleanser,
+          ProductCategory.Moisturizer,
+          ProductCategory.SunProtection,
+        ];
+      case 'post_sun':
+      case 'post_swim':
+        return [
+          ProductCategory.Cleanser,
+          ProductCategory.Moisturizer,
+          ProductCategory.SunProtection,
+        ];
+      case 'event_prep':
+        return [
+          ProductCategory.Cleanser,
+          ProductCategory.Serum,
+          ProductCategory.Moisturizer,
+          ProductCategory.SunProtection,
+        ];
+      case 'quick_refresh':
+      case 'travel_refresh':
+        return [ProductCategory.Moisturizer, ProductCategory.SunProtection];
+      case 'other':
+      case undefined:
+        break;
+    }
+  }
+
   if (shouldAvoidStrongActives(inputs)) {
     return inputs.daypart === 'evening'
       ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
@@ -184,7 +224,8 @@ function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
   return (
     inputs.contextSummary.reaction.hasSignal ||
     inputs.contextSummary.reaction.barrierCompromised ||
-    inputs.contextSummary.routineBreak.recentlyResumed
+    inputs.contextSummary.routineBreak.recentlyResumed ||
+    inputs.contextSummary.applicationPatterns.conservativeRestart
   );
 }
 
@@ -211,6 +252,7 @@ function productScoreToStep(
         maxLength: 140,
         maxSentences: 1,
       }) ?? 'Selected from your shelf.',
+    routineNote: null,
     provenance: 'ai_added',
     chips: [
       {

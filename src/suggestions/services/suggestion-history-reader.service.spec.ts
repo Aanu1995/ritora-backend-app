@@ -123,6 +123,7 @@ describe('SuggestionHistoryReader', () => {
         range: '30d',
         daypart: 'evening',
         mode: 'manual',
+        requestSource: 'on_demand',
         status: 'applied',
         edited: true,
         limit: 1,
@@ -136,6 +137,10 @@ describe('SuggestionHistoryReader', () => {
     expect(historyQueryBuilder.andWhere).toHaveBeenCalledWith(
       'suggestion.mode = :mode',
       { mode: 'manual' },
+    );
+    expect(historyQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'suggestion.request_source = :requestSource',
+      { requestSource: 'on_demand' },
     );
     expect(historyQueryBuilder.limit).toHaveBeenCalledWith(2);
     expect(result.days).toHaveLength(1);
@@ -188,6 +193,8 @@ describe('SuggestionHistoryReader', () => {
         id: 'suggestion-1',
         user_id: 'user-1',
         slot_id: 'slot-1',
+        request_source: 'scheduled',
+        request_context: null,
         target_date: '2026-04-29',
         target_time: '08:00',
         daypart: 'morning',
@@ -370,6 +377,8 @@ function historySuggestion(input: {
     id: input.id,
     user_id: 'user-1',
     slot_id: 'slot-1',
+    request_source: 'scheduled',
+    request_context: null,
     target_date: input.targetDate,
     target_time: input.targetTime,
     daypart: input.daypart,

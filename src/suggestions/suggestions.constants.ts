@@ -61,7 +61,50 @@ export type SuggestionGenerationJobStatus =
   | 'failed'
   | 'cancelled';
 
+export type SuggestionRequestSource = 'scheduled' | 'on_demand';
+export const SUGGESTION_REQUEST_SOURCES: readonly SuggestionRequestSource[] = [
+  'scheduled',
+  'on_demand',
+] as const;
+
+export type OnDemandSuggestionIntent =
+  | 'post_workout'
+  | 'post_sun'
+  | 'post_swim'
+  | 'travel_refresh'
+  | 'quick_refresh'
+  | 'event_prep'
+  | 'post_makeup_or_shower'
+  | 'other';
+
+export const ON_DEMAND_SUGGESTION_INTENTS: readonly OnDemandSuggestionIntent[] =
+  [
+    'post_workout',
+    'post_sun',
+    'post_swim',
+    'travel_refresh',
+    'quick_refresh',
+    'event_prep',
+    'post_makeup_or_shower',
+    'other',
+  ] as const;
+
+export type OnDemandSuggestionIntensity = 'minimal' | 'standard';
+export const ON_DEMAND_SUGGESTION_INTENSITIES: readonly OnDemandSuggestionIntensity[] =
+  ['minimal', 'standard'] as const;
+
+export interface SuggestionRequestContextJson {
+  intent: OnDemandSuggestionIntent;
+  intensity: OnDemandSuggestionIntensity;
+  note: string | null;
+  activityAt: string | null;
+  requestedAt: string;
+}
+
 export type SuggestionObservabilityEventKind =
+  | 'on_demand_requested'
+  | 'on_demand_duplicate_request'
+  | 'on_demand_retry_requested'
   | 'generation_completed'
   | 'generation_failed'
   | 'generation_fallback'
@@ -101,6 +144,9 @@ export const SUGGESTION_SAFETY_POLICY_REVIEWED_AT = '2026-05-04';
 export const SUGGESTION_AI_DAILY_USER_GENERATION_LIMIT = 12;
 export const SUGGESTION_AI_DAILY_USER_REGENERATION_LIMIT = 4;
 export const SUGGESTION_AI_DAILY_USER_COST_LIMIT_USD = 1.5;
+export const SUGGESTION_ON_DEMAND_DAILY_USER_LIMIT = 5;
+export const SUGGESTION_ON_DEMAND_COOLDOWN_MINUTES = 2;
+export const SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS = 14;
 
 export const SUGGESTION_CONTEXT_CACHE_RETENTION_DAYS = 30;
 export const SUGGESTION_GENERATION_CONTEXT_RETENTION_DAYS = 90;

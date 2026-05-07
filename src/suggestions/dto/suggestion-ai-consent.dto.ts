@@ -11,6 +11,9 @@ export class SuggestionAiConsentResponseDto {
   @ApiProperty()
   granted: boolean;
 
+  @ApiProperty({ nullable: true })
+  grantedAt: string | null;
+
   @ApiProperty()
   canReadSensitiveContext: boolean;
 

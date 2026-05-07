@@ -25,7 +25,7 @@ export type HistoryCursorRow = {
 
 type HistoryFingerprintInput = Pick<
   SuggestionHistoryListQueryDto,
-  'daypart' | 'mode' | 'status' | 'edited' | 'limit'
+  'daypart' | 'mode' | 'requestSource' | 'status' | 'edited' | 'limit'
 > & {
   fromDate: string;
   toDate: string;
@@ -74,6 +74,11 @@ export function applyHistoryFilters(
   }
   if (query.mode) {
     queryBuilder.andWhere('suggestion.mode = :mode', { mode: query.mode });
+  }
+  if (query.requestSource) {
+    queryBuilder.andWhere('suggestion.request_source = :requestSource', {
+      requestSource: query.requestSource,
+    });
   }
   if (query.edited === true) {
     queryBuilder.andWhere(HISTORY_EDITED_LOG_EXISTS_SQL);
@@ -144,6 +149,7 @@ export function historyCursorFingerprint(
     query.toDate,
     query.daypart ?? '',
     query.mode ?? '',
+    query.requestSource ?? '',
     query.status ?? '',
     query.edited === undefined ? '' : String(query.edited),
     clampHistoryLimit(query.limit),

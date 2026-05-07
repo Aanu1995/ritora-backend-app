@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { LoggerModule } from 'nestjs-pino';
 import { AuthenticatedTimezoneCaptureInterceptor } from './common/interceptors/authenticated-timezone-capture.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
+import { buildPinoHttpOptions } from './observability/logging.config';
 import { AppBadgesModule } from './app-badges/app-badges.module';
 import { ApplicationTrackingModule } from './application-tracking/application-tracking.module';
 import { AuthModule } from './auth/auth.module';
@@ -31,6 +33,12 @@ import { UsersModule } from './users/users.module';
       validationOptions: {
         abortEarly: true,
       },
+    }),
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        pinoHttp: buildPinoHttpOptions(configService),
+      }),
     }),
     TypeOrmModule.forRootAsync(databaseConfig),
     ThrottlerModule.forRoot([

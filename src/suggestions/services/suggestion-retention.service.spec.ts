@@ -45,19 +45,21 @@ describe('SuggestionRetentionService', () => {
       service.purgeExpiredSensitiveData(new Date('2026-05-04T00:00:00.000Z')),
     ).resolves.toEqual({
       contextCachesDeleted: 2,
-      generationContextsCleared: 3,
+      sensitiveSuggestionFieldsCleared: 3,
     });
 
     expect(cacheRepo.delete).toHaveBeenCalled();
     expect(queryBuilder.set).toHaveBeenCalledWith({
+      ai_explanation: null,
       generation_context: null,
+      request_context: null,
     });
     expect(observability.record).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'retention_purged',
         metadata: {
           contextCachesDeleted: 2,
-          generationContextsCleared: 3,
+          sensitiveSuggestionFieldsCleared: 3,
         },
       }),
     );

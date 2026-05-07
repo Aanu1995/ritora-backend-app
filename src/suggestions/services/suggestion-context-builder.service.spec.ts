@@ -71,6 +71,8 @@ describe('SuggestionContextBuilder', () => {
         substitutedByCategory: { serum: 1 },
         addedOffShelfCount: 1,
         editedLogCount: 1,
+        daysSinceLastApplication: 1,
+        conservativeRestart: false,
       }),
     );
     expect(summary.safetyConstraints).toEqual(
@@ -157,6 +159,30 @@ describe('SuggestionContextBuilder', () => {
     expect(summary).toBe(firstSummary);
     expect(cacheRepo.insert).not.toHaveBeenCalled();
     expect(cacheRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('marks first-use contexts as conservative and downgrades strong actives', async () => {
+    const summary = await builder.build({
+      ...emptyInput(),
+      shelfActiveProducts: [retinoidProduct()],
+    });
+
+    expect(summary.applicationPatterns).toEqual(
+      expect.objectContaining({
+        daysSinceLastApplication: null,
+        conservativeRestart: true,
+      }),
+    );
+    expect(summary.productScores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'retinoid-1',
+          cautionReasons: expect.arrayContaining([
+            'restart gently before using strong actives again',
+          ]),
+        }),
+      ]),
+    );
   });
 });
 

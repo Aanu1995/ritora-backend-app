@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,8 +12,11 @@ import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
 import {
+  SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS,
   SUGGESTION_SAFETY_POLICY_REVIEWED_AT,
   SUGGESTION_SAFETY_POLICY_VERSION,
+  SuggestionRequestContextJson,
+  SuggestionRequestSource,
 } from '../suggestions.constants';
 import {
   buildSafetyConstraints,
@@ -25,10 +27,11 @@ import {
   mergeEvidenceSourceIds,
 } from './suggestion-evidence-sources';
 import { scoreProductForSuggestion } from './suggestion-product-intelligence';
+import { buildRoutineBreakSummary } from './suggestion-routine-break-context';
 import {
-  buildRoutineBreakSummary,
-  routineBreakCacheParts,
-} from './suggestion-routine-break-context';
+  buildSuggestionContextCacheKey,
+  isUniqueConstraintError,
+} from './suggestion-context-cache-key';
 
 @Injectable()
 export class SuggestionContextBuilder {
@@ -44,15 +47,20 @@ export class SuggestionContextBuilder {
       ...inputs,
       targetDate: toDateOnlyString(inputs.targetDate),
       targetTime: toTimeOnlyString(inputs.targetTime),
+      requestSource: inputs.requestSource ?? 'scheduled',
+      requestContext: inputs.requestContext ?? null,
     };
-    const cacheKey = buildCacheKey(normalizedInputs);
-    const cached = await this.contextCacheRepo.findOne({
-      where: {
-        user_id: normalizedInputs.userId,
-        context_date: normalizedInputs.targetDate,
-        target_time: normalizedInputs.targetTime,
-      },
-    });
+    const cacheKey = buildSuggestionContextCacheKey(normalizedInputs);
+    const shouldCache = normalizedInputs.requestSource === 'scheduled';
+    const cached = shouldCache
+      ? await this.contextCacheRepo.findOne({
+          where: {
+            user_id: normalizedInputs.userId,
+            context_date: normalizedInputs.targetDate,
+            target_time: normalizedInputs.targetTime,
+          },
+        })
+      : null;
     if (cached?.cache_key === cacheKey && cached.summary) {
       return cached.summary;
     }
@@ -71,6 +79,10 @@ export class SuggestionContextBuilder {
       normalizedInputs.recentJournalEntries,
       normalizedInputs.targetDate,
     );
+    const applicationPatterns = buildApplicationPatterns(
+      normalizedInputs.recentApplications,
+      normalizedInputs.targetDate,
+    );
     const productScores = normalizedInputs.shelfActiveProducts
       .map((product) =>
         scoreProductForSuggestion(product, {
@@ -81,6 +93,7 @@ export class SuggestionContextBuilder {
           recentUseCount: recentUseByProduct.get(product.id) ?? 0,
           hasReactionSignal: reaction.hasSignal,
           lockedProductIds,
+          conservativeRestart: applicationPatterns.conservativeRestart,
         }),
       )
       .sort((a, b) => b.suitabilityScore - a.suitabilityScore);
@@ -90,6 +103,8 @@ export class SuggestionContextBuilder {
       targetDate: normalizedInputs.targetDate,
       targetTime: normalizedInputs.targetTime,
       daypart: normalizedInputs.daypart,
+      requestSource: normalizedInputs.requestSource,
+      onDemand: normalizedInputs.requestContext,
       skinProfile: {
         primaryGoal: normalizedInputs.skinProfile?.primary_goal ?? null,
         skinType: normalizedInputs.skinProfile?.skin_type ?? null,
@@ -104,9 +119,7 @@ export class SuggestionContextBuilder {
         normalizedInputs.targetDate,
       ),
       productScores,
-      applicationPatterns: buildApplicationPatterns(
-        normalizedInputs.recentApplications,
-      ),
+      applicationPatterns,
       safetyConstraints: [],
       governance: {
         safetyPolicyVersion: SUGGESTION_SAFETY_POLICY_VERSION,
@@ -131,6 +144,10 @@ export class SuggestionContextBuilder {
         ),
       ),
     };
+
+    if (!shouldCache) {
+      return summary;
+    }
 
     const cachePayload = {
       cache_key: cacheKey,
@@ -171,6 +188,8 @@ export interface SuggestionContextBuilderInput {
   targetDate: string;
   targetTime: string;
   daypart: 'morning' | 'noon' | 'evening';
+  requestSource?: SuggestionRequestSource;
+  requestContext?: SuggestionRequestContextJson | null;
   skinProfile: SkinProfile | null;
   shelfActiveProducts: InventoryProduct[];
   routineSteps: RoutineStep[];
@@ -234,12 +253,20 @@ function buildReactionSummary(
 
 function buildApplicationPatterns(
   logs: ApplicationLog[],
+  targetDate: string,
 ): SuggestionContextSummary['applicationPatterns'] {
   const skippedByCategory: Record<string, number> = {};
   const substitutedByCategory: Record<string, number> = {};
   const adherenceByCategory: Record<string, number> = {};
   let addedOffShelfCount = 0;
   let editedLogCount = 0;
+  const applicationDates = logs
+    .map((log) => toDateOnlyString(log.target_date))
+    .filter((date) => date <= toDateOnlyString(targetDate))
+    .sort((a, b) => (a < b ? 1 : -1));
+  const daysSinceLastApplication = applicationDates[0]
+    ? daysBetween(applicationDates[0], targetDate)
+    : null;
   for (const log of logs) {
     if (log.has_been_edited) editedLogCount += 1;
     for (const item of log.items ?? []) {
@@ -253,6 +280,10 @@ function buildApplicationPatterns(
   }
   return {
     days: unique(logs.map((log) => toDateOnlyString(log.target_date))).length,
+    daysSinceLastApplication,
+    conservativeRestart:
+      daysSinceLastApplication === null ||
+      daysSinceLastApplication >= SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS,
     skippedByCategory,
     substitutedByCategory,
     addedOffShelfCount,
@@ -275,77 +306,6 @@ function buildRecentUseByProduct(logs: ApplicationLog[]): Map<string, number> {
     }
   }
   return map;
-}
-
-function buildCacheKey(inputs: SuggestionContextBuilderInput): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        targetDate: inputs.targetDate,
-        targetTime: inputs.targetTime,
-        profile: inputs.skinProfile?.updated_at?.toISOString() ?? null,
-        routineSteps: inputs.routineSteps
-          .slice()
-          .sort(
-            (a, b) => a.step_order - b.step_order || a.id.localeCompare(b.id),
-          )
-          .map((step) => [
-            step.id,
-            step.updated_at?.toISOString() ?? null,
-            step.inventory_product_id,
-            step.step_order,
-            step.step_label,
-            step.is_specialist_locked,
-          ]),
-        products: inputs.shelfActiveProducts
-          .slice()
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .map((product) => [
-            product.id,
-            product.updated_at?.toISOString() ?? null,
-            product.status,
-          ]),
-        journals: inputs.recentJournalEntries
-          .slice()
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .map((entry) => [
-            entry.id,
-            entry.updated_at?.toISOString() ?? null,
-            entry.has_reaction_signal,
-          ]),
-        logs: inputs.recentApplications
-          .slice()
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .map((log) => [
-            log.id,
-            log.updated_at?.toISOString() ?? null,
-            log.edit_count,
-            log.has_been_edited,
-            (log.items ?? [])
-              .slice()
-              .sort(
-                (a, b) =>
-                  a.step_order - b.step_order ||
-                  (a.id ?? '').localeCompare(b.id ?? ''),
-              )
-              .map((item) => [
-                item.id,
-                item.status,
-                item.item_source,
-                item.inventory_product_id,
-                item.substituted_with_product_id,
-                item.suggestion_step_id,
-                item.is_ad_hoc,
-              ]),
-          ]),
-        routineBreaks: routineBreakCacheParts(inputs.recentRoutineBreaks ?? []),
-        aiPersonalizationAllowed: inputs.aiPersonalizationAllowed ?? true,
-        aiPersonalizationBlockedReason:
-          inputs.aiPersonalizationBlockedReason ?? null,
-      }),
-    )
-    .digest('hex')
-    .slice(0, 32);
 }
 
 function daysBetween(fromDate: string, toDate: string): number {
@@ -374,13 +334,4 @@ function increment(target: Record<string, number>, key: string): void {
 
 function unique<T>(values: T[]): T[] {
   return Array.from(new Set(values));
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === '23505'
-  );
 }

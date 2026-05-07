@@ -13,8 +13,10 @@ import {
 import {
   SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT,
   SUGGESTION_HISTORY_PAGE_MAX_LIMIT,
+  SUGGESTION_REQUEST_SOURCES,
   SuggestionDaypart,
   SuggestionMode,
+  SuggestionRequestSource,
 } from '../suggestions.constants';
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { SuggestionInstanceResponseDto } from './suggestion-instance-response.dto';
@@ -52,6 +54,11 @@ export class SuggestionHistoryListQueryDto {
   @IsOptional()
   @IsIn(['ai', 'manual', 'mixed'])
   mode?: SuggestionMode;
+
+  @ApiPropertyOptional({ enum: SUGGESTION_REQUEST_SOURCES })
+  @IsOptional()
+  @IsIn(SUGGESTION_REQUEST_SOURCES)
+  requestSource?: SuggestionRequestSource;
 
   @ApiPropertyOptional({
     enum: ['applied', 'partial', 'skipped', 'simplified', 'missed'],
@@ -93,6 +100,12 @@ export class SuggestionHistorySlotSummaryDto {
 
   @ApiProperty({ nullable: true })
   applicationLogId: string | null;
+
+  @ApiProperty({ enum: SUGGESTION_REQUEST_SOURCES })
+  requestSource: SuggestionRequestSource;
+
+  @ApiProperty({ nullable: true })
+  onDemandIntent: string | null;
 
   @ApiProperty({ enum: ['morning', 'noon', 'evening'] })
   daypart: SuggestionDaypart;

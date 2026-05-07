@@ -4,6 +4,7 @@ import { toDateOnlyString, toIsoString } from '../../common/utils/date';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import {
   TodaysSuggestionRecordingDto,
+  TodaysOnDemandSuggestionDto,
   TodaysSuggestionSlotDto,
   TodaysSuggestionSpecialistDto,
   TodaysSuggestionSummaryDto,
@@ -94,19 +95,61 @@ export function buildRecordingDto(
 
 export function buildTodaySummary(
   slots: TodaysSuggestionSlotDto[],
+  onDemandSuggestions: TodaysOnDemandSuggestionDto[] = [],
 ): TodaysSuggestionSummaryDto {
   const count = (statuses: SuggestionSlotLifecycleStatus[]) =>
     slots.filter((slot) => statuses.includes(slot.status)).length;
+  const onDemandCount = (statuses: TodaysOnDemandSuggestionDto['status'][]) =>
+    onDemandSuggestions.filter((suggestion) =>
+      statuses.includes(suggestion.status),
+    ).length;
   return {
     total: slots.length,
     locked: count(['locked']),
-    upcoming: count(['generating', 'ready', 'active']),
-    ready: count(['ready', 'active']),
+    upcoming:
+      count(['generating', 'ready', 'active']) +
+      onDemandCount(['generating', 'ready']),
+    ready: count(['ready', 'active']) + onDemandCount(['ready']),
     recordable: count(['recordable']),
-    recorded: count(['recorded', 'edited']),
-    edited: count(['edited']),
-    failed: count(['failed']),
+    recorded:
+      count(['recorded', 'edited']) + onDemandCount(['recorded', 'edited']),
+    edited: count(['edited']) + onDemandCount(['edited']),
+    failed: count(['failed']) + onDemandCount(['failed']),
+    onDemand: onDemandSuggestions.length,
   };
+}
+
+export function buildTodayOnDemandDto(params: {
+  suggestion: SuggestionInstance;
+  applicationLog: ApplicationLog | null;
+  gapActionByKey?: ReadonlyMap<string, SuggestionGapActionKind>;
+}): TodaysOnDemandSuggestionDto {
+  const { suggestion, applicationLog, gapActionByKey } = params;
+  const status = onDemandStatus(suggestion, applicationLog);
+  return {
+    id: suggestion.id,
+    status,
+    requestedAt: toIsoString(suggestion.visible_at ?? suggestion.created_at),
+    recording: applicationLog ? buildRecordingDto(applicationLog) : null,
+    applicationLog: applicationLog
+      ? ApplicationLogResponseDto.fromEntity(applicationLog)
+      : null,
+    suggestion: SuggestionInstanceResponseDto.fromEntity(suggestion, {
+      applicationLogId: applicationLog?.id ?? null,
+      gapActionByKey,
+    }),
+  };
+}
+
+function onDemandStatus(
+  suggestion: SuggestionInstance,
+  applicationLog: ApplicationLog | null,
+): TodaysOnDemandSuggestionDto['status'] {
+  if (applicationLog?.has_been_edited) return 'edited';
+  if (applicationLog) return 'recorded';
+  if (suggestion.generation_status === 'failed') return 'failed';
+  if (suggestion.generation_status === 'ready') return 'ready';
+  return 'generating';
 }
 
 export function buildPausedActiveNames(

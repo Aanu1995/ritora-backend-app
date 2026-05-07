@@ -174,6 +174,31 @@ export class TodaysSuggestionSlotDto {
   suggestion: SuggestionInstanceResponseDto | null;
 }
 
+export class TodaysOnDemandSuggestionDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty({
+    enum: ['generating', 'ready', 'recorded', 'edited', 'failed'],
+  })
+  status: Extract<
+    SuggestionSlotLifecycleStatus,
+    'generating' | 'ready' | 'recorded' | 'edited' | 'failed'
+  >;
+
+  @ApiProperty()
+  requestedAt: string;
+
+  @ApiProperty({ nullable: true, type: () => TodaysSuggestionRecordingDto })
+  recording: TodaysSuggestionRecordingDto | null;
+
+  @ApiProperty({ nullable: true, type: () => ApplicationLogResponseDto })
+  applicationLog: ApplicationLogResponseDto | null;
+
+  @ApiProperty({ type: SuggestionInstanceResponseDto })
+  suggestion: SuggestionInstanceResponseDto;
+}
+
 export class TodaysSuggestionSummaryDto {
   @ApiProperty()
   total: number;
@@ -198,6 +223,9 @@ export class TodaysSuggestionSummaryDto {
 
   @ApiProperty()
   failed: number;
+
+  @ApiProperty()
+  onDemand: number;
 }
 
 export class TodaysSuggestionResponseDto {
@@ -221,6 +249,9 @@ export class TodaysSuggestionResponseDto {
 
   @ApiProperty({ type: [TodaysSuggestionSlotDto] })
   slots: TodaysSuggestionSlotDto[];
+
+  @ApiProperty({ type: [TodaysOnDemandSuggestionDto] })
+  onDemandSuggestions: TodaysOnDemandSuggestionDto[];
 
   @ApiProperty({ nullable: true, type: TodaysSuggestionReactionAlertDto })
   reactionAlert: TodaysSuggestionReactionAlertDto | null;

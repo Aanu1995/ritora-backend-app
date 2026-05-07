@@ -28,11 +28,13 @@ import { SuggestionAiGenerator } from './services/suggestion-ai-generator';
 import { SuggestionConsentService } from './services/suggestion-consent.service';
 import { SuggestionContextBuilder } from './services/suggestion-context-builder.service';
 import { SuggestionGenerationContextService } from './services/suggestion-generation-context.service';
+import { SuggestionGenerationPersistenceService } from './services/suggestion-generation-persistence.service';
 import { SuggestionGenerationService } from './services/suggestion-generation.service';
 import { SuggestionGenerationWorker } from './services/suggestion-generation-worker.service';
 import { SuggestionHistoryExportService } from './services/suggestion-history-export.service';
 import { SuggestionHistoryReader } from './services/suggestion-history-reader.service';
 import { SuggestionObservabilityService } from './services/suggestion-observability.service';
+import { SuggestionOnDemandService } from './services/suggestion-on-demand.service';
 import { SuggestionRetentionService } from './services/suggestion-retention.service';
 import { RoutineBreakService } from './services/routine-break.service';
 import { SuggestionScheduler } from './services/suggestion-scheduler.service';
@@ -79,11 +81,13 @@ import { SuggestionsController } from './suggestions.controller';
     SuggestionConsentService,
     SuggestionContextBuilder,
     SuggestionGenerationContextService,
+    SuggestionGenerationPersistenceService,
     SuggestionGenerationService,
     SuggestionGenerationWorker,
     SuggestionScheduler,
     SuggestionReminderWorker,
     SuggestionObservabilityService,
+    SuggestionOnDemandService,
     SuggestionRetentionService,
     RoutineBreakService,
     SuggestionTodayActionService,

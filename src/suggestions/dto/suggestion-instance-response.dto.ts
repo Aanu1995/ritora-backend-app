@@ -16,11 +16,27 @@ import {
   SuggestionGapRecommendationResponseJson,
   SuggestionGenerationStatus,
   SuggestionMode,
+  SuggestionRequestContextJson,
+  SuggestionRequestSource,
   SuggestionSafetyFlagJson,
 } from '../suggestions.constants';
 import { getSuggestionEvidenceSources } from '../services/suggestion-evidence-sources';
 import { applyGapRecommendationActions } from '../services/suggestion-gap-actions';
 import { SuggestionStepResponseDto } from './suggestion-step-response.dto';
+
+export class SuggestionProductDataQualityDto {
+  @ApiProperty()
+  verifiedCount: number;
+
+  @ApiProperty()
+  partialCount: number;
+
+  @ApiProperty()
+  insufficientCount: number;
+
+  @ApiProperty({ type: [String] })
+  warnings: string[];
+}
 
 export class SuggestionInstanceResponseDto {
   @ApiProperty()
@@ -28,6 +44,12 @@ export class SuggestionInstanceResponseDto {
 
   @ApiProperty({ nullable: true })
   slotId: string | null;
+
+  @ApiProperty({ enum: ['scheduled', 'on_demand'] })
+  requestSource: SuggestionRequestSource;
+
+  @ApiProperty({ nullable: true, type: 'object', additionalProperties: true })
+  requestContext: SuggestionRequestContextJson | null;
 
   @ApiProperty()
   targetDate: string;
@@ -86,6 +108,9 @@ export class SuggestionInstanceResponseDto {
   @ApiProperty({ type: 'array', items: { type: 'object' } })
   evidenceSources: SuggestionEvidenceSourceJson[];
 
+  @ApiProperty({ type: SuggestionProductDataQualityDto })
+  productDataQuality: SuggestionProductDataQualityDto;
+
   @ApiProperty({ type: [SuggestionStepResponseDto] })
   steps: SuggestionStepResponseDto[];
 
@@ -108,6 +133,8 @@ export class SuggestionInstanceResponseDto {
     const dto = new SuggestionInstanceResponseDto();
     dto.id = instance.id;
     dto.slotId = instance.slot_id;
+    dto.requestSource = instance.request_source ?? 'scheduled';
+    dto.requestContext = instance.request_context ?? null;
     dto.targetDate = toDateOnlyString(instance.target_date);
     dto.targetTime = toTimeOnlyString(instance.target_time);
     dto.daypart = instance.daypart;
@@ -139,6 +166,7 @@ export class SuggestionInstanceResponseDto {
           (gap) => gap.sourceIds ?? [],
         ),
       ]);
+    dto.productDataQuality = buildProductDataQualityDto(instance);
     dto.steps = (instance.steps ?? [])
       .slice()
       .sort((a, b) => a.step_order - b.step_order)
@@ -148,4 +176,29 @@ export class SuggestionInstanceResponseDto {
     dto.updatedAt = toIsoString(instance.updated_at);
     return dto;
   }
+}
+
+function buildProductDataQualityDto(
+  instance: SuggestionInstance,
+): SuggestionProductDataQualityDto {
+  const scores = instance.generation_context?.productScores ?? [];
+  const dto = new SuggestionProductDataQualityDto();
+  dto.verifiedCount = scores.filter(
+    (score) => score.dataQuality === 'verified',
+  ).length;
+  dto.partialCount = scores.filter(
+    (score) => score.dataQuality === 'partial',
+  ).length;
+  dto.insufficientCount = scores.filter(
+    (score) => score.dataQuality === 'insufficient',
+  ).length;
+  dto.warnings = Array.from(
+    new Set(
+      scores
+        .flatMap((score) => score.dataQualityWarnings ?? [])
+        .map((warning) => warning.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 6);
+  return dto;
 }

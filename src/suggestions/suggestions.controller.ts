@@ -19,6 +19,7 @@ import {
   SuggestionAiConsentResponseDto,
   UpdateSuggestionAiConsentDto,
 } from './dto/suggestion-ai-consent.dto';
+import { CreateOnDemandSuggestionDto } from './dto/on-demand-suggestion.dto';
 import {
   RegenerateSuggestionDto,
   SuggestionHistoryDayDto,
@@ -40,6 +41,7 @@ import {
 } from './dto/suggestion-today-actions.dto';
 import { TodaysSuggestionResponseDto } from './dto/todays-suggestion-response.dto';
 import { SuggestionConsentService } from './services/suggestion-consent.service';
+import { SuggestionOnDemandService } from './services/suggestion-on-demand.service';
 import { RoutineBreakService } from './services/routine-break.service';
 import { SuggestionTodayActionService } from './services/suggestion-today-action.service';
 import { SuggestionsService } from './services/suggestions.service';
@@ -53,6 +55,7 @@ export class SuggestionsController {
     private readonly suggestionConsentService: SuggestionConsentService,
     private readonly todayActionService: SuggestionTodayActionService,
     private readonly routineBreakService: RoutineBreakService,
+    private readonly onDemandService: SuggestionOnDemandService,
   ) {}
 
   @Get('today')
@@ -65,6 +68,27 @@ export class SuggestionsController {
       user,
       requestTimeZone(request),
     );
+  }
+
+  @Post('on-demand')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Queue an on-demand skincare suggestion' })
+  async createOnDemandSuggestion(
+    @CurrentUser() user: User,
+    @Req() request: Request,
+    @Body() body: CreateOnDemandSuggestionDto,
+  ): Promise<SuggestionInstanceResponseDto> {
+    return this.onDemandService.create(user, requestTimeZone(request), body);
+  }
+
+  @Post('on-demand/:id/retry')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Retry a failed on-demand skincare suggestion' })
+  async retryOnDemandSuggestion(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+  ): Promise<SuggestionInstanceResponseDto> {
+    return this.onDemandService.retryFailed(user, id);
   }
 
   @Post('today/reaction/normal-routine')
@@ -249,10 +273,12 @@ function toAiConsentResponse(decision: {
   aiPersonalizationAllowed: boolean;
   canReadSensitiveContext: boolean;
   blockedReason: string | null;
+  grantedAt: Date | null;
   activeSensitiveConsentTypes: string[];
 }): SuggestionAiConsentResponseDto {
   return {
     granted: decision.aiPersonalizationAllowed,
+    grantedAt: decision.grantedAt?.toISOString() ?? null,
     canReadSensitiveContext: decision.canReadSensitiveContext,
     blockedReason: decision.blockedReason,
     activeSensitiveConsentTypes: decision.activeSensitiveConsentTypes,

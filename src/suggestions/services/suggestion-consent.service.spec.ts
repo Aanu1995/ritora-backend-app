@@ -27,13 +27,17 @@ describe('SuggestionConsentService', () => {
       aiPersonalizationAllowed: false,
       canReadSensitiveContext: false,
       blockedReason: 'ai_suggestion_processing_consent_missing',
+      grantedAt: null,
       activeSensitiveConsentTypes: [],
     });
   });
 
   it('allows sensitive context only when AI and sensitive consents are active', async () => {
+    const grantedAt = new Date('2026-05-07T09:00:00.000Z');
     consentsRepo.find.mockResolvedValue([
-      consent(UserConsentType.AiSuggestionProcessing),
+      consent(UserConsentType.AiSuggestionProcessing, {
+        granted_at: grantedAt,
+      }),
       consent(UserConsentType.HealthContextProcessing),
       consent(UserConsentType.SkinProgressProcessing),
     ]);
@@ -43,6 +47,7 @@ describe('SuggestionConsentService', () => {
         aiPersonalizationAllowed: true,
         canReadSensitiveContext: true,
         blockedReason: null,
+        grantedAt,
         activeSensitiveConsentTypes: [
           UserConsentType.HealthContextProcessing,
           UserConsentType.SkinProgressProcessing,
@@ -84,8 +89,13 @@ function repo<T extends ObjectLiteral>() {
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
-function consent(consentType: UserConsentType): UserConsent {
+function consent(
+  consentType: UserConsentType,
+  overrides: Partial<UserConsent> = {},
+): UserConsent {
   return {
     consent_type: consentType,
+    granted_at: null,
+    ...overrides,
   } as UserConsent;
 }

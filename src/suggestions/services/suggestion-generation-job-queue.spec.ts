@@ -52,6 +52,36 @@ describe('suggestion generation job queue helpers', () => {
       }),
     );
   });
+
+  it('requeues on-demand jobs by suggestion instance rather than slot/date', async () => {
+    repoMock.findOne.mockResolvedValue({
+      id: 'job-on-demand-1',
+    } as SuggestionGenerationJob);
+
+    await requeueSuggestionGenerationJob(repoMock, {
+      ...draft(),
+      slot_id: null,
+      suggestion_instance_id: 'suggestion-on-demand-1',
+      request_source: 'on_demand',
+    });
+
+    expect(repoMock.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          suggestion_instance_id: 'suggestion-on-demand-1',
+          request_source: 'on_demand',
+        },
+      }),
+    );
+    expect(repoMock.update).toHaveBeenCalledWith(
+      { id: 'job-on-demand-1' },
+      expect.objectContaining({
+        slot_id: null,
+        suggestion_instance_id: 'suggestion-on-demand-1',
+        request_source: 'on_demand',
+      }),
+    );
+  });
 });
 
 function repo<T extends ObjectLiteral>() {

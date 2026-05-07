@@ -21,6 +21,8 @@ import {
   SuggestionGapRecommendationJson,
   SuggestionGenerationStatus,
   SuggestionMode,
+  SuggestionRequestContextJson,
+  SuggestionRequestSource,
   SuggestionSafetyFlagJson,
 } from '../suggestions.constants';
 import { SuggestionStep } from './suggestion-step.entity';
@@ -43,10 +45,23 @@ const encryptedGapRecommendationsTransformer = encryptedJsonFieldTransformer<
 const encryptedSafetyFlagsTransformer = encryptedJsonFieldTransformer<
   SuggestionSafetyFlagJson[] | null
 >('suggestion_instances.safety_flags', null);
+const encryptedRequestContextTransformer =
+  encryptedJsonFieldTransformer<SuggestionRequestContextJson | null>(
+    'suggestion_instances.request_context',
+    null,
+  );
 
 @Entity('suggestion_instances')
 @Index('IDX_suggestion_instances_user_target_date', ['user_id', 'target_date'])
 @Index('IDX_suggestion_instances_user_visible_at', ['user_id', 'visible_at'])
+@Index(
+  'UQ_suggestion_instances_on_demand_request_id',
+  ['user_id', 'request_id'],
+  {
+    unique: true,
+    where: `"request_source" = 'on_demand' AND "request_id" IS NOT NULL`,
+  },
+)
 export class SuggestionInstance {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;
@@ -56,6 +71,19 @@ export class SuggestionInstance {
 
   @Column({ type: 'varchar', length: 26, nullable: true })
   slot_id: string | null;
+
+  @Column({ type: 'varchar', length: 20, default: 'scheduled' })
+  request_source: SuggestionRequestSource;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  request_id: string | null;
+
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    transformer: encryptedRequestContextTransformer,
+  })
+  request_context: SuggestionRequestContextJson | null;
 
   @Column({ type: 'date' })
   target_date: string;

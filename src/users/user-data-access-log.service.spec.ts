@@ -73,4 +73,17 @@ describe('UserDataAccessLogService', () => {
 
     expect(accessLogRepo.save).not.toHaveBeenCalled();
   });
+
+  it('lists AI suggestion consent audit events with privacy access logs', async () => {
+    await service.listForUser('01TESTUSER');
+
+    const consentTypeFilter = accessLogRepo.find.mock.calls[0]?.[0].where
+      .consent_type as { _value?: UserConsentType[] };
+    expect(consentTypeFilter._value).toEqual(
+      expect.arrayContaining([
+        UserConsentType.HealthContextProcessing,
+        UserConsentType.AiSuggestionProcessing,
+      ]),
+    );
+  });
 });

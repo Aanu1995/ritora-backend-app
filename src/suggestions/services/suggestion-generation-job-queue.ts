@@ -1,9 +1,10 @@
-import { QueryDeepPartialEntity, Repository } from 'typeorm';
+import { FindOptionsWhere, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
+import { SuggestionRequestSource } from '../suggestions.constants';
 
-export type SuggestionGenerationJobDraft = Pick<
+type BaseSuggestionGenerationJobDraft = Pick<
   SuggestionGenerationJob,
   | 'user_id'
   | 'slot_id'
@@ -15,6 +16,11 @@ export type SuggestionGenerationJobDraft = Pick<
   | 'run_after'
   | 'last_error'
 >;
+
+export type SuggestionGenerationJobDraft = BaseSuggestionGenerationJobDraft & {
+  suggestion_instance_id?: string | null;
+  request_source?: SuggestionRequestSource;
+};
 
 export async function insertSuggestionGenerationJob(
   repo: Repository<SuggestionGenerationJob>,
@@ -34,12 +40,10 @@ export async function requeueSuggestionGenerationJob(
   draft: SuggestionGenerationJobDraft,
 ): Promise<void> {
   const targetDate = toDateOnlyString(draft.target_date);
+  const requestSource = normalizeRequestSource(draft.request_source);
+  const where = buildJobLookup(draft, requestSource, targetDate);
   const existing = await repo.findOne({
-    where: {
-      user_id: draft.user_id,
-      slot_id: draft.slot_id,
-      target_date: targetDate,
-    },
+    where,
     select: ['id'],
   });
   if (existing) {
@@ -50,14 +54,33 @@ export async function requeueSuggestionGenerationJob(
   const inserted = await insertSuggestionGenerationJob(repo, draft);
   if (inserted) return;
 
-  await repo.update(
-    {
-      user_id: draft.user_id,
-      slot_id: draft.slot_id,
-      target_date: targetDate,
-    },
-    buildJobUpdate(draft),
-  );
+  await repo.update(where, buildJobUpdate(draft));
+}
+
+function buildJobLookup(
+  draft: SuggestionGenerationJobDraft,
+  requestSource: SuggestionRequestSource,
+  targetDate: string,
+): FindOptionsWhere<SuggestionGenerationJob> {
+  if (requestSource === 'on_demand') {
+    if (!draft.suggestion_instance_id) {
+      throw new Error('On-demand generation jobs require a suggestion id.');
+    }
+    return {
+      suggestion_instance_id: draft.suggestion_instance_id,
+      request_source: requestSource,
+    };
+  }
+
+  if (!draft.slot_id) {
+    throw new Error('Scheduled generation jobs require a slot id.');
+  }
+  return {
+    user_id: draft.user_id,
+    slot_id: draft.slot_id,
+    target_date: targetDate,
+    request_source: requestSource,
+  };
 }
 
 function buildJobRow(
@@ -66,6 +89,9 @@ function buildJobRow(
   return {
     id: ulid(),
     ...draft,
+    request_source: normalizeRequestSource(draft.request_source),
+    suggestion_instance_id: draft.suggestion_instance_id ?? null,
+    slot_id: draft.slot_id ?? null,
     target_date: toDateOnlyString(draft.target_date),
     target_time: toTimeOnlyString(draft.target_time),
     locked_at: null,
@@ -78,11 +104,20 @@ function buildJobUpdate(
 ): QueryDeepPartialEntity<SuggestionGenerationJob> {
   return {
     ...draft,
+    request_source: normalizeRequestSource(draft.request_source),
+    suggestion_instance_id: draft.suggestion_instance_id ?? null,
+    slot_id: draft.slot_id ?? null,
     target_date: toDateOnlyString(draft.target_date),
     target_time: toTimeOnlyString(draft.target_time),
     locked_at: null,
     locked_by: null,
   };
+}
+
+function normalizeRequestSource(
+  value: SuggestionRequestSource | null | undefined,
+): SuggestionRequestSource {
+  return value ?? 'scheduled';
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

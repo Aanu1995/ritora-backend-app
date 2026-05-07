@@ -44,6 +44,31 @@ describe('ApplicationTrackingValidationService', () => {
     });
   });
 
+  it('allows application logs for on-demand suggestions without a slot id', async () => {
+    const target = await service.resolveTarget(
+      user,
+      {
+        suggestionInstanceId: 'suggestion-1',
+        targetDate: '2026-01-01',
+        items: [],
+      },
+      {
+        ...suggestion(),
+        slot_id: null,
+        request_source: 'on_demand',
+        target_time: '12:15',
+        daypart: 'noon',
+      } as SuggestionInstance,
+    );
+
+    expect(target).toEqual({
+      slotId: null,
+      targetDate: '2026-04-29',
+      targetTime: '12:15',
+      daypart: 'noon',
+    });
+  });
+
   it('rejects item product references that do not belong to the user', async () => {
     inventoryRepo.find.mockResolvedValue([]);
 
@@ -153,6 +178,8 @@ function suggestion(): SuggestionInstance {
     id: 'suggestion-1',
     user_id: 'user-1',
     slot_id: 'slot-1',
+    request_source: 'scheduled',
+    request_context: null,
     target_date: '2026-04-29',
     target_time: '08:00',
     daypart: 'morning',

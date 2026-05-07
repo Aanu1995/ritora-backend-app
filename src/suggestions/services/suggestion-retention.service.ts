@@ -57,7 +57,7 @@ export class SuggestionRetentionService
 
   async purgeExpiredSensitiveData(now = new Date()): Promise<{
     contextCachesDeleted: number;
-    generationContextsCleared: number;
+    sensitiveSuggestionFieldsCleared: number;
   }> {
     const cacheCutoff = subtractDays(
       now,
@@ -76,25 +76,31 @@ export class SuggestionRetentionService
     const contextResult = await this.suggestionRepo
       .createQueryBuilder()
       .update()
-      .set({ generation_context: null })
-      .where('generation_context IS NOT NULL')
+      .set({
+        ai_explanation: null,
+        generation_context: null,
+        request_context: null,
+      })
+      .where(
+        '(ai_explanation IS NOT NULL OR generation_context IS NOT NULL OR request_context IS NOT NULL)',
+      )
       .andWhere('generated_at IS NOT NULL')
       .andWhere('generated_at < :contextCutoff', { contextCutoff })
       .execute();
 
     const contextCachesDeleted = affected(cacheResult);
-    const generationContextsCleared = affected(contextResult);
-    if (contextCachesDeleted > 0 || generationContextsCleared > 0) {
+    const sensitiveSuggestionFieldsCleared = affected(contextResult);
+    if (contextCachesDeleted > 0 || sensitiveSuggestionFieldsCleared > 0) {
       await this.observability.record({
         kind: 'retention_purged',
         metadata: {
           contextCachesDeleted,
-          generationContextsCleared,
+          sensitiveSuggestionFieldsCleared,
         },
       });
     }
 
-    return { contextCachesDeleted, generationContextsCleared };
+    return { contextCachesDeleted, sensitiveSuggestionFieldsCleared };
   }
 
   async purgeUserSuggestionData(userId: string): Promise<void> {
@@ -108,6 +114,7 @@ export class SuggestionRetentionService
       .set({
         ai_explanation: null,
         generation_context: null,
+        request_context: null,
         gap_recommendations: null,
         safety_flags: null,
         ai_error: null,

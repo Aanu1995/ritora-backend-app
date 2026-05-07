@@ -12,23 +12,33 @@ import {
 import { ulid } from 'ulid';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { User } from '../../users/entities/user.entity';
-import { SuggestionGenerationJobStatus } from '../suggestions.constants';
+import {
+  SuggestionGenerationJobStatus,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
+import { SuggestionInstance } from './suggestion-instance.entity';
 
-/**
- * Queue row consumed by the suggestion generation worker. The scheduler
- * inserts one job per (user, slot, date) at the slot's `visible_at` time.
- * The worker claims it via `UPDATE ... SKIP LOCKED`, generates the
- * suggestion, then marks the job completed.
- */
 @Entity('suggestion_generation_jobs')
 @Index('IDX_suggestion_jobs_status_run_after', ['status', 'run_after'], {
   where: `"status" IN ('queued','running')`,
 })
 @Index(
-  'UQ_suggestion_jobs_user_slot_date',
+  'UQ_suggestion_jobs_scheduled_user_slot_date',
   ['user_id', 'slot_id', 'target_date'],
-  { unique: true },
+  {
+    unique: true,
+    where: `"request_source" = 'scheduled' AND "slot_id" IS NOT NULL`,
+  },
 )
+@Index('UQ_suggestion_jobs_on_demand_instance', ['suggestion_instance_id'], {
+  unique: true,
+  where: `"request_source" = 'on_demand' AND "suggestion_instance_id" IS NOT NULL`,
+})
+@Index('IDX_suggestion_jobs_source_status_run_after', [
+  'request_source',
+  'status',
+  'run_after',
+])
 export class SuggestionGenerationJob {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;
@@ -36,8 +46,14 @@ export class SuggestionGenerationJob {
   @Column({ type: 'varchar', length: 26 })
   user_id: string;
 
-  @Column({ type: 'varchar', length: 26 })
-  slot_id: string;
+  @Column({ type: 'varchar', length: 26, nullable: true })
+  slot_id: string | null;
+
+  @Column({ type: 'varchar', length: 26, nullable: true })
+  suggestion_instance_id: string | null;
+
+  @Column({ type: 'varchar', length: 20, default: 'scheduled' })
+  request_source: SuggestionRequestSource;
 
   @Column({ type: 'date' })
   target_date: string;
@@ -76,9 +92,13 @@ export class SuggestionGenerationJob {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @ManyToOne(() => ScheduleSlot, { onDelete: 'CASCADE' })
+  @ManyToOne(() => ScheduleSlot, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'slot_id' })
-  slot: ScheduleSlot;
+  slot: ScheduleSlot | null;
+
+  @ManyToOne(() => SuggestionInstance, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'suggestion_instance_id' })
+  suggestion_instance: SuggestionInstance | null;
 
   @BeforeInsert()
   generateId() {

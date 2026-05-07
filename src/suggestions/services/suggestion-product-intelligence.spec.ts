@@ -28,6 +28,7 @@ describe('suggestion product intelligence', () => {
       recentUseCount: 0,
       hasReactionSignal: false,
       lockedProductIds: new Set(),
+      conservativeRestart: false,
     });
 
     expect(quality).toEqual(

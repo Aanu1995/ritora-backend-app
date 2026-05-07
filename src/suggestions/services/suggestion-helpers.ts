@@ -105,6 +105,20 @@ export function formatDateInTimeZone(timeZone: string, at: Date): string {
   }
 }
 
+export function formatTimeInTimeZone(timeZone: string, at: Date): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    return formatter.format(at);
+  } catch {
+    return at.toISOString().slice(11, 16);
+  }
+}
+
 export function clampLeadTimeMinutes(
   value: number | null | undefined,
   defaultValue = 120,

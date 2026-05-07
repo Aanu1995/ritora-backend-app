@@ -77,6 +77,9 @@ export class SuggestionStepResponseDto {
   @ApiProperty({ nullable: true })
   explanation: string | null;
 
+  @ApiProperty({ nullable: true })
+  routineNote: string | null;
+
   @ApiProperty({
     enum: ['specialist_locked', 'user_routine', 'ai_added'],
   })
@@ -109,6 +112,7 @@ export class SuggestionStepResponseDto {
     dto.quantity = step.quantity;
     dto.waitAfterMinutes = step.wait_after_minutes;
     dto.explanation = step.explanation;
+    dto.routineNote = step.routine_note_snapshot;
     dto.provenance = step.provenance;
     dto.chips = step.chips ?? [];
     dto.safetyWarnings = step.safety_warnings ?? [];

@@ -25,6 +25,10 @@ import { SuggestionInstance } from './suggestion-instance.entity';
 
 const encryptedStepExplanationTransformer =
   encryptedNullableStringFieldTransformer('suggestion_steps.explanation');
+const encryptedRoutineNoteSnapshotTransformer =
+  encryptedNullableStringFieldTransformer(
+    'suggestion_steps.routine_note_snapshot',
+  );
 const encryptedStepChipsTransformer = encryptedJsonFieldTransformer<
   SuggestionStepChipJson[] | null
 >('suggestion_steps.chips', null);
@@ -80,6 +84,13 @@ export class SuggestionStep {
     transformer: encryptedStepExplanationTransformer,
   })
   explanation: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedRoutineNoteSnapshotTransformer,
+  })
+  routine_note_snapshot: string | null;
 
   @Column({ type: 'varchar', length: 20 })
   provenance: SuggestionStepProvenance;

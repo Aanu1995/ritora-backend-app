@@ -14,6 +14,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate({
       slotId: 'slot-1',
+      requestSource: 'scheduled',
+      requestContext: null,
       targetDate: '2026-04-29',
       targetTime: '08:00',
       daypart: 'morning',
@@ -31,6 +33,8 @@ describe('SuggestionAiGenerator', () => {
         targetDate: '2026-04-29',
         targetTime: '08:00',
         daypart: 'morning',
+        requestSource: 'scheduled',
+        onDemand: null,
         skinProfile: {
           primaryGoal: null,
           skinType: null,
@@ -56,6 +60,8 @@ describe('SuggestionAiGenerator', () => {
         productScores: [],
         applicationPatterns: {
           days: 0,
+          daysSinceLastApplication: null,
+          conservativeRestart: true,
           skippedByCategory: {},
           substitutedByCategory: {},
           addedOffShelfCount: 0,
@@ -166,6 +172,8 @@ function inputsWithScoredShelfProducts(
   ];
   return {
     slotId: 'slot-1',
+    requestSource: 'scheduled',
+    requestContext: null,
     targetDate: '2026-04-29',
     targetTime: daypart === 'evening' ? '20:00' : '08:00',
     daypart,
@@ -183,6 +191,8 @@ function inputsWithScoredShelfProducts(
       targetDate: '2026-04-29',
       targetTime: daypart === 'evening' ? '20:00' : '08:00',
       daypart,
+      requestSource: 'scheduled',
+      onDemand: null,
       skinProfile: {
         primaryGoal: 'barrier support',
         skinType: null,
@@ -215,6 +225,8 @@ function inputsWithScoredShelfProducts(
       ],
       applicationPatterns: {
         days: 0,
+        daysSinceLastApplication: null,
+        conservativeRestart: false,
         skippedByCategory: {},
         substitutedByCategory: {},
         addedOffShelfCount: 0,

@@ -7,6 +7,7 @@ import {
   isAllSpecialistLocked,
   lockedStepsAreIntact,
   resolveRawStep,
+  routineStepToOutput,
   sanitizeExplanation,
 } from './suggestion-ai-assembly';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
@@ -147,6 +148,44 @@ describe('suggestion AI assembly validation', () => {
     );
   });
 
+  it('preserves routine step notes as step-level context snapshots', () => {
+    const specialistStep = routineStep(
+      'step-1',
+      true,
+      'Use a rice-grain amount only on dry skin.',
+    );
+    const userStep = routineStep(
+      'step-2',
+      false,
+      'Apply this only after the hydrating toner.',
+    );
+    const context = buildAssemblyContext(generationInputs([userStep]));
+
+    expect(routineStepToOutput(specialistStep, 0)).toEqual(
+      expect.objectContaining({
+        routineNote: 'Use a rice-grain amount only on dry skin.',
+      }),
+    );
+
+    expect(
+      resolveRawStep(
+        {
+          stepOrder: 1,
+          routineStepId: 'step-2',
+          inventoryProductId: 'product-1',
+          stepLabel: ProductCategory.Cleanser,
+          provenance: 'user_routine',
+        },
+        1,
+        context,
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        routineNote: 'Apply this only after the hydrating toner.',
+      }),
+    );
+  });
+
   it('marks all-specialist slots as deterministic baseline candidates', () => {
     expect(
       isAllSpecialistLocked(generationInputs([routineStep('step-1', true)])),
@@ -167,6 +206,8 @@ function generationInputs(
 ): SuggestionGenerationInputs {
   return {
     slotId: 'slot-1',
+    requestSource: 'scheduled',
+    requestContext: null,
     targetDate: '2026-04-29',
     targetTime: '08:00',
     daypart: 'morning',
@@ -189,6 +230,8 @@ function contextSummary(): SuggestionContextSummary {
     targetDate: '2026-04-29',
     targetTime: '08:00',
     daypart: 'morning',
+    requestSource: 'scheduled',
+    onDemand: null,
     skinProfile: {
       primaryGoal: null,
       skinType: null,
@@ -214,6 +257,8 @@ function contextSummary(): SuggestionContextSummary {
     productScores: [],
     applicationPatterns: {
       days: 0,
+      daysSinceLastApplication: null,
+      conservativeRestart: false,
       skippedByCategory: {},
       substitutedByCategory: {},
       addedOffShelfCount: 0,
@@ -259,13 +304,18 @@ function productWithVerboseGuidance(): InventoryProduct {
   } as unknown as InventoryProduct;
 }
 
-function routineStep(id: string, isSpecialistLocked: boolean): RoutineStep {
+function routineStep(
+  id: string,
+  isSpecialistLocked: boolean,
+  notes: string | null = null,
+): RoutineStep {
   return {
     id,
     step_order: id.endsWith('2') ? 1 : 0,
     inventory_product_id: 'product-1',
     step_label: ProductCategory.Cleanser,
     custom_label: null,
+    notes,
     is_specialist_locked: isSpecialistLocked,
     product: product(),
   } as RoutineStep;

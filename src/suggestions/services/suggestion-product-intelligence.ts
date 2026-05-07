@@ -51,6 +51,7 @@ export function scoreProductForSuggestion(
     recentUseCount: number;
     hasReactionSignal: boolean;
     lockedProductIds: Set<string>;
+    conservativeRestart: boolean;
   },
 ): SuggestionProductScore {
   const activeTags = detectActiveTags(product);
@@ -93,6 +94,10 @@ export function scoreProductForSuggestion(
   if (options.hasReactionSignal && activeTags.some(isStrongActiveTag)) {
     score -= 35;
     cautions.push('pause strong actives while reaction signal is present');
+  }
+  if (options.conservativeRestart && activeTags.some(isStrongActiveTag)) {
+    score -= 30;
+    cautions.push('restart gently before using strong actives again');
   }
   if (
     (options.daypart === 'morning' || options.daypart === 'noon') &&

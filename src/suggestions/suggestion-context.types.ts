@@ -2,6 +2,8 @@ import type { ProductCategory } from '../shelf/shelf.types';
 import {
   SuggestionEvidenceSourceId,
   SuggestionEvidenceSourceJson,
+  SuggestionRequestContextJson,
+  SuggestionRequestSource,
 } from './suggestions.constants';
 
 export interface SuggestionContextSummary {
@@ -10,6 +12,8 @@ export interface SuggestionContextSummary {
   targetDate: string;
   targetTime: string;
   daypart: 'morning' | 'noon' | 'evening';
+  requestSource: SuggestionRequestSource;
+  onDemand: SuggestionRequestContextJson | null;
   skinProfile: {
     primaryGoal: string | null;
     skinType: string | null;
@@ -35,6 +39,8 @@ export interface SuggestionContextSummary {
   productScores: SuggestionProductScore[];
   applicationPatterns: {
     days: number;
+    daysSinceLastApplication: number | null;
+    conservativeRestart: boolean;
     skippedByCategory: Record<string, number>;
     substitutedByCategory: Record<string, number>;
     addedOffShelfCount: number;

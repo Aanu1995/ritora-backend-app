@@ -23,6 +23,11 @@ export function buildHistorySlotSummary(
     slotId: suggestion.slot_id,
     suggestionId: suggestion.id,
     applicationLogId: log?.id ?? null,
+    requestSource: suggestion.request_source ?? 'scheduled',
+    onDemandIntent:
+      suggestion.request_source === 'on_demand'
+        ? (suggestion.request_context?.intent ?? null)
+        : null,
     daypart: suggestion.daypart,
     slotTime: toTimeOnlyString(slot?.slot_time ?? suggestion.target_time),
     mode: suggestion.mode,

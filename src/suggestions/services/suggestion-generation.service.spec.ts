@@ -23,6 +23,7 @@ import {
 import { SuggestionConsentService } from './suggestion-consent.service';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
 import { SuggestionGenerationContextService } from './suggestion-generation-context.service';
+import { SuggestionGenerationPersistenceService } from './suggestion-generation-persistence.service';
 import { SuggestionGenerationService } from './suggestion-generation.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { RoutineBreakService } from './routine-break.service';
@@ -88,22 +89,26 @@ describe('SuggestionGenerationService', () => {
       applicationLogRepo,
       routineBreakRepo,
     );
-    service = new SuggestionGenerationService(
+    const persistence = new SuggestionGenerationPersistenceService(
       dataSource,
+      preferenceRepo,
+    );
+    service = new SuggestionGenerationService(
       aiGenerator,
       contextService,
+      persistence,
       notifications,
       observability,
       suggestionRepo,
       slotRepo,
       userRepo,
-      preferenceRepo,
       routineBreakService,
     );
     consentService.evaluate.mockResolvedValue({
       aiPersonalizationAllowed: true,
       canReadSensitiveContext: true,
       blockedReason: null,
+      grantedAt: new Date('2026-05-07T09:00:00.000Z'),
       activeSensitiveConsentTypes: [
         UserConsentType.HealthContextProcessing,
         UserConsentType.SkinProgressProcessing,
@@ -192,6 +197,7 @@ describe('SuggestionGenerationService', () => {
       expect.objectContaining({
         suggestion_instance_id: 'suggestion-1',
         inventory_product_id: 'product-1',
+        routine_note_snapshot: 'Apply over damp skin.',
       }),
     ]);
     expect(notifications.dispatch).toHaveBeenCalledWith(
@@ -273,6 +279,7 @@ describe('SuggestionGenerationService', () => {
       aiPersonalizationAllowed: false,
       canReadSensitiveContext: false,
       blockedReason: 'ai_suggestion_processing_consent_missing',
+      grantedAt: null,
       activeSensitiveConsentTypes: [],
     });
     slotRepo.findOne.mockResolvedValue(slot());
@@ -332,6 +339,96 @@ describe('SuggestionGenerationService', () => {
     );
   });
 
+  it('generates an on-demand suggestion without loading a schedule slot', async () => {
+    suggestionRepo.findOne.mockResolvedValue(onDemandSuggestion());
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find.mockResolvedValue([]);
+    applicationLogRepo.find.mockResolvedValue([]);
+    contextBuilder.build.mockResolvedValue({
+      ...contextSummary(),
+      requestSource: 'on_demand',
+      onDemand: {
+        intent: 'post_workout',
+        intensity: 'minimal',
+        note: 'Back from training.',
+        activityAt: null,
+        requestedAt: '2026-05-04T08:00:00.000Z',
+      },
+    });
+    aiGenerator.generate.mockResolvedValue(generationOutput());
+    txStepRepo.delete.mockResolvedValue({ affected: 0, raw: [] });
+    txSuggestionRepo.save.mockImplementation(
+      async (value) => value as SuggestionInstance,
+    );
+    txStepRepo.create.mockImplementation((value) => value as SuggestionStep);
+    mockSaveArray(txStepRepo).mockResolvedValue([]);
+
+    await service.generateForJob(onDemandJob());
+
+    expect(slotRepo.findOne).not.toHaveBeenCalled();
+    expect(contextBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routineSteps: [],
+        requestSource: 'on_demand',
+        requestContext: expect.objectContaining({
+          intent: 'post_workout',
+        }),
+      }),
+    );
+    expect(aiGenerator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slotId: null,
+        requestSource: 'on_demand',
+      }),
+    );
+    expect(txSuggestionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'suggestion-on-demand-1',
+        slot_id: null,
+        request_source: 'on_demand',
+        generation_status: 'ready',
+      }),
+    );
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeKey: 'suggestion_ready:on_demand:suggestion-on-demand-1',
+        payload: expect.objectContaining({
+          requestSource: 'on_demand',
+        }),
+      }),
+    );
+  });
+
+  it('marks queued on-demand suggestions failed if a routine break starts before work runs', async () => {
+    suggestionRepo.findOne.mockResolvedValue(onDemandSuggestion());
+    userRepo.findOne.mockResolvedValue(user());
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
+
+    await service.generateForJob(onDemandJob());
+
+    expect(aiGenerator.generate).not.toHaveBeenCalled();
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'suggestion-on-demand-1',
+        user_id: 'user-1',
+      }),
+      expect.objectContaining({
+        generation_status: 'failed',
+        ai_error: 'routine_break_active',
+      }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'generation_failed',
+        metadata: expect.objectContaining({ requestSource: 'on_demand' }),
+      }),
+    );
+  });
+
   it('suppresses persistence and notification if a routine break starts during generation', async () => {
     slotRepo.findOne.mockResolvedValue(slot());
     userRepo.findOne.mockResolvedValue(user());
@@ -343,7 +440,9 @@ describe('SuggestionGenerationService', () => {
     applicationLogRepo.find.mockResolvedValue([]);
     contextBuilder.build.mockResolvedValue(contextSummary());
     aiGenerator.generate.mockResolvedValue(generationOutput());
-    routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
+    routineBreakService.isRoutineBreakActive
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
 
     await service.generateForJob(job());
 
@@ -385,6 +484,7 @@ function repo<T extends ObjectLiteral>() {
   return {
     create: jest.fn((value) => value),
     createQueryBuilder: jest.fn(),
+    delete: jest.fn(),
     find: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn(),
@@ -435,10 +535,27 @@ function job(): SuggestionGenerationJob {
     id: 'job-1',
     user_id: 'user-1',
     slot_id: 'slot-1',
+    suggestion_instance_id: null,
+    request_source: 'scheduled',
     target_date: '2026-05-04',
     target_time: '08:00',
     visible_at: new Date('2026-05-04T06:30:00.000Z'),
     attempt_count: 1,
+  } as SuggestionGenerationJob;
+}
+
+function onDemandJob(): SuggestionGenerationJob {
+  return {
+    id: 'job-on-demand-1',
+    user_id: 'user-1',
+    slot_id: null,
+    suggestion_instance_id: 'suggestion-on-demand-1',
+    request_source: 'on_demand',
+    target_date: '2026-05-04',
+    target_time: '12:00',
+    visible_at: new Date('2026-05-04T10:00:00.000Z'),
+    attempt_count: 1,
+    last_error: null,
   } as SuggestionGenerationJob;
 }
 
@@ -515,6 +632,8 @@ function contextSummary(): SuggestionContextSummary {
     targetDate: '2026-05-04',
     targetTime: '08:00',
     daypart: 'morning',
+    requestSource: 'scheduled',
+    onDemand: null,
     skinProfile: {
       primaryGoal: 'barrier support',
       skinType: null,
@@ -540,6 +659,8 @@ function contextSummary(): SuggestionContextSummary {
     productScores: [],
     applicationPatterns: {
       days: 0,
+      daysSinceLastApplication: null,
+      conservativeRestart: false,
       skippedByCategory: {},
       substitutedByCategory: {},
       addedOffShelfCount: 0,
@@ -556,6 +677,31 @@ function contextSummary(): SuggestionContextSummary {
     evidenceSources: [],
     skippedCandidates: [],
   };
+}
+
+function onDemandSuggestion(): SuggestionInstance {
+  return {
+    id: 'suggestion-on-demand-1',
+    user_id: 'user-1',
+    slot_id: null,
+    request_source: 'on_demand',
+    request_context: {
+      intent: 'post_workout',
+      intensity: 'minimal',
+      note: 'Back from training.',
+      activityAt: null,
+      requestedAt: '2026-05-04T08:00:00.000Z',
+    },
+    target_date: '2026-05-04',
+    target_time: '12:00',
+    daypart: 'noon',
+    mode: 'ai',
+    generation_status: 'generating',
+    visible_at: new Date('2026-05-04T10:00:00.000Z'),
+    generated_at: null,
+    created_at: new Date('2026-05-04T10:00:00.000Z'),
+    updated_at: new Date('2026-05-04T10:00:00.000Z'),
+  } as SuggestionInstance;
 }
 
 function generationOutput(): SuggestionGenerationOutput {
@@ -585,6 +731,7 @@ function generationOutput(): SuggestionGenerationOutput {
         quantity: 'pea-size',
         waitAfterMinutes: 2,
         explanation: 'Best fit.',
+        routineNote: 'Apply over damp skin.',
         provenance: 'ai_added' as const,
         chips: [],
         safetyWarnings: [],

@@ -211,6 +211,9 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
       this.suggestionRepo.create({
         user_id: slot.user_id,
         slot_id: slot.id,
+        request_source: 'scheduled',
+        request_id: null,
+        request_context: null,
         target_date: targetDate,
         target_time: slot.slot_time,
         daypart: deriveSuggestionDaypart(slot.slot_time),
