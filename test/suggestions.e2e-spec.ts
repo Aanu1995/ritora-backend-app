@@ -1,8 +1,15 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { SlotModeValue } from '../src/schedule/dto/schedule.constants';
 import { ProductCategory } from '../src/shelf/shelf.types';
 import { SuggestionGenerationJob } from '../src/suggestions/entities/suggestion-generation-job.entity';
+import {
+  SuggestionGenerationJobStatus,
+  SuggestionMode,
+  SuggestionRequestSource,
+  SuggestionStepProvenance,
+} from '../src/suggestions/suggestions.constants';
 import {
   SuggestionAiGenerator,
   SuggestionGenerationInputs,
@@ -215,17 +222,16 @@ describe('Suggestions on-demand (e2e)', () => {
   });
 
   it('snapshots scheduled routine step notes and returns them in today suggestions', async () => {
-    const timeZone = 'Europe/Stockholm';
+    const { timeZone, slotTime } = openTodaySlotWindow();
     const targetDate = readString(
-      (await authGet('/suggestions/today').expect(200)).body,
+      (await authGet('/suggestions/today', timeZone).expect(200)).body,
       'date',
     );
-    const slotTime = '12:30';
     const routineNote = 'Use a thin layer only after cleansing.';
     const createdSlot = await authPost('/schedule/slots', {
       dayOfWeek: dayOfWeekForIsoDate(targetDate, timeZone),
       slotTime,
-      mode: 'manual',
+      mode: SlotModeValue.Manual,
     }).expect(201);
     const slotId = readString(createdSlot.body, 'id');
 
@@ -245,25 +251,29 @@ describe('Suggestions on-demand (e2e)', () => {
 
     await generateScheduledSuggestion(slotId, targetDate, slotTime);
 
-    const todayResponse = await authGet('/suggestions/today').expect(200);
+    const todayResponse = await authGet('/suggestions/today', timeZone).expect(
+      200,
+    );
     const today = todayResponse.body as TodayResponse;
     const slot = today.slots.find((item) => item.slotId === slotId);
 
-    expect(slot?.suggestion?.requestSource).toBe('scheduled');
+    expect(slot?.suggestion?.requestSource).toBe(
+      SuggestionRequestSource.Scheduled,
+    );
     expect(slot?.suggestion?.steps[0]).toEqual(
       expect.objectContaining({
         inventoryProductId: productId,
         routineNote,
-        provenance: 'specialist_locked',
+        provenance: SuggestionStepProvenance.SpecialistLocked,
       }),
     );
   });
 
-  function authGet(path: string) {
+  function authGet(path: string, timeZone = 'Europe/Stockholm') {
     return request(app.getHttpServer())
       .get(`/api/v1${path}`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .set('X-Timezone', 'Europe/Stockholm');
+      .set('X-Timezone', timeZone);
   }
 
   function authPost(path: string, body: Record<string, unknown>) {
@@ -308,11 +318,11 @@ describe('Suggestions on-demand (e2e)', () => {
         user_id: userId,
         slot_id: slotId,
         suggestion_instance_id: null,
-        request_source: 'scheduled',
+        request_source: SuggestionRequestSource.Scheduled,
         target_date: targetDate,
         target_time: targetTime,
         visible_at: new Date(),
-        status: 'queued',
+        status: SuggestionGenerationJobStatus.Queued,
         attempt_count: 0,
         run_after: new Date(),
         locked_at: null,
@@ -378,6 +388,45 @@ function dayOfWeekForIsoDate(date: string, timeZone: string): string {
   return weekday.toLowerCase();
 }
 
+function openTodaySlotWindow(): { timeZone: string; slotTime: string } {
+  const candidates = [
+    'Europe/Stockholm',
+    'UTC',
+    'Pacific/Honolulu',
+    'Pacific/Kiritimati',
+  ];
+  for (const timeZone of candidates) {
+    const minutes = localMinutesOfDay(new Date(), timeZone);
+    if (minutes <= 23 * 60 + 20) {
+      return { timeZone, slotTime: minutesToSlotTime(minutes + 30) };
+    }
+  }
+  return { timeZone: 'UTC', slotTime: '23:59' };
+}
+
+function localMinutesOfDay(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0);
+  const minute = Number(
+    parts.find((part) => part.type === 'minute')?.value ?? 0,
+  );
+  return hour * 60 + minute;
+}
+
+function minutesToSlotTime(minutes: number): string {
+  const bounded = Math.min(minutes, 23 * 60 + 59);
+  const hour = Math.floor(bounded / 60)
+    .toString()
+    .padStart(2, '0');
+  const minute = (bounded % 60).toString().padStart(2, '0');
+  return `${hour}:${minute}`;
+}
+
 function shiftIsoDate(date: string, days: number): string {
   const current = new Date(`${date}T00:00:00.000Z`);
   current.setUTCDate(current.getUTCDate() + days);
@@ -390,7 +439,7 @@ function buildOutput(
   const routineStep = inputs.routineSteps[0] ?? null;
   const product = routineStep?.product ?? inputs.shelfActiveProducts[0];
   return {
-    mode: 'ai',
+    mode: SuggestionMode.Ai,
     hasReactionSignal: false,
     simplifiedForReaction: false,
     explanation: {
@@ -419,9 +468,9 @@ function buildOutput(
         routineNote: routineStep?.notes ?? null,
         provenance: routineStep
           ? routineStep.is_specialist_locked
-            ? 'specialist_locked'
-            : 'user_routine'
-          : 'ai_added',
+            ? SuggestionStepProvenance.SpecialistLocked
+            : SuggestionStepProvenance.UserRoutine
+          : SuggestionStepProvenance.AiAdded,
         chips: [],
         safetyWarnings: [],
       },
