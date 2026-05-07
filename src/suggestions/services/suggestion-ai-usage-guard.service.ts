@@ -6,6 +6,7 @@ import {
   SUGGESTION_AI_DAILY_USER_COST_LIMIT_USD,
   SUGGESTION_AI_DAILY_USER_GENERATION_LIMIT,
   SUGGESTION_AI_DAILY_USER_REGENERATION_LIMIT,
+  SuggestionGenerationStatus,
 } from '../suggestions.constants';
 
 export type SuggestionAiUsageBlockReason =
@@ -54,7 +55,10 @@ export class SuggestionAiUsageGuard {
       .where('suggestion.user_id = :userId', { userId })
       .andWhere('suggestion.generated_at >= :start', { start })
       .andWhere('suggestion.generation_status IN (:...statuses)', {
-        statuses: ['ready', 'superseded'],
+        statuses: [
+          SuggestionGenerationStatus.Ready,
+          SuggestionGenerationStatus.Superseded,
+        ],
       })
       .getRawOne<UsageRawRow>();
 

@@ -2,6 +2,7 @@ import { ApplicationLog } from '../../application-tracking/entities/application-
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import {
   RECORDING_REMINDER_DELAY_MINUTES,
+  SuggestionGenerationStatus,
   SuggestionSlotLifecycleStatus,
 } from '../suggestions.constants';
 import { buildSlotInstant, endOfLocalDateInstant } from './suggestion-helpers';
@@ -62,23 +63,43 @@ function resolveLifecycleStatus(input: {
   expiresAt: Date;
   nowMs: number;
 }): SuggestionSlotLifecycleStatus {
-  if (input.applicationLog?.has_been_edited) return 'edited';
-  if (input.applicationLog) return 'recorded';
+  if (input.applicationLog?.has_been_edited) {
+    return SuggestionSlotLifecycleStatus.Edited;
+  }
+  if (input.applicationLog) return SuggestionSlotLifecycleStatus.Recorded;
 
   const suggestionStatus = input.suggestion?.generation_status ?? null;
-  if (suggestionStatus === 'failed') return 'failed';
-  if (suggestionStatus === 'generating') return 'generating';
-  if (
-    suggestionStatus === 'pending' &&
-    input.nowMs >= input.visibleAt.getTime()
-  ) {
-    return 'generating';
+  if (suggestionStatus === SuggestionGenerationStatus.Failed) {
+    return SuggestionSlotLifecycleStatus.Failed;
   }
-
-  if (input.nowMs > input.expiresAt.getTime()) return 'missed';
-  if (input.nowMs < input.visibleAt.getTime()) return 'locked';
-  if (!input.suggestion || suggestionStatus !== 'ready') return 'generating';
-  if (input.nowMs >= input.recordableAt.getTime()) return 'recordable';
-  if (input.nowMs >= input.slotStartsAt.getTime()) return 'active';
-  return 'ready';
+  if (input.nowMs > input.expiresAt.getTime()) {
+    return SuggestionSlotLifecycleStatus.Missed;
+  }
+  if (input.nowMs < input.visibleAt.getTime()) {
+    return SuggestionSlotLifecycleStatus.Locked;
+  }
+  if (
+    suggestionStatus === SuggestionGenerationStatus.Pending ||
+    suggestionStatus === SuggestionGenerationStatus.Generating
+  ) {
+    return input.nowMs >= input.recordableAt.getTime()
+      ? SuggestionSlotLifecycleStatus.Missed
+      : SuggestionSlotLifecycleStatus.Generating;
+  }
+  if (!input.suggestion && input.nowMs >= input.slotStartsAt.getTime()) {
+    return SuggestionSlotLifecycleStatus.Missed;
+  }
+  if (
+    !input.suggestion ||
+    suggestionStatus !== SuggestionGenerationStatus.Ready
+  ) {
+    return SuggestionSlotLifecycleStatus.Generating;
+  }
+  if (input.nowMs >= input.recordableAt.getTime()) {
+    return SuggestionSlotLifecycleStatus.Recordable;
+  }
+  if (input.nowMs >= input.slotStartsAt.getTime()) {
+    return SuggestionSlotLifecycleStatus.Active;
+  }
+  return SuggestionSlotLifecycleStatus.Ready;
 }

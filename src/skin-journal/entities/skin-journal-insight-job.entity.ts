@@ -11,12 +11,19 @@ import {
 } from 'typeorm';
 import { ulid } from 'ulid';
 import { User } from '../../users/entities/user.entity';
-import type {
-  InsightGenerationTrigger,
-  InsightJobStatus,
+import {
+  InsightJobStatusValue,
+  type InsightGenerationTrigger,
+  type InsightJobStatus,
 } from '../skin-journal.constants';
 
-const ACTIVE_INSIGHT_JOB_STATUSES = "'queued','sent','running'";
+const ACTIVE_INSIGHT_JOB_STATUSES = [
+  InsightJobStatusValue.Queued,
+  InsightJobStatusValue.Sent,
+  InsightJobStatusValue.Running,
+]
+  .map((status) => `'${status}'`)
+  .join(',');
 
 @Entity('skin_journal_insight_jobs')
 @Index('IDX_skin_journal_insight_jobs_status_run_after', [
@@ -38,7 +45,11 @@ export class SkinJournalInsightJob {
   @Column({ type: 'varchar', length: 40 })
   trigger: InsightGenerationTrigger;
 
-  @Column({ type: 'varchar', length: 20, default: 'queued' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: InsightJobStatusValue.Queued,
+  })
   status: InsightJobStatus;
 
   @Column({ type: 'varchar', length: 10, default: 'en' })

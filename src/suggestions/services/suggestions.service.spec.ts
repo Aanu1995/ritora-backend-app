@@ -76,6 +76,11 @@ describe('SuggestionsService', () => {
       generatedMaps: [],
       raw: [],
     });
+    slotRepo.findOne.mockResolvedValue({
+      id: 'slot-1',
+      user_id: 'user-1',
+      deleted_at: null,
+    } as ScheduleSlot);
     usageGuard.evaluateRegeneration.mockResolvedValue({
       allowed: true,
       blockedReason: null,
@@ -165,6 +170,63 @@ describe('SuggestionsService', () => {
     await expect(
       service.regenerateSuggestion(user(), 'suggestion-1', {}),
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(usageGuard.evaluateRegeneration).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
+  });
+
+  it('rejects regeneration when the linked schedule slot was deleted', async () => {
+    slotRepo.findOne.mockResolvedValue(null);
+    suggestionRepo.findOne.mockResolvedValue({
+      id: 'suggestion-1',
+      user_id: 'user-1',
+      slot_id: 'slot-1',
+      target_date: '2026-04-29',
+      target_time: '12:00',
+      daypart: 'noon',
+      mode: 'ai',
+      generation_status: 'ready',
+      visible_at: new Date('2026-04-29T10:00:00.000Z'),
+    } as SuggestionInstance);
+
+    await expect(
+      service.regenerateSuggestion(user(), 'suggestion-1', {}),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(slotRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'slot-1',
+          user_id: 'user-1',
+          deleted_at: expect.objectContaining({ _type: 'isNull' }),
+        },
+      }),
+    );
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(usageGuard.evaluateRegeneration).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
+  });
+
+  it('rejects regeneration after the scheduled suggestion time has passed', async () => {
+    jest.setSystemTime(new Date('2026-04-29T12:35:00.000Z'));
+    suggestionRepo.findOne.mockResolvedValue({
+      id: 'suggestion-1',
+      user_id: 'user-1',
+      slot_id: 'slot-1',
+      target_date: '2026-04-29',
+      target_time: '12:00',
+      daypart: 'noon',
+      mode: 'ai',
+      generation_status: 'ready',
+      visible_at: new Date('2026-04-29T10:00:00.000Z'),
+    } as SuggestionInstance);
+
+    await expect(
+      service.regenerateSuggestion(user(), 'suggestion-1', {}),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(usageGuard.evaluateRegeneration).not.toHaveBeenCalled();
     expect(jobRepo.insert).not.toHaveBeenCalled();
   });
 
@@ -240,7 +302,11 @@ describe('SuggestionsService', () => {
 
     expect(slotRepo.find).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { user_id: 'user-1', day_of_week: 'wed' },
+        where: {
+          user_id: 'user-1',
+          day_of_week: 'wed',
+          deleted_at: expect.objectContaining({ _type: 'isNull' }),
+        },
       }),
     );
     expect(result).toEqual(
@@ -294,6 +360,55 @@ describe('SuggestionsService', () => {
       '2026-04-29',
       [],
     );
+  });
+
+  it('hides elapsed schedule slots when no suggestion was provided', async () => {
+    jest.setSystemTime(new Date('2026-04-29T20:35:00.000Z'));
+    preferenceRepo.findOne.mockResolvedValue({
+      suggestion_lead_time_minutes: 120,
+    } as UserNotificationPreference);
+    slotRepo.find.mockResolvedValue([
+      scheduleSlot({
+        id: 'slot-elapsed',
+        slotTime: '20:00',
+        mode: 'ai',
+        lockedSteps: 0,
+      }),
+    ]);
+    suggestionRepo.find.mockResolvedValue([]);
+    applicationLogRepo.find.mockResolvedValue([]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(result.slots).toEqual([]);
+    expect(result.summary.total).toBe(0);
+  });
+
+  it('hides stale pending slots after the recordable window has passed', async () => {
+    jest.setSystemTime(new Date('2026-04-29T20:35:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      scheduleSlot({
+        id: 'slot-elapsed',
+        slotTime: '20:00',
+        mode: 'ai',
+        lockedSteps: 0,
+      }),
+    ]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-pending',
+        slotId: 'slot-elapsed',
+        targetTime: '20:00',
+        generatedAt: null,
+        generationStatus: 'pending',
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(result.slots).toEqual([]);
+    expect(result.summary.total).toBe(0);
   });
 
   it('returns the active routine break and hides unprovided paused slots from Today', async () => {
@@ -397,6 +512,106 @@ describe('SuggestionsService', () => {
         status: 'recorded',
         applicationLog: expect.objectContaining({
           id: 'log-on-demand',
+        }),
+      }),
+    ]);
+  });
+
+  it('keeps already-provided today suggestions visible after their schedule slot is deleted', async () => {
+    slotRepo.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        ...scheduleSlot({
+          id: 'deleted-slot',
+          slotTime: '08:00',
+          mode: 'ai',
+          lockedSteps: 0,
+        }),
+        deleted_at: new Date('2026-04-29T09:00:00.000Z'),
+      } as ScheduleSlot,
+    ]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-ready',
+        slotId: 'deleted-slot',
+        targetTime: '08:00',
+        generatedAt: new Date('2026-04-29T06:00:00.000Z'),
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([
+      applicationLog({
+        id: 'log-1',
+        suggestionId: 'suggestion-ready',
+        hasBeenEdited: false,
+      }),
+    ]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(slotRepo.find).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          user_id: 'user-1',
+          id: expect.objectContaining({ _value: ['deleted-slot'] }),
+        }),
+      }),
+    );
+    expect(result.slots).toEqual([
+      expect.objectContaining({
+        slotId: 'deleted-slot',
+        status: 'recorded',
+        suggestion: expect.objectContaining({ id: 'suggestion-ready' }),
+      }),
+    ]);
+  });
+
+  it('keeps already-provided today suggestions visible even if the schedule row is missing', async () => {
+    slotRepo.find.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-ready',
+        slotId: 'missing-slot',
+        targetTime: '08:00',
+        generatedAt: new Date('2026-04-29T06:00:00.000Z'),
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(result.slots).toEqual([
+      expect.objectContaining({
+        slotId: 'missing-slot',
+        slotTime: '08:00',
+        status: 'recordable',
+        suggestion: expect.objectContaining({ id: 'suggestion-ready' }),
+      }),
+    ]);
+  });
+
+  it('keeps already-provided today suggestions visible even if their slot link was cleared', async () => {
+    slotRepo.find.mockResolvedValue([]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-ready',
+        slotId: null,
+        targetTime: '08:00',
+        generatedAt: new Date('2026-04-29T06:00:00.000Z'),
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(slotRepo.find).toHaveBeenCalledTimes(1);
+    expect(result.slots).toEqual([
+      expect.objectContaining({
+        slotId: 'suggestion:suggestion-ready',
+        slotTime: '08:00',
+        status: 'recordable',
+        suggestion: expect.objectContaining({
+          id: 'suggestion-ready',
+          slotId: null,
         }),
       }),
     ]);
@@ -530,9 +745,10 @@ function scheduleSlot(input: {
 
 function suggestionInstance(input: {
   id: string;
-  slotId: string;
+  slotId: string | null;
   targetTime: string;
   generatedAt?: Date | null;
+  generationStatus?: SuggestionInstance['generation_status'];
 }): SuggestionInstance {
   const now = new Date('2026-04-29T09:55:00.000Z');
   return {
@@ -545,7 +761,7 @@ function suggestionInstance(input: {
     target_time: input.targetTime,
     daypart: input.targetTime < '12:00' ? 'morning' : 'noon',
     mode: 'ai',
-    generation_status: 'ready',
+    generation_status: input.generationStatus ?? 'ready',
     visible_at: new Date('2026-04-29T10:00:00.000Z'),
     generated_at: input.generatedAt ?? now,
     ai_model: 'gpt-test',

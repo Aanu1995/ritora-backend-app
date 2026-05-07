@@ -1,5 +1,6 @@
-import type { ProductCategory } from '../shelf/shelf.types';
+import type { PreferredTimeOfDay, ProductCategory } from '../shelf/shelf.types';
 import {
+  SuggestionDaypart,
   SuggestionEvidenceSourceId,
   SuggestionEvidenceSourceJson,
   SuggestionRequestContextJson,
@@ -11,7 +12,7 @@ export interface SuggestionContextSummary {
   builtAt: string;
   targetDate: string;
   targetTime: string;
-  daypart: 'morning' | 'noon' | 'evening';
+  daypart: SuggestionDaypart;
   requestSource: SuggestionRequestSource;
   onDemand: SuggestionRequestContextJson | null;
   skinProfile: {
@@ -67,7 +68,7 @@ export interface SuggestionProductScore {
   brand: string;
   name: string;
   category: ProductCategory;
-  preferredTimeOfDay: 'morning' | 'evening' | 'either' | null;
+  preferredTimeOfDay: PreferredTimeOfDay | null;
   activeTags: string[];
   suitabilityScore: number;
   suitabilityReasons: string[];

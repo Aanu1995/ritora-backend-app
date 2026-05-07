@@ -55,6 +55,7 @@ import {
   TEXTURE_PREFERENCES,
   WATER_INTAKE_LEVELS,
 } from './skin-profile.constants';
+import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 
 export class RecentProcedureDto {
   @ApiPropertyOptional({ enum: PROCEDURE_TYPES })
@@ -64,6 +65,7 @@ export class RecentProcedureDto {
   @ApiPropertyOptional({
     description: 'ISO date string when the procedure happened',
   })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsString()
   @MaxLength(20)
@@ -72,12 +74,14 @@ export class RecentProcedureDto {
 
 export class SafetyContextDto {
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsIn([...SKIN_CONDITIONS], { each: true })
   conditions?: string[];
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsIn([...SKIN_MEDICATIONS], { each: true })
@@ -89,6 +93,7 @@ export class SafetyContextDto {
   photosensitizing_other?: boolean;
 
   @ApiPropertyOptional({ type: [RecentProcedureDto] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -103,22 +108,26 @@ export class ReactionEntryDto {
   trigger: string;
 
   @ApiPropertyOptional({ enum: REACTION_TRIGGER_TYPES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...REACTION_TRIGGER_TYPES])
   trigger_type?: string;
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsIn([...REACTION_TYPES], { each: true })
   reaction_types?: string[];
 
   @ApiPropertyOptional({ enum: REACTION_SEVERITIES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...REACTION_SEVERITIES])
   severity?: string;
 
   @ApiPropertyOptional({ enum: REACTION_CERTAINTIES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...REACTION_CERTAINTIES])
   certainty?: string;
@@ -131,6 +140,7 @@ export class ReactionEntryDto {
 
 export class ReactionHistoryDto {
   @ApiPropertyOptional({ type: [ReactionEntryDto] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -144,23 +154,27 @@ export class ConcernDetailDto {
   concern: string;
 
   @ApiPropertyOptional({ enum: REACTION_SEVERITIES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...REACTION_SEVERITIES])
   severity?: string;
 
   @ApiPropertyOptional()
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsInt()
   @Min(0)
   duration_months?: number;
 
   @ApiPropertyOptional()
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsInt()
   @Min(1)
   priority?: number;
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -173,6 +187,7 @@ export class ConcernDetailDto {
   subtype?: string;
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -181,6 +196,7 @@ export class ConcernDetailDto {
 
 export class ConcernDetailsDto {
   @ApiPropertyOptional({ type: [ConcernDetailDto] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -190,26 +206,31 @@ export class ConcernDetailsDto {
 
 export class SkinBehaviorDto {
   @ApiPropertyOptional({ enum: TENDENCY_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...TENDENCY_LEVELS])
   burn_tendency?: string;
 
   @ApiPropertyOptional({ enum: TENDENCY_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...TENDENCY_LEVELS])
   tan_tendency?: string;
 
   @ApiPropertyOptional({ enum: TENDENCY_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...TENDENCY_LEVELS])
   pih_tendency?: string;
 
   @ApiPropertyOptional({ enum: TENDENCY_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...TENDENCY_LEVELS])
   melasma_tendency?: string;
 
   @ApiPropertyOptional({ enum: TENDENCY_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...TENDENCY_LEVELS])
   keloid_tendency?: string;
@@ -221,11 +242,13 @@ export class SkinBehaviorDto {
   daily_sun_exposure_hours?: string;
 
   @ApiPropertyOptional({ enum: SUNSCREEN_HABITS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SUNSCREEN_HABITS])
   sunscreen_habit?: string;
 
   @ApiPropertyOptional({ enum: SUNSCREEN_TOLERANCES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SUNSCREEN_TOLERANCES])
   sunscreen_tolerance?: string;
@@ -245,11 +268,13 @@ export class ActiveToleranceDto {
 
 export class RoutinePreferencesDto {
   @ApiPropertyOptional({ enum: ROUTINE_PACES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...ROUTINE_PACES])
   pace?: string;
 
   @ApiPropertyOptional()
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -257,6 +282,7 @@ export class RoutinePreferencesDto {
   am_minutes?: number;
 
   @ApiPropertyOptional()
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -264,6 +290,7 @@ export class RoutinePreferencesDto {
   pm_minutes?: number;
 
   @ApiPropertyOptional()
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -281,11 +308,13 @@ export class RoutinePreferencesDto {
   non_comedogenic?: boolean;
 
   @ApiPropertyOptional({ enum: SUNSCREEN_FILTERS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SUNSCREEN_FILTERS])
   sunscreen_filter?: string;
 
   @ApiPropertyOptional({ enum: SUNSCREEN_FINISHES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SUNSCREEN_FINISHES])
   sunscreen_finish?: string;
@@ -293,32 +322,38 @@ export class RoutinePreferencesDto {
 
 export class LifestyleContextDto {
   @ApiPropertyOptional({ enum: SLEEP_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SLEEP_LEVELS])
   sleep?: string;
 
   @ApiPropertyOptional({ enum: STRESS_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...STRESS_LEVELS])
   stress?: string;
 
   @ApiPropertyOptional({ enum: WATER_INTAKE_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...WATER_INTAKE_LEVELS])
   water_intake?: string;
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsIn([...DIET_FLAGS], { each: true })
   diet_flags?: string[];
 
   @ApiPropertyOptional({ enum: SMOKING_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SMOKING_LEVELS])
   smoking?: string;
 
   @ApiPropertyOptional({ enum: ALCOHOL_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...ALCOHOL_LEVELS])
   alcohol?: string;
@@ -340,6 +375,7 @@ export class LifestyleContextDto {
   shaving?: boolean;
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsIn([...CLIMATE_SENSITIVITIES], { each: true })
@@ -348,30 +384,35 @@ export class LifestyleContextDto {
 
 export class ShoppingPreferencesDto {
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   ingredient_dislikes?: string[];
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   product_dislikes?: string[];
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   brand_dislikes?: string[];
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsIn([...INGREDIENT_ETHICS], { each: true })
   ingredient_ethics?: string[];
 
   @ApiPropertyOptional({ type: [String] })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @IsIn([...TEXTURE_PREFERENCES], { each: true })
@@ -380,11 +421,13 @@ export class ShoppingPreferencesDto {
 
 export class HormonalContextDto {
   @ApiPropertyOptional({ enum: CYCLE_PATTERNS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...CYCLE_PATTERNS])
   cycle_pattern?: string;
 
   @ApiPropertyOptional({ enum: HORMONAL_BREAKOUT_PATTERNS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...HORMONAL_BREAKOUT_PATTERNS])
   breakout_pattern?: string;
@@ -440,6 +483,7 @@ export class CreateSkinProfileDto {
   currentConcerns?: string[];
 
   @ApiPropertyOptional({ description: 'ISO 3166-1 alpha-2 country code' })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsString()
   @Length(2, 2)
@@ -465,11 +509,13 @@ export class CreateSkinProfileDto {
   fitzpatrickPhototype?: string;
 
   @ApiPropertyOptional({ enum: SENSITIVITY_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SENSITIVITY_LEVELS])
   sensitivityLevel?: string;
 
   @ApiPropertyOptional({ enum: HYDRATION_LEVELS })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...HYDRATION_LEVELS])
   hydrationLevel?: string;
@@ -480,6 +526,7 @@ export class CreateSkinProfileDto {
   primaryGoal?: string;
 
   @ApiPropertyOptional({ enum: PREGNANCY_STATUSES })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...PREGNANCY_STATUSES])
   pregnancyStatus?: string;

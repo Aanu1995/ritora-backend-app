@@ -16,6 +16,7 @@ import {
 } from '../dto/suggestion-history.dto';
 import { SuggestionInstanceResponseDto } from '../dto/suggestion-instance-response.dto';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { SuggestionGenerationStatus } from '../suggestions.constants';
 import {
   applyHistoryCursor,
   applyHistoryFilters,
@@ -156,7 +157,7 @@ export class SuggestionHistoryReader {
       where: {
         user_id: user.id,
         target_date: date,
-        generation_status: 'ready',
+        generation_status: SuggestionGenerationStatus.Ready,
       },
       relations: ['steps', 'steps.product'],
       order: { target_time: 'ASC' },
@@ -266,7 +267,7 @@ export class SuggestionHistoryReader {
       .addSelect('suggestion.target_time', 'target_time')
       .where('suggestion.user_id = :userId', { userId: params.userId })
       .andWhere('suggestion.generation_status = :status', {
-        status: 'ready',
+        status: SuggestionGenerationStatus.Ready,
       })
       .andWhere('suggestion.target_date BETWEEN :fromDate AND :toDate', {
         fromDate: params.fromDate,

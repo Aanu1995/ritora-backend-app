@@ -11,9 +11,14 @@ export const DAYS_OF_WEEK = [
 ] as const;
 export type DayOfWeek = (typeof DAYS_OF_WEEK)[number];
 
-export const SLOT_MODES = ['manual', 'ai'] as const;
+export const SlotModeValue = {
+  Manual: 'manual',
+  Ai: 'ai',
+} as const;
+
+export const SLOT_MODES = Object.values(SlotModeValue);
 export type SlotMode = (typeof SLOT_MODES)[number];
-export const DEFAULT_SLOT_MODE: SlotMode = 'ai';
+export const DEFAULT_SLOT_MODE: SlotMode = SlotModeValue.Ai;
 
 export const STEP_LABELS = [
   ...Object.values(ProductCategory),

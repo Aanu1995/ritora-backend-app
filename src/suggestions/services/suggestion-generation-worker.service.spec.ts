@@ -197,6 +197,76 @@ describe('SuggestionGenerationWorker', () => {
       }),
     );
   });
+
+  it('does not crash when a corrupt scheduled job is missing its slot id', async () => {
+    queryBuilder.execute.mockResolvedValue({
+      raw: [
+        {
+          id: 'job-corrupt',
+          user_id: 'user-1',
+          slot_id: null,
+          suggestion_instance_id: null,
+          request_source: 'scheduled',
+          target_date: '2026-05-04',
+          target_time: '08:00',
+          attempt_count: 2,
+        },
+      ],
+    });
+    generationService.generateForJob.mockRejectedValueOnce(
+      new Error('Scheduled suggestion job is missing slot_id'),
+    );
+
+    await expect(worker.pollOnce()).resolves.toBeUndefined();
+
+    expect(suggestionRepo.update).not.toHaveBeenCalled();
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'job-corrupt' },
+      expect.objectContaining({
+        status: 'failed',
+        attempt_count: 3,
+        locked_at: null,
+        locked_by: null,
+      }),
+    );
+  });
+
+  it('dead-letters corrupt stale scheduled jobs without a slot id', async () => {
+    const staleLockedAt = new Date('2026-05-04T05:40:00.000Z');
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T06:00:00.000Z'));
+    jobRepo.find.mockResolvedValue([
+      {
+        id: 'stale-corrupt',
+        user_id: 'user-1',
+        slot_id: null,
+        suggestion_instance_id: null,
+        request_source: 'scheduled',
+        target_date: '2026-05-04',
+        target_time: '08:00',
+        attempt_count: 2,
+        locked_at: staleLockedAt,
+      } as SuggestionGenerationJob,
+    ]);
+    queryBuilder.execute.mockResolvedValue({ raw: [] });
+
+    await expect(worker.pollOnce()).resolves.toBeUndefined();
+
+    expect(suggestionRepo.update).not.toHaveBeenCalled();
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'stale-corrupt' },
+      expect.objectContaining({
+        status: 'failed',
+        attempt_count: 3,
+      }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'job_dead_lettered',
+        jobId: 'stale-corrupt',
+      }),
+    );
+    jest.useRealTimers();
+  });
 });
 
 function repo<T extends ObjectLiteral>() {

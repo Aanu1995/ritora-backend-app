@@ -65,6 +65,15 @@ describe('ApplicationReactiveRegenerationService', () => {
 
     await service.queueAfterApplicationChange(user(), skippedMorningLog());
 
+    expect(slotRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          user_id: 'user-1',
+          day_of_week: 'wed',
+          deleted_at: expect.objectContaining({ _type: 'isNull' }),
+        },
+      }),
+    );
     expect(suggestionRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'noon-suggestion',
@@ -95,6 +104,36 @@ describe('ApplicationReactiveRegenerationService', () => {
         last_error: 'reactive:log-1',
       }),
     );
+  });
+
+  it('does not queue reactive regeneration for later slots whose start time already passed', async () => {
+    jest.setSystemTime(new Date('2026-04-29T20:35:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      slot('morning-slot', '08:00'),
+      slot('noon-slot', '12:00'),
+      slot('evening-slot', '20:00'),
+    ]);
+    preferenceRepo.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      suggestion_lead_time_minutes: 120,
+    } as UserNotificationPreference);
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'noon-suggestion',
+        slot_id: 'noon-slot',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+      {
+        id: 'evening-suggestion',
+        slot_id: 'evening-slot',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+    ]);
+
+    await service.queueAfterApplicationChange(user(), skippedMorningLog());
+
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
   });
 
   it('does not queue regeneration when the log has no meaningful deviation', async () => {

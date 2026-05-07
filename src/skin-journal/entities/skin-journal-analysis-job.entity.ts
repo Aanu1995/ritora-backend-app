@@ -12,9 +12,18 @@ import {
 import { ulid } from 'ulid';
 import { User } from '../../users/entities/user.entity';
 import { SkinJournalEntry } from './skin-journal-entry.entity';
-import type { AnalysisJobStatus } from '../skin-journal.constants';
+import {
+  AnalysisJobStatus,
+  AnalysisJobStatusValue,
+} from '../skin-journal.constants';
 
-const ACTIVE_ANALYSIS_JOB_STATUSES = "'queued','sent','running'";
+const ACTIVE_ANALYSIS_JOB_STATUSES = [
+  AnalysisJobStatusValue.Queued,
+  AnalysisJobStatusValue.Sent,
+  AnalysisJobStatusValue.Running,
+]
+  .map((status) => `'${status}'`)
+  .join(',');
 
 @Entity('skin_journal_analysis_jobs')
 @Index('IDX_skin_journal_analysis_jobs_status_run_after', [
@@ -48,7 +57,11 @@ export class SkinJournalAnalysisJob {
   @Column({ type: 'text' })
   photo_object_key: string;
 
-  @Column({ type: 'varchar', length: 20, default: 'queued' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: AnalysisJobStatusValue.Queued,
+  })
   status: AnalysisJobStatus;
 
   @Column({ type: 'integer', default: 0 })

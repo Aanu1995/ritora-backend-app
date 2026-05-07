@@ -13,13 +13,16 @@ import {
 import { ulid } from 'ulid';
 import { encryptedNullableStringFieldTransformer } from '../../skin-profile/skin-profile-field-encryption';
 import { User } from '../../users/entities/user.entity';
-import { DayOfWeek, SlotMode } from '../dto/schedule.constants';
+import { DayOfWeek, SlotMode, SlotModeValue } from '../dto/schedule.constants';
 import { RoutineStep } from './routine-step.entity';
 
 const encryptedSpecialistProviderTransformer =
   encryptedNullableStringFieldTransformer(
     'schedule_slots.specialist_provider_name',
   );
+const encryptedSlotNotesTransformer = encryptedNullableStringFieldTransformer(
+  'schedule_slots.slot_notes',
+);
 const encryptedSpecialistClinicTransformer =
   encryptedNullableStringFieldTransformer(
     'schedule_slots.specialist_clinic_name',
@@ -35,9 +38,11 @@ const encryptedSpecialistSafetyNotesTransformer =
   ['user_id', 'day_of_week', 'slot_time'],
   {
     unique: true,
+    where: `"deleted_at" IS NULL`,
   },
 )
 @Index('IDX_schedule_slots_user_day', ['user_id', 'day_of_week'])
+@Index('IDX_schedule_slots_user_deleted', ['user_id', 'deleted_at'])
 export class ScheduleSlot {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;
@@ -51,10 +56,14 @@ export class ScheduleSlot {
   @Column({ type: 'time' })
   slot_time: string;
 
-  @Column({ type: 'varchar', length: 10, default: 'ai' })
+  @Column({ type: 'varchar', length: 10, default: SlotModeValue.Ai })
   mode: SlotMode;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedSlotNotesTransformer,
+  })
   slot_notes: string | null;
 
   @Column({
@@ -80,6 +89,9 @@ export class ScheduleSlot {
     transformer: encryptedSpecialistSafetyNotesTransformer,
   })
   specialist_safety_notes: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  deleted_at: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;

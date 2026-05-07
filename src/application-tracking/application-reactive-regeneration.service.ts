@@ -1,19 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Not, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
+import { SlotModeValue } from '../schedule/dto/schedule.constants';
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { UserNotificationPreference } from '../notifications/entities/user-notification-preference.entity';
 import { User } from '../users/entities/user.entity';
 import { SuggestionGenerationJob } from '../suggestions/entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
+import {
+  SuggestionGenerationJobStatus,
+  SuggestionGenerationStatus,
+  SuggestionMode,
+} from '../suggestions/suggestions.constants';
 import { RoutineBreakService } from '../suggestions/services/routine-break.service';
 import { mapDayOfWeekShort } from '../suggestions/services/suggestion-history.helpers';
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
+  compareClockTimes,
   deriveSuggestionDaypart,
 } from '../suggestions/services/suggestion-helpers';
 import { requeueSuggestionGenerationJob } from '../suggestions/services/suggestion-generation-job-queue';
+import { hasScheduledSlotElapsed } from '../suggestions/services/suggestion-scheduled-job-guards';
+import {
+  ApplicationItemSource,
+  ApplicationItemStatus,
+} from './application-tracking.constants';
 import { ApplicationLogResponseDto } from './dto/application-log-response.dto';
 
 @Injectable()
@@ -42,11 +54,11 @@ export class ApplicationReactiveRegenerationService {
       new Date(`${log.targetDate}T12:00:00Z`),
     );
     const slots = await this.slotRepo.find({
-      where: { user_id: user.id, day_of_week: dayOfWeek },
+      where: { user_id: user.id, day_of_week: dayOfWeek, deleted_at: IsNull() },
       order: { slot_time: 'ASC' },
     });
     const futureSlots = slots.filter(
-      (slot) => slot.slot_time.localeCompare(log.targetTime ?? '') > 0,
+      (slot) => compareClockTimes(slot.slot_time, log.targetTime ?? '') > 0,
     );
     if (futureSlots.length === 0) return;
     const prefs = await this.preferenceRepo.findOne({
@@ -61,7 +73,7 @@ export class ApplicationReactiveRegenerationService {
         user_id: user.id,
         slot_id: In(futureSlots.map((slot) => slot.id)),
         target_date: log.targetDate,
-        generation_status: Not('superseded' as const),
+        generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
     });
     const suggestionBySlot = new Map(
@@ -74,20 +86,34 @@ export class ApplicationReactiveRegenerationService {
         slot.slot_time,
         timeZone,
       );
+      if (
+        hasScheduledSlotElapsed({
+          targetDate: log.targetDate,
+          targetTime: slot.slot_time,
+          timeZone,
+          now,
+        })
+      ) {
+        continue;
+      }
       const visibleAt = new Date(slotInstant.getTime() - leadMinutes * 60_000);
       if (visibleAt.getTime() > now.getTime()) continue;
 
       const existing = suggestionBySlot.get(slot.id);
       let supersedesId: string | null = null;
       if (
-        existing?.generation_status === 'ready' ||
-        existing?.generation_status === 'failed'
+        existing?.generation_status === SuggestionGenerationStatus.Ready ||
+        existing?.generation_status === SuggestionGenerationStatus.Failed
       ) {
         supersedesId = existing.id;
-        existing.generation_status = 'superseded';
+        existing.generation_status = SuggestionGenerationStatus.Superseded;
         await this.suggestionRepo.save(existing);
       }
-      if (existing?.generation_status === 'generating') continue;
+      if (
+        existing?.generation_status === SuggestionGenerationStatus.Generating
+      ) {
+        continue;
+      }
       if (!existing || supersedesId) {
         await this.suggestionRepo.save(
           this.suggestionRepo.create({
@@ -96,8 +122,11 @@ export class ApplicationReactiveRegenerationService {
             target_date: log.targetDate,
             target_time: slot.slot_time,
             daypart: deriveSuggestionDaypart(slot.slot_time),
-            mode: slot.mode === 'manual' ? 'manual' : 'ai',
-            generation_status: 'pending',
+            mode:
+              slot.mode === SlotModeValue.Manual
+                ? SuggestionMode.Manual
+                : SuggestionMode.Ai,
+            generation_status: SuggestionGenerationStatus.Pending,
             visible_at: visibleAt,
             generated_at: null,
             ai_model: null,
@@ -125,7 +154,7 @@ export class ApplicationReactiveRegenerationService {
         target_date: log.targetDate,
         target_time: slot.slot_time,
         visible_at: visibleAt,
-        status: 'queued',
+        status: SuggestionGenerationJobStatus.Queued,
         attempt_count: 0,
         run_after: now,
         last_error: `reactive:${log.id}`,
@@ -139,10 +168,11 @@ function hasRegenerationSignal(log: ApplicationLogResponseDto): boolean {
     log.hasBeenEdited ||
     log.items.some(
       (item) =>
-        ['skipped', 'substituted'].includes(item.status) ||
+        item.status === ApplicationItemStatus.Skipped ||
+        item.status === ApplicationItemStatus.Substituted ||
         item.isAdHoc ||
-        item.itemSource === 'added_shelf' ||
-        item.itemSource === 'added_off_shelf',
+        item.itemSource === ApplicationItemSource.AddedShelf ||
+        item.itemSource === ApplicationItemSource.AddedOffShelf,
     )
   );
 }

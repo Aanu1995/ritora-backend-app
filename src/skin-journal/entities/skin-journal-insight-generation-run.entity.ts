@@ -7,9 +7,10 @@ import {
   PrimaryColumn,
 } from 'typeorm';
 import { ulid } from 'ulid';
-import type {
-  InsightGenerationStatus,
-  InsightGenerationTrigger,
+import {
+  InsightGenerationStatusValue,
+  type InsightGenerationStatus,
+  type InsightGenerationTrigger,
 } from '../skin-journal.constants';
 
 @Entity('skin_journal_insight_generation_runs')
@@ -24,7 +25,11 @@ export class SkinJournalInsightGenerationRun {
   @Column({ type: 'varchar', length: 40 })
   trigger: InsightGenerationTrigger;
 
-  @Column({ type: 'varchar', length: 20, default: 'running' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: InsightGenerationStatusValue.Running,
+  })
   status: InsightGenerationStatus;
 
   @Column({ type: 'date' })

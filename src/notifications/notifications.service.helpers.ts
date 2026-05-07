@@ -13,6 +13,7 @@ import {
 import {
   ScheduledNotification,
   ScheduledNotificationStatus,
+  ScheduledNotificationStatusValue,
 } from './entities/scheduled-notification.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
 import { UpdatePreferencesDto } from './dto/notification-preference.dto';
@@ -103,7 +104,7 @@ export async function runScheduledNotificationSweep(
 ): Promise<{ sent: number; failed: number }> {
   const due = await params.scheduledNotifications.find({
     where: {
-      status: 'pending',
+      status: ScheduledNotificationStatusValue.Pending,
       deliver_at: LessThanOrEqual(now),
     },
     order: { deliver_at: 'ASC' },
@@ -113,8 +114,8 @@ export async function runScheduledNotificationSweep(
   let failed = 0;
   for (const scheduled of due) {
     const claim = await params.scheduledNotifications.update(
-      { id: scheduled.id, status: 'pending' },
-      { status: 'dispatching', locked_at: now },
+      { id: scheduled.id, status: ScheduledNotificationStatusValue.Pending },
+      { status: ScheduledNotificationStatusValue.Dispatching, locked_at: now },
     );
     if (!claim.affected) {
       continue;
@@ -133,15 +134,15 @@ export async function runScheduledNotificationSweep(
       });
       await params.scheduledNotifications.update(
         { id: scheduled.id },
-        { status: 'sent', last_error: null },
+        { status: ScheduledNotificationStatusValue.Sent, last_error: null },
       );
       sent += 1;
     } catch (error) {
       const attemptCount = scheduled.attempt_count + 1;
       const status: ScheduledNotificationStatus =
         attemptCount >= SCHEDULED_NOTIFICATION_MAX_ATTEMPTS
-          ? 'failed'
-          : 'pending';
+          ? ScheduledNotificationStatusValue.Failed
+          : ScheduledNotificationStatusValue.Pending;
       await params.scheduledNotifications.update(
         { id: scheduled.id },
         {
@@ -181,7 +182,7 @@ export async function scheduleAfterQuietHours(
     payload: params.payload ?? null,
     deep_link: params.deepLink ?? null,
     deliver_at: deliverAt,
-    status: 'pending',
+    status: ScheduledNotificationStatusValue.Pending,
     attempt_count: 0,
     last_error: null,
     locked_at: null,

@@ -25,6 +25,7 @@ import {
   type StressLevel,
   type SunExposure,
 } from '../skin-journal.constants';
+import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 
 const FEELS: OverallFeel[] = ['awful', 'bad', 'ok', 'good', 'great'];
 const SLEEP: SleepBand[] = ['lt5h', '5to7h', '7to9h', 'gt9h', 'skipped'];
@@ -134,17 +135,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class RatingsDto {
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) oiliness?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) dryness?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) redness?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) breakouts?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(5) texture?: number;
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  oiliness?: number;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  dryness?: number;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  redness?: number;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  breakouts?: number;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  texture?: number;
+
+  @EmptyStringToUndefined()
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(5)
   irritation?: number;
+
+  @EmptyStringToUndefined()
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -176,15 +215,36 @@ export class UpsertEntryDto {
   @ValidateNested()
   @Type(() => RatingsDto)
   ratings?: RatingsDto;
-  @IsOptional() @IsIn(FEELS) overall_feel?: OverallFeel;
-  @IsOptional() @IsIn(SLEEP) sleep_band?: SleepBand;
-  @IsOptional() @IsIn(STRESS) stress_today?: StressLevel;
-  @IsOptional() @IsIn(SUN) sun_exposure_today?: SunExposure;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn(FEELS)
+  overall_feel?: OverallFeel;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn(SLEEP)
+  sleep_band?: SleepBand;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn(STRESS)
+  stress_today?: StressLevel;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn(SUN)
+  sun_exposure_today?: SunExposure;
+
   @IsOptional()
   @Transform(transformOptionalBoolean)
   @IsBoolean()
   sweat_exercise_today?: boolean;
-  @IsOptional() @IsIn(CYCLE) cycle_marker?: CycleMarker;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn(CYCLE)
+  cycle_marker?: CycleMarker;
 
   @IsOptional()
   @Transform(transformOptionalRecentChange)

@@ -6,8 +6,16 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindManyOptions, In, MoreThan, Not, Repository } from 'typeorm';
+import {
+  FindManyOptions,
+  In,
+  IsNull,
+  MoreThan,
+  Not,
+  Repository,
+} from 'typeorm';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
+import { SlotModeValue } from '../../schedule/dto/schedule.constants';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
 import { User } from '../../users/entities/user.entity';
@@ -16,6 +24,10 @@ import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import {
   SUGGESTION_SCHEDULER_BATCH_SIZE,
   SUGGESTION_SCHEDULER_INTERVAL_MS,
+  SuggestionGenerationJobStatus,
+  SuggestionGenerationStatus,
+  SuggestionMode,
+  SuggestionRequestSource,
 } from '../suggestions.constants';
 import { RoutineBreakService } from './routine-break.service';
 import {
@@ -161,7 +173,7 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
             target_date: targetDate,
             target_time: slot.slot_time,
             visible_at: visibleAt,
-            status: 'queued',
+            status: SuggestionGenerationJobStatus.Queued,
             attempt_count: 0,
             run_after: visibleAt,
             last_error: null,
@@ -184,11 +196,12 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
     lastSeenId: string | null,
   ): Promise<ScheduleSlot[]> {
     const options: FindManyOptions<ScheduleSlot> = {
+      where: { deleted_at: IsNull() },
       order: { id: 'ASC' },
       take: SUGGESTION_SCHEDULER_BATCH_SIZE,
     };
     if (lastSeenId) {
-      options.where = { id: MoreThan(lastSeenId) };
+      options.where = { id: MoreThan(lastSeenId), deleted_at: IsNull() };
     }
     return this.slotRepo.find(options);
   }
@@ -203,7 +216,7 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
         user_id: slot.user_id,
         slot_id: slot.id,
         target_date: targetDate,
-        generation_status: Not('superseded' as const),
+        generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
     });
     if (existing) return;
@@ -211,14 +224,17 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
       this.suggestionRepo.create({
         user_id: slot.user_id,
         slot_id: slot.id,
-        request_source: 'scheduled',
+        request_source: SuggestionRequestSource.Scheduled,
         request_id: null,
         request_context: null,
         target_date: targetDate,
         target_time: slot.slot_time,
         daypart: deriveSuggestionDaypart(slot.slot_time),
-        mode: slot.mode === 'manual' ? 'manual' : 'ai',
-        generation_status: 'pending',
+        mode:
+          slot.mode === SlotModeValue.Manual
+            ? SuggestionMode.Manual
+            : SuggestionMode.Ai,
+        generation_status: SuggestionGenerationStatus.Pending,
         visible_at: visibleAt,
         generated_at: null,
         ai_model: null,

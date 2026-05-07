@@ -1,11 +1,19 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
-import { ProductCategory, ShelfStatus } from '../../shelf/shelf.types';
+import {
+  PreferredTimeOfDay,
+  ProductCategory,
+  ShelfStatus,
+} from '../../shelf/shelf.types';
 import {
   SuggestionContextSummary,
   SuggestionProductScore,
 } from '../suggestion-context.types';
-import { SuggestionEvidenceSourceId } from '../suggestions.constants';
+import {
+  SuggestionDaypart,
+  SuggestionEvidenceSourceId,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import {
   buildPrompt,
@@ -48,7 +56,7 @@ describe('suggestion AI contract', () => {
   it('treats on-demand free text as context instead of instructions', () => {
     const prompt = buildPrompt({
       ...generationInputs(),
-      requestSource: 'on_demand',
+      requestSource: SuggestionRequestSource.OnDemand,
       requestContext: {
         intent: 'post_workout',
         intensity: 'minimal',
@@ -139,12 +147,12 @@ function generationInputs(): SuggestionGenerationInputs {
   const product = sunscreenProduct();
   return {
     slotId: 'slot-1',
-    requestSource: 'scheduled',
+    requestSource: SuggestionRequestSource.Scheduled,
     requestContext: null,
     scheduledSlotContext: null,
     targetDate: '2026-05-04',
     targetTime: '08:00',
-    daypart: 'morning',
+    daypart: SuggestionDaypart.Morning,
     skinProfile: null,
     shelfActiveProducts: [product],
     shelfFinishedProductIds: [],
@@ -163,7 +171,7 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
     brand: product.brand,
     name: product.name,
     category: product.category,
-    preferredTimeOfDay: 'morning',
+    preferredTimeOfDay: PreferredTimeOfDay.Morning,
     activeTags: ['spf'],
     suitabilityScore: 90,
     suitabilityReasons: ['daytime sun protection fit'],
@@ -179,8 +187,8 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
     builtAt: '2026-05-04T06:00:00.000Z',
     targetDate: '2026-05-04',
     targetTime: '08:00',
-    daypart: 'morning',
-    requestSource: 'scheduled',
+    daypart: SuggestionDaypart.Morning,
+    requestSource: SuggestionRequestSource.Scheduled,
     onDemand: null,
     skinProfile: {
       primaryGoal: null,

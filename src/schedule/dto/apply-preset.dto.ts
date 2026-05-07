@@ -1,23 +1,34 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import {
   DATE_ONLY_REGEX,
+  DEFAULT_SLOT_MODE,
   MAX_SPECIALIST_CLINIC_NAME_LENGTH,
   MAX_SPECIALIST_PROVIDER_NAME_LENGTH,
   MAX_SPECIALIST_SAFETY_NOTES_LENGTH,
   MAX_SLOT_NOTES_LENGTH,
+  MAX_STEPS_PER_SLOT,
   SCHEDULE_PRESETS,
   type SchedulePreset,
   SLOT_MODES,
   type SlotMode,
   TIME_REGEX,
 } from './schedule.constants';
+import {
+  EmptyStringToNull,
+  EmptyStringToUndefined,
+} from '../../common/dto/empty-string.transforms';
+import { RoutineStepInputDto } from './upsert-routine-steps.dto';
 
 export class ApplyPresetDto {
   @ApiProperty({ enum: SCHEDULE_PRESETS })
@@ -29,7 +40,8 @@ export class ApplyPresetDto {
   @Matches(TIME_REGEX, { message: 'slotTime must be in HH:MM 24-hour format' })
   slotTime!: string;
 
-  @ApiPropertyOptional({ enum: SLOT_MODES, default: 'ai' })
+  @ApiPropertyOptional({ enum: SLOT_MODES, default: DEFAULT_SLOT_MODE })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn([...SLOT_MODES])
   mode?: SlotMode;
@@ -53,6 +65,7 @@ export class ApplyPresetDto {
   specialistClinicName?: string | null;
 
   @ApiPropertyOptional({ example: '2026-03-12', nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsString()
   @Matches(DATE_ONLY_REGEX, { message: 'activeSince must be YYYY-MM-DD' })
@@ -63,4 +76,13 @@ export class ApplyPresetDto {
   @IsString()
   @MaxLength(MAX_SPECIALIST_SAFETY_NOTES_LENGTH)
   specialistSafetyNotes?: string | null;
+
+  @ApiPropertyOptional({ type: [RoutineStepInputDto] })
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_STEPS_PER_SLOT)
+  @ValidateNested({ each: true })
+  @Type(() => RoutineStepInputDto)
+  steps?: RoutineStepInputDto[];
 }

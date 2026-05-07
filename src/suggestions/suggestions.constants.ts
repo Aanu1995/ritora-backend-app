@@ -1,71 +1,134 @@
-export type SuggestionDaypart = 'morning' | 'noon' | 'evening';
-export const SUGGESTION_DAYPARTS: readonly SuggestionDaypart[] = [
-  'morning',
-  'noon',
-  'evening',
-] as const;
+export const SuggestionDaypart = {
+  Morning: 'morning',
+  Noon: 'noon',
+  Evening: 'evening',
+} as const;
 
-export type SuggestionMode = 'ai' | 'manual' | 'mixed';
-export const SUGGESTION_MODES: readonly SuggestionMode[] = [
-  'ai',
-  'manual',
-  'mixed',
-] as const;
+export type SuggestionDaypart =
+  (typeof SuggestionDaypart)[keyof typeof SuggestionDaypart];
+
+export const SUGGESTION_DAYPARTS = Object.values(SuggestionDaypart);
+
+export const SuggestionMode = {
+  Ai: 'ai',
+  Manual: 'manual',
+  Mixed: 'mixed',
+} as const;
+
+export type SuggestionMode =
+  (typeof SuggestionMode)[keyof typeof SuggestionMode];
+
+export const SUGGESTION_MODES = Object.values(SuggestionMode);
+
+export const SuggestionGenerationStatus = {
+  Pending: 'pending',
+  Generating: 'generating',
+  Ready: 'ready',
+  Failed: 'failed',
+  Superseded: 'superseded',
+} as const;
 
 export type SuggestionGenerationStatus =
-  | 'pending'
-  | 'generating'
-  | 'ready'
-  | 'failed'
-  | 'superseded';
+  (typeof SuggestionGenerationStatus)[keyof typeof SuggestionGenerationStatus];
 
-export const SUGGESTION_GENERATION_STATUSES: readonly SuggestionGenerationStatus[] =
-  ['pending', 'generating', 'ready', 'failed', 'superseded'] as const;
+export const SUGGESTION_GENERATION_STATUSES = Object.values(
+  SuggestionGenerationStatus,
+);
+
+export const SuggestionSlotLifecycleStatus = {
+  Locked: 'locked',
+  Generating: 'generating',
+  Ready: 'ready',
+  Active: 'active',
+  Recordable: 'recordable',
+  Recorded: 'recorded',
+  Edited: 'edited',
+  Missed: 'missed',
+  Failed: 'failed',
+} as const;
 
 export type SuggestionSlotLifecycleStatus =
-  | 'locked'
-  | 'generating'
-  | 'ready'
-  | 'active'
-  | 'recordable'
-  | 'recorded'
-  | 'edited'
-  | 'missed'
-  | 'failed';
+  (typeof SuggestionSlotLifecycleStatus)[keyof typeof SuggestionSlotLifecycleStatus];
 
-export const SUGGESTION_SLOT_LIFECYCLE_STATUSES: readonly SuggestionSlotLifecycleStatus[] =
-  [
-    'locked',
-    'generating',
-    'ready',
-    'active',
-    'recordable',
-    'recorded',
-    'edited',
-    'missed',
-    'failed',
-  ] as const;
+export const SUGGESTION_SLOT_LIFECYCLE_STATUSES = Object.values(
+  SuggestionSlotLifecycleStatus,
+);
+
+export const SuggestionStepProvenance = {
+  SpecialistLocked: 'specialist_locked',
+  UserRoutine: 'user_routine',
+  AiAdded: 'ai_added',
+} as const;
 
 export type SuggestionStepProvenance =
-  | 'specialist_locked'
-  | 'user_routine'
-  | 'ai_added';
+  (typeof SuggestionStepProvenance)[keyof typeof SuggestionStepProvenance];
 
-export const SUGGESTION_STEP_PROVENANCES: readonly SuggestionStepProvenance[] =
-  ['specialist_locked', 'user_routine', 'ai_added'] as const;
+export const SUGGESTION_STEP_PROVENANCES = Object.values(
+  SuggestionStepProvenance,
+);
+
+export const SuggestionGenerationJobStatus = {
+  Queued: 'queued',
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+  Cancelled: 'cancelled',
+} as const;
 
 export type SuggestionGenerationJobStatus =
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  (typeof SuggestionGenerationJobStatus)[keyof typeof SuggestionGenerationJobStatus];
 
-export type SuggestionRequestSource = 'scheduled' | 'on_demand';
-export const SUGGESTION_REQUEST_SOURCES: readonly SuggestionRequestSource[] = [
-  'scheduled',
-  'on_demand',
-] as const;
+export const SuggestionRequestSource = {
+  Scheduled: 'scheduled',
+  OnDemand: 'on_demand',
+} as const;
+
+export type SuggestionRequestSource =
+  (typeof SuggestionRequestSource)[keyof typeof SuggestionRequestSource];
+
+export const SUGGESTION_REQUEST_SOURCES = Object.values(
+  SuggestionRequestSource,
+);
+
+export const SuggestionHistoryRange = {
+  SevenDays: '7d',
+  ThirtyDays: '30d',
+  Custom: 'custom',
+} as const;
+
+export type SuggestionHistoryRange =
+  (typeof SuggestionHistoryRange)[keyof typeof SuggestionHistoryRange];
+
+export const SUGGESTION_HISTORY_RANGES = Object.values(SuggestionHistoryRange);
+
+export const SuggestionHistorySlotStatus = {
+  Applied: 'applied',
+  Partial: 'partial',
+  Skipped: 'skipped',
+  Simplified: 'simplified',
+  Missed: 'missed',
+} as const;
+
+export type SuggestionHistorySlotStatus =
+  (typeof SuggestionHistorySlotStatus)[keyof typeof SuggestionHistorySlotStatus];
+
+export const SUGGESTION_HISTORY_SLOT_STATUSES = Object.values(
+  SuggestionHistorySlotStatus,
+);
+
+export const SuggestionRegenerationReason = {
+  UserRequested: 'user_requested',
+  ScheduleChange: 'schedule_change',
+  ReactionDetected: 'reaction_detected',
+  NormalRoutineRequested: 'normal_routine_requested',
+} as const;
+
+export type SuggestionRegenerationReason =
+  (typeof SuggestionRegenerationReason)[keyof typeof SuggestionRegenerationReason];
+
+export const SUGGESTION_REGENERATION_REASONS = Object.values(
+  SuggestionRegenerationReason,
+);
 
 export type OnDemandSuggestionIntent =
   | 'post_workout'
@@ -240,6 +303,19 @@ export interface SuggestionSafetyFlagJson {
 }
 
 export interface SuggestionStepChipJson {
-  tone: 'neutral' | 'reason' | 'ai' | 'specialist' | 'warn';
+  tone: SuggestionStepChipTone;
   text: string;
 }
+
+export const SuggestionStepChipTone = {
+  Neutral: 'neutral',
+  Reason: 'reason',
+  Ai: 'ai',
+  Specialist: 'specialist',
+  Warn: 'warn',
+} as const;
+
+export type SuggestionStepChipTone =
+  (typeof SuggestionStepChipTone)[keyof typeof SuggestionStepChipTone];
+
+export const SUGGESTION_STEP_CHIP_TONES = Object.values(SuggestionStepChipTone);

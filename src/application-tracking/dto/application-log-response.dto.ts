@@ -8,6 +8,7 @@ import { ApplicationLogItemResponseDto } from './application-log-item.dto';
 import { ApplicationLog } from '../entities/application-log.entity';
 import { ApplicationLogVersion } from '../entities/application-log-version.entity';
 import {
+  APPLICATION_DAYPARTS,
   ApplicationDaypart,
   ApplicationLogSnapshot,
 } from '../application-tracking.constants';
@@ -30,7 +31,7 @@ export class ApplicationLogResponseDto {
 
   @ApiProperty({
     nullable: true,
-    enum: ['morning', 'noon', 'evening'],
+    enum: APPLICATION_DAYPARTS,
   })
   daypart: ApplicationDaypart | null;
 

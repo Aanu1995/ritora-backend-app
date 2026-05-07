@@ -75,6 +75,7 @@ import {
 import {
   CalendarDayDto,
   CalendarDayState,
+  CalendarDayStateValue,
   CalendarResponseDto,
 } from './dto/calendar-response.dto';
 import { JournalEntryResponseDto } from './dto/journal-entry-response.dto';
@@ -121,9 +122,12 @@ import {
   SKIN_JOURNAL_WRAPPED_ENABLED,
   SkinJournalExportPayload,
   AnalysisStatus,
+  AnalysisStatusValue,
   AnalysisEntryContext,
   AnalysisSkinContext,
   CompareDeltaBullet,
+  ExportStatusValue,
+  InsightGenerationStatusValue,
 } from './skin-journal.constants';
 import {
   isValidDate,
@@ -307,7 +311,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         user_id: params.userId,
         entry_date: params.targetDate,
         time_zone: timeZone,
-        analysis_status: 'pending',
+        analysis_status: AnalysisStatusValue.Pending,
       });
     }
 
@@ -366,7 +370,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       entry.exif_stripped = stored.exif_stripped;
 
       /* Re-analyse on photo replacement. */
-      entry.analysis_status = 'pending';
+      entry.analysis_status = AnalysisStatusValue.Pending;
       entry.analysis_observations = null;
       entry.analysis_interpretation = null;
       entry.analysis_concern_keys = [];
@@ -378,7 +382,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!entry.photo_object_key) {
-      entry.analysis_status = 'skipped';
+      entry.analysis_status = AnalysisStatusValue.Skipped;
     }
 
     let saved: SkinJournalEntry;
@@ -414,7 +418,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    if (saved.analysis_status === 'pending' && saved.photo_object_key) {
+    if (
+      saved.analysis_status === AnalysisStatusValue.Pending &&
+      saved.photo_object_key
+    ) {
       await this.tryEnqueueAnalysisForEntry(
         params.userId,
         saved,
@@ -547,7 +554,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     if (!entry.photo_object_key) {
       throw new BadRequestException('Entry has no photo to analyse');
     }
-    entry.analysis_status = 'pending';
+    entry.analysis_status = AnalysisStatusValue.Pending;
     entry.analysis_error = null;
     entry.analysis_interpretation = null;
     entry.analysis_retry_count = (entry.analysis_retry_count ?? 0) + 1;
@@ -667,22 +674,24 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
     const days: CalendarDayDto[] = dates.map((date) => {
       const entry = byDate.get(date);
-      let state: CalendarDayState = 'no_entry';
+      let state: CalendarDayState = CalendarDayStateValue.NoEntry;
       let hasReaction = false;
       if (entry) {
         if (!entry.photo_object_key) {
-          state = 'entry_no_photo';
+          state = CalendarDayStateValue.EntryNoPhoto;
         } else if (
-          entry.analysis_status === 'pending' ||
-          entry.analysis_status === 'queued' ||
-          entry.analysis_status === 'running'
+          entry.analysis_status === AnalysisStatusValue.Pending ||
+          entry.analysis_status === AnalysisStatusValue.Queued ||
+          entry.analysis_status === AnalysisStatusValue.Running
         ) {
-          state = 'pending';
-        } else if (entry.analysis_status === 'failed') {
-          state = 'failed';
+          state = CalendarDayStateValue.Pending;
+        } else if (entry.analysis_status === AnalysisStatusValue.Failed) {
+          state = CalendarDayStateValue.Failed;
         } else {
           hasReaction = entry.has_reaction_signal;
-          state = hasReaction ? 'reaction' : 'completed';
+          state = hasReaction
+            ? CalendarDayStateValue.Reaction
+            : CalendarDayStateValue.Completed;
         }
       }
       return {
@@ -1017,7 +1026,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     const fallbackStartedAt = Date.now();
     let plannedInputImageCount = 1;
     try {
-      entry.analysis_status = 'running';
+      entry.analysis_status = AnalysisStatusValue.Running;
       entry.analysis_started_at = startedAt;
       await this.entries.save(entry);
       await this.recordDataAccess(
@@ -1075,8 +1084,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       current.analysis_status =
         obs.image_quality.face_detected &&
         obs.image_quality.needs_retake !== true
-          ? 'completed'
-          : 'needs_review';
+          ? AnalysisStatusValue.Completed
+          : AnalysisStatusValue.NeedsReview;
       current.analysis_model = obs.model_version;
       current.analysis_version = obs.schema_version;
       current.analysis_prompt_version = result.metadata.prompt_version;
@@ -1115,7 +1124,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         job.attempt_count <
           (job.max_attempts || this.analysisQueue.getMaxAttempts());
       if (shouldRetry && job) {
-        current.analysis_status = 'queued';
+        current.analysis_status = AnalysisStatusValue.Queued;
         current.analysis_error = errorMessage;
         current.analysis_prompt_version = this.analysis.promptVersion();
         current.analysis_started_at = startedAt;
@@ -1129,7 +1138,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      current.analysis_status = 'failed';
+      current.analysis_status = AnalysisStatusValue.Failed;
       current.analysis_error = errorMessage;
       current.analysis_prompt_version = this.analysis.promptVersion();
       current.analysis_started_at = startedAt;
@@ -1163,10 +1172,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     if (!current || current.photo_object_key !== photoObjectKey) {
       return;
     }
-    if (current.analysis_status === 'completed') {
+    if (current.analysis_status === AnalysisStatusValue.Completed) {
       return;
     }
-    current.analysis_status = 'queued';
+    current.analysis_status = AnalysisStatusValue.Queued;
     current.analysis_error = reason;
     await this.entries.save(current);
   }
@@ -1209,7 +1218,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         error,
       );
       if (entry.photo_object_key) {
-        entry.analysis_status = 'queued';
+        entry.analysis_status = AnalysisStatusValue.Queued;
         entry.analysis_error =
           'Analysis queue is temporarily unavailable; it will retry automatically.';
         await this.entries.save(entry);
@@ -1245,9 +1254,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
     await this.analysisQueue.recoverExpiredLocks();
     const recoverableStatuses: AnalysisStatus[] = [
-      'pending',
-      'queued',
-      'running',
+      AnalysisStatusValue.Pending,
+      AnalysisStatusValue.Queued,
+      AnalysisStatusValue.Running,
     ];
     const interrupted = await this.entries.find({
       where: {
@@ -1261,7 +1270,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       if (!entry.photo_object_key) {
         continue;
       }
-      entry.analysis_status = 'queued';
+      entry.analysis_status = AnalysisStatusValue.Queued;
       entry.analysis_error =
         'Analysis queued after service restart; it will retry automatically.';
       await this.entries.save(entry);
@@ -1313,13 +1322,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       take: 500,
     });
     const completedCount = analysedEntries.filter(
-      (entry) => entry.analysis_status === 'completed',
+      (entry) => entry.analysis_status === AnalysisStatusValue.Completed,
     ).length;
     const failedCount = analysedEntries.filter(
-      (entry) => entry.analysis_status === 'failed',
+      (entry) => entry.analysis_status === AnalysisStatusValue.Failed,
     ).length;
     const needsReviewCount = analysedEntries.filter(
-      (entry) => entry.analysis_status === 'needs_review',
+      (entry) => entry.analysis_status === AnalysisStatusValue.NeedsReview,
     ).length;
     const durationValues = analysedEntries
       .map((entry) => entry.analysis_duration_ms)
@@ -1883,7 +1892,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       this.insightRuns.create({
         user_id: userId,
         trigger: options.trigger,
-        status: 'running',
+        status: InsightGenerationStatusValue.Running,
         data_window_start: entriesAsc[0].entry_date,
         data_window_end:
           entriesAsc.at(-1)?.entry_date ?? entriesAsc[0].entry_date,
@@ -1978,13 +1987,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
           deepLink: '/journal?tab=insights',
         });
       }
-      run.status = 'completed';
+      run.status = InsightGenerationStatusValue.Completed;
       run.insight_count = createdCount;
       run.completed_at = nowDate();
       run.duration_ms = Date.now() - startedAt;
       await this.insightRuns.save(run);
     } catch (error) {
-      run.status = 'failed';
+      run.status = InsightGenerationStatusValue.Failed;
       run.error =
         error instanceof Error ? error.message : 'Insight generation failed';
       run.completed_at = nowDate();
@@ -2058,7 +2067,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     const [totalEntries, lastRun, activeJob] = await Promise.all([
       this.entries.count({ where: { user_id: userId } }),
       this.insightRuns.findOne({
-        where: { user_id: userId, status: 'completed' },
+        where: {
+          user_id: userId,
+          status: InsightGenerationStatusValue.Completed,
+        },
         order: { completed_at: 'DESC' },
       }),
       this.insightQueue.getActiveJobForUser(userId),
@@ -2300,7 +2312,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       user_id: userId,
       range_from: dto.from,
       range_to: dto.to,
-      status: 'ready',
+      status: ExportStatusValue.Ready,
       payload,
       error: null,
     });
@@ -2375,7 +2387,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         user_id: userId,
         entry_date: LessThan(currentEntry.entry_date),
         photo_object_key: Not(IsNull()),
-        analysis_status: 'completed',
+        analysis_status: AnalysisStatusValue.Completed,
       } as FindOptionsWhere<SkinJournalEntry>,
       order: { entry_date: 'DESC' },
       take: 10,

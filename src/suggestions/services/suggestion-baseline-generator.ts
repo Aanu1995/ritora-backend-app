@@ -5,9 +5,13 @@ import type {
   SuggestionGenerationStepOutput,
 } from './suggestion-ai-generator';
 import {
+  SuggestionDaypart,
   SuggestionEvidenceSourceId,
   SuggestionExplanationJson,
   SuggestionGapRecommendationJson,
+  SuggestionRequestSource,
+  SuggestionStepChipTone,
+  SuggestionStepProvenance,
 } from '../suggestions.constants';
 import { SuggestionProductScore } from '../suggestion-context.types';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
@@ -38,11 +42,11 @@ export function deterministicExplanation(
 ): SuggestionExplanationJson {
   return {
     headline:
-      inputs.requestSource === 'on_demand'
+      inputs.requestSource === SuggestionRequestSource.OnDemand
         ? 'Quick shelf suggestion'
         : 'Using your shelf today',
     body: [
-      inputs.requestSource === 'on_demand'
+      inputs.requestSource === SuggestionRequestSource.OnDemand
         ? 'Ritora used your shelf and safety rules for this request.'
         : 'Ritora used your shelf and safety rules for this slot.',
       ...(inputs.contextSummary.routineBreak.recentlyResumed
@@ -90,7 +94,8 @@ export function buildDeterministicGapRecommendations(
   const gaps: SuggestionGapRecommendationJson[] = [];
 
   if (
-    (inputs.daypart === 'morning' || inputs.daypart === 'noon') &&
+    (inputs.daypart === SuggestionDaypart.Morning ||
+      inputs.daypart === SuggestionDaypart.Noon) &&
     !hasSunscreen
   ) {
     gaps.push({
@@ -160,7 +165,7 @@ function selectBaselineProducts(
 function preferredCategoryOrder(
   inputs: SuggestionGenerationInputs,
 ): ProductCategory[] {
-  if (inputs.requestSource === 'on_demand') {
+  if (inputs.requestSource === SuggestionRequestSource.OnDemand) {
     switch (inputs.requestContext?.intent) {
       case 'post_workout':
       case 'post_makeup_or_shower':
@@ -193,7 +198,7 @@ function preferredCategoryOrder(
   }
 
   if (shouldAvoidStrongActives(inputs)) {
-    return inputs.daypart === 'evening'
+    return inputs.daypart === SuggestionDaypart.Evening
       ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
       : [
           ProductCategory.Cleanser,
@@ -202,7 +207,7 @@ function preferredCategoryOrder(
         ];
   }
 
-  if (inputs.daypart === 'evening') {
+  if (inputs.daypart === SuggestionDaypart.Evening) {
     return [
       ProductCategory.Cleanser,
       ProductCategory.Serum,
@@ -253,10 +258,10 @@ function productScoreToStep(
         maxSentences: 1,
       }) ?? 'Selected from your shelf.',
     routineNote: null,
-    provenance: 'ai_added',
+    provenance: SuggestionStepProvenance.AiAdded,
     chips: [
       {
-        tone: 'ai',
+        tone: SuggestionStepChipTone.Ai,
         text: 'Ritora baseline',
       },
     ],

@@ -11,13 +11,19 @@ import {
   NOTIFICATION_PAGE_DEFAULT_LIMIT,
   NOTIFICATION_PAGE_MAX_LIMIT,
 } from '../notifications.constants';
+import {
+  EmptyStringToDefault,
+  EmptyStringToUndefined,
+} from '../../common/dto/empty-string.transforms';
 
 export class NotificationListQueryDto {
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsString()
   @MaxLength(512)
   cursor?: string;
 
+  @EmptyStringToDefault(NOTIFICATION_PAGE_DEFAULT_LIMIT)
   @IsOptional()
   @Type(() => Number)
   @IsInt()

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsISO8601, IsOptional, IsString, MaxLength } from 'class-validator';
+import { EmptyStringToNull } from '../../common/dto/empty-string.transforms';
 import {
   ROUTINE_BREAK_VIEW_STATUSES,
   RoutineBreakViewStatus,
@@ -7,6 +8,7 @@ import {
 
 export class StartRoutineBreakDto {
   @ApiProperty({ required: false, nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsISO8601({ strict: true })
   endsAt?: string | null;
@@ -20,6 +22,7 @@ export class StartRoutineBreakDto {
 
 export class UpdateRoutineBreakDto {
   @ApiProperty({ required: false, nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsISO8601({ strict: true })
   endsAt?: string | null;

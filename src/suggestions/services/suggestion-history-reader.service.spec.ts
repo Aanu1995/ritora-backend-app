@@ -260,6 +260,148 @@ describe('SuggestionHistoryReader', () => {
     );
   });
 
+  it('uses stored snapshots when deleted source rows are no longer available', async () => {
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'suggestion-1',
+        user_id: 'user-1',
+        slot_id: 'deleted-slot-1',
+        request_source: 'scheduled',
+        request_context: null,
+        target_date: '2026-04-29',
+        target_time: '08:30',
+        daypart: 'morning',
+        mode: 'ai',
+        generation_status: 'ready',
+        visible_at: new Date('2026-04-29T06:30:00.000Z'),
+        generated_at: new Date('2026-04-29T06:31:00.000Z'),
+        ai_model: 'gpt-4.1-mini',
+        ai_prompt_version: '2026-05-06.v1',
+        simplified_for_reaction: false,
+        has_reaction_signal: false,
+        steps: [
+          {
+            id: 'step-1',
+            step_order: 0,
+            routine_step_id: null,
+            inventory_product_id: null,
+            product_brand_snapshot: 'Ava Lab',
+            product_name_snapshot: 'Barrier Serum',
+            step_label: 'serum',
+            custom_label: null,
+            application_method: null,
+            quantity: null,
+            wait_after_minutes: null,
+            explanation: 'Keep it gentle.',
+            routine_note_snapshot: null,
+            provenance: 'ai_added',
+            chips: [],
+            safety_warnings: [],
+            product: null,
+          },
+        ],
+        gap_recommendations: [],
+        safety_flags: [],
+        generation_context: null,
+        ai_explanation: null,
+        created_at: new Date('2026-04-29T06:30:00.000Z'),
+        updated_at: new Date('2026-04-29T06:31:00.000Z'),
+      } as unknown as SuggestionInstance,
+    ]);
+    applicationLogRepo.find.mockResolvedValue([
+      {
+        id: 'log-1',
+        suggestion_instance_id: 'suggestion-1',
+        slot_id: 'deleted-slot-1',
+        target_date: '2026-04-29',
+        target_time: '08:30',
+        daypart: 'morning',
+        applied_at: new Date('2026-04-29T08:42:00.000Z'),
+        general_notes: null,
+        edit_reason: null,
+        edit_count: 0,
+        has_been_edited: false,
+        first_recorded_at: new Date('2026-04-29T08:42:00.000Z'),
+        last_edited_at: null,
+        created_at: new Date('2026-04-29T08:42:00.000Z'),
+        updated_at: new Date('2026-04-29T08:42:00.000Z'),
+        items: [
+          {
+            id: 'item-1',
+            step_order: 0,
+            suggestion_step_id: 'step-1',
+            inventory_product_id: null,
+            substituted_with_product_id: null,
+            product_brand_snapshot: 'Ava Lab',
+            product_name_snapshot: 'Barrier Serum',
+            step_label: 'serum',
+            status: 'applied',
+            is_ad_hoc: false,
+            item_source: 'recommended',
+            ad_hoc_brand: null,
+            ad_hoc_name: null,
+            notes: null,
+            substitution_reason: null,
+            recommended_snapshot: null,
+            applied_snapshot: {
+              product_id: null,
+              brand: 'Ava Lab',
+              name: 'Barrier Serum',
+              step_label: 'serum',
+              suggestion_step_id: 'step-1',
+            },
+            applied_at: new Date('2026-04-29T08:42:00.000Z'),
+            product: null,
+            substituted_with_product: null,
+          },
+        ],
+      } as unknown as ApplicationLog,
+    ]);
+    slotRepo.findBy.mockResolvedValue([]);
+    journalEntryRepo.find.mockResolvedValue([
+      {
+        id: 'journal-removed-photo',
+        entry_date: '2026-04-29',
+        photo_object_key: null,
+        overall_feel: 'ok',
+        has_reaction_signal: true,
+        analysis_observations: {
+          reaction_signals: { reaction_detected: true },
+        },
+      } as SkinJournalEntry,
+    ]);
+
+    const day = await reader.getHistoryDay(
+      { id: 'user-1', time_zone: 'UTC' } as User,
+      null,
+      '2026-04-29',
+    );
+
+    expect(day.photoEntryId).toBeNull();
+    expect(day.reactionFlagged).toBe(false);
+    expect(day.slots[0]).toEqual(
+      expect.objectContaining({
+        slotId: 'deleted-slot-1',
+        slotTime: '08:30',
+        status: 'applied',
+      }),
+    );
+    expect(day.slots[0].suggestion?.steps[0]).toEqual(
+      expect.objectContaining({
+        product: null,
+        productBrand: 'Ava Lab',
+        productName: 'Barrier Serum',
+      }),
+    );
+    expect(day.slots[0].applicationLog?.items[0]).toEqual(
+      expect.objectContaining({
+        product: null,
+        productBrand: 'Ava Lab',
+        productName: 'Barrier Serum',
+      }),
+    );
+  });
+
   it('exports every matching history row while ignoring frontend pagination', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-05-04T10:00:00.000Z'));
     historyQueryBuilder.getRawMany.mockResolvedValue([

@@ -23,11 +23,12 @@ import {
   sparklineBlock,
   textBlock,
 } from './insights/blocks';
-import type {
-  ConcernTrendFacts,
-  InsightCandidate,
-  InsightValue,
-  InsightValues,
+import {
+  InsightToneValue,
+  type ConcernTrendFacts,
+  type InsightCandidate,
+  type InsightValue,
+  type InsightValues,
 } from './insights/insight-types';
 
 export type DeterministicInsightCandidate = InsightCandidate;
@@ -877,9 +878,9 @@ function aiSummaryInsight(
           entriesCount: entries.length,
           reactionCount,
         },
-        'ai',
+        InsightToneValue.Ai,
       ),
-      disclaimerBlock('journal.insightsTab.ai.provenance', 'ai'),
+      disclaimerBlock('journal.insightsTab.ai.provenance', InsightToneValue.Ai),
     ],
     sourceEntryIds: entries.slice(-14).map((entry) => entry.id),
     timeWindow,
@@ -916,7 +917,7 @@ function aiPatternInsight(
         {
           factor: 'travelled',
         },
-        'ai',
+        InsightToneValue.Ai,
       ),
       factorTableBlock([
         {
@@ -926,7 +927,7 @@ function aiPatternInsight(
           tone: 'neutral',
         },
       ]),
-      disclaimerBlock('journal.insightsTab.ai.provenance', 'ai'),
+      disclaimerBlock('journal.insightsTab.ai.provenance', InsightToneValue.Ai),
     ],
     sourceEntryIds: travelEntries.map((entry) => entry.id),
     timeWindow,

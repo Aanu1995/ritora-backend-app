@@ -15,6 +15,7 @@ import {
   encryptedJsonFieldTransformer,
   encryptedNullableStringFieldTransformer,
 } from '../../skin-profile/skin-profile-field-encryption';
+import { AnalysisStatusValue } from '../skin-journal.constants';
 import type {
   Angle,
   AnalysisObservations,
@@ -144,7 +145,7 @@ export class SkinJournalEntry {
   })
   complaint_note: string | null;
 
-  @Column({ type: 'varchar', length: 20, default: 'pending' })
+  @Column({ type: 'varchar', length: 20, default: AnalysisStatusValue.Pending })
   analysis_status: AnalysisStatus;
 
   @Column({

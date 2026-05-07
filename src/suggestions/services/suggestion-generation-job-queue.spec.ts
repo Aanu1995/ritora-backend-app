@@ -82,6 +82,24 @@ describe('suggestion generation job queue helpers', () => {
       }),
     );
   });
+
+  it('keeps scheduled jobs linked only by slot/date even when a replacement suggestion exists', async () => {
+    repoMock.findOne.mockResolvedValue(null);
+
+    await requeueSuggestionGenerationJob(repoMock, {
+      ...draft(),
+      suggestion_instance_id: 'replacement-suggestion-1',
+      request_source: 'scheduled',
+    });
+
+    expect(repoMock.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slot_id: 'slot-1',
+        suggestion_instance_id: null,
+        request_source: 'scheduled',
+      }),
+    );
+  });
 });
 
 function repo<T extends ObjectLiteral>() {

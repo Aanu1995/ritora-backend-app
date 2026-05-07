@@ -11,6 +11,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { EmptyStringToNull } from '../../common/dto/empty-string.transforms';
 import { toIsoString } from '../../common/utils/date';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ApplicationLogItem } from '../entities/application-log-item.entity';
@@ -59,16 +60,19 @@ export class ApplicationLogItemInputDto {
   stepOrder!: number;
 
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsString()
   suggestionStepId?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsString()
   inventoryProductId?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsString()
   substitutedWithProductId?: string | null;
@@ -118,6 +122,7 @@ export class ApplicationLogItemInputDto {
   substitutionReason?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsDateString()
   appliedAt?: string | null;
@@ -216,14 +221,16 @@ export class ApplicationLogItemResponseDto {
 
 export class RecordApplicationDto {
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsString()
-  suggestionInstanceId?: string;
+  suggestionInstanceId?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsString()
-  slotId?: string;
+  slotId?: string | null;
 
   @ApiProperty({ format: 'date' })
   @IsDateString()
@@ -235,6 +242,7 @@ export class RecordApplicationDto {
   targetTime?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsDateString()
   appliedAt?: string | null;
@@ -253,6 +261,7 @@ export class RecordApplicationDto {
 
 export class EditApplicationDto {
   @ApiPropertyOptional({ nullable: true })
+  @EmptyStringToNull()
   @IsOptional()
   @IsDateString()
   appliedAt?: string | null;

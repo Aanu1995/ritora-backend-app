@@ -1,13 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { AnalysisStatus } from '../skin-journal.constants';
 
+export const CalendarDayStateValue = {
+  NoEntry: 'no_entry',
+  EntryNoPhoto: 'entry_no_photo',
+  Pending: 'pending',
+  Completed: 'completed',
+  Reaction: 'reaction',
+  Failed: 'failed',
+} as const;
+
 export type CalendarDayState =
-  | 'no_entry'
-  | 'entry_no_photo'
-  | 'pending'
-  | 'completed'
-  | 'reaction'
-  | 'failed';
+  (typeof CalendarDayStateValue)[keyof typeof CalendarDayStateValue];
 
 export class CalendarDayDto {
   @ApiProperty()

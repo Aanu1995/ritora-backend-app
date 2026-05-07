@@ -61,6 +61,81 @@ describe('suggestion product intelligence', () => {
 
     expect(assessProductDataQuality(product).quality).toBe('verified');
   });
+
+  it('does not warn when optional timing hints are missing', () => {
+    const product = productWithData({
+      category: ProductCategory.Moisturizer,
+      inciIngredients: ['Glycerin', 'Ceramide NP'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: null,
+    });
+    product.guidance = {
+      applicationMethod: ApplicationMethod.Fingertips,
+      quantity: Quantity.PeaSize,
+      steps: ['Apply to clean skin'],
+      cautions: [],
+      waitMinutes: null,
+    };
+
+    expect(assessProductDataQuality(product)).toEqual({
+      quality: 'verified',
+      warnings: [],
+    });
+  });
+
+  it('trusts matched ingredient intelligence even when source confirmation date is absent', () => {
+    const product = productWithData({
+      category: ProductCategory.Treatment,
+      inciIngredients: ['Water', 'Azelaic Acid', 'Tocopherol'],
+      inciLastConfirmedAt: null,
+      preferredTimeOfDay: null,
+    });
+    product.guidance = {
+      applicationMethod: ApplicationMethod.Fingertips,
+      quantity: Quantity.AsNeeded,
+      steps: ['Apply a small amount'],
+      cautions: ['Use sun protection'],
+      waitMinutes: null,
+    };
+
+    expect(
+      assessProductDataQuality(product, ['azelaic_acid'], {
+        matchedIngredientCount: 2,
+        totalIngredientCount: 3,
+      }),
+    ).toEqual({
+      quality: 'verified',
+      warnings: [],
+    });
+  });
+
+  it('warns when an INCI list has no matched key actives', () => {
+    const product = productWithData({
+      category: ProductCategory.SunProtection,
+      inciIngredients: ['UVA/UVB filter', 'Licochalcone A'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: null,
+    });
+    product.guidance = {
+      applicationMethod: ApplicationMethod.Fingertips,
+      quantity: Quantity.AsNeeded,
+      steps: ['Apply generously'],
+      cautions: [],
+      waitMinutes: null,
+    };
+
+    expect(
+      assessProductDataQuality(product, ['spf'], {
+        matchedIngredientCount: 0,
+        totalIngredientCount: 2,
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        quality: 'partial',
+        warnings: ['key active ingredients not matched'],
+      }),
+    );
+  });
 });
 
 function productWithData(input: {

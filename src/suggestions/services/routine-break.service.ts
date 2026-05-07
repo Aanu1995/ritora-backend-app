@@ -8,7 +8,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
 import { toIsoString, toNullableIsoString } from '../../common/utils/date';
-import { ScheduledNotification } from '../../notifications/entities/scheduled-notification.entity';
+import {
+  ScheduledNotification,
+  ScheduledNotificationStatusValue,
+} from '../../notifications/entities/scheduled-notification.entity';
 import { User } from '../../users/entities/user.entity';
 import {
   RoutineBreakResponseDto,
@@ -205,11 +208,11 @@ export class RoutineBreakService {
     await repository.update(
       {
         user_id: userId,
-        status: 'pending',
+        status: ScheduledNotificationStatusValue.Pending,
         kind: In([...ROUTINE_BREAK_NOTIFICATION_KINDS]),
       },
       {
-        status: 'cancelled',
+        status: ScheduledNotificationStatusValue.Cancelled,
         last_error: ROUTINE_BREAK_NOTIFICATION_CANCEL_REASON,
         locked_at: null,
       },

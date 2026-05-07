@@ -147,6 +147,12 @@ describe('ApplicationTrackingService', () => {
       items: [itemInput('substituted')],
     });
 
+    expect(validation.buildItemDrafts).toHaveBeenCalledWith(
+      'user-1',
+      [itemInput('substituted')],
+      expect.any(Object),
+      existing.items,
+    );
     expect(txItemRepo.delete).toHaveBeenCalledWith({
       application_log_id: 'log-1',
     });

@@ -3,9 +3,11 @@ import {
   SuggestionEvidenceSourceId,
   SuggestionExplanationJson,
   SuggestionGapRecommendationJson,
+  SuggestionRequestSource,
   SuggestionSafetyFlagJson,
   SuggestionStepChipJson,
   SuggestionStepProvenance,
+  SUGGESTION_STEP_CHIP_TONES,
 } from '../suggestions.constants';
 import {
   formatOnDemandContext,
@@ -14,6 +16,7 @@ import {
   formatShelfProduct,
 } from './suggestion-ai-prompt-formatters';
 import type { SuggestionGenerationInputs } from './suggestion-ai-generator';
+import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
 
 export const SYSTEM_PROMPT = [
   'You are a skincare suggestion engine for the Ritora app.',
@@ -139,7 +142,7 @@ export const RESPONSE_FORMAT = {
                 properties: {
                   tone: {
                     type: 'string',
-                    enum: ['neutral', 'reason', 'ai', 'specialist', 'warn'],
+                    enum: SUGGESTION_STEP_CHIP_TONES,
                   },
                   text: { type: 'string' },
                 },
@@ -294,7 +297,7 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
     .map(
       (entry) =>
         `- ${toDateOnlyString(entry.entry_date)}: status=${entry.analysis_status}${
-          entry.has_reaction_signal ? ', reactionSignal=true' : ''
+          hasUsableJournalReactionSignal(entry) ? ', reactionSignal=true' : ''
         }`,
     )
     .join('\n');
@@ -314,7 +317,7 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
     )
     .join('\n');
   const requestContext =
-    inputs.requestSource === 'on_demand'
+    inputs.requestSource === SuggestionRequestSource.OnDemand
       ? formatOnDemandContext(inputs)
       : formatScheduledSlotContext(inputs);
 

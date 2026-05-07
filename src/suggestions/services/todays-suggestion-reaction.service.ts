@@ -55,7 +55,8 @@ export class TodaysSuggestionReactionService {
       order: { entry_date: 'DESC' },
       take: REACTION_LOOKBACK_DAYS,
     });
-    const latest = entries.find(hasReactionSignal) ?? null;
+    const photoEntries = entries.filter((entry) => entry.photo_object_key);
+    const latest = photoEntries.find(hasReactionSignal) ?? null;
     if (!latest) return null;
 
     const simplification = await this.simplificationRepo.findOne({
@@ -78,7 +79,7 @@ export class TodaysSuggestionReactionService {
       indicators: collectIndicators(observations),
       concernKeys,
       barrierConcern: hasBarrierConcern(observations, concernKeys),
-      photosUntilClear: photosUntilClear(entries, latest),
+      photosUntilClear: photosUntilClear(photoEntries, latest),
       clearCriteria: CLEAR_CRITERIA,
       summary: buildSummary(latest, observations),
     };

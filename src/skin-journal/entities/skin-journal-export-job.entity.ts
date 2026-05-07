@@ -11,9 +11,10 @@ import {
   encryptedJsonFieldTransformer,
   encryptedNullableStringFieldTransformer,
 } from '../../skin-profile/skin-profile-field-encryption';
-import type {
-  ExportStatus,
-  SkinJournalExportPayload,
+import {
+  ExportStatusValue,
+  type ExportStatus,
+  type SkinJournalExportPayload,
 } from '../skin-journal.constants';
 
 const encryptedPayloadTransformer =
@@ -37,7 +38,7 @@ export class SkinJournalExportJob {
   @Column({ type: 'date' })
   range_to: string;
 
-  @Column({ type: 'varchar', length: 20, default: 'ready' })
+  @Column({ type: 'varchar', length: 20, default: ExportStatusValue.Ready })
   status: ExportStatus;
 
   @Column({

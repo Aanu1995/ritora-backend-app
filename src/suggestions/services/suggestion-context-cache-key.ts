@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { SuggestionRequestSource } from '../suggestions.constants';
 import { routineBreakCacheParts } from './suggestion-routine-break-context';
 import type { SuggestionContextBuilderInput } from './suggestion-context-builder.service';
 
@@ -21,9 +22,9 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
   return {
     targetDate: inputs.targetDate,
     targetTime: inputs.targetTime,
-    requestSource: inputs.requestSource ?? 'scheduled',
+    requestSource: inputs.requestSource ?? SuggestionRequestSource.Scheduled,
     requestContext:
-      inputs.requestSource === 'on_demand'
+      inputs.requestSource === SuggestionRequestSource.OnDemand
         ? (inputs.requestContext ?? null)
         : null,
     profile: inputs.skinProfile?.updated_at?.toISOString() ?? null,

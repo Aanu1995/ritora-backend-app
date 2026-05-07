@@ -111,6 +111,7 @@ export class ApplicationTrackingService {
       user.id,
       payload.items,
       suggestion,
+      log.items ?? [],
     );
 
     const response = await this.dataSource.transaction(async (manager) => {

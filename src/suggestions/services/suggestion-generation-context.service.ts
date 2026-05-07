@@ -17,10 +17,12 @@ import {
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { SuggestionRequestSource } from '../suggestions.constants';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionConsentService } from './suggestion-consent.service';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
+import { normalizeJournalEntriesForSuggestions } from './suggestion-journal-context';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
 import { deriveSuggestionDaypart } from './suggestion-helpers';
@@ -106,7 +108,7 @@ export class SuggestionGenerationContextService {
       targetDate,
       targetTime,
       daypart,
-      requestSource: 'scheduled',
+      requestSource: SuggestionRequestSource.Scheduled,
       requestContext: null,
       skinProfile: contextData.skinProfile,
       shelfActiveProducts: contextData.activeProducts,
@@ -120,7 +122,7 @@ export class SuggestionGenerationContextService {
 
     return {
       slotId: slot.id,
-      requestSource: 'scheduled',
+      requestSource: SuggestionRequestSource.Scheduled,
       requestContext: null,
       scheduledSlotContext: {
         slotNotes: slot.slot_notes ?? null,
@@ -163,7 +165,7 @@ export class SuggestionGenerationContextService {
       targetDate,
       targetTime,
       daypart,
-      requestSource: 'on_demand',
+      requestSource: SuggestionRequestSource.OnDemand,
       requestContext: suggestion.request_context,
       skinProfile: contextData.skinProfile,
       shelfActiveProducts: contextData.activeProducts,
@@ -177,7 +179,7 @@ export class SuggestionGenerationContextService {
 
     return {
       slotId: null,
-      requestSource: 'on_demand',
+      requestSource: SuggestionRequestSource.OnDemand,
       requestContext: suggestion.request_context,
       scheduledSlotContext: null,
       targetDate,
@@ -281,7 +283,7 @@ export class SuggestionGenerationContextService {
         targetDate,
         lastError,
       );
-    const recentJournal =
+    const recentJournalRows =
       canReadSensitiveContext && !ignoreReactionContext
         ? await this.journalRepo.find({
             where: { user_id: userId },
@@ -289,6 +291,8 @@ export class SuggestionGenerationContextService {
             take: 7,
           })
         : [];
+    const recentJournal =
+      normalizeJournalEntriesForSuggestions(recentJournalRows);
     const recentApplications = canReadSensitiveContext
       ? await this.applicationLogRepo.find({
           where: { user_id: userId },

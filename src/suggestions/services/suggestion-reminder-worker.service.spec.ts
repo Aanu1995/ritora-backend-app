@@ -3,6 +3,7 @@ import { ObjectLiteral, Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { InAppNotification } from '../../notifications/entities/in-app-notification.entity';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { RoutineBreakService } from './routine-break.service';
@@ -18,6 +19,7 @@ describe('SuggestionReminderWorker', () => {
   const suggestionRepo = repo<SuggestionInstance>();
   const applicationLogRepo = repo<ApplicationLog>();
   const userRepo = repo<User>();
+  const slotRepo = repo<ScheduleSlot>();
   const routineBreakService = {
     getActiveUserIds: jest.fn(),
   } as unknown as jest.Mocked<RoutineBreakService>;
@@ -27,6 +29,7 @@ describe('SuggestionReminderWorker', () => {
     suggestionRepo,
     applicationLogRepo,
     userRepo,
+    slotRepo,
     routineBreakService,
   );
 
@@ -35,6 +38,13 @@ describe('SuggestionReminderWorker', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T10:00:00.000Z'));
     notifications.dispatch.mockResolvedValue(null as InAppNotification | null);
     routineBreakService.getActiveUserIds.mockResolvedValue(new Set());
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        deleted_at: null,
+      } as ScheduleSlot,
+    ]);
   });
 
   afterEach(() => {
@@ -65,6 +75,14 @@ describe('SuggestionReminderWorker', () => {
         where: expect.objectContaining({
           generation_status: 'ready',
           target_date: expect.any(Object),
+        }),
+      }),
+    );
+    expect(slotRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: expect.objectContaining({ _value: ['slot-1'] }),
+          deleted_at: expect.objectContaining({ _type: 'isNull' }),
         }),
       }),
     );
@@ -102,6 +120,75 @@ describe('SuggestionReminderWorker', () => {
     const result = await worker.runOnce();
 
     expect(result).toEqual({ slotStart: 0, recordingReminder: 0 });
+    expect(notifications.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('does not send scheduled reminders after the schedule slot was deleted', async () => {
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'suggestion-1',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+    ]);
+    slotRepo.find.mockResolvedValue([]);
+
+    const result = await worker.runOnce();
+
+    expect(result).toEqual({ slotStart: 0, recordingReminder: 0 });
+    expect(userRepo.find).not.toHaveBeenCalled();
+    expect(applicationLogRepo.find).not.toHaveBeenCalled();
+    expect(notifications.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('does not send scheduled reminders when the slot belongs to another user', async () => {
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'suggestion-1',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+    ]);
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'other-user',
+        deleted_at: null,
+      } as ScheduleSlot,
+    ]);
+
+    const result = await worker.runOnce();
+
+    expect(result).toEqual({ slotStart: 0, recordingReminder: 0 });
+    expect(userRepo.find).toHaveBeenCalled();
+    expect(notifications.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('does not send slot-start or recording reminders for on-demand suggestions', async () => {
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'suggestion-on-demand-1',
+        user_id: 'user-1',
+        slot_id: null,
+        request_source: 'on_demand',
+        target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+    ]);
+
+    const result = await worker.runOnce();
+
+    expect(result).toEqual({ slotStart: 0, recordingReminder: 0 });
+    expect(slotRepo.find).not.toHaveBeenCalled();
+    expect(userRepo.find).not.toHaveBeenCalled();
+    expect(applicationLogRepo.find).not.toHaveBeenCalled();
     expect(notifications.dispatch).not.toHaveBeenCalled();
   });
 });

@@ -5,14 +5,12 @@ import {
   decodeCursor,
   encodeCursor,
 } from '../../common/utils/cursor-pagination';
-import {
-  SuggestionHistoryListQueryDto,
-  SuggestionHistorySlotStatus,
-} from '../dto/suggestion-history.dto';
+import { SuggestionHistoryListQueryDto } from '../dto/suggestion-history.dto';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import {
   SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT,
   SUGGESTION_HISTORY_PAGE_MAX_LIMIT,
+  SuggestionHistorySlotStatus,
 } from '../suggestions.constants';
 
 type HistoryCursorTuple = [string, string, string];
@@ -173,15 +171,15 @@ function historyCursorTuple(row: HistoryCursorRow): HistoryCursorTuple {
 
 function historyStatusSql(status: SuggestionHistorySlotStatus): string {
   switch (status) {
-    case 'simplified':
+    case SuggestionHistorySlotStatus.Simplified:
       return 'suggestion.simplified_for_reaction = true';
-    case 'missed':
+    case SuggestionHistorySlotStatus.Missed:
       return `suggestion.simplified_for_reaction = false AND (NOT ${HISTORY_LOG_EXISTS_SQL} OR ${HISTORY_STEP_COUNT_SQL} = 0)`;
-    case 'applied':
+    case SuggestionHistorySlotStatus.Applied:
       return `suggestion.simplified_for_reaction = false AND ${HISTORY_STEP_COUNT_SQL} > 0 AND ${HISTORY_APPLIED_COUNT_SQL} = ${HISTORY_STEP_COUNT_SQL}`;
-    case 'skipped':
+    case SuggestionHistorySlotStatus.Skipped:
       return `suggestion.simplified_for_reaction = false AND ${HISTORY_STEP_COUNT_SQL} > 0 AND ${HISTORY_LOG_EXISTS_SQL} AND ${HISTORY_COMPLETED_COUNT_SQL} = 0`;
-    case 'partial':
+    case SuggestionHistorySlotStatus.Partial:
       return `suggestion.simplified_for_reaction = false AND ${HISTORY_STEP_COUNT_SQL} > 0 AND ${HISTORY_COMPLETED_COUNT_SQL} > 0 AND ${HISTORY_APPLIED_COUNT_SQL} < ${HISTORY_STEP_COUNT_SQL}`;
   }
 }

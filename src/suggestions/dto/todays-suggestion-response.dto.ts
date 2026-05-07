@@ -1,5 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  SUGGESTION_DAYPARTS,
+  SUGGESTION_MODES,
+  SUGGESTION_SLOT_LIFECYCLE_STATUSES,
   SuggestionDaypart,
   SuggestionMode,
   SuggestionSlotLifecycleStatus,
@@ -7,6 +10,14 @@ import {
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { RoutineBreakResponseDto } from './suggestion-routine-break.dto';
 import { SuggestionInstanceResponseDto } from './suggestion-instance-response.dto';
+
+const TODAYS_ON_DEMAND_STATUSES = [
+  SuggestionSlotLifecycleStatus.Generating,
+  SuggestionSlotLifecycleStatus.Ready,
+  SuggestionSlotLifecycleStatus.Recorded,
+  SuggestionSlotLifecycleStatus.Edited,
+  SuggestionSlotLifecycleStatus.Failed,
+] as const;
 
 export class TodaysSuggestionWeatherSummaryDto {
   @ApiProperty({ nullable: true })
@@ -110,13 +121,13 @@ export class TodaysSuggestionSlotDto {
   @ApiProperty()
   slotId: string;
 
-  @ApiProperty({ enum: ['morning', 'noon', 'evening'] })
+  @ApiProperty({ enum: SUGGESTION_DAYPARTS })
   daypart: SuggestionDaypart;
 
   @ApiProperty()
   slotTime: string;
 
-  @ApiProperty({ enum: ['ai', 'manual', 'mixed'] })
+  @ApiProperty({ enum: SUGGESTION_MODES })
   mode: SuggestionMode;
 
   @ApiProperty({ nullable: true })
@@ -137,19 +148,7 @@ export class TodaysSuggestionSlotDto {
   @ApiProperty()
   isVisible: boolean;
 
-  @ApiProperty({
-    enum: [
-      'locked',
-      'generating',
-      'ready',
-      'active',
-      'recordable',
-      'recorded',
-      'edited',
-      'missed',
-      'failed',
-    ],
-  })
+  @ApiProperty({ enum: SUGGESTION_SLOT_LIFECYCLE_STATUSES })
   status: SuggestionSlotLifecycleStatus;
 
   @ApiProperty()
@@ -178,12 +177,14 @@ export class TodaysOnDemandSuggestionDto {
   @ApiProperty()
   id: string;
 
-  @ApiProperty({
-    enum: ['generating', 'ready', 'recorded', 'edited', 'failed'],
-  })
+  @ApiProperty({ enum: TODAYS_ON_DEMAND_STATUSES })
   status: Extract<
     SuggestionSlotLifecycleStatus,
-    'generating' | 'ready' | 'recorded' | 'edited' | 'failed'
+    | typeof SuggestionSlotLifecycleStatus.Generating
+    | typeof SuggestionSlotLifecycleStatus.Ready
+    | typeof SuggestionSlotLifecycleStatus.Recorded
+    | typeof SuggestionSlotLifecycleStatus.Edited
+    | typeof SuggestionSlotLifecycleStatus.Failed
   >;
 
   @ApiProperty()

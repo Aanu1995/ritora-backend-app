@@ -1,13 +1,17 @@
 export type Angle = 'head_on' | 'left_profile' | 'right_profile';
 
+export const AnalysisStatusValue = {
+  Pending: 'pending',
+  Queued: 'queued',
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+  NeedsReview: 'needs_review',
+  Skipped: 'skipped',
+} as const;
+
 export type AnalysisStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'needs_review'
-  | 'skipped';
+  (typeof AnalysisStatusValue)[keyof typeof AnalysisStatusValue];
 
 export type OverallFeel = 'awful' | 'bad' | 'ok' | 'good' | 'great';
 
@@ -65,7 +69,14 @@ export type InsightGenerationTrigger =
   | 'scheduled_refresh'
   | 'product_or_routine_changed';
 
-export type InsightGenerationStatus = 'running' | 'completed' | 'failed';
+export const InsightGenerationStatusValue = {
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+} as const;
+
+export type InsightGenerationStatus =
+  (typeof InsightGenerationStatusValue)[keyof typeof InsightGenerationStatusValue];
 
 export type InsightWindow = 'all' | 'week' | 'month';
 
@@ -79,13 +90,17 @@ export type InsightEvidenceGrade =
 
 export type WrappedPeriodKind = 'monthly' | 'quarterly' | 'yearly';
 
+export const WrappedStatusValue = {
+  NotEnoughPhotos: 'not_enough_photos',
+  ReadyToGenerate: 'ready_to_generate',
+  Pending: 'pending',
+  Generating: 'generating',
+  Ready: 'ready',
+  Failed: 'failed',
+} as const;
+
 export type WrappedStatus =
-  | 'not_enough_photos'
-  | 'ready_to_generate'
-  | 'pending'
-  | 'generating'
-  | 'ready'
-  | 'failed';
+  (typeof WrappedStatusValue)[keyof typeof WrappedStatusValue];
 
 export type SimplificationMode = 'barrier_repair';
 
@@ -93,29 +108,50 @@ export type RestoreStrategy = 'full' | 'phased';
 
 export type ReactionSeverity = 'none' | 'mild' | 'moderate' | 'severe';
 
-export type ExportStatus = 'ready' | 'failed';
+export const ExportStatusValue = {
+  Ready: 'ready',
+  Failed: 'failed',
+} as const;
+
+export type ExportStatus =
+  (typeof ExportStatusValue)[keyof typeof ExportStatusValue];
+
+export const AnalysisJobStatusValue = {
+  Queued: 'queued',
+  Sent: 'sent',
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+  Cancelled: 'cancelled',
+} as const;
 
 export type AnalysisJobStatus =
-  | 'queued'
-  | 'sent'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  (typeof AnalysisJobStatusValue)[keyof typeof AnalysisJobStatusValue];
 
 export type AnalysisQueueDriver = 'sqs' | 'database';
 
+export const InsightJobStatusValue = {
+  Queued: 'queued',
+  Sent: 'sent',
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+  Cancelled: 'cancelled',
+} as const;
+
 export type InsightJobStatus =
-  | 'queued'
-  | 'sent'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  (typeof InsightJobStatusValue)[keyof typeof InsightJobStatusValue];
 
 export type InsightQueueDriver = 'sqs' | 'database';
 
-export type MediaDeletionJobStatus = 'pending' | 'verified' | 'failed';
+export const MediaDeletionJobStatusValue = {
+  Pending: 'pending',
+  Verified: 'verified',
+  Failed: 'failed',
+} as const;
+
+export type MediaDeletionJobStatus =
+  (typeof MediaDeletionJobStatusValue)[keyof typeof MediaDeletionJobStatusValue];
 
 export type AnalysisChangeDirection =
   | 'improved'

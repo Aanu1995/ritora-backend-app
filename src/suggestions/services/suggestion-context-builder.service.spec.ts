@@ -10,6 +10,7 @@ import {
 } from '../../shelf/shelf.types';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
+import { MatchingService } from '../../ingredients/matching.service';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
 import { SuggestionEvidenceSourceId } from '../suggestions.constants';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
@@ -184,6 +185,38 @@ describe('SuggestionContextBuilder', () => {
       ]),
     );
   });
+
+  it('carries shelf ingredient-intelligence gaps into product quality', async () => {
+    const matchingService = {
+      matchProduct: jest.fn((product) => ({
+        product,
+        matchedIngredients: [],
+        unresolvedTokens: [...product.inciIngredients],
+        totalTokens: product.inciIngredients.length,
+        resolvedTokens: 0,
+      })),
+    } as unknown as MatchingService;
+    const builderWithIngredientIntelligence = new SuggestionContextBuilder(
+      cacheRepo,
+      matchingService,
+    );
+
+    const summary = await builderWithIngredientIntelligence.build({
+      ...emptyInput(),
+      shelfActiveProducts: [sunscreenProduct()],
+    });
+
+    expect(summary.productScores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'spf-1',
+          dataQualityWarnings: expect.arrayContaining([
+            'key active ingredients not matched',
+          ]),
+        }),
+      ]),
+    );
+  });
 });
 
 function repo<T extends ObjectLiteral>() {
@@ -310,6 +343,7 @@ function reactionJournalEntry(): SkinJournalEntry {
     id: 'journal-1',
     user_id: 'user-1',
     entry_date: '2026-04-29',
+    photo_object_key: 'skin-journal/user-1/2026-04-29.jpg',
     has_reaction_signal: true,
     analysis_observations: {
       reaction_signals: {

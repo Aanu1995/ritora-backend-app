@@ -4,6 +4,7 @@ import {
   SuggestionProductScore,
 } from '../suggestion-context.types';
 import {
+  SuggestionDaypart,
   SuggestionEvidenceSourceId,
   SuggestionSafetyFlagJson,
 } from '../suggestions.constants';
@@ -89,7 +90,8 @@ export function buildPolicySafetyFlags(
     );
   }
   if (
-    (context.daypart === 'morning' || context.daypart === 'noon') &&
+    (context.daypart === SuggestionDaypart.Morning ||
+      context.daypart === SuggestionDaypart.Noon) &&
     selectedTags.has('retinoid')
   ) {
     flags.push({

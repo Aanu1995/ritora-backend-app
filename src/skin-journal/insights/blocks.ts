@@ -1,17 +1,18 @@
-import type {
-  InsightAction,
-  InsightBlock,
-  InsightMetricUnit,
-  InsightTone,
-  InsightValues,
-  LocalizedInsightText,
+import {
+  InsightToneValue,
+  type InsightAction,
+  type InsightBlock,
+  type InsightMetricUnit,
+  type InsightTone,
+  type InsightValues,
+  type LocalizedInsightText,
 } from './insight-types';
 import type { InsightEvidenceGrade } from '../skin-journal.constants';
 
 export function textBlock(
   key: string,
   values?: InsightValues,
-  tone: InsightTone = 'neutral',
+  tone: InsightTone = InsightToneValue.Neutral,
 ): InsightBlock {
   return { type: 'text', key, values, tone };
 }
@@ -82,7 +83,7 @@ export function entryThumbsBlock(entryIds: string[], max = 6): InsightBlock {
 
 export function disclaimerBlock(
   key: string,
-  tone: InsightTone = 'neutral',
+  tone: InsightTone = InsightToneValue.Neutral,
   values?: InsightValues,
 ): InsightBlock {
   return { type: 'disclaimer', key, tone, values };

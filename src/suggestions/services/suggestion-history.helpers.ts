@@ -1,28 +1,36 @@
 import { Between, FindOperator } from 'typeorm';
+import { ApplicationItemStatus } from '../../application-tracking/application-tracking.constants';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { toDateOnlyString } from '../../common/utils/date';
 import { DayOfWeek } from '../../schedule/dto/schedule.constants';
 import {
-  SuggestionHistoryListQueryDto,
+  SuggestionHistoryRange,
   SuggestionHistorySlotStatus,
-} from '../dto/suggestion-history.dto';
+} from '../suggestions.constants';
+import { SuggestionHistoryListQueryDto } from '../dto/suggestion-history.dto';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 
 export function computeSlotStatus(
   suggestion: SuggestionInstance,
   log: ApplicationLog | null,
 ): SuggestionHistorySlotStatus {
-  if (suggestion.simplified_for_reaction) return 'simplified';
-  if (!log) return 'missed';
+  if (suggestion.simplified_for_reaction) {
+    return SuggestionHistorySlotStatus.Simplified;
+  }
+  if (!log) return SuggestionHistorySlotStatus.Missed;
   const totalSteps = suggestion.steps?.length ?? 0;
-  if (totalSteps === 0) return 'missed';
+  if (totalSteps === 0) return SuggestionHistorySlotStatus.Missed;
   const exactAppliedCount =
-    log.items?.filter((item) => item.status === 'applied').length ?? 0;
+    log.items?.filter((item) => item.status === ApplicationItemStatus.Applied)
+      .length ?? 0;
   const appliedCount =
-    log.items?.filter((item) => item.status !== 'skipped').length ?? 0;
-  if (exactAppliedCount === totalSteps) return 'applied';
-  if (appliedCount === 0) return 'skipped';
-  return 'partial';
+    log.items?.filter((item) => item.status !== ApplicationItemStatus.Skipped)
+      .length ?? 0;
+  if (exactAppliedCount === totalSteps) {
+    return SuggestionHistorySlotStatus.Applied;
+  }
+  if (appliedCount === 0) return SuggestionHistorySlotStatus.Skipped;
+  return SuggestionHistorySlotStatus.Partial;
 }
 
 export function buildSummaryLine(
@@ -40,9 +48,12 @@ export function buildSummaryLine(
     } suggested. No record yet.`;
   }
   const exactAppliedCount =
-    log.items?.filter((item) => item.status === 'applied').length ?? 0;
+    log.items?.filter((item) => item.status === ApplicationItemStatus.Applied)
+      .length ?? 0;
   const substitutionCount =
-    log.items?.filter((item) => item.status === 'substituted').length ?? 0;
+    log.items?.filter(
+      (item) => item.status === ApplicationItemStatus.Substituted,
+    ).length ?? 0;
   if (exactAppliedCount === totalSteps) {
     return `${appliedCount} of ${totalSteps} applied. Matches the suggestion.`;
   }
@@ -63,13 +74,13 @@ export function computeRange(
   query: SuggestionHistoryListQueryDto,
   historyEndDate: string,
 ): { fromDate: string; toDate: string } {
-  if (query.range === 'custom' && query.from && query.to) {
+  if (query.range === SuggestionHistoryRange.Custom && query.from && query.to) {
     return {
       fromDate: query.from,
       toDate: minDateString(query.to, historyEndDate),
     };
   }
-  const days = query.range === '30d' ? 30 : 7;
+  const days = query.range === SuggestionHistoryRange.ThirtyDays ? 30 : 7;
   const end = new Date(`${historyEndDate}T00:00:00Z`);
   const from = new Date(end.getTime() - (days - 1) * 86_400_000);
   return {

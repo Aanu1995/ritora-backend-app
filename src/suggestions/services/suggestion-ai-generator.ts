@@ -10,6 +10,7 @@ import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
 import {
   SuggestionExplanationJson,
+  SuggestionDaypart,
   SuggestionGapRecommendationJson,
   SuggestionMode,
   SuggestionRequestContextJson,
@@ -46,6 +47,7 @@ import {
   buildDeterministicGapRecommendations,
   deterministicExplanation,
 } from './suggestion-baseline-generator';
+import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
 export const SUGGESTION_AI_TIMEOUT_MS = 45_000;
@@ -61,7 +63,7 @@ export interface SuggestionGenerationInputs {
   } | null;
   targetDate: string;
   targetTime: string;
-  daypart: 'morning' | 'noon' | 'evening';
+  daypart: SuggestionDaypart;
   skinProfile: SkinProfile | null;
   shelfActiveProducts: InventoryProduct[];
   shelfFinishedProductIds: string[];
@@ -268,7 +270,8 @@ export class SuggestionAiGenerator {
         : buildDeterministicAiSteps(inputs);
     const hasReactionSignal = hasReactionSignalInInputs(inputs);
     return {
-      mode: orderedSteps.length === 0 ? 'ai' : 'manual',
+      mode:
+        orderedSteps.length === 0 ? SuggestionMode.Ai : SuggestionMode.Manual,
       hasReactionSignal,
       simplifiedForReaction: hasReactionSignal && orderedSteps.length === 0,
       explanation:
@@ -297,12 +300,7 @@ function hasReactionSignalInInputs(
   return (
     inputs.contextSummary.reaction.hasSignal ||
     inputs.contextSummary.reaction.barrierCompromised ||
-    inputs.recentJournalEntries.some(
-      (entry) =>
-        entry.has_reaction_signal ||
-        entry.analysis_observations?.reaction_signals?.reaction_detected ||
-        entry.analysis_observations?.barrier_signs?.barrier_compromise,
-    )
+    inputs.recentJournalEntries.some(hasUsableJournalReactionSignal)
   );
 }
 

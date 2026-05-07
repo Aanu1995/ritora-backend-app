@@ -8,6 +8,7 @@ import {
   SuggestionMode,
   SuggestionSafetyFlagJson,
   SuggestionStepChipJson,
+  SuggestionStepProvenance,
 } from '../suggestions.constants';
 import type {
   SuggestionGenerationInputs,
@@ -66,8 +67,8 @@ export function resolveRawStep(
   }
 
   const product = resolveActiveProduct(rawStep, context);
-  const provenance = rawStep.provenance ?? 'ai_added';
-  if (provenance === 'ai_added' && !product) return null;
+  const provenance = rawStep.provenance ?? SuggestionStepProvenance.AiAdded;
+  if (provenance === SuggestionStepProvenance.AiAdded && !product) return null;
   if (rawStep.inventoryProductId && !product) return null;
   if (!product && rawStep.productBrand && rawStep.productName) return null;
 
@@ -109,7 +110,9 @@ export function lockedStepsAreIntact(
     .filter((step) => step.is_specialist_locked)
     .sort((a, b) => a.step_order - b.step_order);
   const rawLocked = rawSteps
-    .filter((step) => step.provenance === 'specialist_locked')
+    .filter(
+      (step) => step.provenance === SuggestionStepProvenance.SpecialistLocked,
+    )
     .sort((a, b) => (a.stepOrder ?? 0) - (b.stepOrder ?? 0));
   if (rawLocked.length !== lockedSteps.length) return false;
   return lockedSteps.every((lockedStep, index) => {
@@ -155,8 +158,8 @@ export function routineStepToOutput(
     }),
     routineNote: normalizeRoutineNote(step.notes),
     provenance: step.is_specialist_locked
-      ? 'specialist_locked'
-      : 'user_routine',
+      ? SuggestionStepProvenance.SpecialistLocked
+      : SuggestionStepProvenance.UserRoutine,
     chips: step.is_specialist_locked
       ? [{ tone: 'specialist', text: 'Specialist locked' }]
       : [],
@@ -183,15 +186,17 @@ export function computeMode(
   steps: SuggestionGenerationStepOutput[],
   hasLockedInput: boolean,
 ): SuggestionMode {
-  const hasAi = steps.some((step) => step.provenance === 'ai_added');
+  const hasAi = steps.some(
+    (step) => step.provenance === SuggestionStepProvenance.AiAdded,
+  );
   const hasManual = steps.some(
     (step) =>
-      step.provenance === 'user_routine' ||
-      step.provenance === 'specialist_locked',
+      step.provenance === SuggestionStepProvenance.UserRoutine ||
+      step.provenance === SuggestionStepProvenance.SpecialistLocked,
   );
-  if (hasManual && hasAi) return 'mixed';
-  if (hasLockedInput || hasManual) return 'manual';
-  return 'ai';
+  if (hasManual && hasAi) return SuggestionMode.Mixed;
+  if (hasLockedInput || hasManual) return SuggestionMode.Manual;
+  return SuggestionMode.Ai;
 }
 
 export function buildDeterministicSafetyFlags(

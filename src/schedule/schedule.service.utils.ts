@@ -1,15 +1,26 @@
 import type { ApplyPresetDto } from './dto/apply-preset.dto';
 import type { CreateSlotsDto } from './dto/create-slots.dto';
+import { In, Not, type Repository } from 'typeorm';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { ShelfStatus } from '../shelf/shelf.types';
 import {
   DAYS_OF_WEEK,
   CUSTOM_STEP_LABEL,
   DEFAULT_SLOT_MODE,
+  MAX_STEPS_PER_SLOT,
   type DayOfWeek,
   type SlotMode,
 } from './dto/schedule.constants';
 import type { UpdateSlotDto } from './dto/update-slot.dto';
 import type { UpsertRoutineStepsDto } from './dto/upsert-routine-steps.dto';
+import { RoutineStep } from './entities/routine-step.entity';
 import type { ScheduleSlot } from './entities/schedule-slot.entity';
+import {
+  scheduleCustomLabelRequired,
+  scheduleProductsNotOwned,
+  scheduleRequiresProduct,
+  scheduleTooManySteps,
+} from './schedule.errors';
 import { normaliseTime, uniqueDays } from './schedule.utils';
 
 type RoutineStepInput = UpsertRoutineStepsDto['steps'][number];
@@ -23,6 +34,7 @@ export type NormalizedSlotInput = {
   specialistSafetyNotes: string | null;
   slotTime: string;
   mode: SlotMode;
+  steps: RoutineStepInput[];
 };
 
 export type NormalizedCreateSlotsInput = {
@@ -34,6 +46,7 @@ export type NormalizedCreateSlotsInput = {
   specialistSafetyNotes: string | null;
   slotTime: string;
   mode: SlotMode;
+  steps: RoutineStepInput[];
 };
 
 export function normalizeSlotInput(input: {
@@ -45,6 +58,7 @@ export function normalizeSlotInput(input: {
   specialistSafetyNotes?: string | null;
   slotTime: string;
   mode?: SlotMode;
+  steps?: readonly RoutineStepInput[] | null;
 }): NormalizedSlotInput {
   return {
     dayOfWeek: input.dayOfWeek,
@@ -57,6 +71,7 @@ export function normalizeSlotInput(input: {
     specialistSafetyNotes: normalizeNullableString(input.specialistSafetyNotes),
     slotTime: normaliseTime(input.slotTime),
     mode: input.mode ?? DEFAULT_SLOT_MODE,
+    steps: normalizeRoutineSteps(input.steps),
   };
 }
 
@@ -72,6 +87,7 @@ export function normalizeCreateSlotsInput(
     specialistSafetyNotes: normalizeNullableString(dto.specialistSafetyNotes),
     slotTime: normaliseTime(dto.slotTime),
     mode: dto.mode ?? DEFAULT_SLOT_MODE,
+    steps: normalizeRoutineSteps(dto.steps),
   };
 }
 
@@ -102,6 +118,7 @@ export function buildEveryDaySlotsInput(dto: ApplyPresetDto): CreateSlotsDto {
     specialistClinicName: dto.specialistClinicName,
     specialistActiveSince: dto.specialistActiveSince,
     specialistSafetyNotes: dto.specialistSafetyNotes,
+    steps: dto.steps,
   };
 }
 
@@ -118,6 +135,7 @@ export function buildSlotInputForDay(
     specialistClinicName: slotInput.specialistClinicName,
     specialistActiveSince: slotInput.specialistActiveSince,
     specialistSafetyNotes: slotInput.specialistSafetyNotes,
+    steps: slotInput.steps,
   };
 }
 
@@ -198,9 +216,94 @@ export function buildRoutineStepWriteData(
     }));
 }
 
+export async function assertRoutineStepsSchedulable(
+  productsRepository: Repository<InventoryProduct>,
+  userId: string,
+  steps: readonly RoutineStepInput[],
+): Promise<void> {
+  if (steps.length > MAX_STEPS_PER_SLOT) {
+    throw scheduleTooManySteps(MAX_STEPS_PER_SLOT);
+  }
+  await assertProductsAvailable(productsRepository, userId, steps);
+  if (hasMissingCustomLabel(steps)) {
+    throw scheduleCustomLabelRequired();
+  }
+}
+
+export async function assertUserHasSchedulableProduct(
+  productsRepository: Repository<InventoryProduct>,
+  userId: string,
+): Promise<void> {
+  const productCount = await productsRepository.count({
+    where: { user_id: userId, status: Not(ShelfStatus.Archived) },
+  });
+  if (productCount === 0) throw scheduleRequiresProduct();
+}
+
+export async function replaceRoutineSteps(
+  stepsRepository: Repository<RoutineStep>,
+  slotId: string,
+  steps: readonly RoutineStepInput[],
+): Promise<void> {
+  const stepWriteData = buildRoutineStepWriteData(slotId, steps);
+  await stepsRepository.delete({ slot_id: slotId });
+
+  if (stepWriteData.length === 0) {
+    return;
+  }
+
+  await stepsRepository.save(
+    stepWriteData.map((step) => stepsRepository.create(step)),
+  );
+}
+
+export function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === '23505'
+  );
+}
+
 function normalizeNullableString(
   value: string | null | undefined,
 ): string | null {
   const normalized = value?.trim() ?? '';
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRoutineSteps(
+  steps: readonly RoutineStepInput[] | null | undefined,
+): RoutineStepInput[] {
+  return [...(steps ?? [])];
+}
+
+async function assertProductsAvailable(
+  productsRepository: Repository<InventoryProduct>,
+  userId: string,
+  steps: readonly RoutineStepInput[],
+): Promise<void> {
+  const referencedProductIds = collectReferencedProductIds(steps);
+
+  if (referencedProductIds.length === 0) {
+    return;
+  }
+
+  const ownedProducts = await productsRepository.find({
+    where: {
+      id: In(referencedProductIds),
+      user_id: userId,
+      status: Not(ShelfStatus.Archived),
+    },
+    select: ['id'],
+  });
+  const ownedIds = new Set(ownedProducts.map((product) => product.id));
+  const foreignProductIds = referencedProductIds.filter(
+    (productId) => !ownedIds.has(productId),
+  );
+
+  if (foreignProductIds.length > 0) {
+    throw scheduleProductsNotOwned(foreignProductIds);
+  }
 }

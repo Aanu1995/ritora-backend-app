@@ -45,6 +45,7 @@ import { TranslationService } from './translation.service';
       useExisting: OpenAiExplanationProvider,
     },
   ],
+  exports: [MatchingService],
 })
 export class IngredientsModule implements OnApplicationBootstrap {
   private readonly logger = new Logger(IngredientsModule.name);

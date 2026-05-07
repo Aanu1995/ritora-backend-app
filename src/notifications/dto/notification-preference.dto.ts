@@ -15,6 +15,7 @@ import {
   NotificationChannel,
   UserNotificationPreference,
 } from '../entities/user-notification-preference.entity';
+import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 
 export const SUGGESTION_LEAD_TIME_MIN_MINUTES = 30;
 export const SUGGESTION_LEAD_TIME_MAX_MINUTES = 720;
@@ -23,6 +24,7 @@ export const SUGGESTION_LEAD_TIME_DEFAULT_MINUTES = 120;
 const HHMM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class UpdatePreferencesDto {
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsString()
   @Matches(HHMM_PATTERN)
@@ -32,6 +34,7 @@ export class UpdatePreferencesDto {
   @IsBoolean()
   photo_reminder_enabled?: boolean;
 
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @ArrayUnique()
@@ -49,6 +52,7 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() slot_start_enabled?: boolean;
   @IsOptional() @IsBoolean() recording_reminder_enabled?: boolean;
 
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsInt()
   @Min(SUGGESTION_LEAD_TIME_MIN_MINUTES)
@@ -57,11 +61,13 @@ export class UpdatePreferencesDto {
 
   @IsOptional() @IsBoolean() quiet_hours_enabled?: boolean;
 
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsString()
   @Matches(HHMM_PATTERN)
   quiet_hours_start?: string;
 
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsString()
   @Matches(HHMM_PATTERN)

@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import type { ProductForAnalysis } from '../../ingredients/ingredients.types';
+import { MatchingService } from '../../ingredients/matching.service';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
@@ -15,6 +17,7 @@ import {
   SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS,
   SUGGESTION_SAFETY_POLICY_REVIEWED_AT,
   SUGGESTION_SAFETY_POLICY_VERSION,
+  SuggestionDaypart,
   SuggestionRequestContextJson,
   SuggestionRequestSource,
 } from '../suggestions.constants';
@@ -26,18 +29,24 @@ import {
   getSuggestionEvidenceSources,
   mergeEvidenceSourceIds,
 } from './suggestion-evidence-sources';
-import { scoreProductForSuggestion } from './suggestion-product-intelligence';
+import {
+  scoreProductForSuggestion,
+  type ProductIngredientIntelligence,
+} from './suggestion-product-intelligence';
 import { buildRoutineBreakSummary } from './suggestion-routine-break-context';
 import {
   buildSuggestionContextCacheKey,
   isUniqueConstraintError,
 } from './suggestion-context-cache-key';
+import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
 
 @Injectable()
 export class SuggestionContextBuilder {
   constructor(
     @InjectRepository(SuggestionContextCache)
     private readonly contextCacheRepo: Repository<SuggestionContextCache>,
+    @Optional()
+    private readonly matchingService?: MatchingService,
   ) {}
 
   async build(
@@ -47,11 +56,12 @@ export class SuggestionContextBuilder {
       ...inputs,
       targetDate: toDateOnlyString(inputs.targetDate),
       targetTime: toTimeOnlyString(inputs.targetTime),
-      requestSource: inputs.requestSource ?? 'scheduled',
+      requestSource: inputs.requestSource ?? SuggestionRequestSource.Scheduled,
       requestContext: inputs.requestContext ?? null,
     };
     const cacheKey = buildSuggestionContextCacheKey(normalizedInputs);
-    const shouldCache = normalizedInputs.requestSource === 'scheduled';
+    const shouldCache =
+      normalizedInputs.requestSource === SuggestionRequestSource.Scheduled;
     const cached = shouldCache
       ? await this.contextCacheRepo.findOne({
           where: {
@@ -83,6 +93,11 @@ export class SuggestionContextBuilder {
       normalizedInputs.recentApplications,
       normalizedInputs.targetDate,
     );
+    const ingredientIntelligenceByProductId =
+      buildIngredientIntelligenceByProductId(
+        this.matchingService,
+        normalizedInputs.shelfActiveProducts,
+      );
     const productScores = normalizedInputs.shelfActiveProducts
       .map((product) =>
         scoreProductForSuggestion(product, {
@@ -94,6 +109,9 @@ export class SuggestionContextBuilder {
           hasReactionSignal: reaction.hasSignal,
           lockedProductIds,
           conservativeRestart: applicationPatterns.conservativeRestart,
+          ingredientIntelligence: ingredientIntelligenceByProductId.get(
+            product.id,
+          ),
         }),
       )
       .sort((a, b) => b.suitabilityScore - a.suitabilityScore);
@@ -187,7 +205,7 @@ export interface SuggestionContextBuilderInput {
   userId: string;
   targetDate: string;
   targetTime: string;
-  daypart: 'morning' | 'noon' | 'evening';
+  daypart: SuggestionDaypart;
   requestSource?: SuggestionRequestSource;
   requestContext?: SuggestionRequestContextJson | null;
   skinProfile: SkinProfile | null;
@@ -207,12 +225,7 @@ function buildReactionSummary(
   const reactionEntries = entries
     .slice()
     .sort(compareJournalRecency)
-    .filter(
-      (entry) =>
-        entry.has_reaction_signal ||
-        entry.analysis_observations?.reaction_signals?.reaction_detected ||
-        entry.analysis_observations?.barrier_signs?.barrier_compromise,
-    );
+    .filter(hasUsableJournalReactionSignal);
   const latest = reactionEntries[0] ?? null;
   const observations = latest?.analysis_observations ?? null;
   const concerns = entries.flatMap(
@@ -306,6 +319,33 @@ function buildRecentUseByProduct(logs: ApplicationLog[]): Map<string, number> {
     }
   }
   return map;
+}
+
+function buildIngredientIntelligenceByProductId(
+  matchingService: MatchingService | undefined,
+  products: InventoryProduct[],
+): Map<string, ProductIngredientIntelligence> {
+  const map = new Map<string, ProductIngredientIntelligence>();
+  if (!matchingService) return map;
+
+  for (const product of products) {
+    const match = matchingService.matchProduct(toAnalysisProduct(product));
+    map.set(product.id, {
+      matchedIngredientCount: match.matchedIngredients.length,
+      totalIngredientCount: match.totalTokens,
+    });
+  }
+  return map;
+}
+
+function toAnalysisProduct(product: InventoryProduct): ProductForAnalysis {
+  return {
+    id: product.id,
+    brand: product.brand,
+    name: product.name,
+    category: product.category,
+    inciIngredients: product.identity?.inciIngredients ?? [],
+  };
 }
 
 function daysBetween(fromDate: string, toDate: string): number {

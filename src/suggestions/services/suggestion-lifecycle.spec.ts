@@ -81,6 +81,17 @@ describe('computeSuggestionLifecycle', () => {
 
     expect(lifecycle.status).toBe('missed');
   });
+
+  it('does not keep an unprovided elapsed slot in a generating state', () => {
+    const lifecycle = computeSuggestionLifecycle({
+      ...base,
+      suggestion: null,
+      applicationLog: null,
+      now: new Date('2026-04-29T08:35:00.000Z'),
+    });
+
+    expect(lifecycle.status).toBe('missed');
+  });
 });
 
 function suggestionWithStatus(

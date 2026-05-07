@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, Repository } from 'typeorm';
 import { SkinJournalMediaDeletionJob } from '../entities/skin-journal-media-deletion-job.entity';
 import {
+  MediaDeletionJobStatusValue,
   SKIN_JOURNAL_MEDIA_DELETION_VERIFY_BATCH_SIZE,
   SKIN_JOURNAL_MEDIA_DELETION_VERIFY_DELAY_MS,
   SKIN_JOURNAL_MEDIA_DELETION_VERIFY_INTERVAL_MS,
@@ -63,7 +64,7 @@ export class SkinJournalMediaRetentionService
 
     job.user_id = params.userId;
     job.object_key = params.objectKey;
-    job.status = 'pending';
+    job.status = MediaDeletionJobStatusValue.Pending;
     job.run_after =
       params.runAfter ??
       new Date(Date.now() + SKIN_JOURNAL_MEDIA_DELETION_VERIFY_DELAY_MS);
@@ -77,7 +78,7 @@ export class SkinJournalMediaRetentionService
   async verifyDueDeletions(now = new Date()): Promise<number> {
     const jobs = await this.deletionJobs.find({
       where: {
-        status: 'pending',
+        status: MediaDeletionJobStatusValue.Pending,
         run_after: LessThanOrEqual(now),
       },
       order: { run_after: 'ASC' },
@@ -92,7 +93,7 @@ export class SkinJournalMediaRetentionService
         if (exists) {
           throw new Error('Media object still exists after delete attempt');
         }
-        job.status = 'verified';
+        job.status = MediaDeletionJobStatusValue.Verified;
         job.last_error = null;
         job.verified_at = now;
         await this.deletionJobs.save(job);
@@ -103,8 +104,8 @@ export class SkinJournalMediaRetentionService
         job.last_error = message;
         job.status =
           job.attempt_count >= SKIN_JOURNAL_MEDIA_DELETION_VERIFY_MAX_ATTEMPTS
-            ? 'failed'
-            : 'pending';
+            ? MediaDeletionJobStatusValue.Failed
+            : MediaDeletionJobStatusValue.Pending;
         job.run_after = new Date(
           now.getTime() + this.nextRetryDelayMs(job.attempt_count),
         );

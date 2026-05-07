@@ -18,21 +18,25 @@ import {
 } from '../suggestions.constants';
 import { SuggestionInstance } from './suggestion-instance.entity';
 
+const ACTIVE_JOB_STATUS_INDEX_WHERE = `"status" IN ('${SuggestionGenerationJobStatus.Queued}','${SuggestionGenerationJobStatus.Running}')`;
+const SCHEDULED_JOB_INDEX_WHERE = `"request_source" = '${SuggestionRequestSource.Scheduled}' AND "slot_id" IS NOT NULL`;
+const ON_DEMAND_JOB_INDEX_WHERE = `"request_source" = '${SuggestionRequestSource.OnDemand}' AND "suggestion_instance_id" IS NOT NULL`;
+
 @Entity('suggestion_generation_jobs')
 @Index('IDX_suggestion_jobs_status_run_after', ['status', 'run_after'], {
-  where: `"status" IN ('queued','running')`,
+  where: ACTIVE_JOB_STATUS_INDEX_WHERE,
 })
 @Index(
   'UQ_suggestion_jobs_scheduled_user_slot_date',
   ['user_id', 'slot_id', 'target_date'],
   {
     unique: true,
-    where: `"request_source" = 'scheduled' AND "slot_id" IS NOT NULL`,
+    where: SCHEDULED_JOB_INDEX_WHERE,
   },
 )
 @Index('UQ_suggestion_jobs_on_demand_instance', ['suggestion_instance_id'], {
   unique: true,
-  where: `"request_source" = 'on_demand' AND "suggestion_instance_id" IS NOT NULL`,
+  where: ON_DEMAND_JOB_INDEX_WHERE,
 })
 @Index('IDX_suggestion_jobs_source_status_run_after', [
   'request_source',
@@ -52,7 +56,11 @@ export class SuggestionGenerationJob {
   @Column({ type: 'varchar', length: 26, nullable: true })
   suggestion_instance_id: string | null;
 
-  @Column({ type: 'varchar', length: 20, default: 'scheduled' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: SuggestionRequestSource.Scheduled,
+  })
   request_source: SuggestionRequestSource;
 
   @Column({ type: 'date' })
@@ -64,7 +72,11 @@ export class SuggestionGenerationJob {
   @Column({ type: 'timestamptz' })
   visible_at: Date;
 
-  @Column({ type: 'varchar', length: 20, default: 'queued' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: SuggestionGenerationJobStatus.Queued,
+  })
   status: SuggestionGenerationJobStatus;
 
   @Column({ type: 'integer', default: 0 })

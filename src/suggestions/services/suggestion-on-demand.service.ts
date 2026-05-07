@@ -20,7 +20,11 @@ import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import {
   SUGGESTION_ON_DEMAND_COOLDOWN_MINUTES,
   SUGGESTION_ON_DEMAND_DAILY_USER_LIMIT,
+  SuggestionGenerationJobStatus,
+  SuggestionGenerationStatus,
+  SuggestionMode,
   SuggestionRequestContextJson,
+  SuggestionRequestSource,
 } from '../suggestions.constants';
 import {
   deriveSuggestionDaypart,
@@ -32,6 +36,11 @@ import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionConsentService } from './suggestion-consent.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { RoutineBreakService } from './routine-break.service';
+import {
+  buildRequestContext,
+  isUniqueConstraintError,
+  normalizeRequestId,
+} from './suggestion-on-demand.utils';
 
 @Injectable()
 export class SuggestionOnDemandService {
@@ -120,14 +129,14 @@ export class SuggestionOnDemandService {
       where: {
         id: suggestionId,
         user_id: user.id,
-        request_source: 'on_demand',
+        request_source: SuggestionRequestSource.OnDemand,
       },
       relations: ['steps'],
     });
     if (!suggestion) {
       throw new NotFoundException('On-demand suggestion not found.');
     }
-    if (suggestion.generation_status !== 'failed') {
+    if (suggestion.generation_status !== SuggestionGenerationStatus.Failed) {
       return SuggestionInstanceResponseDto.fromEntity(suggestion);
     }
 
@@ -149,7 +158,7 @@ export class SuggestionOnDemandService {
       suggestionInstanceId: queued.id,
       metadata: {
         intent: queued.request_context?.intent ?? null,
-        retryFromStatus: 'failed',
+        retryFromStatus: SuggestionGenerationStatus.Failed,
       },
     });
     return SuggestionInstanceResponseDto.fromEntity(queued);
@@ -162,7 +171,7 @@ export class SuggestionOnDemandService {
     return this.suggestionRepo.findOne({
       where: {
         user_id: userId,
-        request_source: 'on_demand',
+        request_source: SuggestionRequestSource.OnDemand,
         request_id: requestId,
       },
       relations: ['steps'],
@@ -184,14 +193,14 @@ export class SuggestionOnDemandService {
         suggestionRepo.create({
           user_id: inputs.user.id,
           slot_id: null,
-          request_source: 'on_demand',
+          request_source: SuggestionRequestSource.OnDemand,
           request_id: inputs.requestId,
           request_context: inputs.requestContext,
           target_date: inputs.targetDate,
           target_time: inputs.targetTime,
           daypart: deriveSuggestionDaypart(inputs.targetTime),
-          mode: 'ai',
-          generation_status: 'generating',
+          mode: SuggestionMode.Ai,
+          generation_status: SuggestionGenerationStatus.Generating,
           visible_at: inputs.now,
           generated_at: null,
           ai_model: null,
@@ -217,11 +226,11 @@ export class SuggestionOnDemandService {
         user_id: inputs.user.id,
         slot_id: null,
         suggestion_instance_id: suggestion.id,
-        request_source: 'on_demand',
+        request_source: SuggestionRequestSource.OnDemand,
         target_date: inputs.targetDate,
         target_time: inputs.targetTime,
         visible_at: inputs.now,
-        status: 'queued',
+        status: SuggestionGenerationJobStatus.Queued,
         attempt_count: 0,
         run_after: inputs.now,
         last_error: null,
@@ -241,7 +250,7 @@ export class SuggestionOnDemandService {
       const jobRepo = manager.getRepository(SuggestionGenerationJob);
       const queued = await suggestionRepo.save({
         ...suggestion,
-        generation_status: 'generating',
+        generation_status: SuggestionGenerationStatus.Generating,
         ai_error: null,
         ai_retry_count: 0,
       });
@@ -249,14 +258,14 @@ export class SuggestionOnDemandService {
         where: {
           user_id: userId,
           suggestion_instance_id: suggestion.id,
-          request_source: 'on_demand',
+          request_source: SuggestionRequestSource.OnDemand,
         },
       });
       if (job) {
         await jobRepo.update(
           { id: job.id },
           {
-            status: 'queued',
+            status: SuggestionGenerationJobStatus.Queued,
             attempt_count: 0,
             run_after: now,
             locked_at: null,
@@ -269,11 +278,11 @@ export class SuggestionOnDemandService {
           user_id: userId,
           slot_id: null,
           suggestion_instance_id: suggestion.id,
-          request_source: 'on_demand',
+          request_source: SuggestionRequestSource.OnDemand,
           target_date: toDateOnlyString(suggestion.target_date),
           target_time: toTimeOnlyString(suggestion.target_time),
           visible_at: suggestion.visible_at ?? now,
-          status: 'queued',
+          status: SuggestionGenerationJobStatus.Queued,
           attempt_count: 0,
           run_after: now,
           last_error: null,
@@ -327,9 +336,9 @@ export class SuggestionOnDemandService {
     const countToday = await this.suggestionRepo.count({
       where: {
         user_id: userId,
-        request_source: 'on_demand',
+        request_source: SuggestionRequestSource.OnDemand,
         target_date: targetDate,
-        generation_status: Not('superseded' as const),
+        generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
     });
     if (countToday >= SUGGESTION_ON_DEMAND_DAILY_USER_LIMIT) {
@@ -342,8 +351,8 @@ export class SuggestionOnDemandService {
     const latest = await this.suggestionRepo.findOne({
       where: {
         user_id: userId,
-        request_source: 'on_demand',
-        generation_status: Not('superseded' as const),
+        request_source: SuggestionRequestSource.OnDemand,
+        generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
       select: ['id', 'created_at'],
       order: { created_at: 'DESC' },
@@ -385,29 +394,4 @@ export class SuggestionOnDemandService {
       },
     });
   }
-}
-
-function normalizeRequestId(value: string | undefined): string | null {
-  const trimmed = value?.trim() ?? '';
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error
-    ? (error as { code?: unknown }).code === '23505'
-    : false;
-}
-
-function buildRequestContext(
-  payload: CreateOnDemandSuggestionDto,
-  now: Date,
-): SuggestionRequestContextJson {
-  const note = payload.note?.trim() ?? '';
-  return {
-    intent: payload.intent,
-    intensity: payload.intensity ?? 'standard',
-    note: note.length > 0 ? note : null,
-    activityAt: payload.activityAt ?? null,
-    requestedAt: now.toISOString(),
-  };
 }

@@ -62,7 +62,7 @@ function buildJobLookup(
   requestSource: SuggestionRequestSource,
   targetDate: string,
 ): FindOptionsWhere<SuggestionGenerationJob> {
-  if (requestSource === 'on_demand') {
+  if (requestSource === SuggestionRequestSource.OnDemand) {
     if (!draft.suggestion_instance_id) {
       throw new Error('On-demand generation jobs require a suggestion id.');
     }
@@ -86,11 +86,12 @@ function buildJobLookup(
 function buildJobRow(
   draft: SuggestionGenerationJobDraft,
 ): QueryDeepPartialEntity<SuggestionGenerationJob> {
+  const requestSource = normalizeRequestSource(draft.request_source);
   return {
     id: ulid(),
     ...draft,
-    request_source: normalizeRequestSource(draft.request_source),
-    suggestion_instance_id: draft.suggestion_instance_id ?? null,
+    request_source: requestSource,
+    suggestion_instance_id: suggestionInstanceIdForSource(draft, requestSource),
     slot_id: draft.slot_id ?? null,
     target_date: toDateOnlyString(draft.target_date),
     target_time: toTimeOnlyString(draft.target_time),
@@ -102,10 +103,11 @@ function buildJobRow(
 function buildJobUpdate(
   draft: SuggestionGenerationJobDraft,
 ): QueryDeepPartialEntity<SuggestionGenerationJob> {
+  const requestSource = normalizeRequestSource(draft.request_source);
   return {
     ...draft,
-    request_source: normalizeRequestSource(draft.request_source),
-    suggestion_instance_id: draft.suggestion_instance_id ?? null,
+    request_source: requestSource,
+    suggestion_instance_id: suggestionInstanceIdForSource(draft, requestSource),
     slot_id: draft.slot_id ?? null,
     target_date: toDateOnlyString(draft.target_date),
     target_time: toTimeOnlyString(draft.target_time),
@@ -117,7 +119,16 @@ function buildJobUpdate(
 function normalizeRequestSource(
   value: SuggestionRequestSource | null | undefined,
 ): SuggestionRequestSource {
-  return value ?? 'scheduled';
+  return value ?? SuggestionRequestSource.Scheduled;
+}
+
+function suggestionInstanceIdForSource(
+  draft: SuggestionGenerationJobDraft,
+  requestSource: SuggestionRequestSource,
+): string | null {
+  return requestSource === SuggestionRequestSource.OnDemand
+    ? (draft.suggestion_instance_id ?? null)
+    : null;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

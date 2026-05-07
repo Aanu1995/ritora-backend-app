@@ -30,12 +30,20 @@ import {
   SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER,
   SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
   SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS,
+  AnalysisJobStatusValue,
   type AnalysisJobStatus,
   type AnalysisQueueDriver,
 } from '../skin-journal.constants';
 
-const ACTIVE_JOB_STATUSES: AnalysisJobStatus[] = ['queued', 'sent', 'running'];
-const CLAIMABLE_JOB_STATUSES: AnalysisJobStatus[] = ['queued', 'sent'];
+const ACTIVE_JOB_STATUSES: AnalysisJobStatus[] = [
+  AnalysisJobStatusValue.Queued,
+  AnalysisJobStatusValue.Sent,
+  AnalysisJobStatusValue.Running,
+];
+const CLAIMABLE_JOB_STATUSES: AnalysisJobStatus[] = [
+  AnalysisJobStatusValue.Queued,
+  AnalysisJobStatusValue.Sent,
+];
 const ANALYSIS_JOB_TABLE_NAME = 'skin_journal_analysis_jobs';
 
 export type AnalysisQueueMessage = {
@@ -178,8 +186,8 @@ export class SkinJournalAnalysisQueueService
     job.max_attempts = job.max_attempts || this.maxAttempts;
     job.completed_at = null;
     job.last_error = params.reason ?? job.last_error ?? null;
-    if (job.status !== 'running') {
-      job.status = 'queued';
+    if (job.status !== AnalysisJobStatusValue.Running) {
+      job.status = AnalysisJobStatusValue.Queued;
       job.locked_at = null;
       job.locked_by = null;
     }
@@ -201,7 +209,7 @@ export class SkinJournalAnalysisQueueService
     }
     const dueJobs = await this.jobs.find({
       where: {
-        status: 'queued',
+        status: AnalysisJobStatusValue.Queued,
         run_after: LessThanOrEqual(new Date()),
       },
       order: { run_after: 'ASC' },
@@ -211,12 +219,12 @@ export class SkinJournalAnalysisQueueService
     for (const job of dueJobs) {
       try {
         await this.sendSqsJob(job.id);
-        job.status = 'sent';
+        job.status = AnalysisJobStatusValue.Sent;
         job.last_error = null;
         await this.jobs.save(job);
         sent += 1;
       } catch (error) {
-        job.status = 'queued';
+        job.status = AnalysisJobStatusValue.Queued;
         job.last_error = this.errorMessage(error);
         await this.jobs.save(job);
         this.logger.error(
@@ -297,7 +305,7 @@ export class SkinJournalAnalysisQueueService
         return null;
       }
       if (job.run_after.getTime() > Date.now()) {
-        job.status = 'queued';
+        job.status = AnalysisJobStatusValue.Queued;
         job.locked_at = null;
         job.locked_by = null;
         await repo.save(job);
@@ -306,7 +314,7 @@ export class SkinJournalAnalysisQueueService
       }
       const capacity = await this.canClaimDistributedCapacity(repo, job);
       if (!capacity.ok) {
-        job.status = 'queued';
+        job.status = AnalysisJobStatusValue.Queued;
         job.locked_at = null;
         job.locked_by = null;
         job.last_error = capacity.reason;
@@ -315,7 +323,7 @@ export class SkinJournalAnalysisQueueService
         this.scheduleDispatch();
         return null;
       }
-      job.status = 'running';
+      job.status = AnalysisJobStatusValue.Running;
       job.locked_at = new Date();
       job.locked_by = workerId;
       job.attempt_count += 1;
@@ -350,7 +358,7 @@ export class SkinJournalAnalysisQueueService
       }
       const capacity = await this.canClaimDistributedCapacity(repo, job);
       if (!capacity.ok) {
-        job.status = 'queued';
+        job.status = AnalysisJobStatusValue.Queued;
         job.locked_at = null;
         job.locked_by = null;
         job.last_error = capacity.reason;
@@ -359,7 +367,7 @@ export class SkinJournalAnalysisQueueService
         this.scheduleDispatch();
         return null;
       }
-      job.status = 'running';
+      job.status = AnalysisJobStatusValue.Running;
       job.locked_at = new Date();
       job.locked_by = workerId;
       job.attempt_count += 1;
@@ -373,7 +381,7 @@ export class SkinJournalAnalysisQueueService
   }
 
   async completeJob(job: SkinJournalAnalysisJob): Promise<void> {
-    job.status = 'completed';
+    job.status = AnalysisJobStatusValue.Completed;
     job.locked_at = null;
     job.locked_by = null;
     job.last_error = null;
@@ -382,7 +390,7 @@ export class SkinJournalAnalysisQueueService
   }
 
   async failJob(job: SkinJournalAnalysisJob, error: string): Promise<void> {
-    job.status = 'failed';
+    job.status = AnalysisJobStatusValue.Failed;
     job.locked_at = null;
     job.locked_by = null;
     job.last_error = error;
@@ -391,7 +399,7 @@ export class SkinJournalAnalysisQueueService
   }
 
   async cancelJob(job: SkinJournalAnalysisJob, reason: string): Promise<void> {
-    job.status = 'cancelled';
+    job.status = AnalysisJobStatusValue.Cancelled;
     job.locked_at = null;
     job.locked_by = null;
     job.last_error = reason;
@@ -403,7 +411,7 @@ export class SkinJournalAnalysisQueueService
     job: SkinJournalAnalysisJob,
     params: { reason: string; runAfter: Date },
   ): Promise<void> {
-    job.status = 'queued';
+    job.status = AnalysisJobStatusValue.Queued;
     job.run_after = params.runAfter;
     job.locked_at = null;
     job.locked_by = null;
@@ -434,17 +442,24 @@ export class SkinJournalAnalysisQueueService
     }
     const cutoff = new Date(Date.now() - this.lockTtlSeconds * 1000);
     const candidates = await this.jobs.find({
-      where: { status: In(['sent', 'running']) },
+      where: {
+        status: In([
+          AnalysisJobStatusValue.Sent,
+          AnalysisJobStatusValue.Running,
+        ]),
+      },
       take: 100,
     });
     let recovered = 0;
     for (const job of candidates) {
       const referenceDate =
-        job.status === 'running' ? job.locked_at : job.updated_at;
+        job.status === AnalysisJobStatusValue.Running
+          ? job.locked_at
+          : job.updated_at;
       if (referenceDate && referenceDate.getTime() > cutoff.getTime()) {
         continue;
       }
-      job.status = 'queued';
+      job.status = AnalysisJobStatusValue.Queued;
       job.locked_at = null;
       job.locked_by = null;
       job.last_error =
@@ -473,14 +488,19 @@ export class SkinJournalAnalysisQueueService
       oldestQueued,
       retrying,
     ] = await Promise.all([
-      this.jobs.count({ where: { status: 'queued' } }),
-      this.jobs.count({ where: { status: 'sent' } }),
-      this.jobs.count({ where: { status: 'running' } }),
-      this.jobs.count({ where: { status: 'failed' } }),
-      this.jobs.count({ where: { status: 'completed' } }),
-      this.jobs.count({ where: { status: 'cancelled' } }),
+      this.jobs.count({ where: { status: AnalysisJobStatusValue.Queued } }),
+      this.jobs.count({ where: { status: AnalysisJobStatusValue.Sent } }),
+      this.jobs.count({ where: { status: AnalysisJobStatusValue.Running } }),
+      this.jobs.count({ where: { status: AnalysisJobStatusValue.Failed } }),
+      this.jobs.count({ where: { status: AnalysisJobStatusValue.Completed } }),
+      this.jobs.count({ where: { status: AnalysisJobStatusValue.Cancelled } }),
       this.jobs.findOne({
-        where: { status: In(['queued', 'sent']) },
+        where: {
+          status: In([
+            AnalysisJobStatusValue.Queued,
+            AnalysisJobStatusValue.Sent,
+          ]),
+        },
         order: { run_after: 'ASC' },
       }),
       this.jobs
@@ -653,14 +673,14 @@ export class SkinJournalAnalysisQueueService
     const [globalRunning, userRunning, userAttemptsToday] = await Promise.all([
       repo.count({
         where: {
-          status: 'running',
+          status: AnalysisJobStatusValue.Running,
           locked_at: MoreThanOrEqual(cutoff),
         },
       }),
       repo.count({
         where: {
           user_id: job.user_id,
-          status: 'running',
+          status: AnalysisJobStatusValue.Running,
           locked_at: MoreThanOrEqual(cutoff),
         },
       }),

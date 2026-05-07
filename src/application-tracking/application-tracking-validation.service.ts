@@ -6,23 +6,25 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { toDateOnlyString, toTimeOnlyString } from '../common/utils/date';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { deriveSuggestionDaypart } from '../suggestions/services/suggestion-helpers';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
-import { SuggestionStep } from '../suggestions/entities/suggestion-step.entity';
+import { SuggestionGenerationStatus } from '../suggestions/suggestions.constants';
 import { User } from '../users/entities/user.entity';
 import {
   ApplicationLogItemInputDto,
   RecordApplicationDto,
 } from './dto/application-log-item.dto';
 import {
-  ApplicationItemProductSnapshot,
-  ApplicationItemSource,
-} from './application-tracking.constants';
-import type { ApplicationDaypart } from './application-tracking.constants';
+  collectApplicationItemProductIds,
+  resolveApplicationItemDrafts,
+  ResolvedApplicationItemInput,
+} from './application-item-draft.resolver';
+import { ApplicationDaypart } from './application-tracking.constants';
+import { ApplicationLogItem } from './entities/application-log-item.entity';
 
 @Injectable()
 export class ApplicationTrackingValidationService {
@@ -44,12 +46,14 @@ export class ApplicationTrackingValidationService {
       user,
       suggestionInstanceId,
     );
-    if (suggestion.generation_status === 'superseded') {
+    if (
+      suggestion.generation_status === SuggestionGenerationStatus.Superseded
+    ) {
       throw new ConflictException(
         'This suggestion has been superseded. Record the current suggestion instead.',
       );
     }
-    if (suggestion.generation_status !== 'ready') {
+    if (suggestion.generation_status !== SuggestionGenerationStatus.Ready) {
       throw new ConflictException('This suggestion is not ready to record.');
     }
     return suggestion;
@@ -78,7 +82,7 @@ export class ApplicationTrackingValidationService {
     }
     const slot = payload.slotId
       ? await this.slotRepo.findOne({
-          where: { id: payload.slotId, user_id: user.id },
+          where: { id: payload.slotId, user_id: user.id, deleted_at: IsNull() },
         })
       : null;
     if (payload.slotId && !slot) {
@@ -97,34 +101,29 @@ export class ApplicationTrackingValidationService {
     userId: string,
     items: ApplicationLogItemInputDto[],
     suggestion: SuggestionInstance | null,
+    existingItems: ApplicationLogItem[] = [],
   ): Promise<ResolvedApplicationItemInput[]> {
     if (!items?.length) {
       throw new BadRequestException(
         'At least one applied, skipped, or substituted item is required.',
       );
     }
-    const stepById = new Map<string, SuggestionStep>(
-      (suggestion?.steps ?? []).map((step) => [step.id, step]),
+    const productById = await this.loadProductMap(
+      userId,
+      collectApplicationItemProductIds(items, existingItems),
     );
-    const productById = await this.loadProductMap(userId, items);
-    return items.map((item, index) =>
-      resolveItemDraft(item, index, stepById, productById),
-    );
+    return resolveApplicationItemDrafts({
+      items,
+      suggestionSteps: suggestion?.steps ?? [],
+      productById,
+      existingItems,
+    });
   }
 
   private async loadProductMap(
     userId: string,
-    items: ApplicationLogItemInputDto[],
+    ids: string[],
   ): Promise<Map<string, InventoryProduct>> {
-    const ids = Array.from(
-      new Set(
-        items.flatMap((item) =>
-          [item.inventoryProductId, item.substitutedWithProductId].filter(
-            (id): id is string => Boolean(id),
-          ),
-        ),
-      ),
-    );
     const products = ids.length
       ? await this.inventoryRepo.find({
           where: { user_id: userId, id: In(ids) },
@@ -167,169 +166,3 @@ export type ApplicationTarget = {
   targetTime: string | null;
   daypart: ApplicationDaypart | null;
 };
-
-export type ResolvedApplicationItemInput = ApplicationLogItemInputDto & {
-  productBrand: string | null;
-  productName: string | null;
-  stepLabel: string | null;
-  isAdHoc: boolean;
-  adHocBrand: string | null;
-  adHocName: string | null;
-  inventoryProductId: string | null;
-  substitutedWithProductId: string | null;
-  itemSource: ApplicationItemSource;
-  substitutionReason: string | null;
-  recommendedSnapshot: ApplicationItemProductSnapshot | null;
-  appliedSnapshot: ApplicationItemProductSnapshot | null;
-};
-
-function resolveItemDraft(
-  item: ApplicationLogItemInputDto,
-  index: number,
-  stepById: Map<string, SuggestionStep>,
-  productById: Map<string, InventoryProduct>,
-): ResolvedApplicationItemInput {
-  const suggestionStep = item.suggestionStepId
-    ? (stepById.get(item.suggestionStepId) ?? null)
-    : null;
-  if (item.suggestionStepId && !suggestionStep) {
-    throw new BadRequestException(
-      'Suggestion step does not belong to this suggestion.',
-    );
-  }
-  const product = item.inventoryProductId
-    ? (productById.get(item.inventoryProductId) ?? null)
-    : null;
-  const substitutedProduct = item.substitutedWithProductId
-    ? (productById.get(item.substitutedWithProductId) ?? null)
-    : null;
-  const isAdHoc = item.isAdHoc ?? false;
-  validateItemShape(item, isAdHoc, product, substitutedProduct, suggestionStep);
-
-  const sourceProduct = product ?? suggestionStep?.product ?? null;
-  const itemSource = resolveItemSource(item, suggestionStep);
-  return {
-    ...item,
-    stepOrder: item.stepOrder ?? index,
-    inventoryProductId: product?.id ?? item.inventoryProductId ?? null,
-    substitutedWithProductId: substitutedProduct?.id ?? null,
-    productBrand:
-      sourceProduct?.brand ?? item.productBrand ?? item.adHocBrand ?? null,
-    productName:
-      sourceProduct?.name ?? item.productName ?? item.adHocName ?? null,
-    stepLabel: suggestionStep?.step_label ?? item.stepLabel ?? null,
-    isAdHoc,
-    adHocBrand: item.adHocBrand?.trim() || null,
-    adHocName: item.adHocName?.trim() || null,
-    itemSource,
-    substitutionReason: item.substitutionReason ?? null,
-    recommendedSnapshot: suggestionStep
-      ? {
-          product_id: suggestionStep.inventory_product_id,
-          brand:
-            suggestionStep.product_brand_snapshot ??
-            suggestionStep.product?.brand ??
-            null,
-          name:
-            suggestionStep.product_name_snapshot ??
-            suggestionStep.product?.name ??
-            null,
-          step_label: suggestionStep.step_label,
-          routine_step_id: suggestionStep.routine_step_id,
-          suggestion_step_id: suggestionStep.id,
-          provenance: suggestionStep.provenance,
-        }
-      : null,
-    appliedSnapshot: buildAppliedSnapshot(
-      item,
-      sourceProduct,
-      substitutedProduct,
-      suggestionStep,
-    ),
-  };
-}
-
-function resolveItemSource(
-  item: ApplicationLogItemInputDto,
-  suggestionStep: SuggestionStep | null,
-): ApplicationItemSource {
-  if (item.isAdHoc) return 'added_off_shelf';
-  if (
-    !suggestionStep &&
-    (item.inventoryProductId || item.substitutedWithProductId)
-  ) {
-    return 'added_shelf';
-  }
-  return 'recommended';
-}
-
-function buildAppliedSnapshot(
-  item: ApplicationLogItemInputDto,
-  sourceProduct: InventoryProduct | null,
-  substitutedProduct: InventoryProduct | null,
-  suggestionStep: SuggestionStep | null,
-): ApplicationItemProductSnapshot | null {
-  if (item.status === 'substituted' && item.isAdHoc) {
-    return {
-      product_id: null,
-      brand: item.adHocBrand ?? null,
-      name: item.adHocName ?? null,
-      step_label: item.stepLabel ?? suggestionStep?.step_label ?? null,
-      routine_step_id: suggestionStep?.routine_step_id ?? null,
-      suggestion_step_id: suggestionStep?.id ?? null,
-      provenance: 'added_off_shelf',
-    };
-  }
-  const product = substitutedProduct ?? sourceProduct;
-  if (product) {
-    return {
-      product_id: product.id,
-      brand: product.brand,
-      name: product.name,
-      step_label: suggestionStep?.step_label ?? item.stepLabel ?? null,
-      routine_step_id: suggestionStep?.routine_step_id ?? null,
-      suggestion_step_id: suggestionStep?.id ?? null,
-      provenance: suggestionStep?.provenance ?? null,
-    };
-  }
-  if (item.isAdHoc) {
-    return {
-      product_id: null,
-      brand: item.adHocBrand ?? null,
-      name: item.adHocName ?? null,
-      step_label: item.stepLabel ?? null,
-      routine_step_id: null,
-      suggestion_step_id: suggestionStep?.id ?? null,
-      provenance: 'added_off_shelf',
-    };
-  }
-  return null;
-}
-
-function validateItemShape(
-  item: ApplicationLogItemInputDto,
-  isAdHoc: boolean,
-  product: InventoryProduct | null,
-  substitutedProduct: InventoryProduct | null,
-  suggestionStep: SuggestionStep | null,
-): void {
-  if (isAdHoc && (!item.adHocBrand?.trim() || !item.adHocName?.trim())) {
-    throw new BadRequestException(
-      'Off-shelf products require both brand and name.',
-    );
-  }
-  if (
-    item.status === 'substituted' &&
-    !substitutedProduct &&
-    !(isAdHoc && item.adHocBrand?.trim() && item.adHocName?.trim())
-  ) {
-    throw new BadRequestException(
-      'Substituted items require a shelf product or an off-shelf brand and name.',
-    );
-  }
-  if (!isAdHoc && !product && !suggestionStep) {
-    throw new BadRequestException(
-      'Logged items must reference a suggestion step, shelf product, or off-shelf product.',
-    );
-  }
-}

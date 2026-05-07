@@ -6,14 +6,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, In, IsNull, Repository } from 'typeorm';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import {
   RECORDING_REMINDER_DELAY_MINUTES,
+  SuggestionGenerationStatus,
+  SuggestionRequestSource,
   SUGGESTION_GENERATION_POLL_INTERVAL_MS,
 } from '../suggestions.constants';
 import { RoutineBreakService } from './routine-break.service';
@@ -47,6 +50,8 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
     private readonly applicationLogRepo: Repository<ApplicationLog>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(ScheduleSlot)
+    private readonly slotRepo: Repository<ScheduleSlot>,
     private readonly routineBreakService: RoutineBreakService,
   ) {
     this.enabled = this.configService.get<string>('NODE_ENV') !== 'test';
@@ -87,7 +92,7 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
     // this bound, every old suggestion stays in the worker scan forever.
     const readySuggestions = await this.suggestionRepo.find({
       where: {
-        generation_status: 'ready',
+        generation_status: SuggestionGenerationStatus.Ready,
         target_date: Between(fromDate, toDate),
       },
     });
@@ -95,8 +100,19 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
     if (readySuggestions.length === 0) {
       return { slotStart: 0, recordingReminder: 0 };
     }
+    const scheduledSuggestions = readySuggestions.filter(isScheduledSuggestion);
+    if (scheduledSuggestions.length === 0) {
+      return { slotStart: 0, recordingReminder: 0 };
+    }
 
-    const userIds = Array.from(new Set(readySuggestions.map((s) => s.user_id)));
+    const activeSlotKeys = await this.loadActiveSlotKeys(scheduledSuggestions);
+    if (activeSlotKeys.size === 0) {
+      return { slotStart: 0, recordingReminder: 0 };
+    }
+
+    const userIds = Array.from(
+      new Set(scheduledSuggestions.map((suggestion) => suggestion.user_id)),
+    );
     const users = await this.userRepo.find({
       where: { id: In(userIds) },
     });
@@ -106,7 +122,9 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
       now,
     );
 
-    const suggestionIds = readySuggestions.map((s) => s.id);
+    const suggestionIds = scheduledSuggestions.map(
+      (suggestion) => suggestion.id,
+    );
     const logs = await this.applicationLogRepo.find({
       where: {
         suggestion_instance_id: In(suggestionIds),
@@ -116,7 +134,13 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
       logs.map((log) => log.suggestion_instance_id).filter(Boolean) as string[],
     );
 
-    for (const suggestion of readySuggestions) {
+    for (const suggestion of scheduledSuggestions) {
+      if (
+        !suggestion.slot_id ||
+        !activeSlotKeys.has(slotUserKey(suggestion.user_id, suggestion.slot_id))
+      ) {
+        continue;
+      }
       if (activeBreakUserIds.has(suggestion.user_id)) continue;
       const user = usersById.get(suggestion.user_id);
       if (!user) continue;
@@ -193,6 +217,41 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
     }, delayMs);
     this.timer.unref?.();
   }
+
+  private async loadActiveSlotKeys(
+    suggestions: SuggestionInstance[],
+  ): Promise<Set<string>> {
+    const slotIds = Array.from(
+      new Set(
+        suggestions.flatMap((suggestion) =>
+          suggestion.slot_id ? [suggestion.slot_id] : [],
+        ),
+      ),
+    );
+    if (slotIds.length === 0) return new Set();
+
+    const slots = await this.slotRepo.find({
+      where: {
+        id: In(slotIds),
+        deleted_at: IsNull(),
+      },
+      select: ['id', 'user_id'],
+    });
+    return new Set(slots.map((slot) => slotUserKey(slot.user_id, slot.id)));
+  }
+}
+
+function isScheduledSuggestion(
+  suggestion: SuggestionInstance,
+): suggestion is SuggestionInstance & { slot_id: string } {
+  return (
+    suggestion.request_source !== SuggestionRequestSource.OnDemand &&
+    typeof suggestion.slot_id === 'string'
+  );
+}
+
+function slotUserKey(userId: string, slotId: string): string {
+  return `${userId}:${slotId}`;
 }
 
 function isDueBeforeEndOfNextDay(now: Date, target: Date): boolean {

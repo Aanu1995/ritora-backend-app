@@ -11,10 +11,11 @@ import {
   encryptedJsonFieldTransformer,
   encryptedNullableStringFieldTransformer,
 } from '../../skin-profile/skin-profile-field-encryption';
-import type {
-  WrappedManifest,
-  WrappedPeriodKind,
-  WrappedStatus,
+import {
+  WrappedStatusValue,
+  type WrappedManifest,
+  type WrappedPeriodKind,
+  type WrappedStatus,
 } from '../skin-journal.constants';
 
 const encryptedManifestTransformer =
@@ -45,7 +46,7 @@ export class SkinJournalWrapped {
   @Column({ type: 'date' })
   period_end: string;
 
-  @Column({ type: 'varchar', length: 30, default: 'pending' })
+  @Column({ type: 'varchar', length: 30, default: WrappedStatusValue.Pending })
   status: WrappedStatus;
 
   @Column({

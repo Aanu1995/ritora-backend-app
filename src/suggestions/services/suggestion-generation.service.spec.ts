@@ -73,6 +73,7 @@ describe('SuggestionGenerationService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T06:45:00.000Z'));
     txSuggestionRepo = repo<SuggestionInstance>();
     txStepRepo = repo<SuggestionStep>();
     dataSource = dataSourceWithRepos(txSuggestionRepo, txStepRepo);
@@ -125,6 +126,10 @@ describe('SuggestionGenerationService', () => {
     routineBreakRepo.find.mockResolvedValue([]);
     routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
     suggestionRepo.update.mockResolvedValue({ affected: 1 } as never);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('builds minimized context, persists a ready suggestion, and dispatches a deduped notification', async () => {
@@ -213,6 +218,64 @@ describe('SuggestionGenerationService', () => {
         userId: 'user-1',
       }),
     );
+  });
+
+  it('does not generate a scheduled suggestion after the slot time has elapsed', async () => {
+    jest.setSystemTime(new Date('2026-05-04T08:35:00.000Z'));
+    slotRepo.findOne.mockResolvedValue(slot());
+    userRepo.findOne.mockResolvedValue(user());
+
+    await service.generateForJob(job());
+
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+      }),
+      {
+        generation_status: 'superseded',
+        ai_error: 'schedule_slot_elapsed',
+      },
+    );
+    expect(contextBuilder.build).not.toHaveBeenCalled();
+    expect(aiGenerator.generate).not.toHaveBeenCalled();
+    expect(notifications.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('does not persist a scheduled suggestion if generation finishes after the slot time', async () => {
+    jest.setSystemTime(new Date('2026-05-04T07:59:00.000Z'));
+    slotRepo.findOne.mockResolvedValue(slot());
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find.mockResolvedValue([]);
+    applicationLogRepo.find.mockResolvedValue([]);
+    preferenceRepo.findOne.mockResolvedValue(null);
+    contextBuilder.build.mockResolvedValue(contextSummary());
+    aiGenerator.generate.mockImplementation(async () => {
+      jest.setSystemTime(new Date('2026-05-04T08:01:00.000Z'));
+      return generationOutput();
+    });
+
+    await service.generateForJob(job());
+
+    expect(aiGenerator.generate).toHaveBeenCalled();
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+      }),
+      {
+        generation_status: 'superseded',
+        ai_error: 'schedule_slot_elapsed',
+      },
+    );
+    expect(txSuggestionRepo.save).not.toHaveBeenCalled();
+    expect(notifications.dispatch).not.toHaveBeenCalled();
   });
 
   it('clips generated step metadata to database column lengths before saving', async () => {
@@ -403,6 +466,24 @@ describe('SuggestionGenerationService', () => {
     );
   });
 
+  it('ignores on-demand jobs when the suggestion belongs to another user', async () => {
+    suggestionRepo.findOne.mockResolvedValue(null);
+
+    await service.generateForJob(onDemandJob());
+
+    expect(suggestionRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'suggestion-on-demand-1',
+          user_id: 'user-1',
+        },
+      }),
+    );
+    expect(userRepo.findOne).not.toHaveBeenCalled();
+    expect(aiGenerator.generate).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
   it('marks queued on-demand suggestions failed if a routine break starts before work runs', async () => {
     suggestionRepo.findOne.mockResolvedValue(onDemandSuggestion());
     userRepo.findOne.mockResolvedValue(user());
@@ -472,11 +553,56 @@ describe('SuggestionGenerationService', () => {
   it('does not crash when the slot or user no longer exists', async () => {
     slotRepo.findOne.mockResolvedValue(null);
     await expect(service.generateForJob(job())).resolves.toBeUndefined();
+    expect(slotRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'slot-1',
+          user_id: 'user-1',
+          deleted_at: expect.objectContaining({ _type: 'isNull' }),
+        },
+      }),
+    );
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        generation_status: expect.objectContaining({ _type: 'in' }),
+      }),
+      expect.objectContaining({
+        generation_status: 'superseded',
+        ai_error: 'schedule_slot_unavailable',
+      }),
+    );
     expect(userRepo.findOne).not.toHaveBeenCalled();
 
     slotRepo.findOne.mockResolvedValue(slot());
     userRepo.findOne.mockResolvedValue(null);
     await expect(service.generateForJob(job())).resolves.toBeUndefined();
+  });
+
+  it('supersedes pending scheduled work when the slot changed after queueing', async () => {
+    slotRepo.findOne.mockResolvedValue({
+      ...slot(),
+      slot_time: '09:00',
+    } as ScheduleSlot);
+
+    await expect(service.generateForJob(job())).resolves.toBeUndefined();
+
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        generation_status: expect.objectContaining({ _type: 'in' }),
+      }),
+      expect.objectContaining({
+        generation_status: 'superseded',
+        ai_error: 'schedule_slot_changed',
+      }),
+    );
+    expect(userRepo.findOne).not.toHaveBeenCalled();
+    expect(aiGenerator.generate).not.toHaveBeenCalled();
   });
 });
 
@@ -567,6 +693,7 @@ function slot(): ScheduleSlot {
   return {
     id: 'slot-1',
     user_id: 'user-1',
+    day_of_week: 'mon',
     slot_time: '08:00',
     mode: 'ai',
     steps: [

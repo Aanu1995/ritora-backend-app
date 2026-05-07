@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Not, Repository } from 'typeorm';
+import { FindOptionsWhere, LessThan, Not, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
@@ -17,6 +17,9 @@ import {
   SUGGESTION_JOB_LOCK_TIMEOUT_MINUTES,
   SUGGESTION_STALE_JOB_REAPER_BATCH_SIZE,
   ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+  SuggestionGenerationJobStatus,
+  SuggestionGenerationStatus,
+  SuggestionRequestSource,
 } from '../suggestions.constants';
 import { RoutineBreakService } from './routine-break.service';
 import { SuggestionGenerationService } from './suggestion-generation.service';
@@ -82,7 +85,7 @@ export class SuggestionGenerationWorker
         await this.jobRepo.update(
           { id: job.id },
           {
-            status: 'completed',
+            status: SuggestionGenerationJobStatus.Completed,
             last_error: null,
             locked_at: null,
             locked_by: null,
@@ -97,9 +100,9 @@ export class SuggestionGenerationWorker
         const nextAttemptCount = job.attempt_count + 1;
         const nextStatus =
           nextAttemptCount >= SUGGESTION_GENERATION_MAX_ATTEMPTS
-            ? 'failed'
-            : 'queued';
-        if (nextStatus === 'failed') {
+            ? SuggestionGenerationJobStatus.Failed
+            : SuggestionGenerationJobStatus.Queued;
+        if (nextStatus === SuggestionGenerationJobStatus.Failed) {
           await this.markSuggestionFailed(job, message);
           await this.observability.record({
             kind: 'generation_failed',
@@ -135,15 +138,15 @@ export class SuggestionGenerationWorker
     job: SuggestionGenerationJob,
     message: string,
   ): Promise<void> {
-    if (job.request_source === 'on_demand') {
+    if (job.request_source === SuggestionRequestSource.OnDemand) {
       await this.suggestionRepo.update(
         {
           user_id: job.user_id,
           id: job.suggestion_instance_id ?? '',
-          generation_status: Not('superseded' as const),
+          generation_status: Not(SuggestionGenerationStatus.Superseded),
         },
         {
-          generation_status: 'failed',
+          generation_status: SuggestionGenerationStatus.Failed,
           ai_error: message,
           ai_retry_count: job.attempt_count + 1,
         },
@@ -151,41 +154,37 @@ export class SuggestionGenerationWorker
       return;
     }
 
-    const slotId = getScheduledSlotId(job);
-    await this.suggestionRepo.update(
-      {
-        user_id: job.user_id,
-        slot_id: slotId,
-        target_date: job.target_date,
-        generation_status: Not('superseded' as const),
-      },
-      {
-        generation_status: 'failed',
-        ai_error: message,
-        ai_retry_count: job.attempt_count + 1,
-      },
+    const where = scheduledSuggestionWhere(
+      job,
+      Not(SuggestionGenerationStatus.Superseded),
     );
+    if (!where) return;
+    await this.suggestionRepo.update(where, {
+      generation_status: SuggestionGenerationStatus.Failed,
+      ai_error: message,
+      ai_retry_count: job.attempt_count + 1,
+    });
   }
 
   private async cancelJobForRoutineBreak(
     job: SuggestionGenerationJob,
   ): Promise<void> {
-    if (job.request_source === 'on_demand') {
+    if (job.request_source === SuggestionRequestSource.OnDemand) {
       await this.suggestionRepo.update(
         {
           user_id: job.user_id,
           id: job.suggestion_instance_id ?? '',
-          generation_status: Not('ready' as const),
+          generation_status: Not(SuggestionGenerationStatus.Ready),
         },
         {
-          generation_status: 'failed',
+          generation_status: SuggestionGenerationStatus.Failed,
           ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
         },
       );
       await this.jobRepo.update(
         { id: job.id },
         {
-          status: 'cancelled',
+          status: SuggestionGenerationJobStatus.Cancelled,
           last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
           locked_at: null,
           locked_by: null,
@@ -194,23 +193,19 @@ export class SuggestionGenerationWorker
       return;
     }
 
-    const slotId = getScheduledSlotId(job);
-    await this.suggestionRepo.update(
-      {
-        user_id: job.user_id,
-        slot_id: slotId,
-        target_date: job.target_date,
-        generation_status: 'pending',
-      },
-      {
-        generation_status: 'superseded',
-        ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
-      },
+    const where = scheduledSuggestionWhere(
+      job,
+      SuggestionGenerationStatus.Pending,
     );
+    if (!where) return;
+    await this.suggestionRepo.update(where, {
+      generation_status: SuggestionGenerationStatus.Superseded,
+      ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+    });
     await this.jobRepo.update(
       { id: job.id },
       {
-        status: 'cancelled',
+        status: SuggestionGenerationJobStatus.Cancelled,
         last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
         locked_at: null,
         locked_by: null,
@@ -224,7 +219,7 @@ export class SuggestionGenerationWorker
     );
     const staleJobs = await this.jobRepo.find({
       where: {
-        status: 'running',
+        status: SuggestionGenerationJobStatus.Running,
         locked_at: LessThan(cutoff),
       },
       order: { locked_at: 'ASC' },
@@ -239,7 +234,7 @@ export class SuggestionGenerationWorker
         await this.jobRepo.update(
           { id: job.id },
           {
-            status: 'failed',
+            status: SuggestionGenerationJobStatus.Failed,
             attempt_count: nextAttemptCount,
             last_error: message,
             locked_at: null,
@@ -259,7 +254,7 @@ export class SuggestionGenerationWorker
       await this.jobRepo.update(
         { id: job.id },
         {
-          status: 'queued',
+          status: SuggestionGenerationJobStatus.Queued,
           attempt_count: nextAttemptCount,
           run_after: now,
           last_error: message,
@@ -280,34 +275,30 @@ export class SuggestionGenerationWorker
   private async markSuggestionGenerating(
     job: SuggestionGenerationJob,
   ): Promise<void> {
-    if (job.request_source === 'on_demand') {
+    if (job.request_source === SuggestionRequestSource.OnDemand) {
       await this.suggestionRepo.update(
         {
           user_id: job.user_id,
           id: job.suggestion_instance_id ?? '',
-          generation_status: Not('ready' as const),
+          generation_status: Not(SuggestionGenerationStatus.Ready),
         },
         {
-          generation_status: 'generating',
+          generation_status: SuggestionGenerationStatus.Generating,
           ai_error: null,
         },
       );
       return;
     }
 
-    const slotId = getScheduledSlotId(job);
-    await this.suggestionRepo.update(
-      {
-        user_id: job.user_id,
-        slot_id: slotId,
-        target_date: job.target_date,
-        generation_status: 'pending',
-      },
-      {
-        generation_status: 'generating',
-        ai_error: null,
-      },
+    const where = scheduledSuggestionWhere(
+      job,
+      SuggestionGenerationStatus.Pending,
     );
+    if (!where) return;
+    await this.suggestionRepo.update(where, {
+      generation_status: SuggestionGenerationStatus.Generating,
+      ai_error: null,
+    });
   }
 
   private async claimNextJob(): Promise<SuggestionGenerationJob | null> {
@@ -317,13 +308,13 @@ export class SuggestionGenerationWorker
       .createQueryBuilder()
       .update()
       .set({
-        status: 'running',
+        status: SuggestionGenerationJobStatus.Running,
         locked_at: now,
         locked_by: this.workerId,
       })
       .where(
-        `id = ( SELECT "id" FROM suggestion_generation_jobs WHERE status = 'queued' AND run_after <= :now ORDER BY run_after ASC LIMIT 1 FOR UPDATE SKIP LOCKED )`,
-        { now },
+        `id = ( SELECT "id" FROM suggestion_generation_jobs WHERE status = :queuedStatus AND run_after <= :now ORDER BY run_after ASC LIMIT 1 FOR UPDATE SKIP LOCKED )`,
+        { now, queuedStatus: SuggestionGenerationJobStatus.Queued },
       )
       .returning('*')
       .execute();
@@ -376,16 +367,31 @@ function normalizeClaimedJob(
 }
 
 function formatJobTarget(job: SuggestionGenerationJob): string {
-  return job.request_source === 'on_demand'
+  return job.request_source === SuggestionRequestSource.OnDemand
     ? `on-demand suggestion ${job.suggestion_instance_id ?? 'unknown'}`
     : `slot ${job.slot_id ?? 'unknown'}`;
 }
 
-function getScheduledSlotId(job: SuggestionGenerationJob): string {
+function scheduledSuggestionWhere(
+  job: SuggestionGenerationJob,
+  generationStatus: FindOptionsWhere<SuggestionInstance>['generation_status'],
+): FindOptionsWhere<SuggestionInstance> | null {
   if (job.slot_id) {
-    return job.slot_id;
+    return {
+      user_id: job.user_id,
+      slot_id: job.slot_id,
+      target_date: job.target_date,
+      generation_status: generationStatus,
+    };
   }
-  throw new Error(`Scheduled suggestion job ${job.id} is missing slot_id`);
+  if (job.suggestion_instance_id) {
+    return {
+      user_id: job.user_id,
+      id: job.suggestion_instance_id,
+      generation_status: generationStatus,
+    };
+  }
+  return null;
 }
 
 function retryDelayMs(attemptCount: number): number {

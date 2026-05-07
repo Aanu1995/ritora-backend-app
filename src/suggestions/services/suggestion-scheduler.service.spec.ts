@@ -72,6 +72,9 @@ describe('SuggestionScheduler', () => {
     expect(result.enqueued).toBe(1);
     expect(slotRepo.find).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: {
+          deleted_at: expect.objectContaining({ _type: 'isNull' }),
+        },
         order: { id: 'ASC' },
         take: expect.any(Number),
       }),

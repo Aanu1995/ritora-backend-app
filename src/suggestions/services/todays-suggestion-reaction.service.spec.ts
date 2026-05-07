@@ -61,6 +61,22 @@ describe('TodaysSuggestionReactionService', () => {
     ).resolves.toBeNull();
   });
 
+  it('does not link a reaction banner to an entry whose photo was removed', async () => {
+    entryRepo.find.mockResolvedValue([
+      {
+        ...reactionEntry('2026-05-04', true),
+        photo_object_key: null,
+      } as SkinJournalEntry,
+    ]);
+    simplificationRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.getReactionAlert('user-1', '2026-05-04', []),
+    ).resolves.toBeNull();
+
+    expect(simplificationRepo.findOne).not.toHaveBeenCalled();
+  });
+
   it('hides reaction metadata when the user has chosen normal routine today', async () => {
     todayActionService.shouldIgnoreReactionContext.mockResolvedValue(true);
 
@@ -84,6 +100,7 @@ function reactionEntry(date: string, detected: boolean): SkinJournalEntry {
     id: `entry-${date}`,
     entry_date: date,
     user_id: 'user-1',
+    photo_object_key: `skin-journal/user-1/entry-${date}/photo.webp`,
     has_reaction_signal: detected,
     analysis_summary: detected
       ? 'Possible irritation signal detected; keep the routine simple.'

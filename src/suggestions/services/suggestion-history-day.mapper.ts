@@ -7,10 +7,12 @@ import {
   SuggestionHistorySlotSummaryDto,
 } from '../dto/suggestion-history.dto';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { SuggestionRequestSource } from '../suggestions.constants';
 import {
   buildSummaryLine,
   computeSlotStatus,
 } from './suggestion-history.helpers';
+import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
 
 export function buildHistorySlotSummary(
   suggestion: SuggestionInstance,
@@ -23,9 +25,10 @@ export function buildHistorySlotSummary(
     slotId: suggestion.slot_id,
     suggestionId: suggestion.id,
     applicationLogId: log?.id ?? null,
-    requestSource: suggestion.request_source ?? 'scheduled',
+    requestSource:
+      suggestion.request_source ?? SuggestionRequestSource.Scheduled,
     onDemandIntent:
-      suggestion.request_source === 'on_demand'
+      suggestion.request_source === SuggestionRequestSource.OnDemand
         ? (suggestion.request_context?.intent ?? null)
         : null,
     daypart: suggestion.daypart,
@@ -66,7 +69,8 @@ export function applyJournalMetadata(
   day.photoEntryId = entry.photo_object_key ? entry.id : null;
   day.moodScore = moodScore(entry.overall_feel);
   day.hydrationTrend = hydrationTrend(entry);
-  day.reactionFlagged = day.reactionFlagged || entry.has_reaction_signal;
+  day.reactionFlagged =
+    day.reactionFlagged || hasUsableJournalReactionSignal(entry);
   return day;
 }
 

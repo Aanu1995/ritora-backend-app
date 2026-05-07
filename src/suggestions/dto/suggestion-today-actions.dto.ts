@@ -8,6 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 import {
   SUGGESTION_GAP_ACTION_KINDS,
   SuggestionGapActionKind,
@@ -61,6 +62,7 @@ export class SnoozeRecordingReminderDto {
   suggestionInstanceId: string;
 
   @ApiProperty({ required: false, minimum: 15, maximum: 180 })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsInt()
   @Min(15)

@@ -9,6 +9,10 @@ import {
   SuggestionInstance,
 } from '../entities/suggestion-instance.entity';
 import {
+  SUGGESTION_DAYPARTS,
+  SUGGESTION_GENERATION_STATUSES,
+  SUGGESTION_MODES,
+  SUGGESTION_REQUEST_SOURCES,
   SuggestionDaypart,
   SuggestionEvidenceSourceJson,
   SuggestionExplanationJson,
@@ -16,6 +20,7 @@ import {
   SuggestionGapRecommendationResponseJson,
   SuggestionGenerationStatus,
   SuggestionMode,
+  SuggestionRequestSource as SuggestionRequestSourceValue,
   SuggestionRequestContextJson,
   SuggestionRequestSource,
   SuggestionSafetyFlagJson,
@@ -45,7 +50,7 @@ export class SuggestionInstanceResponseDto {
   @ApiProperty({ nullable: true })
   slotId: string | null;
 
-  @ApiProperty({ enum: ['scheduled', 'on_demand'] })
+  @ApiProperty({ enum: SUGGESTION_REQUEST_SOURCES })
   requestSource: SuggestionRequestSource;
 
   @ApiProperty({ nullable: true, type: 'object', additionalProperties: true })
@@ -57,15 +62,13 @@ export class SuggestionInstanceResponseDto {
   @ApiProperty()
   targetTime: string;
 
-  @ApiProperty({ enum: ['morning', 'noon', 'evening'] })
+  @ApiProperty({ enum: SUGGESTION_DAYPARTS })
   daypart: SuggestionDaypart;
 
-  @ApiProperty({ enum: ['ai', 'manual', 'mixed'] })
+  @ApiProperty({ enum: SUGGESTION_MODES })
   mode: SuggestionMode;
 
-  @ApiProperty({
-    enum: ['pending', 'generating', 'ready', 'failed', 'superseded'],
-  })
+  @ApiProperty({ enum: SUGGESTION_GENERATION_STATUSES })
   generationStatus: SuggestionGenerationStatus;
 
   @ApiProperty()
@@ -133,7 +136,8 @@ export class SuggestionInstanceResponseDto {
     const dto = new SuggestionInstanceResponseDto();
     dto.id = instance.id;
     dto.slotId = instance.slot_id;
-    dto.requestSource = instance.request_source ?? 'scheduled';
+    dto.requestSource =
+      instance.request_source ?? SuggestionRequestSourceValue.Scheduled;
     dto.requestContext = instance.request_context ?? null;
     dto.targetDate = toDateOnlyString(instance.target_date);
     dto.targetTime = toTimeOnlyString(instance.target_time);

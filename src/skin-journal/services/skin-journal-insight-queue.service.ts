@@ -25,14 +25,25 @@ import {
   SKIN_JOURNAL_INSIGHT_JOB_MAX_ATTEMPTS,
   SKIN_JOURNAL_INSIGHT_SQS_VISIBILITY_TIMEOUT_SECONDS,
   SKIN_JOURNAL_INSIGHT_SQS_WAIT_TIME_SECONDS,
+  InsightJobStatusValue,
   type InsightGenerationTrigger,
   type InsightJobStatus,
   type InsightQueueDriver,
 } from '../skin-journal.constants';
 
-const ACTIVE_JOB_STATUSES: InsightJobStatus[] = ['queued', 'sent', 'running'];
-const COALESCIBLE_JOB_STATUSES: InsightJobStatus[] = ['queued', 'sent'];
-const CLAIMABLE_JOB_STATUSES: InsightJobStatus[] = ['queued', 'sent'];
+const ACTIVE_JOB_STATUSES: InsightJobStatus[] = [
+  InsightJobStatusValue.Queued,
+  InsightJobStatusValue.Sent,
+  InsightJobStatusValue.Running,
+];
+const COALESCIBLE_JOB_STATUSES: InsightJobStatus[] = [
+  InsightJobStatusValue.Queued,
+  InsightJobStatusValue.Sent,
+];
+const CLAIMABLE_JOB_STATUSES: InsightJobStatus[] = [
+  InsightJobStatusValue.Queued,
+  InsightJobStatusValue.Sent,
+];
 const INSIGHT_JOB_TABLE_NAME = 'skin_journal_insight_jobs';
 
 export type InsightQueueMessage = {
@@ -156,7 +167,7 @@ export class SkinJournalInsightQueueService
       const runningJob = await this.jobs.findOne({
         where: {
           user_id: params.userId,
-          status: 'running',
+          status: InsightJobStatusValue.Running,
         },
       });
       if (runningJob) {
@@ -179,8 +190,8 @@ export class SkinJournalInsightQueueService
     job.max_attempts = job.max_attempts || this.maxAttempts;
     job.completed_at = null;
     job.last_error = params.reason ?? job.last_error ?? null;
-    if (job.status !== 'running') {
-      job.status = 'queued';
+    if (job.status !== InsightJobStatusValue.Running) {
+      job.status = InsightJobStatusValue.Queued;
       job.locked_at = null;
       job.locked_by = null;
     }
@@ -202,7 +213,7 @@ export class SkinJournalInsightQueueService
     }
     const dueJobs = await this.jobs.find({
       where: {
-        status: 'queued',
+        status: InsightJobStatusValue.Queued,
         run_after: LessThanOrEqual(new Date()),
       },
       order: { run_after: 'ASC' },
@@ -212,12 +223,12 @@ export class SkinJournalInsightQueueService
     for (const job of dueJobs) {
       try {
         await this.sendSqsJob(job.id);
-        job.status = 'sent';
+        job.status = InsightJobStatusValue.Sent;
         job.last_error = null;
         await this.jobs.save(job);
         sent += 1;
       } catch (error) {
-        job.status = 'queued';
+        job.status = InsightJobStatusValue.Queued;
         job.last_error = this.errorMessage(error);
         await this.jobs.save(job);
         this.logger.error(
@@ -298,14 +309,14 @@ export class SkinJournalInsightQueueService
         return null;
       }
       if (job.run_after.getTime() > Date.now()) {
-        job.status = 'queued';
+        job.status = InsightJobStatusValue.Queued;
         job.locked_at = null;
         job.locked_by = null;
         await repo.save(job);
         this.scheduleDispatch();
         return null;
       }
-      job.status = 'running';
+      job.status = InsightJobStatusValue.Running;
       job.locked_at = new Date();
       job.locked_by = workerId;
       job.attempt_count += 1;
@@ -338,7 +349,7 @@ export class SkinJournalInsightQueueService
       if (!job) {
         return null;
       }
-      job.status = 'running';
+      job.status = InsightJobStatusValue.Running;
       job.locked_at = new Date();
       job.locked_by = workerId;
       job.attempt_count += 1;
@@ -352,7 +363,7 @@ export class SkinJournalInsightQueueService
   }
 
   async completeJob(job: SkinJournalInsightJob): Promise<void> {
-    job.status = 'completed';
+    job.status = InsightJobStatusValue.Completed;
     job.locked_at = null;
     job.locked_by = null;
     job.last_error = null;
@@ -361,7 +372,7 @@ export class SkinJournalInsightQueueService
   }
 
   async failJob(job: SkinJournalInsightJob, error: string): Promise<void> {
-    job.status = 'failed';
+    job.status = InsightJobStatusValue.Failed;
     job.locked_at = null;
     job.locked_by = null;
     job.last_error = error;
@@ -370,7 +381,7 @@ export class SkinJournalInsightQueueService
   }
 
   async cancelJob(job: SkinJournalInsightJob, reason: string): Promise<void> {
-    job.status = 'cancelled';
+    job.status = InsightJobStatusValue.Cancelled;
     job.locked_at = null;
     job.locked_by = null;
     job.last_error = reason;
@@ -387,7 +398,7 @@ export class SkinJournalInsightQueueService
       trigger?: InsightGenerationTrigger;
     },
   ): Promise<void> {
-    job.status = 'queued';
+    job.status = InsightJobStatusValue.Queued;
     job.run_after = params.runAfter;
     job.locked_at = null;
     job.locked_by = null;
@@ -409,17 +420,21 @@ export class SkinJournalInsightQueueService
     }
     const cutoff = new Date(Date.now() - this.lockTtlSeconds * 1000);
     const candidates = await this.jobs.find({
-      where: { status: In(['sent', 'running']) },
+      where: {
+        status: In([InsightJobStatusValue.Sent, InsightJobStatusValue.Running]),
+      },
       take: 100,
     });
     let recovered = 0;
     for (const job of candidates) {
       const referenceDate =
-        job.status === 'running' ? job.locked_at : job.updated_at;
+        job.status === InsightJobStatusValue.Running
+          ? job.locked_at
+          : job.updated_at;
       if (referenceDate && referenceDate.getTime() > cutoff.getTime()) {
         continue;
       }
-      job.status = 'queued';
+      job.status = InsightJobStatusValue.Queued;
       job.locked_at = null;
       job.locked_by = null;
       job.last_error =
@@ -460,14 +475,19 @@ export class SkinJournalInsightQueueService
       oldestQueued,
       retrying,
     ] = await Promise.all([
-      this.jobs.count({ where: { status: 'queued' } }),
-      this.jobs.count({ where: { status: 'sent' } }),
-      this.jobs.count({ where: { status: 'running' } }),
-      this.jobs.count({ where: { status: 'failed' } }),
-      this.jobs.count({ where: { status: 'completed' } }),
-      this.jobs.count({ where: { status: 'cancelled' } }),
+      this.jobs.count({ where: { status: InsightJobStatusValue.Queued } }),
+      this.jobs.count({ where: { status: InsightJobStatusValue.Sent } }),
+      this.jobs.count({ where: { status: InsightJobStatusValue.Running } }),
+      this.jobs.count({ where: { status: InsightJobStatusValue.Failed } }),
+      this.jobs.count({ where: { status: InsightJobStatusValue.Completed } }),
+      this.jobs.count({ where: { status: InsightJobStatusValue.Cancelled } }),
       this.jobs.findOne({
-        where: { status: In(['queued', 'sent']) },
+        where: {
+          status: In([
+            InsightJobStatusValue.Queued,
+            InsightJobStatusValue.Sent,
+          ]),
+        },
         order: { run_after: 'ASC' },
       }),
       this.jobs

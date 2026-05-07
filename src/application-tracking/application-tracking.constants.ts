@@ -1,15 +1,32 @@
-export type ApplicationItemStatus = 'applied' | 'skipped' | 'substituted';
-export const APPLICATION_ITEM_STATUSES: readonly ApplicationItemStatus[] = [
-  'applied',
-  'skipped',
-  'substituted',
-] as const;
+export const ApplicationItemStatus = {
+  Applied: 'applied',
+  Skipped: 'skipped',
+  Substituted: 'substituted',
+} as const;
 
-export type ApplicationDaypart = 'morning' | 'noon' | 'evening';
+export type ApplicationItemStatus =
+  (typeof ApplicationItemStatus)[keyof typeof ApplicationItemStatus];
+
+export const APPLICATION_ITEM_STATUSES = Object.values(ApplicationItemStatus);
+
+export const ApplicationDaypart = {
+  Morning: 'morning',
+  Noon: 'noon',
+  Evening: 'evening',
+} as const;
+
+export type ApplicationDaypart =
+  (typeof ApplicationDaypart)[keyof typeof ApplicationDaypart];
+
+export const APPLICATION_DAYPARTS = Object.values(ApplicationDaypart);
+export const ApplicationItemSource = {
+  Recommended: 'recommended',
+  AddedShelf: 'added_shelf',
+  AddedOffShelf: 'added_off_shelf',
+} as const;
+
 export type ApplicationItemSource =
-  | 'recommended'
-  | 'added_shelf'
-  | 'added_off_shelf';
+  (typeof ApplicationItemSource)[keyof typeof ApplicationItemSource];
 
 export interface ApplicationItemProductSnapshot {
   product_id: string | null;

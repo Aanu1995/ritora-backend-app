@@ -104,8 +104,8 @@ export class SuggestionStepResponseDto {
     dto.routineStepId = step.routine_step_id;
     dto.inventoryProductId = step.inventory_product_id;
     dto.productBrand =
-      step.product?.brand ?? step.product_brand_snapshot ?? null;
-    dto.productName = step.product?.name ?? step.product_name_snapshot ?? null;
+      step.product_brand_snapshot ?? step.product?.brand ?? null;
+    dto.productName = step.product_name_snapshot ?? step.product?.name ?? null;
     dto.stepLabel = step.step_label;
     dto.customLabel = step.custom_label;
     dto.applicationMethod = step.application_method;

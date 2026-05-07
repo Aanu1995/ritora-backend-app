@@ -7,6 +7,7 @@ import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.
 import { SuggestionStep } from '../suggestions/entities/suggestion-step.entity';
 import { User } from '../users/entities/user.entity';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
+import { ApplicationLogItem } from './entities/application-log-item.entity';
 
 describe('ApplicationTrackingValidationService', () => {
   const suggestionRepo = mockRepo<SuggestionInstance>();
@@ -142,6 +143,125 @@ describe('ApplicationTrackingValidationService', () => {
     expect(draft.substitutionReason).toBe('Skin felt dry.');
   });
 
+  it('records a provided suggestion from step snapshots after the product is deleted', async () => {
+    inventoryRepo.find.mockResolvedValue([]);
+
+    const [draft] = await service.buildItemDrafts(
+      'user-1',
+      [
+        {
+          stepOrder: 0,
+          suggestionStepId: 'step-1',
+          inventoryProductId: 'deleted-product-1',
+          status: 'applied',
+        },
+      ],
+      suggestionWithDeletedProduct(),
+    );
+
+    expect(draft.inventoryProductId).toBeNull();
+    expect(draft.productBrand).toBe('Ava Lab');
+    expect(draft.productName).toBe('Gentle Cleanser');
+    expect(draft.recommendedSnapshot).toEqual(
+      expect.objectContaining({
+        product_id: null,
+        brand: 'Ava Lab',
+        name: 'Gentle Cleanser',
+      }),
+    );
+    expect(draft.appliedSnapshot).toEqual(
+      expect.objectContaining({
+        product_id: null,
+        brand: 'Ava Lab',
+        name: 'Gentle Cleanser',
+        suggestion_step_id: 'step-1',
+      }),
+    );
+  });
+
+  it('preserves a historical substitution snapshot when the shelf product was deleted before edit', async () => {
+    inventoryRepo.find.mockResolvedValue([]);
+
+    const [draft] = await service.buildItemDrafts(
+      'user-1',
+      [
+        {
+          stepOrder: 0,
+          suggestionStepId: 'step-1',
+          substitutedWithProductId: 'deleted-substitution',
+          status: 'substituted',
+        },
+      ],
+      suggestion(),
+      [
+        {
+          step_order: 0,
+          suggestion_step_id: 'step-1',
+          substituted_with_product_id: null,
+          applied_snapshot: {
+            product_id: 'deleted-substitution',
+            brand: 'Plain Lab',
+            name: 'Recovery Balm',
+            step_label: 'cleanser',
+            suggestion_step_id: 'step-1',
+            provenance: 'added_shelf',
+          },
+        } as ApplicationLogItem,
+      ],
+    );
+
+    expect(draft.substitutedWithProductId).toBeNull();
+    expect(draft.appliedSnapshot).toEqual(
+      expect.objectContaining({
+        product_id: 'deleted-substitution',
+        brand: 'Plain Lab',
+        name: 'Recovery Balm',
+      }),
+    );
+  });
+
+  it('preserves a deleted substitution snapshot when the edit payload no longer has a product id', async () => {
+    inventoryRepo.find.mockResolvedValue([]);
+
+    const [draft] = await service.buildItemDrafts(
+      'user-1',
+      [
+        {
+          stepOrder: 0,
+          suggestionStepId: 'step-1',
+          substitutedWithProductId: null,
+          status: 'substituted',
+        },
+      ],
+      suggestion(),
+      [
+        {
+          step_order: 0,
+          suggestion_step_id: 'step-1',
+          status: 'substituted',
+          substituted_with_product_id: null,
+          applied_snapshot: {
+            product_id: 'deleted-substitution',
+            brand: 'Plain Lab',
+            name: 'Recovery Balm',
+            step_label: 'cleanser',
+            suggestion_step_id: 'step-1',
+            provenance: 'added_shelf',
+          },
+        } as ApplicationLogItem,
+      ],
+    );
+
+    expect(draft.substitutedWithProductId).toBeNull();
+    expect(draft.appliedSnapshot).toEqual(
+      expect.objectContaining({
+        product_id: 'deleted-substitution',
+        brand: 'Plain Lab',
+        name: 'Recovery Balm',
+      }),
+    );
+  });
+
   it('rejects suggestions that have not produced a ready recommendation', async () => {
     suggestionRepo.findOne.mockResolvedValue({
       ...suggestion(),
@@ -199,6 +319,23 @@ function suggestion(): SuggestionInstance {
           status: ShelfStatus.Active,
           guidance: {},
         } as InventoryProduct,
+      } as SuggestionStep,
+    ],
+  } as SuggestionInstance;
+}
+
+function suggestionWithDeletedProduct(): SuggestionInstance {
+  return {
+    ...suggestion(),
+    steps: [
+      {
+        id: 'step-1',
+        suggestion_instance_id: 'suggestion-1',
+        inventory_product_id: null,
+        product_brand_snapshot: 'Ava Lab',
+        product_name_snapshot: 'Gentle Cleanser',
+        step_label: ProductCategory.Cleanser,
+        product: null,
       } as SuggestionStep,
     ],
   } as SuggestionInstance;

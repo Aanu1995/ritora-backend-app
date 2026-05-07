@@ -29,6 +29,8 @@ import { SuggestionStep } from './suggestion-step.entity';
 
 export type SuggestionGenerationContext = SuggestionContextSummary;
 
+const ON_DEMAND_REQUEST_ID_INDEX_WHERE = `"request_source" = '${SuggestionRequestSource.OnDemand}' AND "request_id" IS NOT NULL`;
+
 const encryptedExplanationTransformer =
   encryptedJsonFieldTransformer<SuggestionExplanationJson | null>(
     'suggestion_instances.ai_explanation',
@@ -59,7 +61,7 @@ const encryptedRequestContextTransformer =
   ['user_id', 'request_id'],
   {
     unique: true,
-    where: `"request_source" = 'on_demand' AND "request_id" IS NOT NULL`,
+    where: ON_DEMAND_REQUEST_ID_INDEX_WHERE,
   },
 )
 export class SuggestionInstance {
@@ -72,7 +74,11 @@ export class SuggestionInstance {
   @Column({ type: 'varchar', length: 26, nullable: true })
   slot_id: string | null;
 
-  @Column({ type: 'varchar', length: 20, default: 'scheduled' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: SuggestionRequestSource.Scheduled,
+  })
   request_source: SuggestionRequestSource;
 
   @Column({ type: 'varchar', length: 80, nullable: true })
@@ -97,7 +103,11 @@ export class SuggestionInstance {
   @Column({ type: 'varchar', length: 20 })
   mode: SuggestionMode;
 
-  @Column({ type: 'varchar', length: 20, default: 'pending' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: SuggestionGenerationStatus.Pending,
+  })
   generation_status: SuggestionGenerationStatus;
 
   @Column({ type: 'timestamptz' })
@@ -180,7 +190,7 @@ export class SuggestionInstance {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @ManyToOne(() => ScheduleSlot, { onDelete: 'SET NULL', nullable: true })
+  @ManyToOne(() => ScheduleSlot, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'slot_id' })
   slot: ScheduleSlot | null;
 

@@ -11,13 +11,17 @@ import type {
 export type InsightValue = string | number | boolean | null;
 export type InsightValues = Record<string, InsightValue>;
 export type InsightMetricUnit = 'entries' | 'rating';
+export const InsightToneValue = {
+  Neutral: 'neutral',
+  Positive: 'positive',
+  Concern: 'concern',
+  Warning: 'warning',
+  Critical: 'critical',
+  Ai: 'ai',
+} as const;
+
 export type InsightTone =
-  | 'neutral'
-  | 'positive'
-  | 'concern'
-  | 'warning'
-  | 'critical'
-  | 'ai';
+  (typeof InsightToneValue)[keyof typeof InsightToneValue];
 
 export interface LocalizedInsightText {
   key: string;

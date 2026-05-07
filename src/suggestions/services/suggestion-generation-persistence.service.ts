@@ -10,6 +10,10 @@ import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.e
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
 import {
+  SuggestionGenerationStatus,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
+import {
   SuggestionGenerationInputs,
   SuggestionGenerationOutput,
 } from './suggestion-ai-generator';
@@ -52,27 +56,28 @@ export class SuggestionGenerationPersistenceService {
           user_id: user.id,
           slot_id: slot.id,
           target_date: targetDate,
-          generation_status: Not('superseded' as const),
+          generation_status: Not(SuggestionGenerationStatus.Superseded),
         },
         order: { generated_at: 'DESC', created_at: 'DESC' },
       });
       const supersedesId =
         activeBeforePersist?.supersedes_id ??
-        (activeBeforePersist?.generation_status === 'ready'
+        (activeBeforePersist?.generation_status ===
+        SuggestionGenerationStatus.Ready
           ? activeBeforePersist.id
           : null);
 
       await suggestionRepo
         .createQueryBuilder()
         .update()
-        .set({ generation_status: 'superseded' })
+        .set({ generation_status: SuggestionGenerationStatus.Superseded })
         .where(
           'user_id = :userId AND slot_id = :slotId AND target_date = :targetDate AND generation_status <> :superseded',
           {
             userId: user.id,
             slotId: slot.id,
             targetDate,
-            superseded: 'superseded',
+            superseded: SuggestionGenerationStatus.Superseded,
           },
         )
         .execute();
@@ -89,7 +94,7 @@ export class SuggestionGenerationPersistenceService {
         user_id: user.id,
         slot_id: slot.id,
         target_time: targetTime,
-        request_source: 'scheduled',
+        request_source: SuggestionRequestSource.Scheduled,
         request_id: null,
         request_context: null,
         visible_at: new Date(visibleAtMs),
@@ -122,7 +127,7 @@ export class SuggestionGenerationPersistenceService {
         ...buildReadySuggestionFields(job, inputs, output, targetDate),
         user_id: user.id,
         slot_id: null,
-        request_source: 'on_demand',
+        request_source: SuggestionRequestSource.OnDemand,
         target_time: targetTime,
         visible_at: suggestion.visible_at ?? new Date(),
       });
@@ -150,7 +155,7 @@ function buildReadySuggestionFields(
     target_date: targetDate,
     daypart: inputs.daypart,
     mode: output.mode,
-    generation_status: 'ready',
+    generation_status: SuggestionGenerationStatus.Ready,
     generated_at: new Date(),
     ai_model: fitNullableColumnText(
       output.metadata.model,

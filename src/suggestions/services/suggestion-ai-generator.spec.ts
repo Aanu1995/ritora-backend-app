@@ -1,7 +1,15 @@
 import { ConfigService } from '@nestjs/config';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
-import { ProductCategory, ShelfStatus } from '../../shelf/shelf.types';
-import { SuggestionEvidenceSourceId } from '../suggestions.constants';
+import {
+  PreferredTimeOfDay,
+  ProductCategory,
+  ShelfStatus,
+} from '../../shelf/shelf.types';
+import {
+  SuggestionDaypart,
+  SuggestionEvidenceSourceId,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
 import { SuggestionAiGenerator } from './suggestion-ai-generator';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import { getSuggestionEvidenceSources } from './suggestion-evidence-sources';
@@ -14,11 +22,11 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate({
       slotId: 'slot-1',
-      requestSource: 'scheduled',
+      requestSource: SuggestionRequestSource.Scheduled,
       requestContext: null,
       targetDate: '2026-04-29',
       targetTime: '08:00',
-      daypart: 'morning',
+      daypart: SuggestionDaypart.Morning,
       skinProfile: null,
       shelfActiveProducts: [],
       shelfFinishedProductIds: [],
@@ -32,8 +40,8 @@ describe('SuggestionAiGenerator', () => {
         builtAt: '2026-04-29T06:00:00.000Z',
         targetDate: '2026-04-29',
         targetTime: '08:00',
-        daypart: 'morning',
-        requestSource: 'scheduled',
+        daypart: SuggestionDaypart.Morning,
+        requestSource: SuggestionRequestSource.Scheduled,
         onDemand: null,
         skinProfile: {
           primaryGoal: null,
@@ -97,7 +105,7 @@ describe('SuggestionAiGenerator', () => {
     } as unknown as ConfigService);
 
     const result = await generator.generate(
-      inputsWithScoredShelfProducts('morning'),
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
     );
 
     expect(result.mode).toBe('ai');
@@ -130,7 +138,7 @@ describe('SuggestionAiGenerator', () => {
       get: jest.fn().mockReturnValue(null),
     } as unknown as ConfigService);
 
-    const inputs = inputsWithScoredShelfProducts('morning');
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
     inputs.shelfActiveProducts = inputs.shelfActiveProducts.filter(
       (product) => product.id !== 'spf-1',
     );
@@ -162,7 +170,7 @@ describe('SuggestionAiGenerator', () => {
 });
 
 function inputsWithScoredShelfProducts(
-  daypart: 'morning' | 'noon' | 'evening',
+  daypart: SuggestionDaypart,
 ): SuggestionGenerationInputs {
   const products = [
     product('cleanser-1', 'Soft Cleanser', ProductCategory.Cleanser),
@@ -172,10 +180,10 @@ function inputsWithScoredShelfProducts(
   ];
   return {
     slotId: 'slot-1',
-    requestSource: 'scheduled',
+    requestSource: SuggestionRequestSource.Scheduled,
     requestContext: null,
     targetDate: '2026-04-29',
-    targetTime: daypart === 'evening' ? '20:00' : '08:00',
+    targetTime: daypart === SuggestionDaypart.Evening ? '20:00' : '08:00',
     daypart,
     skinProfile: null,
     shelfActiveProducts: products,
@@ -189,9 +197,9 @@ function inputsWithScoredShelfProducts(
       cacheKey: 'ctx-products',
       builtAt: '2026-04-29T06:00:00.000Z',
       targetDate: '2026-04-29',
-      targetTime: daypart === 'evening' ? '20:00' : '08:00',
+      targetTime: daypart === SuggestionDaypart.Evening ? '20:00' : '08:00',
       daypart,
-      requestSource: 'scheduled',
+      requestSource: SuggestionRequestSource.Scheduled,
       onDemand: null,
       skinProfile: {
         primaryGoal: 'barrier support',
@@ -282,7 +290,7 @@ function productScore(
     brand: 'Ava Lab',
     name: productId,
     category,
-    preferredTimeOfDay: 'either' as const,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
     activeTags,
     suitabilityScore,
     suitabilityReasons: ['matches this slot'],

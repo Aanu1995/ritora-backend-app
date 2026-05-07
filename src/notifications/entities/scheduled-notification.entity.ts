@@ -14,12 +14,16 @@ import {
   NotificationSeverity,
 } from './in-app-notification.entity';
 
+export const ScheduledNotificationStatusValue = {
+  Pending: 'pending',
+  Dispatching: 'dispatching',
+  Sent: 'sent',
+  Cancelled: 'cancelled',
+  Failed: 'failed',
+} as const;
+
 export type ScheduledNotificationStatus =
-  | 'pending'
-  | 'dispatching'
-  | 'sent'
-  | 'cancelled'
-  | 'failed';
+  (typeof ScheduledNotificationStatusValue)[keyof typeof ScheduledNotificationStatusValue];
 
 const encryptedScheduledPayloadTransformer =
   encryptedJsonFieldTransformer<Record<string, unknown> | null>(
@@ -72,7 +76,11 @@ export class ScheduledNotification {
   @Column({ type: 'timestamptz' })
   deliver_at: Date;
 
-  @Column({ type: 'varchar', length: 20, default: 'pending' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: ScheduledNotificationStatusValue.Pending,
+  })
   status: ScheduledNotificationStatus;
 
   @Column({ type: 'integer', default: 0 })

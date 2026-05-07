@@ -5,11 +5,27 @@ import {
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import { SuggestionProductScore } from '../suggestion-context.types';
-import { SuggestionEvidenceSourceId } from '../suggestions.constants';
+import {
+  SuggestionDaypart,
+  SuggestionEvidenceSourceId,
+} from '../suggestions.constants';
 import {
   mergeEvidenceSourceIds,
   sourceIdsForActiveTags,
 } from './suggestion-evidence-sources';
+
+export enum SuggestionProductDataWarning {
+  IngredientListMissing = 'ingredient list missing',
+  ProductCategoryNeedsReview = 'product category needs review',
+  ApplicationGuidanceMissing = 'application guidance missing',
+  KeyActiveIngredientsNotMatched = 'key active ingredients not matched',
+  StrongActiveCautionsMissing = 'strong active cautions missing',
+}
+
+export type ProductIngredientIntelligence = {
+  matchedIngredientCount: number;
+  totalIngredientCount: number;
+};
 
 const ACTIVE_TAG_PATTERNS: Array<{ tag: string; pattern: RegExp }> = [
   { tag: 'retinoid', pattern: /retinol|retinal|retinoid|tretinoin|adapalene/i },
@@ -45,17 +61,22 @@ const ACTIVE_TAG_PATTERNS: Array<{ tag: string; pattern: RegExp }> = [
 export function scoreProductForSuggestion(
   product: InventoryProduct,
   options: {
-    daypart: 'morning' | 'noon' | 'evening';
+    daypart: SuggestionDaypart;
     primaryGoal: string | null;
     sensitivityLevel: string | null;
     recentUseCount: number;
     hasReactionSignal: boolean;
     lockedProductIds: Set<string>;
     conservativeRestart: boolean;
+    ingredientIntelligence?: ProductIngredientIntelligence;
   },
 ): SuggestionProductScore {
   const activeTags = detectActiveTags(product);
-  const productDataQuality = assessProductDataQuality(product, activeTags);
+  const productDataQuality = assessProductDataQuality(
+    product,
+    activeTags,
+    options.ingredientIntelligence,
+  );
   const evidenceSourceIds = buildProductEvidenceSourceIds(
     product.category,
     activeTags,
@@ -99,15 +120,12 @@ export function scoreProductForSuggestion(
     score -= 30;
     cautions.push('restart gently before using strong actives again');
   }
-  if (
-    (options.daypart === 'morning' || options.daypart === 'noon') &&
-    activeTags.includes('retinoid')
-  ) {
+  if (isDaytimeSuggestion(options.daypart) && activeTags.includes('retinoid')) {
     score -= 25;
     cautions.push('retinoid is usually better suited to evening');
   }
   if (
-    (options.daypart === 'morning' || options.daypart === 'noon') &&
+    isDaytimeSuggestion(options.daypart) &&
     product.category === ProductCategory.SunProtection
   ) {
     score += 25;
@@ -145,48 +163,45 @@ export function scoreProductForSuggestion(
 export function assessProductDataQuality(
   product: InventoryProduct,
   activeTags: string[] = detectActiveTags(product),
+  ingredientIntelligence?: ProductIngredientIntelligence,
 ): {
   quality: SuggestionProductScore['dataQuality'];
   warnings: string[];
 } {
   const warnings: string[] = [];
   const hasIngredients = (product.identity?.inciIngredients ?? []).length > 0;
-  const hasConfirmedInci = Boolean(product.identity?.inciLastConfirmedAt);
+  const hasMatchedIngredientIntelligence =
+    ingredientIntelligence === undefined ||
+    ingredientIntelligence.totalIngredientCount === 0 ||
+    ingredientIntelligence.matchedIngredientCount > 0;
   const hasGuidance = Boolean(
     product.guidance?.applicationMethod ||
     product.guidance?.quantity ||
     (product.guidance?.steps?.length ?? 0) > 0,
   );
-  if (!hasIngredients) warnings.push('ingredient list missing');
-  if (hasIngredients && !hasConfirmedInci) {
-    warnings.push('ingredient list not recently verified');
+  if (!hasIngredients) {
+    warnings.push(SuggestionProductDataWarning.IngredientListMissing);
+  }
+  if (hasIngredients && !hasMatchedIngredientIntelligence) {
+    warnings.push(SuggestionProductDataWarning.KeyActiveIngredientsNotMatched);
   }
   if (product.category === ProductCategory.Other) {
-    warnings.push('product category needs review');
+    warnings.push(SuggestionProductDataWarning.ProductCategoryNeedsReview);
   }
-  if (!product.user_fields?.preferredTimeOfDay) {
-    warnings.push('preferred time of day missing');
-  }
-  if (!hasGuidance) warnings.push('application guidance missing');
-  if (product.guidance?.waitMinutes === null) {
-    warnings.push('wait time missing');
+  if (!hasGuidance) {
+    warnings.push(SuggestionProductDataWarning.ApplicationGuidanceMissing);
   }
   if (
     activeTags.some(isStrongActiveTag) &&
     (product.guidance?.cautions?.length ?? 0) === 0
   ) {
-    warnings.push('strong active cautions missing');
+    warnings.push(SuggestionProductDataWarning.StrongActiveCautionsMissing);
   }
 
   if (!hasIngredients || product.category === ProductCategory.Other) {
     return { quality: 'insufficient', warnings };
   }
-  if (
-    hasConfirmedInci &&
-    hasGuidance &&
-    product.user_fields?.preferredTimeOfDay &&
-    warnings.length <= 1
-  ) {
+  if (hasGuidance && warnings.length === 0) {
     return { quality: 'verified', warnings };
   }
   return { quality: 'partial', warnings };
@@ -226,7 +241,7 @@ function buildProductEvidenceSourceIds(
 
 function scorePreferredTime(
   preferredTime: PreferredTimeOfDay,
-  daypart: 'morning' | 'noon' | 'evening',
+  daypart: SuggestionDaypart,
   reasons: string[],
   cautions: string[],
 ): number {
@@ -236,14 +251,21 @@ function scorePreferredTime(
   }
   if (
     (preferredTime === PreferredTimeOfDay.Morning &&
-      (daypart === 'morning' || daypart === 'noon')) ||
-    (preferredTime === PreferredTimeOfDay.Evening && daypart === 'evening')
+      isDaytimeSuggestion(daypart)) ||
+    (preferredTime === PreferredTimeOfDay.Evening &&
+      daypart === SuggestionDaypart.Evening)
   ) {
     reasons.push('matches preferred time of day');
     return 12;
   }
   cautions.push('preferred time of day does not match this slot');
   return -12;
+}
+
+function isDaytimeSuggestion(daypart: SuggestionDaypart): boolean {
+  return (
+    daypart === SuggestionDaypart.Morning || daypart === SuggestionDaypart.Noon
+  );
 }
 
 function matchesGoal(

@@ -1,6 +1,8 @@
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
+  clockTimesEqual,
+  compareClockTimes,
   deriveSuggestionDaypart,
   endOfLocalDateInstant,
 } from './suggestion-helpers';
@@ -17,6 +19,12 @@ describe('suggestion helpers', () => {
     expect(deriveSuggestionDaypart('08:00')).toBe('morning');
     expect(deriveSuggestionDaypart('13:30')).toBe('noon');
     expect(deriveSuggestionDaypart('20:00')).toBe('evening');
+  });
+
+  it('compares database and API time shapes by wall-clock value', () => {
+    expect(clockTimesEqual('12:30', '12:30:00')).toBe(true);
+    expect(compareClockTimes('12:31:00', '12:30')).toBeGreaterThan(0);
+    expect(compareClockTimes('12:29', '12:30:00')).toBeLessThan(0);
   });
 
   it('uses timezone-aware instants for DST-sensitive dates', () => {

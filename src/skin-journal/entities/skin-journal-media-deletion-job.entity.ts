@@ -8,7 +8,10 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ulid } from 'ulid';
-import type { MediaDeletionJobStatus } from '../skin-journal.constants';
+import {
+  MediaDeletionJobStatusValue,
+  type MediaDeletionJobStatus,
+} from '../skin-journal.constants';
 
 @Entity('skin_journal_media_deletion_jobs')
 @Index('IDX_skin_journal_media_deletion_jobs_status_run_after', [
@@ -32,7 +35,11 @@ export class SkinJournalMediaDeletionJob {
   @Column({ type: 'text' })
   object_key: string;
 
-  @Column({ type: 'varchar', length: 20, default: 'pending' })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: MediaDeletionJobStatusValue.Pending,
+  })
   status: MediaDeletionJobStatus;
 
   @Column({ type: 'integer', default: 0 })

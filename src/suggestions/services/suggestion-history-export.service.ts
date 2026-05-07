@@ -21,7 +21,11 @@ import {
 } from '../dto/suggestion-history.dto';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
-import { SUGGESTION_HISTORY_EXPORT_MAX_ROWS } from '../suggestions.constants';
+import {
+  SUGGESTION_HISTORY_EXPORT_MAX_ROWS,
+  SuggestionGenerationStatus,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
 import {
   applyHistoryFilters,
   HistoryCursorRow,
@@ -102,7 +106,7 @@ export class SuggestionHistoryExportService {
       user.id,
       suggestions,
     );
-    const exportRows = suggestions.map((suggestion) => {
+    const exportRows: string[][] = suggestions.map((suggestion): string[] => {
       const targetDate = toDateOnlyString(suggestion.target_date);
       const log = logBySuggestion.get(suggestion.id) ?? null;
       const totalSteps = suggestion.steps?.length ?? 0;
@@ -116,8 +120,8 @@ export class SuggestionHistoryExportService {
         slotTime,
         suggestion.daypart,
         suggestion.mode,
-        suggestion.request_source ?? 'scheduled',
-        suggestion.request_source === 'on_demand'
+        suggestion.request_source ?? SuggestionRequestSource.Scheduled,
+        suggestion.request_source === SuggestionRequestSource.OnDemand
           ? (suggestion.request_context?.intent ?? '')
           : '',
         computeSlotStatus(suggestion, log),
@@ -153,7 +157,7 @@ export class SuggestionHistoryExportService {
       .addSelect('suggestion.target_time', 'target_time')
       .where('suggestion.user_id = :userId', { userId })
       .andWhere('suggestion.generation_status = :status', {
-        status: 'ready',
+        status: SuggestionGenerationStatus.Ready,
       })
       .andWhere('suggestion.target_date BETWEEN :fromDate AND :toDate', {
         fromDate,

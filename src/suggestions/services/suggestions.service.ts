@@ -32,13 +32,8 @@ import {
 } from '../dto/todays-suggestion-response.dto';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
-import { SUGGESTION_LEAD_TIME_DEFAULT_MINUTES } from '../suggestions.constants';
 import { mapDayOfWeekShort } from './suggestion-history.helpers';
-import {
-  buildSlotInstant,
-  clampLeadTimeMinutes,
-  formatDateInTimeZone,
-} from './suggestion-helpers';
+import { buildSlotInstant, formatDateInTimeZone } from './suggestion-helpers';
 import { SuggestionHistoryReader } from './suggestion-history-reader.service';
 import { SuggestionHistoryExportService } from './suggestion-history-export.service';
 import { computeSuggestionLifecycle } from './suggestion-lifecycle';
@@ -51,9 +46,22 @@ import {
   buildTodayOnDemandDto,
   buildTodaySlotDto,
   buildTodaySummary,
+  shouldExposeTodaySlot,
 } from './todays-suggestion-response.mapper';
 import { TodaysSuggestionReactionService } from './todays-suggestion-reaction.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
+import { includeHistoricalSlotsForReadySuggestions } from './today-schedule-slot-resolver';
+import {
+  mapLatestApplicationLogBySuggestion,
+  mapLatestSuggestionBySlot,
+} from './today-suggestion-maps';
+import { hasScheduledSlotElapsed } from './suggestion-scheduled-job-guards';
+import { resolveSuggestionLeadTimeMinutes } from './suggestion-preferences';
+import {
+  SuggestionGenerationJobStatus,
+  SuggestionGenerationStatus,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
 
 @Injectable()
 export class SuggestionsService {
@@ -85,11 +93,14 @@ export class SuggestionsService {
     const now = new Date();
     const today = formatDateInTimeZone(timeZone, now);
     const dayOfWeek = mapDayOfWeekShort(timeZone, now);
-    const leadTimeMinutes = await this.resolveLeadTimeMinutes(user.id);
+    const leadTimeMinutes = await resolveSuggestionLeadTimeMinutes(
+      this.preferenceRepo,
+      user.id,
+    );
     const { routineBreak } = await this.routineBreakService.getBreakState(user);
 
-    const slots = await this.slotRepo.find({
-      where: { user_id: user.id, day_of_week: dayOfWeek },
+    const activeSlots = await this.slotRepo.find({
+      where: { user_id: user.id, day_of_week: dayOfWeek, deleted_at: IsNull() },
       relations: ['steps', 'steps.product'],
       order: { slot_time: 'ASC' },
     });
@@ -98,16 +109,24 @@ export class SuggestionsService {
       where: {
         user_id: user.id,
         target_date: today,
-        generation_status: Not('superseded' as const),
+        generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
       relations: ['steps', 'steps.product'],
     });
     const scheduledSuggestions = suggestions.filter(
       (suggestion) =>
-        (suggestion.request_source ?? 'scheduled') === 'scheduled',
+        (suggestion.request_source ?? SuggestionRequestSource.Scheduled) ===
+        SuggestionRequestSource.Scheduled,
     );
+    const slots = await includeHistoricalSlotsForReadySuggestions({
+      slotRepo: this.slotRepo,
+      userId: user.id,
+      activeSlots,
+      scheduledSuggestions,
+    });
     const onDemandSuggestions = suggestions.filter(
-      (suggestion) => suggestion.request_source === 'on_demand',
+      (suggestion) =>
+        suggestion.request_source === SuggestionRequestSource.OnDemand,
     );
 
     const applications = await this.applicationLogRepo.find({
@@ -119,35 +138,9 @@ export class SuggestionsService {
       relations: ['items', 'items.product', 'items.substituted_with_product'],
     });
 
-    const suggestionBySlot = new Map<string, SuggestionInstance>();
-    for (const suggestion of scheduledSuggestions) {
-      if (!suggestion.slot_id) continue;
-      const existing = suggestionBySlot.get(suggestion.slot_id);
-      if (!existing) {
-        suggestionBySlot.set(suggestion.slot_id, suggestion);
-        continue;
-      }
-      if (
-        (suggestion.generated_at?.getTime() ?? 0) >
-        (existing.generated_at?.getTime() ?? 0)
-      ) {
-        suggestionBySlot.set(suggestion.slot_id, suggestion);
-      }
-    }
-
-    const applicationLogBySuggestion = new Map<string, ApplicationLog>();
-    for (const log of applications) {
-      if (!log.suggestion_instance_id) continue;
-      const existing = applicationLogBySuggestion.get(
-        log.suggestion_instance_id,
-      );
-      if (
-        !existing ||
-        (log.updated_at?.getTime() ?? 0) > (existing.updated_at?.getTime() ?? 0)
-      ) {
-        applicationLogBySuggestion.set(log.suggestion_instance_id, log);
-      }
-    }
+    const suggestionBySlot = mapLatestSuggestionBySlot(scheduledSuggestions);
+    const applicationLogBySuggestion =
+      mapLatestApplicationLogBySuggestion(applications);
     const gapActionMaps = await this.todayActionService.getGapActionMaps(
       user.id,
       suggestions.map((suggestion) => suggestion.id),
@@ -205,16 +198,21 @@ export class SuggestionsService {
       today,
       buildPausedActiveNames(scheduledSuggestions),
     );
+    const visibleSlotDtos = slotDtos.filter(shouldExposeTodaySlot);
     const responseSlots =
       routineBreak?.status === 'active'
-        ? slotDtos.filter(
-            (slot) => slot.suggestion?.generationStatus === 'ready',
+        ? visibleSlotDtos.filter(
+            (slot) =>
+              slot.suggestion?.generationStatus ===
+              SuggestionGenerationStatus.Ready,
           )
-        : slotDtos;
+        : visibleSlotDtos;
     const responseOnDemand =
       routineBreak?.status === 'active'
         ? onDemandDtos.filter(
-            (suggestion) => suggestion.suggestion.generationStatus === 'ready',
+            (suggestion) =>
+              suggestion.suggestion.generationStatus ===
+              SuggestionGenerationStatus.Ready,
           )
         : onDemandDtos;
 
@@ -278,10 +276,40 @@ export class SuggestionsService {
     if (existing.user_id !== user.id) {
       throw new ForbiddenException('Suggestion belongs to another user.');
     }
+    if (!existing.slot_id) {
+      throw new ConflictException(
+        'This suggestion is no longer linked to a schedule.',
+      );
+    }
     if (await this.routineBreakService.isRoutineBreakActive(user.id)) {
       throw new ConflictException(
         'Routine is paused. Resume before regenerating suggestions.',
       );
+    }
+    const activeSlot = await this.slotRepo.findOne({
+      where: {
+        id: existing.slot_id,
+        user_id: user.id,
+        deleted_at: IsNull(),
+      },
+      select: ['id'],
+    });
+    if (!activeSlot) {
+      throw new ConflictException(
+        'This suggestion is linked to a schedule that was removed.',
+      );
+    }
+    const targetDate = toDateOnlyString(existing.target_date);
+    const targetTime = toTimeOnlyString(existing.target_time);
+    const timeZone = resolveEffectiveTimeZone(user.time_zone, null);
+    if (
+      hasScheduledSlotElapsed({
+        targetDate,
+        targetTime,
+        timeZone,
+      })
+    ) {
+      throw new ConflictException('This suggestion time has already passed.');
     }
     const usageDecision = await this.usageGuard.evaluateRegeneration(user.id);
     if (!usageDecision.allowed) {
@@ -303,30 +331,22 @@ export class SuggestionsService {
       );
     }
 
-    existing.generation_status = 'superseded';
+    existing.generation_status = SuggestionGenerationStatus.Superseded;
     await this.suggestionRepo.save(existing);
 
-    if (!existing.slot_id) {
-      throw new ConflictException(
-        'This suggestion is no longer linked to a schedule slot.',
-      );
-    }
-
     const now = new Date();
-    const targetDate = toDateOnlyString(existing.target_date);
-    const targetTime = toTimeOnlyString(existing.target_time);
     const replacement = await this.suggestionRepo.save(
       this.suggestionRepo.create({
         user_id: user.id,
         slot_id: existing.slot_id,
-        request_source: 'scheduled',
+        request_source: SuggestionRequestSource.Scheduled,
         request_id: null,
         request_context: null,
         target_date: targetDate,
         target_time: targetTime,
         daypart: existing.daypart,
         mode: existing.mode,
-        generation_status: 'pending',
+        generation_status: SuggestionGenerationStatus.Pending,
         visible_at: now,
         generated_at: null,
         ai_model: null,
@@ -354,7 +374,7 @@ export class SuggestionsService {
       target_date: targetDate,
       target_time: targetTime,
       visible_at: now,
-      status: 'queued',
+      status: SuggestionGenerationJobStatus.Queued,
       attempt_count: 0,
       run_after: now,
       last_error: payload.reason ? `regenerate:${payload.reason}` : null,
@@ -385,15 +405,5 @@ export class SuggestionsService {
     date: string,
   ): Promise<SuggestionHistoryDayDto> {
     return this.historyReader.getHistoryDay(user, requestTimeZone, date);
-  }
-
-  private async resolveLeadTimeMinutes(userId: string): Promise<number> {
-    const prefs = await this.preferenceRepo.findOne({
-      where: { user_id: userId },
-    });
-    return clampLeadTimeMinutes(
-      prefs?.suggestion_lead_time_minutes,
-      SUGGESTION_LEAD_TIME_DEFAULT_MINUTES,
-    );
   }
 }

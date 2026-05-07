@@ -1,6 +1,7 @@
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { toDateOnlyString, toIsoString } from '../../common/utils/date';
+import { SlotModeValue } from '../../schedule/dto/schedule.constants';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import {
   TodaysSuggestionRecordingDto,
@@ -13,6 +14,7 @@ import { SuggestionInstanceResponseDto } from '../dto/suggestion-instance-respon
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import {
   SuggestionGapActionKind,
+  SuggestionGenerationStatus,
   SuggestionMode,
   SuggestionSlotLifecycleStatus,
 } from '../suggestions.constants';
@@ -48,7 +50,7 @@ export function buildTodaySlotDto({
     specialistLockedStepCount: countSpecialistLockedSteps(slot),
     specialist: buildSpecialistDto(slot),
     visibleAt: visibleAt.toISOString(),
-    isVisible: lifecycle.status !== 'locked',
+    isVisible: lifecycle.status !== SuggestionSlotLifecycleStatus.Locked,
     status: lifecycle.status,
     slotStartsAt: toIsoString(lifecycle.slotStartsAt),
     recordableAt: toIsoString(lifecycle.recordableAt),
@@ -70,12 +72,14 @@ export function buildTodaySlotDto({
 }
 
 export function deriveScheduledSlotMode(slot: ScheduleSlot): SuggestionMode {
-  if (slot.mode === 'ai') return 'ai';
+  if (slot.mode === SlotModeValue.Ai) return SuggestionMode.Ai;
   const steps = slot.steps ?? [];
-  if (steps.length === 0) return 'manual';
+  if (steps.length === 0) return SuggestionMode.Manual;
   const lockedCount = countSpecialistLockedSteps(slot);
-  if (lockedCount > 0 && lockedCount < steps.length) return 'mixed';
-  return 'manual';
+  if (lockedCount > 0 && lockedCount < steps.length) {
+    return SuggestionMode.Mixed;
+  }
+  return SuggestionMode.Manual;
 }
 
 export function buildRecordingDto(
@@ -105,18 +109,46 @@ export function buildTodaySummary(
     ).length;
   return {
     total: slots.length,
-    locked: count(['locked']),
+    locked: count([SuggestionSlotLifecycleStatus.Locked]),
     upcoming:
-      count(['generating', 'ready', 'active']) +
-      onDemandCount(['generating', 'ready']),
-    ready: count(['ready', 'active']) + onDemandCount(['ready']),
-    recordable: count(['recordable']),
+      count([
+        SuggestionSlotLifecycleStatus.Generating,
+        SuggestionSlotLifecycleStatus.Ready,
+        SuggestionSlotLifecycleStatus.Active,
+      ]) +
+      onDemandCount([
+        SuggestionSlotLifecycleStatus.Generating,
+        SuggestionSlotLifecycleStatus.Ready,
+      ]),
+    ready:
+      count([
+        SuggestionSlotLifecycleStatus.Ready,
+        SuggestionSlotLifecycleStatus.Active,
+      ]) + onDemandCount([SuggestionSlotLifecycleStatus.Ready]),
+    recordable: count([SuggestionSlotLifecycleStatus.Recordable]),
     recorded:
-      count(['recorded', 'edited']) + onDemandCount(['recorded', 'edited']),
-    edited: count(['edited']) + onDemandCount(['edited']),
-    failed: count(['failed']) + onDemandCount(['failed']),
+      count([
+        SuggestionSlotLifecycleStatus.Recorded,
+        SuggestionSlotLifecycleStatus.Edited,
+      ]) +
+      onDemandCount([
+        SuggestionSlotLifecycleStatus.Recorded,
+        SuggestionSlotLifecycleStatus.Edited,
+      ]),
+    edited:
+      count([SuggestionSlotLifecycleStatus.Edited]) +
+      onDemandCount([SuggestionSlotLifecycleStatus.Edited]),
+    failed:
+      count([SuggestionSlotLifecycleStatus.Failed]) +
+      onDemandCount([SuggestionSlotLifecycleStatus.Failed]),
     onDemand: onDemandSuggestions.length,
   };
+}
+
+export function shouldExposeTodaySlot(slot: TodaysSuggestionSlotDto): boolean {
+  if (slot.status !== SuggestionSlotLifecycleStatus.Missed) return true;
+  if (slot.recording) return true;
+  return slot.suggestion?.generationStatus === SuggestionGenerationStatus.Ready;
 }
 
 export function buildTodayOnDemandDto(params: {
@@ -145,11 +177,17 @@ function onDemandStatus(
   suggestion: SuggestionInstance,
   applicationLog: ApplicationLog | null,
 ): TodaysOnDemandSuggestionDto['status'] {
-  if (applicationLog?.has_been_edited) return 'edited';
-  if (applicationLog) return 'recorded';
-  if (suggestion.generation_status === 'failed') return 'failed';
-  if (suggestion.generation_status === 'ready') return 'ready';
-  return 'generating';
+  if (applicationLog?.has_been_edited) {
+    return SuggestionSlotLifecycleStatus.Edited;
+  }
+  if (applicationLog) return SuggestionSlotLifecycleStatus.Recorded;
+  if (suggestion.generation_status === SuggestionGenerationStatus.Failed) {
+    return SuggestionSlotLifecycleStatus.Failed;
+  }
+  if (suggestion.generation_status === SuggestionGenerationStatus.Ready) {
+    return SuggestionSlotLifecycleStatus.Ready;
+  }
+  return SuggestionSlotLifecycleStatus.Generating;
 }
 
 export function buildPausedActiveNames(

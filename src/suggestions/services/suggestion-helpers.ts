@@ -8,14 +8,37 @@ import {
 
 /** Bucket a HH:MM[:SS] slot time into morning, noon (mid-day), or evening. */
 export function deriveSuggestionDaypart(slotTime: string): SuggestionDaypart {
-  const [hourStr = '0', minuteStr = '0'] = slotTime.split(':');
+  const total = clockTimeToSeconds(slotTime) / 60;
+  if (total < DAYPART_BOUNDARY_NOON_MINUTES) return SuggestionDaypart.Morning;
+  if (total < DAYPART_BOUNDARY_EVENING_MINUTES) return SuggestionDaypart.Noon;
+  return SuggestionDaypart.Evening;
+}
+
+export function clockTimesEqual(
+  first: string | Date,
+  second: string | Date,
+): boolean {
+  return compareClockTimes(first, second) === 0;
+}
+
+export function compareClockTimes(
+  first: string | Date,
+  second: string | Date,
+): number {
+  return clockTimeToSeconds(first) - clockTimeToSeconds(second);
+}
+
+export function clockTimeToSeconds(value: string | Date): number {
+  const normalized = toTimeOnlyString(value);
+  const [hourStr = '0', minuteStr = '0', secondStr = '0'] =
+    normalized.split(':');
   const hours = Number.parseInt(hourStr, 10);
   const minutes = Number.parseInt(minuteStr, 10);
-  if (Number.isNaN(hours) || Number.isNaN(minutes)) return 'morning';
-  const total = hours * 60 + minutes;
-  if (total < DAYPART_BOUNDARY_NOON_MINUTES) return 'morning';
-  if (total < DAYPART_BOUNDARY_EVENING_MINUTES) return 'noon';
-  return 'evening';
+  const seconds = Number.parseInt(secondStr, 10);
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || Number.isNaN(seconds)) {
+    return 0;
+  }
+  return hours * 3600 + minutes * 60 + seconds;
 }
 
 /**

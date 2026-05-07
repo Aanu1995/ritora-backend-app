@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { ApplicationLogItem } from '../application-tracking/entities/application-log-item.entity';
+import { IngredientsModule } from '../ingredients/ingredients.module';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
@@ -69,6 +70,7 @@ import { SuggestionsController } from './suggestions.controller';
       User,
       UserConsent,
     ]),
+    IngredientsModule,
     NotificationsModule,
     UsersModule,
   ],

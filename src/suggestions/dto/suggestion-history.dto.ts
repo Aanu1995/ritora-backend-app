@@ -11,69 +11,82 @@ import {
   Min,
 } from 'class-validator';
 import {
+  SUGGESTION_DAYPARTS,
+  SUGGESTION_HISTORY_RANGES,
   SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT,
   SUGGESTION_HISTORY_PAGE_MAX_LIMIT,
+  SUGGESTION_HISTORY_SLOT_STATUSES,
+  SUGGESTION_MODES,
   SUGGESTION_REQUEST_SOURCES,
   SuggestionDaypart,
+  SuggestionHistoryRange,
+  SuggestionHistorySlotStatus,
   SuggestionMode,
+  SuggestionRegenerationReason,
   SuggestionRequestSource,
+  SUGGESTION_REGENERATION_REASONS,
 } from '../suggestions.constants';
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
+import {
+  EmptyStringToDefault,
+  EmptyStringToNull,
+  EmptyStringToUndefined,
+} from '../../common/dto/empty-string.transforms';
 import { SuggestionInstanceResponseDto } from './suggestion-instance-response.dto';
 import { TodaysSuggestionWeatherSummaryDto } from './todays-suggestion-response.dto';
 
-export type SuggestionHistorySlotStatus =
-  | 'applied'
-  | 'partial'
-  | 'skipped'
-  | 'simplified'
-  | 'missed';
-
 export class SuggestionHistoryListQueryDto {
-  @ApiPropertyOptional({ enum: ['7d', '30d', 'custom'] })
+  @ApiPropertyOptional({ enum: SUGGESTION_HISTORY_RANGES })
+  @EmptyStringToNull()
   @IsOptional()
-  @IsIn(['7d', '30d', 'custom'])
-  range?: '7d' | '30d' | 'custom';
+  @IsIn(SUGGESTION_HISTORY_RANGES)
+  range?: SuggestionHistoryRange | null;
 
   @ApiPropertyOptional({ format: 'date' })
+  @EmptyStringToNull()
   @IsOptional()
   @IsDateString()
-  from?: string;
+  from?: string | null;
 
   @ApiPropertyOptional({ format: 'date' })
+  @EmptyStringToNull()
   @IsOptional()
   @IsDateString()
-  to?: string;
+  to?: string | null;
 
-  @ApiPropertyOptional({ enum: ['morning', 'noon', 'evening'] })
+  @ApiPropertyOptional({ enum: SUGGESTION_DAYPARTS })
+  @EmptyStringToNull()
   @IsOptional()
-  @IsIn(['morning', 'noon', 'evening'])
-  daypart?: SuggestionDaypart;
+  @IsIn(SUGGESTION_DAYPARTS)
+  daypart?: SuggestionDaypart | null;
 
-  @ApiPropertyOptional({ enum: ['ai', 'manual', 'mixed'] })
+  @ApiPropertyOptional({ enum: SUGGESTION_MODES })
+  @EmptyStringToNull()
   @IsOptional()
-  @IsIn(['ai', 'manual', 'mixed'])
-  mode?: SuggestionMode;
+  @IsIn(SUGGESTION_MODES)
+  mode?: SuggestionMode | null;
 
   @ApiPropertyOptional({ enum: SUGGESTION_REQUEST_SOURCES })
+  @EmptyStringToNull()
   @IsOptional()
   @IsIn(SUGGESTION_REQUEST_SOURCES)
-  requestSource?: SuggestionRequestSource;
+  requestSource?: SuggestionRequestSource | null;
 
-  @ApiPropertyOptional({
-    enum: ['applied', 'partial', 'skipped', 'simplified', 'missed'],
-  })
+  @ApiPropertyOptional({ enum: SUGGESTION_HISTORY_SLOT_STATUSES })
+  @EmptyStringToNull()
   @IsOptional()
-  @IsIn(['applied', 'partial', 'skipped', 'simplified', 'missed'])
-  status?: SuggestionHistorySlotStatus;
+  @IsIn(SUGGESTION_HISTORY_SLOT_STATUSES)
+  status?: SuggestionHistorySlotStatus | null;
 
   @ApiPropertyOptional()
+  @EmptyStringToUndefined()
   @IsOptional()
   @Type(() => Boolean)
   @IsBoolean()
   edited?: boolean;
 
   @ApiPropertyOptional()
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsString()
   cursor?: string;
@@ -83,6 +96,7 @@ export class SuggestionHistoryListQueryDto {
     maximum: SUGGESTION_HISTORY_PAGE_MAX_LIMIT,
     default: SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT,
   })
+  @EmptyStringToDefault(SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT)
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -107,13 +121,13 @@ export class SuggestionHistorySlotSummaryDto {
   @ApiProperty({ nullable: true })
   onDemandIntent: string | null;
 
-  @ApiProperty({ enum: ['morning', 'noon', 'evening'] })
+  @ApiProperty({ enum: SUGGESTION_DAYPARTS })
   daypart: SuggestionDaypart;
 
   @ApiProperty()
   slotTime: string;
 
-  @ApiProperty({ enum: ['ai', 'manual', 'mixed'] })
+  @ApiProperty({ enum: SUGGESTION_MODES })
   mode: SuggestionMode;
 
   @ApiProperty()
@@ -122,9 +136,7 @@ export class SuggestionHistorySlotSummaryDto {
   @ApiProperty()
   totalSteps: number;
 
-  @ApiProperty({
-    enum: ['applied', 'partial', 'skipped', 'simplified', 'missed'],
-  })
+  @ApiProperty({ enum: SUGGESTION_HISTORY_SLOT_STATUSES })
   status: SuggestionHistorySlotStatus;
 
   @ApiProperty()
@@ -197,23 +209,9 @@ export type SuggestionHistoryExportFile = {
 
 export class RegenerateSuggestionDto {
   @ApiPropertyOptional({
-    enum: [
-      'user_requested',
-      'schedule_change',
-      'reaction_detected',
-      'normal_routine_requested',
-    ],
+    enum: SUGGESTION_REGENERATION_REASONS,
   })
   @IsOptional()
-  @IsIn([
-    'user_requested',
-    'schedule_change',
-    'reaction_detected',
-    'normal_routine_requested',
-  ])
-  reason?:
-    | 'user_requested'
-    | 'schedule_change'
-    | 'reaction_detected'
-    | 'normal_routine_requested';
+  @IsIn(SUGGESTION_REGENERATION_REASONS)
+  reason?: SuggestionRegenerationReason;
 }
