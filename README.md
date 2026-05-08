@@ -53,11 +53,11 @@ cp .env.example .env
 Important variable groups:
 
 - Database: `DATABASE_*`
-- Web app / CORS: `WEB_APP_URL`, `CORS_ORIGINS`
+- Web app / CORS: `WEB_APP_URL`, `API_PUBLIC_URL`, `CORS_ORIGINS`
 - JWT: `JWT_SECRET`, `JWT_REFRESH_SECRET`, expiry, issuer, audience
 - Cookies: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
-- Mail: `RESEND_API_KEY`, `MAIL_FROM`
+- Mail: `RESEND_API_KEY`, `MAIL_FROM`, `NOTIFICATION_MAIL_FROM`, `MAIL_UNSUBSCRIBE_SECRET`
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`, feature-specific model keys such as `SUGGESTION_AI_MODEL`
 - Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
 - Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
@@ -70,9 +70,12 @@ Important variable groups:
 Production validation requires:
 
 - `WEB_APP_URL` to be HTTPS
+- `API_PUBLIC_URL` to be HTTPS and include the API prefix, for example `https://api.example.com/api/v1`
 - `COOKIE_SECURE=true`
 - non-empty strong JWT secrets
-- a valid `MAIL_FROM`
+- a stable `MAIL_UNSUBSCRIBE_SECRET` with at least 32 characters
+- a valid `MAIL_FROM` for auth emails
+- a valid `NOTIFICATION_MAIL_FROM` for notification emails, different from `MAIL_FROM`
 - valid `CORS_ORIGINS` when configured
 
 ## Local development
@@ -101,6 +104,7 @@ DATABASE_NAME=ritora
 DATABASE_USER=postgres
 DATABASE_PASSWORD=your-local-password
 WEB_APP_URL=http://localhost:3000
+API_PUBLIC_URL=http://localhost:3001/api/v1
 CORS_ORIGINS=http://localhost:3000
 JWT_SECRET=dev-jwt-secret-change-me
 JWT_REFRESH_SECRET=dev-refresh-secret-change-me

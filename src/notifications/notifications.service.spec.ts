@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { MailUnsubscribeTokenService } from '../mail/mail-unsubscribe-token.service';
 import { MailService } from '../mail/mail.service';
 import {
   DataProvenance,
@@ -110,6 +111,7 @@ describe('NotificationsService', () => {
   let inventoryProducts: ReturnType<typeof repo>;
   let notificationQb: ReturnType<typeof notificationQueryBuilder>;
   const mailService = { sendNotificationEmail: jest.fn() };
+  const unsubscribeTokens = { verifyToken: jest.fn() };
   const pushNotifications = { sendNotificationPush: jest.fn() };
 
   beforeEach(async () => {
@@ -123,6 +125,7 @@ describe('NotificationsService', () => {
     inventoryProducts = repo();
     mailService.sendNotificationEmail.mockClear();
     mailService.sendNotificationEmail.mockResolvedValue(undefined);
+    unsubscribeTokens.verifyToken.mockClear();
     pushNotifications.sendNotificationPush.mockClear();
     pushNotifications.sendNotificationPush.mockResolvedValue(undefined);
 
@@ -148,11 +151,107 @@ describe('NotificationsService', () => {
           useValue: inventoryProducts,
         },
         { provide: MailService, useValue: mailService },
+        { provide: MailUnsubscribeTokenService, useValue: unsubscribeTokens },
         { provide: PushNotificationsService, useValue: pushNotifications },
       ],
     }).compile();
 
     service = module.get(NotificationsService);
+  });
+
+  it('unsubscribes photo reminders from a signed email token', async () => {
+    const prefs = {
+      user_id: 'user-1',
+      channels: ['in_app', 'email'],
+      photo_reminder_enabled: true,
+      reaction_alerts_enabled: true,
+      simplification_alerts_enabled: true,
+      insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
+      wrapped_alerts_enabled: true,
+      suggestion_ready_enabled: true,
+      slot_start_enabled: true,
+      recording_reminder_enabled: true,
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      suggestion_lead_time_minutes: 120,
+      quiet_hours_enabled: false,
+      quiet_hours_start: '22:30',
+      quiet_hours_end: '06:30',
+      photo_tutorial_completed: false,
+    };
+    unsubscribeTokens.verifyToken.mockReturnValue({
+      userId: 'user-1',
+      kind: 'photo_reminder',
+    });
+    users.findOne.mockResolvedValue({ id: 'user-1' });
+    preferences.findOne.mockResolvedValue(prefs);
+
+    await service.unsubscribeNotificationEmail('signed-token');
+
+    expect(prefs.photo_reminder_enabled).toBe(false);
+    expect(preferences.save).toHaveBeenCalledWith(
+      expect.objectContaining({ photo_reminder_enabled: false }),
+    );
+  });
+
+  it('unsubscribes shared insight preferences for doctor referral email tokens', async () => {
+    const prefs = {
+      user_id: 'user-1',
+      channels: ['in_app', 'email'],
+      photo_reminder_enabled: true,
+      reaction_alerts_enabled: true,
+      simplification_alerts_enabled: true,
+      insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
+      wrapped_alerts_enabled: true,
+      suggestion_ready_enabled: true,
+      slot_start_enabled: true,
+      recording_reminder_enabled: true,
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      suggestion_lead_time_minutes: 120,
+      quiet_hours_enabled: false,
+      quiet_hours_start: '22:30',
+      quiet_hours_end: '06:30',
+      photo_tutorial_completed: false,
+    };
+    unsubscribeTokens.verifyToken.mockReturnValue({
+      userId: 'user-1',
+      kind: 'doctor_referral',
+    });
+    users.findOne.mockResolvedValue({ id: 'user-1' });
+    preferences.findOne.mockResolvedValue(prefs);
+
+    await service.unsubscribeNotificationEmail('signed-token');
+
+    expect(prefs.insight_alerts_enabled).toBe(false);
+    expect(preferences.save).toHaveBeenCalledWith(
+      expect.objectContaining({ insight_alerts_enabled: false }),
+    );
+  });
+
+  it('treats valid unsubscribe tokens for deleted users as already handled', async () => {
+    unsubscribeTokens.verifyToken.mockReturnValue({
+      userId: 'deleted-user',
+      kind: 'photo_reminder',
+    });
+    users.findOne.mockResolvedValue(null);
+
+    await service.unsubscribeNotificationEmail('signed-token');
+
+    expect(preferences.findOne).not.toHaveBeenCalled();
+    expect(preferences.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid unsubscribe tokens without changing preferences', async () => {
+    unsubscribeTokens.verifyToken.mockReturnValue(null);
+
+    await expect(
+      service.unsubscribeNotificationEmail('bad-token'),
+    ).rejects.toThrow('Invalid unsubscribe token');
+
+    expect(preferences.save).not.toHaveBeenCalled();
   });
 
   it('returns the first cursor page using the same pagination shape as shelf', async () => {

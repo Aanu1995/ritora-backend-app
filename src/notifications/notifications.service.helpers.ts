@@ -12,6 +12,7 @@ import {
   todayInTimeZone,
 } from '../skin-journal/skin-journal.utils';
 import { User } from '../users/entities/user.entity';
+import { NOTIFICATION_KIND_TEMPLATE } from '../mail/mail.constants';
 import {
   PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
   PRODUCT_EXPIRY_NOTICE_DAYS_MAX,
@@ -489,7 +490,7 @@ export function isNotificationKindEnabled(
 }
 
 export function canSendNotificationEmail(kind: NotificationKind): boolean {
-  return kind !== 'product_nearing_expiry' && kind !== 'product_expired';
+  return kind in NOTIFICATION_KIND_TEMPLATE;
 }
 
 export function requiresNotificationInApp(kind: NotificationKind): boolean {

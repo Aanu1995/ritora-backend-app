@@ -130,6 +130,15 @@ function validateCookieSettings(
   }
 
   if (env.NODE_ENV === 'production') {
+    if (
+      typeof env.MAIL_FROM === 'string' &&
+      typeof env.NOTIFICATION_MAIL_FROM === 'string' &&
+      env.MAIL_FROM.trim().toLowerCase() ===
+        env.NOTIFICATION_MAIL_FROM.trim().toLowerCase()
+    ) {
+      return helpers.error('any.invalid');
+    }
+
     const configuredOrigins =
       typeof env.CORS_ORIGINS === 'string' && env.CORS_ORIGINS.trim().length > 0
         ? env.CORS_ORIGINS
@@ -162,6 +171,18 @@ export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').required(),
 
   API_PORT: Joi.number().port().required(),
+  API_PUBLIC_URL: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string()
+      .trim()
+      .uri({ scheme: ['https'] })
+      .required(),
+    otherwise: Joi.string()
+      .trim()
+      .uri({ scheme: ['http', 'https'] })
+      .allow('')
+      .default(''),
+  }),
   LOG_LEVEL: Joi.string()
     .valid('error', 'warn', 'log', 'debug', 'verbose')
     .required(),
@@ -364,8 +385,18 @@ export const envValidationSchema = Joi.object({
   SKIN_PROFILE_FIELD_ENCRYPTION_KEY_ID: Joi.string().trim().max(64).required(),
   MAIL_FROM: Joi.when('NODE_ENV', {
     is: 'production',
-    then: Joi.string().email().required(),
-    otherwise: Joi.string().email().required(),
+    then: Joi.string().trim().email().required(),
+    otherwise: Joi.string().trim().email().required(),
+  }),
+  NOTIFICATION_MAIL_FROM: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().email().required(),
+    otherwise: Joi.string().trim().email().allow('').default(''),
+  }),
+  MAIL_UNSUBSCRIBE_SECRET: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(32).required(),
+    otherwise: Joi.string().trim().allow('').default(''),
   }),
 
   WEB_APP_URL: Joi.when('NODE_ENV', {

@@ -1,3 +1,4 @@
+import { IS_PUBLIC_KEY } from '../common/decorators/public.decorator';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 
@@ -13,6 +14,7 @@ describe('NotificationsController', () => {
     getPushStatus: jest.fn(),
     upsertPushSubscription: jest.fn(),
     revokePushSubscription: jest.fn(),
+    unsubscribeNotificationEmail: jest.fn(),
   } as unknown as jest.Mocked<NotificationsService>;
 
   let controller: NotificationsController;
@@ -97,5 +99,23 @@ describe('NotificationsController', () => {
       'user-1',
       'sub-1',
     );
+  });
+
+  it('exposes a public one-click email unsubscribe endpoint', async () => {
+    service.unsubscribeNotificationEmail.mockResolvedValue(undefined);
+
+    await expect(
+      controller.unsubscribeEmailNotification('signed-token'),
+    ).resolves.toEqual({ ok: true });
+
+    expect(service.unsubscribeNotificationEmail).toHaveBeenCalledWith(
+      'signed-token',
+    );
+    expect(
+      Reflect.getMetadata(
+        IS_PUBLIC_KEY,
+        controller.unsubscribeEmailNotification,
+      ),
+    ).toBe(true);
   });
 });

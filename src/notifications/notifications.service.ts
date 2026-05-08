@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -8,6 +9,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
+import {
+  NOTIFICATION_KIND_TEMPLATE,
+  type NotificationEmailKind,
+} from '../mail/mail.constants';
+import { MailUnsubscribeTokenService } from '../mail/mail-unsubscribe-token.service';
+import { normalizeLanguage } from '../common/i18n/i18n';
 import { type PaginatedResult } from '../common/utils/cursor-pagination';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
@@ -80,6 +87,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(InventoryProduct)
     private readonly inventoryProducts: Repository<InventoryProduct>,
     private readonly mailService: MailService,
+    private readonly unsubscribeTokens: MailUnsubscribeTokenService,
     private readonly pushNotifications: PushNotificationsService,
   ) {}
 
@@ -379,6 +387,24 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     await this.pushNotifications.revokeSubscription(userId, id);
   }
 
+  async unsubscribeNotificationEmail(token: string): Promise<void> {
+    const payload = this.unsubscribeTokens.verifyToken(token);
+    if (!payload) {
+      throw new BadRequestException('Invalid unsubscribe token');
+    }
+
+    const user = await this.users.findOne({ where: { id: payload.userId } });
+    if (!user) {
+      return;
+    }
+
+    const prefs = await this.ensurePreferences(payload.userId);
+    const changed = applyEmailUnsubscribePreference(prefs, payload.kind);
+    if (changed) {
+      await this.preferences.save(prefs);
+    }
+  }
+
   private async ensurePreferences(
     userId: string,
   ): Promise<UserNotificationPreference> {
@@ -435,12 +461,19 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (!user?.email) {
       return;
     }
+    if (!(params.kind in NOTIFICATION_KIND_TEMPLATE)) {
+      return;
+    }
     try {
-      await this.mailService.sendNotificationEmail(
-        user.email,
-        params.titleKey,
-        params.bodyKey,
-      );
+      await this.mailService.sendNotificationEmail({
+        userId: user.id,
+        email: user.email,
+        language: normalizeLanguage(user.preferred_language),
+        kind: params.kind as NotificationEmailKind,
+        firstName: user.first_name,
+        payload: params.payload ?? {},
+        deepLink: params.deepLink,
+      });
     } catch (error) {
       this.logger.warn(
         `Notification email failed for ${params.kind}: ${
@@ -483,12 +516,13 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     prefetchedUser?: User | null,
   ): Promise<User | null> {
     if (prefetchedUser) return prefetchedUser;
-    if (
-      !prefs.quiet_hours_enabled &&
-      !prefs.channels.includes('email') &&
-      !prefs.channels.includes('push') &&
-      !params.forcePush
-    ) {
+    const willEmail =
+      prefs.channels.includes('email') && canSendNotificationEmail(params.kind);
+    const willPush =
+      params.forcePush ||
+      requiresNotificationPush(params.kind) ||
+      prefs.channels.includes('push');
+    if (!prefs.quiet_hours_enabled && !willEmail && !willPush) {
       return null;
     }
     return this.users.findOne({ where: { id: params.userId } });
@@ -532,4 +566,49 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       },
     });
   }
+}
+
+function applyEmailUnsubscribePreference(
+  prefs: UserNotificationPreference,
+  kind: NotificationEmailKind,
+): boolean {
+  switch (kind) {
+    case 'photo_reminder':
+      return disablePreference(prefs, 'photo_reminder_enabled');
+    case 'suggestion_ready':
+      return disablePreference(prefs, 'suggestion_ready_enabled');
+    case 'slot_start':
+      return disablePreference(prefs, 'slot_start_enabled');
+    case 'recording_reminder':
+      return disablePreference(prefs, 'recording_reminder_enabled');
+    case 'simplification_started':
+      return disablePreference(prefs, 'simplification_alerts_enabled');
+    case 'insight_ready':
+    case 'doctor_referral':
+      return disablePreference(prefs, 'insight_alerts_enabled');
+    case 'wrapped_ready':
+      return disablePreference(prefs, 'wrapped_alerts_enabled');
+    case 'reaction_detected':
+      return false;
+  }
+}
+
+function disablePreference(
+  prefs: UserNotificationPreference,
+  key: keyof Pick<
+    UserNotificationPreference,
+    | 'photo_reminder_enabled'
+    | 'suggestion_ready_enabled'
+    | 'slot_start_enabled'
+    | 'recording_reminder_enabled'
+    | 'simplification_alerts_enabled'
+    | 'insight_alerts_enabled'
+    | 'wrapped_alerts_enabled'
+  >,
+): boolean {
+  if (prefs[key] === false) {
+    return false;
+  }
+  prefs[key] = false;
+  return true;
 }

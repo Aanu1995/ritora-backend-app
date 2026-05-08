@@ -78,7 +78,10 @@ function developmentEnv(
     SKIN_PROFILE_FIELD_ENCRYPTION_KEY: '',
     SKIN_PROFILE_FIELD_ENCRYPTION_KEY_ID: 'primary',
     MAIL_FROM: 'onboarding@resend.dev',
+    NOTIFICATION_MAIL_FROM: '',
+    MAIL_UNSUBSCRIBE_SECRET: '',
     WEB_APP_URL: 'http://localhost:3000',
+    API_PUBLIC_URL: '',
     WEB_PUSH_VAPID_PUBLIC_KEY: '',
     WEB_PUSH_VAPID_PRIVATE_KEY: '',
     WEB_PUSH_SUBJECT: 'mailto:support@getritora.com',
@@ -129,7 +132,10 @@ function productionEnv(
     APPLE_CALLBACK_URL: 'https://api.ritora.com/api/v1/auth/apple/callback',
     SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
     MAIL_FROM: 'noreply@ritora.com',
+    NOTIFICATION_MAIL_FROM: 'notifications@ritora.com',
+    MAIL_UNSUBSCRIBE_SECRET: 'u'.repeat(32),
     WEB_APP_URL: 'https://app.ritora.com',
+    API_PUBLIC_URL: 'https://api.ritora.com/api/v1',
     WEB_PUSH_VAPID_PUBLIC_KEY:
       'BGtkbcjrO12YMoDuq2sCQeHlu47uPx3SHTgFKZFYiBW8Qr0D9vgyZSZPdw6_4ZFEI9Snk1VEAj2qTYI1I1YxBXE',
     WEB_PUSH_VAPID_PRIVATE_KEY: 'I0_d0vnesxbBSUmlDdOKibGo6vEXRO-Vu88QlSlm5j0',
@@ -174,6 +180,7 @@ describe('envValidationSchema', () => {
       JWT_SECRET: 'dev-jwt-secret-change-me',
       JWT_REFRESH_SECRET: 'dev-refresh-secret-change-me',
       MAIL_FROM: 'onboarding@resend.dev',
+      NOTIFICATION_MAIL_FROM: '',
       COOKIE_DOMAIN: '',
       SWAGGER_ENABLED: true,
     });
@@ -217,6 +224,42 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error?.message).toContain('WEB_PUSH_VAPID_PUBLIC_KEY');
+  });
+
+  it('requires one-click unsubscribe signing config in production', () => {
+    const result = validateEnv(
+      productionEnv({
+        MAIL_UNSUBSCRIBE_SECRET: '',
+      }),
+    );
+
+    expect(result.error?.message).toContain('MAIL_UNSUBSCRIBE_SECRET');
+  });
+
+  it('requires a separate notification email sender in production', () => {
+    const missingResult = validateEnv(
+      productionEnv({
+        NOTIFICATION_MAIL_FROM: '',
+      }),
+    );
+    expect(missingResult.error?.message).toContain('NOTIFICATION_MAIL_FROM');
+
+    const duplicateResult = validateEnv(
+      productionEnv({
+        NOTIFICATION_MAIL_FROM: 'noreply@ritora.com',
+      }),
+    );
+    expect(duplicateResult.error).toBeDefined();
+  });
+
+  it('requires a public HTTPS API URL for production email unsubscribe links', () => {
+    const result = validateEnv(
+      productionEnv({
+        API_PUBLIC_URL: '',
+      }),
+    );
+
+    expect(result.error?.message).toContain('API_PUBLIC_URL');
   });
 
   it('rejects malformed Web Push VAPID credentials in production', () => {

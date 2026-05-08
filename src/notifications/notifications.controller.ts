@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { NotificationsService } from './notifications.service';
 import {
   PreferencesResponseDto,
@@ -62,6 +64,14 @@ export class NotificationsController {
     @Body() dto: UpdatePreferencesDto,
   ) {
     return this.service.updatePreferences(userId, dto);
+  }
+
+  @Public()
+  @Post('email/unsubscribe')
+  @HttpCode(200)
+  async unsubscribeEmailNotification(@Query('token') token: string) {
+    await this.service.unsubscribeNotificationEmail(token);
+    return { ok: true };
   }
 
   @Get('push/public-key')

@@ -389,6 +389,81 @@ describe('PushNotificationsService', () => {
     );
   });
 
+  it('renders English push copy for English speakers on a generic kind', async () => {
+    subscriptions.find.mockResolvedValue([webSubscription()]);
+
+    await service.sendNotificationPush({
+      userId: 'user-1',
+      kind: 'reaction_detected',
+      titleKey: 'notificationsPage.kinds.reaction_detected.title',
+      bodyKey: 'notificationsPage.kinds.reaction_detected.body',
+      deepLink: '/today',
+      language: 'en',
+    });
+
+    const sentBody = sendNotification.mock.calls[0]?.[1] as string;
+    expect(sentBody).toContain('"title":"We paused your routine"');
+    expect(sentBody).toContain(
+      '"body":"Your photo today shows changes. Switched to barrier mode while your skin settles."',
+    );
+  });
+
+  it('renders Swedish push copy for Swedish speakers on a generic kind', async () => {
+    subscriptions.find.mockResolvedValue([webSubscription()]);
+
+    await service.sendNotificationPush({
+      userId: 'user-1',
+      kind: 'reaction_detected',
+      titleKey: 'notificationsPage.kinds.reaction_detected.title',
+      bodyKey: 'notificationsPage.kinds.reaction_detected.body',
+      deepLink: '/today',
+      language: 'sv',
+    });
+
+    const sentBody = sendNotification.mock.calls[0]?.[1] as string;
+    expect(sentBody).toContain('"title":"Vi pausade din rutin"');
+    expect(sentBody).toContain('barriärläge');
+  });
+
+  it('renders Swedish product expiry copy when language is sv', async () => {
+    subscriptions.find.mockResolvedValue([webSubscription()]);
+
+    await service.sendNotificationPush({
+      userId: 'user-1',
+      kind: 'product_nearing_expiry',
+      titleKey: 'notificationsPage.kinds.product_nearing_expiry.title',
+      bodyKey: 'notificationsPage.kinds.product_nearing_expiry.body',
+      payload: {
+        productName: 'CeraVe Retinol Serum',
+        expiresAt: '2026-05-10T00:00:00.000Z',
+        daysUntilExpiry: 3,
+      },
+      deepLink: '/shelf/product-1',
+      dedupeKey: 'product_nearing_expiry:product-1:2026-05-10',
+      language: 'sv',
+    });
+
+    const sentBody = sendNotification.mock.calls[0]?.[1] as string;
+    expect(sentBody).toContain('"title":"Produkt nära utgång"');
+    expect(sentBody).toContain('går ut om 3 dagar');
+  });
+
+  it('falls back to English when language is missing or unsupported', async () => {
+    subscriptions.find.mockResolvedValue([webSubscription()]);
+
+    await service.sendNotificationPush({
+      userId: 'user-1',
+      kind: 'photo_reminder',
+      titleKey: 'notificationsPage.kinds.photo_reminder.title',
+      bodyKey: 'notificationsPage.kinds.photo_reminder.body',
+      deepLink: '/journal/upload',
+      language: null,
+    });
+
+    const sentBody = sendNotification.mock.calls[0]?.[1] as string;
+    expect(sentBody).toContain('"title":"Time for today\'s photo"');
+  });
+
   it('records a clear skipped reason when web push is unavailable', async () => {
     const unconfiguredService = new PushNotificationsService(
       subscriptions as never,
@@ -435,9 +510,15 @@ describe('PushNotificationsService', () => {
       expect.objectContaining({
         status: PushDeliveryStatusValue.Failed,
         provider_status_code: 503,
+        error_message: 'Push service temporarily unavailable.',
         attempt_count: 1,
         next_attempt_at: expect.any(Date),
         locked_at: null,
+      }),
+    );
+    expect(subscriptions.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        last_failure_reason: 'Push service temporarily unavailable.',
       }),
     );
   });
@@ -522,6 +603,7 @@ describe('PushNotificationsService', () => {
       expect.objectContaining({
         status: PushDeliveryStatusValue.Failed,
         provider_status_code: 410,
+        error_message: 'Push subscription expired.',
       }),
     );
   });

@@ -1,0 +1,28 @@
+<tr>
+  <td class="email-padding" style="padding: 32px 40px 0 40px;">
+    <div class="email-hair" style="height: 1px; line-height: 1px; font-size: 0; background-color: #ece8df;">&nbsp;</div>
+  </td>
+</tr>
+<tr>
+  <td class="email-padding" align="left" style="padding: 20px 40px 0 40px;">
+    <p class="email-muted" style="margin: 0 0 6px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #6b7361;">
+      {{footerWhy}} <a class="email-link" href="{{manageUrl}}" style="color: #1F5F3D; text-decoration: underline;">{{manageLabel}}</a>.
+    </p>
+    <p class="email-muted" style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #6b7361;">
+      {{supportLine}} <a class="email-link" href="mailto:{{supportEmail}}" style="color: #1F5F3D; text-decoration: underline;">{{supportEmail}}</a>.
+    </p>
+  </td>
+</tr>
+{{#if unsubscribeUrl}}
+<tr>
+  <td class="email-padding" align="left" style="padding: 22px 40px 40px 40px;">
+    <p class="email-muted" style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #8a9188;">
+      <a class="email-link" href="{{unsubscribeUrl}}" style="color: #8a9188; text-decoration: underline;">{{unsubscribeLabel}}</a>
+    </p>
+  </td>
+</tr>
+{{else}}
+<tr>
+  <td class="email-padding" align="left" style="padding: 0 40px 40px 40px;">&nbsp;</td>
+</tr>
+{{/if}}

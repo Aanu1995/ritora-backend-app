@@ -120,6 +120,12 @@ const PUSH_ERROR_MESSAGE = {
   unsupportedProvider: 'Push provider is not supported for delivery yet.',
   missingPayload: 'Stored push payload is missing.',
   claimExpired: 'Push delivery claim expired before it could be sent.',
+  deliveryExpired: 'Push subscription expired.',
+  deliveryForbidden: 'Push service rejected the subscription.',
+  deliveryBadRequest: 'Push service rejected the payload.',
+  deliveryRateLimited: 'Push service rate limited delivery.',
+  deliveryTransient: 'Push service temporarily unavailable.',
+  deliveryFailed: 'Push delivery failed.',
 } as const;
 
 const GENERIC_PUSH_COPY: Record<
@@ -129,93 +135,93 @@ const GENERIC_PUSH_COPY: Record<
   en: {
     photo_reminder: {
       title: "Time for today's photo",
-      body: 'Capture your morning baseline in natural daylight.',
+      body: 'Take it in steady light, the same window each day.',
     },
     reaction_detected: {
-      title: 'Possible reaction detected',
-      body: 'Increased redness, new breakouts. Routine simplified to barrier-repair until you acknowledge.',
+      title: 'We paused your routine',
+      body: 'Your photo today shows changes. Switched to barrier mode while your skin settles.',
     },
     simplification_started: {
-      title: 'Routine simplified',
-      body: 'Barrier repair mode active. Restore any time.',
+      title: 'Your routine is simpler today',
+      body: 'Barrier mode is on. You can switch back any time.',
     },
     doctor_referral: {
-      title: 'Doctor referral nudge',
-      body: 'Persistent reaction signals. Consider a dermatologist visit.',
+      title: 'Worth seeing a dermatologist',
+      body: 'A pattern keeps coming back. A specialist could help.',
     },
     insight_ready: {
-      title: 'New insight',
-      body: "Tap to see what's working.",
+      title: 'A new insight is ready',
+      body: 'Your photos are telling a quiet story.',
     },
     wrapped_ready: {
-      title: 'Your Wrapped is ready',
-      body: 'Your private recap is ready with AI captions on visible changes.',
+      title: 'Your week in skin is ready',
+      body: 'Small wins, honest gaps, one thing to try next.',
     },
     analysis_failed: {
-      title: 'Analysis failed',
-      body: 'Tap to retry on the entry.',
+      title: 'Photo analysis hit a snag',
+      body: 'Tap to retry. Your photo is safe.',
     },
     export_ready: {
-      title: 'Your export is ready',
+      title: 'Your data export is ready',
       body: 'Tap to download.',
     },
     suggestion_ready: {
-      title: 'Your suggestion is ready',
-      body: 'Tap to review the steps before you apply.',
+      title: 'Your routine is ready',
+      body: 'Take a look at the steps before you apply.',
     },
     slot_start: {
-      title: 'Time to start your routine',
-      body: 'Your routine is ready. Mark each step as you go.',
+      title: 'Time for your routine',
+      body: 'Steps are ready. Tap to apply and mark each one.',
     },
     recording_reminder: {
-      title: 'How did your routine go?',
-      body: 'Record what you applied so the rest of today knows what to build on.',
+      title: 'How did it go?',
+      body: 'Take 10 seconds to log what you applied.',
     },
   },
   sv: {
     photo_reminder: {
-      title: 'Dags för dagens foto',
-      body: 'Fånga din morgonbaslinje i naturligt dagsljus.',
+      title: 'Dags för dagens bild',
+      body: 'Ta den i jämnt ljus, samma fönster varje dag.',
     },
     reaction_detected: {
-      title: 'Möjlig reaktion upptäckt',
-      body: 'Ökad rodnad, nya utbrott. Rutin förenklad till barriär-reparation tills du bekräftar.',
+      title: 'Vi pausade din rutin',
+      body: 'Din bild idag visar förändringar. Bytte till barriärläge medan din hud lugnar sig.',
     },
     simplification_started: {
-      title: 'Rutin förenklad',
-      body: 'Barriärreparation aktiv. Återställ när som helst.',
+      title: 'Din rutin är enklare idag',
+      body: 'Barriärläge är på. Du kan byta tillbaka när som helst.',
     },
     doctor_referral: {
-      title: 'Hudläkarremiss',
-      body: 'Kvarstående reaktionssignaler. Överväg ett hudläkarbesök.',
+      title: 'Värt att träffa en hudläkare',
+      body: 'Ett mönster återkommer. En specialist kan hjälpa.',
     },
     insight_ready: {
-      title: 'Ny insikt',
-      body: 'Tryck för att se vad som fungerar.',
+      title: 'En ny insikt är klar',
+      body: 'Dina bilder berättar en stilla historia.',
     },
     wrapped_ready: {
-      title: 'Din Wrapped är klar',
-      body: 'Din privata sammanfattning är klar med AI-texter om synliga förändringar.',
+      title: 'Din vecka i hud är klar',
+      body: 'Små vinster, ärliga luckor, en sak att prova härnäst.',
     },
     analysis_failed: {
-      title: 'Analys misslyckades',
-      body: 'Tryck för att försöka igen.',
+      title: 'Något gick snett med bildanalysen',
+      body: 'Tryck för att försöka igen. Din bild är säker.',
     },
     export_ready: {
-      title: 'Din export är klar',
+      title: 'Din dataexport är klar',
       body: 'Tryck för att ladda ner.',
     },
     suggestion_ready: {
-      title: 'Ditt förslag är klart',
-      body: 'Tryck för att granska stegen innan du applicerar.',
+      title: 'Din rutin är klar',
+      body: 'Titta på stegen innan du applicerar.',
     },
     slot_start: {
-      title: 'Dags att starta din rutin',
-      body: 'Din rutin är redo. Markera varje steg när du gör det.',
+      title: 'Dags för din rutin',
+      body: 'Stegen är klara. Tryck för att applicera och markera varje steg.',
     },
     recording_reminder: {
-      title: 'Hur gick din rutin?',
-      body: 'Registrera vad du applicerade så att resten av dagen vet vad det ska bygga på.',
+      title: 'Hur gick det?',
+      body: 'Ta 10 sekunder och logga vad du applicerade.',
     },
   },
 };
@@ -735,8 +741,7 @@ export class PushNotificationsService implements OnModuleInit, OnModuleDestroy {
       return 'sent';
     } catch (error) {
       const statusCode = resolveWebPushStatusCode(error);
-      const message =
-        error instanceof Error ? error.message : 'Unknown push delivery error';
+      const message = resolveWebPushFailureReason(statusCode);
       delivery.status = PushDeliveryStatusValue.Failed;
       delivery.provider_status_code = statusCode;
       delivery.error_message = message;
@@ -754,7 +759,11 @@ export class PushNotificationsService implements OnModuleInit, OnModuleDestroy {
       if (statusCode === 404 || statusCode === 410) {
         subscription.revoked_at = new Date();
       }
-      this.logger.warn(`Web Push delivery failed for ${kind}: ${message}`);
+      this.logger.warn(
+        `Web Push delivery failed for ${kind}: ${message}${
+          statusCode ? ` (${statusCode})` : ''
+        }`,
+      );
       await Promise.all([
         this.deliveries.save(delivery),
         this.subscriptions.save(subscription),
@@ -979,6 +988,25 @@ function resolveWebPushStatusCode(error: unknown): number | null {
   return typeof maybeStatus === 'number' ? maybeStatus : null;
 }
 
+function resolveWebPushFailureReason(statusCode: number | null): string {
+  if (statusCode === 404 || statusCode === 410) {
+    return PUSH_ERROR_MESSAGE.deliveryExpired;
+  }
+  if (statusCode === 401 || statusCode === 403) {
+    return PUSH_ERROR_MESSAGE.deliveryForbidden;
+  }
+  if (statusCode === 400 || statusCode === 413) {
+    return PUSH_ERROR_MESSAGE.deliveryBadRequest;
+  }
+  if (statusCode === 429) {
+    return PUSH_ERROR_MESSAGE.deliveryRateLimited;
+  }
+  if (statusCode === null || statusCode === 408 || statusCode >= 500) {
+    return PUSH_ERROR_MESSAGE.deliveryTransient;
+  }
+  return PUSH_ERROR_MESSAGE.deliveryFailed;
+}
+
 function buildPushCopy(payload: PushNotificationPayload): PushCopy {
   const language = normalizeLanguage(payload.language ?? DEFAULT_LANGUAGE);
   if (
@@ -1025,27 +1053,27 @@ function buildProductExpiryPushCopy(
   if (daysUntilExpiry === null) {
     return language === 'sv'
       ? {
-          title: 'Produkt närmar sig utgång',
-          body: `${productName} närmar sig utgång den ${expiresDate}.`,
+          title: 'Produkt nära utgång',
+          body: `${productName} går ut den ${expiresDate}.`,
         }
       : {
-          title: 'Product nearing expiry',
-          body: `${productName} is nearing expiry on ${expiresDate}.`,
+          title: 'Product close to expiry',
+          body: `${productName} expires on ${expiresDate}.`,
         };
   }
 
   if (language === 'sv') {
     const dayLabel = daysUntilExpiry === 1 ? 'dag' : 'dagar';
     return {
-      title: 'Produkt närmar sig utgång',
-      body: `${productName} går ut om ${daysUntilExpiry} ${dayLabel} den ${expiresDate}.`,
+      title: 'Produkt nära utgång',
+      body: `${productName} går ut om ${daysUntilExpiry} ${dayLabel}, den ${expiresDate}.`,
     };
   }
 
   const dayLabel = daysUntilExpiry === 1 ? 'day' : 'days';
   return {
-    title: 'Product nearing expiry',
-    body: `${productName} expires in ${daysUntilExpiry} ${dayLabel} on ${expiresDate}.`,
+    title: 'Product close to expiry',
+    body: `${productName} expires in ${daysUntilExpiry} ${dayLabel}, on ${expiresDate}.`,
   };
 }
 

@@ -54,6 +54,164 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'You can ignore this email and your current password will keep working. Ritora will never ask for your password by email.',
     'mail.passwordReset.footerLine':
       'Sent from Ritora. If you ever have questions about your account, the team is at support@getritora.com.',
+    'mail.notification.shared.manageLabel': 'Manage notification preferences',
+    'mail.notification.shared.supportLine': 'Need help? Reach us at',
+    'mail.subject.photo_reminder': "Add today's skin photo",
+    'mail.notification.photo_reminder.previewText':
+      'A quick photo today keeps your progress honest.',
+    'mail.notification.photo_reminder.title':
+      "Time for today's photo, {{firstName}}",
+    'mail.notification.photo_reminder.intro':
+      'A quick photo in steady light is all your skin needs today. Ritora reads it for reactions, tracks how things are going, and shapes the suggestions ahead.',
+    'mail.notification.photo_reminder.payloadLabel': 'TODAY · {{date}}',
+    'mail.notification.photo_reminder.payloadTitle': 'No photo logged yet',
+    'mail.notification.photo_reminder.payloadMeta':
+      'Last photo: {{lastPhotoLabel}}',
+    'mail.notification.photo_reminder.ctaLabel': "Add today's photo",
+    'mail.notification.photo_reminder.tipNote':
+      'Same window, same light. Ritora compares your photos across the last 14 days to spot the small changes you would miss.',
+    'mail.notification.photo_reminder.footerWhy':
+      'You are getting this because daily photo reminders are on.',
+    'mail.notification.photo_reminder.unsubscribeLabel':
+      'Unsubscribe from photo reminders',
+    'mail.subject.suggestion_ready': 'Your {{slot}} routine is ready',
+    'mail.notification.suggestion_ready.previewText':
+      'Your routine is shaped and waiting on the Today page.',
+    'mail.notification.suggestion_ready.title':
+      'Your {{slot}} routine is ready',
+    'mail.notification.suggestion_ready.intro':
+      'Shaped around your skin today, what you applied last night, and the ingredients already on your shelf.',
+    'mail.notification.suggestion_ready.slotLabel': '{{slot}} · {{slotTime}}',
+    'mail.notification.suggestion_ready.stepSummary':
+      '{{stepCount}} steps, about {{minutes}} minutes',
+    'mail.notification.suggestion_ready.ctaLabel': "Open today's plan",
+    'mail.notification.suggestion_ready.rationale':
+      "Why these. Ritora left out anything that clashes with last night's actives, and kept your barrier light so today's SPF can do its job.",
+    'mail.notification.suggestion_ready.footerWhy':
+      'You are getting this because suggestion alerts are on.',
+    'mail.notification.suggestion_ready.unsubscribeLabel':
+      'Unsubscribe from suggestion alerts',
+    'mail.subject.slot_start': 'Time for your {{slot}} routine',
+    'mail.notification.slot_start.previewText':
+      'Your {{slot}} routine is up and waiting.',
+    'mail.notification.slot_start.title':
+      'It is time, {{firstName}}. {{slot}} routine.',
+    'mail.notification.slot_start.intro':
+      '{{minutes}} minutes, {{stepCount}} steps, then your day is yours. We will nudge you in 30 if you forget to log it.',
+    'mail.notification.slot_start.payloadLabel': 'SLOT NOW · {{slot}}',
+    'mail.notification.slot_start.payloadTitle': '{{stepFlow}}',
+    'mail.notification.slot_start.payloadMeta':
+      'About {{minutes}} min. Gentle on your barrier. Finishes with SPF.',
+    'mail.notification.slot_start.ctaLabel': 'Apply now',
+    'mail.notification.slot_start.footerWhy':
+      'You are getting this because slot start alerts are on.',
+    'mail.notification.slot_start.unsubscribeLabel':
+      'Unsubscribe from slot start alerts',
+    'mail.subject.recording_reminder': 'Quick log: did you apply your routine?',
+    'mail.notification.recording_reminder.previewText':
+      'Ten seconds to log what you actually applied this {{slot}}.',
+    'mail.notification.recording_reminder.title':
+      'Did you apply your {{slot}} routine?',
+    'mail.notification.recording_reminder.intro':
+      'Ten seconds is all it takes. Log what actually went on so the next suggestion knows where to start.',
+    'mail.notification.recording_reminder.slotLabel':
+      '{{slot}} SLOT · {{slotTime}}',
+    'mail.notification.recording_reminder.statusLabel': 'Awaiting record',
+    'mail.notification.recording_reminder.stepsMeta':
+      '{{stepCount}} suggested steps. Checklist already filled. About 10 seconds to confirm.',
+    'mail.notification.recording_reminder.ctaLabel': 'Record {{slot}} now',
+    'mail.notification.recording_reminder.skipNote':
+      'Skipped today? <a class="email-link email-secondary-link" href="{{skipUrl}}" style="color: #6b7361; text-decoration: underline;">Mark this slot as skipped</a>. We will adapt without scolding.',
+    'mail.notification.recording_reminder.footerWhy':
+      'You are getting this because recording reminders are on.',
+    'mail.notification.recording_reminder.unsubscribeLabel':
+      'Unsubscribe from recording reminders',
+    'mail.subject.reaction_detected': 'Your routine has been paused',
+    'mail.notification.reaction_detected.previewText':
+      'Routine paused. Your barrier is the priority for the next few days.',
+    'mail.notification.reaction_detected.title':
+      'We paused your routine for a moment',
+    'mail.notification.reaction_detected.intro':
+      'Hi {{firstName}}. Your latest photo shows some changes that were not there yesterday. We have paused your actives and switched you to barrier mode while your skin settles.',
+    'mail.notification.reaction_detected.reassurance':
+      'This is not a diagnosis. Just Ritora being cautious. Most reactions calm down in 2 to 4 days with gentler care.',
+    'mail.notification.reaction_detected.pausedLabel': 'PAUSED FOR NOW',
+    'mail.notification.reaction_detected.pausedTitle':
+      '{{count}} actives held back from your routine',
+    'mail.notification.reaction_detected.guidanceTitle':
+      'For the next few days',
+    'mail.notification.reaction_detected.guidanceBody':
+      'Cleanser, moisturiser, SPF. That is it. Skip exfoliants, hot water, and anything new. Keep taking your photo as usual so we can see when you are ready to layer back in.',
+    'mail.notification.reaction_detected.ctaLabel': 'View what changed',
+    'mail.notification.reaction_detected.disclaimer':
+      "If the reaction worsens, spreads, or comes with swelling or pain, please contact a dermatologist. Ritora's signal is supportive, not medical.",
+    'mail.notification.reaction_detected.footerWhy':
+      'You are getting this because reaction alerts are critical and stay on for everyone.',
+    'mail.subject.simplification_started': 'Your routine is now simplified',
+    'mail.notification.simplification_started.previewText':
+      'Your routine has been streamlined to help your barrier recover.',
+    'mail.notification.simplification_started.title':
+      'Your routine is now simplified',
+    'mail.notification.simplification_started.intro':
+      'We have trimmed your routine to the essentials so your barrier can rest. The actives are still on your shelf. They will come back as soon as your skin is ready.',
+    'mail.notification.simplification_started.routineLabel':
+      'SIMPLIFIED ROUTINE · {{stepCount}} STEPS',
+    'mail.notification.simplification_started.routineSummary': '{{flow}}',
+    'mail.notification.simplification_started.ctaLabel':
+      'View simplified routine',
+    'mail.notification.simplification_started.recoveryNote':
+      'Ritora will watch your photos and bring back actives one at a time once your skin shows it is ready. Usually 3 to 7 days.',
+    'mail.notification.simplification_started.footerWhy':
+      'You are getting this because simplification alerts are on.',
+    'mail.notification.simplification_started.unsubscribeLabel':
+      'Unsubscribe from simplification alerts',
+    'mail.subject.insight_ready': 'A new insight about your skin',
+    'mail.notification.insight_ready.previewText':
+      'Your photos are telling a quiet story.',
+    'mail.notification.insight_ready.title': 'A new insight, {{firstName}}',
+    'mail.notification.insight_ready.intro':
+      'After your recent days of photos and records, your skin is telling us something specific. Here is what we found.',
+    'mail.notification.insight_ready.disclaimer':
+      'Insights are not medical claims. They are patterns Ritora noticed in your own data. Open the inside view to see the methodology and the days behind the number.',
+    'mail.notification.insight_ready.ctaLabel': 'Read full insight',
+    'mail.notification.insight_ready.footerWhy':
+      'You are getting this because insight alerts are on.',
+    'mail.notification.insight_ready.unsubscribeLabel':
+      'Unsubscribe from insight alerts',
+    'mail.subject.doctor_referral': 'A specialist referral suggestion',
+    'mail.notification.doctor_referral.previewText':
+      'A pattern Ritora cannot fully read alone. A specialist could.',
+    'mail.notification.doctor_referral.title':
+      'Worth seeing a {{specialistType}}',
+    'mail.notification.doctor_referral.intro':
+      'Ritora has been watching a recurring pattern that does not respond to the usual barrier and rest routine. A specialist can look at it properly. This is a suggestion, not a diagnosis.',
+    'mail.notification.doctor_referral.specialistLabel': 'SUGGESTED SPECIALIST',
+    'mail.notification.doctor_referral.specialistTitle':
+      '{{specialistType}} · {{consultMode}}',
+    'mail.notification.doctor_referral.prepTitle': 'What to bring',
+    'mail.notification.doctor_referral.prepBody':
+      'Ritora can prepare a one page summary. Your shelf, your routine history, the photos around the pattern, and the timeline. The specialist gets context in 30 seconds, and you skip the "what have you tried" part.',
+    'mail.notification.doctor_referral.ctaLabel': 'View suggestion + summary',
+    'mail.notification.doctor_referral.disclaimer':
+      'Ritora is not a medical service. We surface signals. Specialists make calls. If something feels urgent, like pain, swelling, or fever, do not wait for an appointment.',
+    'mail.notification.doctor_referral.footerWhy':
+      'You are getting this because referral suggestions are on.',
+    'mail.notification.doctor_referral.unsubscribeLabel':
+      'Unsubscribe from referral suggestions',
+    'mail.subject.wrapped_ready': 'Your week in skin · Ritora',
+    'mail.notification.wrapped_ready.previewText':
+      'Your week in skin. Small wins, honest gaps, and one thing to try next.',
+    'mail.notification.wrapped_ready.title': 'Your week in skin, {{firstName}}',
+    'mail.notification.wrapped_ready.intro':
+      'A small story this week. Here is the wrap.',
+    'mail.notification.wrapped_ready.weekLabel': '{{weekRange}}',
+    'mail.notification.wrapped_ready.ctaLabel': "Open this week's wrap",
+    'mail.notification.wrapped_ready.footnote':
+      'Inside the wrap, you will find your photos day by day, what you applied, the redness curve, and the rationale behind every suggestion change.',
+    'mail.notification.wrapped_ready.footerWhy':
+      'You are getting this because Wrapped is on.',
+    'mail.notification.wrapped_ready.unsubscribeLabel':
+      'Unsubscribe from Wrapped',
     'errors.internalServer': 'Internal server error',
     'errors.originNotAllowed': 'Origin not allowed',
     'errors.userNotFound': 'User not found',
@@ -164,6 +322,162 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Du kan ignorera det här mejlet så fortsätter ditt nuvarande lösenord att fungera. Ritora kommer aldrig att be om ditt lösenord via e-post.',
     'mail.passwordReset.footerLine':
       'Skickat från Ritora. Om du har frågor om ditt konto finns vi på support@getritora.com.',
+    'mail.notification.shared.manageLabel': 'Hantera aviseringar',
+    'mail.notification.shared.supportLine': 'Behöver du hjälp? Skriv till',
+    'mail.subject.photo_reminder': 'Lägg till dagens hudbild',
+    'mail.notification.photo_reminder.previewText':
+      'En kort bild idag håller din utveckling ärlig.',
+    'mail.notification.photo_reminder.title':
+      'Dags för dagens bild, {{firstName}}',
+    'mail.notification.photo_reminder.intro':
+      'En kort bild i jämnt ljus är allt din hud behöver av dig idag. Ritora läser den för reaktioner, följer hur det går och formar förslagen framåt.',
+    'mail.notification.photo_reminder.payloadLabel': 'IDAG · {{date}}',
+    'mail.notification.photo_reminder.payloadTitle': 'Ingen bild loggad än',
+    'mail.notification.photo_reminder.payloadMeta':
+      'Senaste bild: {{lastPhotoLabel}}',
+    'mail.notification.photo_reminder.ctaLabel': 'Lägg till dagens bild',
+    'mail.notification.photo_reminder.tipNote':
+      'Samma fönster, samma ljus. Ritora jämför dina bilder över de senaste 14 dagarna för att fånga små förändringar du annars skulle missa.',
+    'mail.notification.photo_reminder.footerWhy':
+      'Du får det här mejlet eftersom dagliga bildpåminnelser är på.',
+    'mail.notification.photo_reminder.unsubscribeLabel':
+      'Avregistrera bildpåminnelser',
+    'mail.subject.suggestion_ready': 'Din {{slot}}rutin är klar',
+    'mail.notification.suggestion_ready.previewText':
+      'Din rutin är formad och väntar på Idag-sidan.',
+    'mail.notification.suggestion_ready.title': 'Din {{slot}}rutin är klar',
+    'mail.notification.suggestion_ready.intro':
+      'Anpassad efter din hud idag, vad du applicerade igår kväll och de ingredienser som redan finns på din hylla.',
+    'mail.notification.suggestion_ready.slotLabel': '{{slot}} · {{slotTime}}',
+    'mail.notification.suggestion_ready.stepSummary':
+      '{{stepCount}} steg, ungefär {{minutes}} minuter',
+    'mail.notification.suggestion_ready.ctaLabel': 'Öppna dagens plan',
+    'mail.notification.suggestion_ready.rationale':
+      'Varför just dessa. Ritora utelämnade allt som krockar med gårdagens aktiva ingredienser och höll din barriär lätt så att dagens SPF kan göra sitt jobb.',
+    'mail.notification.suggestion_ready.footerWhy':
+      'Du får det här eftersom rutinaviseringar är på.',
+    'mail.notification.suggestion_ready.unsubscribeLabel':
+      'Avregistrera rutinaviseringar',
+    'mail.subject.slot_start': 'Dags för din {{slot}}rutin',
+    'mail.notification.slot_start.previewText':
+      'Din {{slot}}rutin är uppe och väntar.',
+    'mail.notification.slot_start.title':
+      'Det är dags, {{firstName}}. {{slot}}rutin.',
+    'mail.notification.slot_start.intro':
+      '{{minutes}} minuter, {{stepCount}} steg, sedan är dagen din. Vi puffar dig om 30 om du glömmer logga.',
+    'mail.notification.slot_start.payloadLabel': 'PASS NU · {{slot}}',
+    'mail.notification.slot_start.payloadTitle': '{{stepFlow}}',
+    'mail.notification.slot_start.payloadMeta':
+      'Ungefär {{minutes}} min. Snäll mot din barriär. Avslutar med SPF.',
+    'mail.notification.slot_start.ctaLabel': 'Applicera nu',
+    'mail.notification.slot_start.footerWhy':
+      'Du får det här eftersom passstartaviseringar är på.',
+    'mail.notification.slot_start.unsubscribeLabel':
+      'Avregistrera passstartaviseringar',
+    'mail.subject.recording_reminder': 'Snabb logg: applicerade du din rutin?',
+    'mail.notification.recording_reminder.previewText':
+      'Tio sekunder för att logga vad du faktiskt applicerade i {{slot}}.',
+    'mail.notification.recording_reminder.title':
+      'Applicerade du din {{slot}}rutin?',
+    'mail.notification.recording_reminder.intro':
+      'Tio sekunder är allt som krävs. Logga vad som faktiskt blev så vet nästa förslag var det ska börja.',
+    'mail.notification.recording_reminder.slotLabel':
+      '{{slot}}PASS · {{slotTime}}',
+    'mail.notification.recording_reminder.statusLabel': 'Väntar på logg',
+    'mail.notification.recording_reminder.stepsMeta':
+      '{{stepCount}} föreslagna steg. Checklistan är redan ifylld. Ungefär 10 sekunder att bekräfta.',
+    'mail.notification.recording_reminder.ctaLabel': 'Logga {{slot}} nu',
+    'mail.notification.recording_reminder.skipNote':
+      'Hoppade över idag? <a class="email-link email-secondary-link" href="{{skipUrl}}" style="color: #6b7361; text-decoration: underline;">Markera passet som hoppat</a>. Vi anpassar oss utan att tjata.',
+    'mail.notification.recording_reminder.footerWhy':
+      'Du får det här eftersom loggpåminnelser är på.',
+    'mail.notification.recording_reminder.unsubscribeLabel':
+      'Avregistrera loggpåminnelser',
+    'mail.subject.reaction_detected': 'Din rutin har pausats',
+    'mail.notification.reaction_detected.previewText':
+      'Rutin pausad. Din barriär är prioriteten de närmaste dagarna.',
+    'mail.notification.reaction_detected.title':
+      'Vi pausade din rutin för en stund',
+    'mail.notification.reaction_detected.intro':
+      'Hej {{firstName}}. Din senaste bild visar förändringar som inte fanns igår. Vi har pausat dina aktiva ingredienser och växlat till barriärläge medan din hud lugnar sig.',
+    'mail.notification.reaction_detected.reassurance':
+      'Det här är ingen diagnos. Bara Ritora som är försiktig. De flesta reaktioner lägger sig på 2 till 4 dagar med mildare vård.',
+    'mail.notification.reaction_detected.pausedLabel': 'PAUSADE JUST NU',
+    'mail.notification.reaction_detected.pausedTitle':
+      '{{count}} aktiva ingredienser hålls tillbaka från din rutin',
+    'mail.notification.reaction_detected.guidanceTitle': 'De närmaste dagarna',
+    'mail.notification.reaction_detected.guidanceBody':
+      'Rengöring, kräm, SPF. Det är allt. Hoppa över peeling, hett vatten och allt nytt. Ta din bild som vanligt så vi ser när du är redo att lägga tillbaka steg.',
+    'mail.notification.reaction_detected.ctaLabel': 'Se vad som ändrats',
+    'mail.notification.reaction_detected.disclaimer':
+      'Om reaktionen förvärras, sprider sig eller kommer med svullnad eller smärta, kontakta en hudläkare. Ritoras signal är stödjande, inte medicinsk.',
+    'mail.notification.reaction_detected.footerWhy':
+      'Du får det här eftersom reaktionsaviseringar är kritiska och alltid på.',
+    'mail.subject.simplification_started': 'Din rutin är nu förenklad',
+    'mail.notification.simplification_started.previewText':
+      'Din rutin har strömlinjeformats för att hjälpa din barriär att återhämta sig.',
+    'mail.notification.simplification_started.title':
+      'Din rutin är nu förenklad',
+    'mail.notification.simplification_started.intro':
+      'Vi har trimmat din rutin till det väsentliga så att din barriär kan vila. De aktiva ingredienserna är fortfarande på din hylla. De kommer tillbaka så snart din hud är redo.',
+    'mail.notification.simplification_started.routineLabel':
+      'FÖRENKLAD RUTIN · {{stepCount}} STEG',
+    'mail.notification.simplification_started.routineSummary': '{{flow}}',
+    'mail.notification.simplification_started.ctaLabel': 'Visa förenklad rutin',
+    'mail.notification.simplification_started.recoveryNote':
+      'Ritora följer dina bilder och tar tillbaka aktiva ingredienser en i taget när din hud visar att den är redo. Vanligtvis 3 till 7 dagar.',
+    'mail.notification.simplification_started.footerWhy':
+      'Du får det här eftersom förenklingsaviseringar är på.',
+    'mail.notification.simplification_started.unsubscribeLabel':
+      'Avregistrera förenklingsaviseringar',
+    'mail.subject.insight_ready': 'En ny insikt om din hud',
+    'mail.notification.insight_ready.previewText':
+      'Dina bilder berättar en stilla historia.',
+    'mail.notification.insight_ready.title': 'En ny insikt, {{firstName}}',
+    'mail.notification.insight_ready.intro':
+      'Efter dina senaste dagar med bilder och loggar berättar din hud något specifikt. Här är vad vi hittade.',
+    'mail.notification.insight_ready.disclaimer':
+      'Insikter är inte medicinska påståenden. Det är mönster Ritora hittat i din egen data. Öppna insidan för att se metoden och dagarna bakom siffran.',
+    'mail.notification.insight_ready.ctaLabel': 'Läs hela insikten',
+    'mail.notification.insight_ready.footerWhy':
+      'Du får det här eftersom insiktsaviseringar är på.',
+    'mail.notification.insight_ready.unsubscribeLabel':
+      'Avregistrera insiktsaviseringar',
+    'mail.subject.doctor_referral': 'Förslag på remiss till specialist',
+    'mail.notification.doctor_referral.previewText':
+      'Ett mönster Ritora inte kan läsa fullt ut själv. En specialist kan.',
+    'mail.notification.doctor_referral.title':
+      'Värt att träffa en {{specialistType}}',
+    'mail.notification.doctor_referral.intro':
+      'Ritora har följt ett återkommande mönster som inte svarar på den vanliga barriär och vila rutinen. En specialist kan se på det ordentligt. Det här är ett förslag, inte en diagnos.',
+    'mail.notification.doctor_referral.specialistLabel':
+      'FÖRESLAGEN SPECIALIST',
+    'mail.notification.doctor_referral.specialistTitle':
+      '{{specialistType}} · {{consultMode}}',
+    'mail.notification.doctor_referral.prepTitle': 'Det du tar med dig',
+    'mail.notification.doctor_referral.prepBody':
+      'Ritora kan förbereda en sammanfattning på en sida. Din hylla, din rutinhistorik, bilderna kring mönstret och tidslinjen. Specialisten får sammanhang på 30 sekunder, och du slipper berätta vad du redan provat.',
+    'mail.notification.doctor_referral.ctaLabel':
+      'Visa förslag + sammanfattning',
+    'mail.notification.doctor_referral.disclaimer':
+      'Ritora är ingen medicinsk tjänst. Vi lyfter signaler. Specialister fattar besluten. Om något känns akut, som smärta, svullnad eller feber, vänta inte på en tid.',
+    'mail.notification.doctor_referral.footerWhy':
+      'Du får det här eftersom remissförslag är på.',
+    'mail.notification.doctor_referral.unsubscribeLabel':
+      'Avregistrera remissförslag',
+    'mail.subject.wrapped_ready': 'Din vecka i hud · Ritora',
+    'mail.notification.wrapped_ready.previewText':
+      'Din vecka i hud. Små vinster, ärliga luckor och en sak att prova härnäst.',
+    'mail.notification.wrapped_ready.title': 'Din vecka i hud, {{firstName}}',
+    'mail.notification.wrapped_ready.intro':
+      'En liten historia den här veckan. Här är sammanfattningen.',
+    'mail.notification.wrapped_ready.weekLabel': '{{weekRange}}',
+    'mail.notification.wrapped_ready.ctaLabel': 'Öppna veckans sammanfattning',
+    'mail.notification.wrapped_ready.footnote':
+      'Inuti sammanfattningen finns dina bilder dag för dag, vad du applicerade, rodnadskurvan och resonemanget bakom varje förslagsändring.',
+    'mail.notification.wrapped_ready.footerWhy':
+      'Du får det här eftersom Wrapped är på.',
+    'mail.notification.wrapped_ready.unsubscribeLabel': 'Avregistrera Wrapped',
     'errors.internalServer': 'Internt serverfel',
     'errors.originNotAllowed': 'Otillåten origin',
     'errors.userNotFound': 'Användaren hittades inte',
