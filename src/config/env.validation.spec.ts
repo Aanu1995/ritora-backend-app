@@ -79,6 +79,9 @@ function developmentEnv(
     SKIN_PROFILE_FIELD_ENCRYPTION_KEY_ID: 'primary',
     MAIL_FROM: 'onboarding@resend.dev',
     WEB_APP_URL: 'http://localhost:3000',
+    WEB_PUSH_VAPID_PUBLIC_KEY: '',
+    WEB_PUSH_VAPID_PRIVATE_KEY: '',
+    WEB_PUSH_SUBJECT: 'mailto:support@getritora.com',
     SWAGGER_ENABLED: true,
     AWS_REGION: 'eu-north-1',
     PRODUCT_MEDIA_BUCKET: '',
@@ -127,6 +130,10 @@ function productionEnv(
     SKIN_PROFILE_FIELD_ENCRYPTION_KEY: 'c'.repeat(32),
     MAIL_FROM: 'noreply@ritora.com',
     WEB_APP_URL: 'https://app.ritora.com',
+    WEB_PUSH_VAPID_PUBLIC_KEY:
+      'BGtkbcjrO12YMoDuq2sCQeHlu47uPx3SHTgFKZFYiBW8Qr0D9vgyZSZPdw6_4ZFEI9Snk1VEAj2qTYI1I1YxBXE',
+    WEB_PUSH_VAPID_PRIVATE_KEY: 'I0_d0vnesxbBSUmlDdOKibGo6vEXRO-Vu88QlSlm5j0',
+    WEB_PUSH_SUBJECT: 'mailto:support@getritora.com',
     SWAGGER_ENABLED: false,
     PRODUCT_MEDIA_BUCKET: 'ritora-prod-product-media',
     PRODUCT_MEDIA_CLOUDFRONT_URL: 'https://products.ritora.com',
@@ -199,6 +206,29 @@ describe('envValidationSchema', () => {
     expect(result.value.SWAGGER_ENABLED).toBe(false);
     expect(result.value.DATABASE_SSL).toBe(true);
     expect(result.value.DATABASE_SSL_REJECT_UNAUTHORIZED).toBe(true);
+  });
+
+  it('requires Web Push VAPID credentials in production', () => {
+    const result = validateEnv(
+      productionEnv({
+        WEB_PUSH_VAPID_PUBLIC_KEY: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('WEB_PUSH_VAPID_PUBLIC_KEY');
+  });
+
+  it('rejects malformed Web Push VAPID credentials in production', () => {
+    const result = validateEnv(
+      productionEnv({
+        WEB_PUSH_VAPID_PUBLIC_KEY: 'not-a-public-key',
+        WEB_PUSH_VAPID_PRIVATE_KEY: 'not-a-private-key',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('WEB_PUSH_VAPID_PUBLIC_KEY');
   });
 
   it('allows extra process environment variables from npm and shells', () => {

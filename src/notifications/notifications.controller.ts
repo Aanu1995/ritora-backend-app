@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -15,6 +17,12 @@ import {
   UpdatePreferencesDto,
 } from './dto/notification-preference.dto';
 import { NotificationListQueryDto } from './dto/notification-list-query.dto';
+import {
+  PushPublicKeyResponseDto,
+  PushStatusResponseDto,
+  PushSubscriptionResponseDto,
+  UpsertPushSubscriptionDto,
+} from './dto/push-notification-subscription.dto';
 
 @ApiTags('notifications')
 @Controller('notifications')
@@ -54,5 +62,42 @@ export class NotificationsController {
     @Body() dto: UpdatePreferencesDto,
   ) {
     return this.service.updatePreferences(userId, dto);
+  }
+
+  @Get('push/public-key')
+  @ApiOkResponse({ type: PushPublicKeyResponseDto })
+  getPushPublicKey(): PushPublicKeyResponseDto {
+    return this.service.getPushPublicKey();
+  }
+
+  @Get('push/subscriptions')
+  @ApiOkResponse({ type: [PushSubscriptionResponseDto] })
+  async listPushSubscriptions(@CurrentUser('id') userId: string) {
+    return this.service.listPushSubscriptions(userId);
+  }
+
+  @Get('push/status')
+  @ApiOkResponse({ type: PushStatusResponseDto })
+  async getPushStatus(@CurrentUser('id') userId: string) {
+    return this.service.getPushStatus(userId);
+  }
+
+  @Post('push/subscriptions')
+  @ApiOkResponse({ type: PushSubscriptionResponseDto })
+  async upsertPushSubscription(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpsertPushSubscriptionDto,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.service.upsertPushSubscription(userId, dto, userAgent ?? null);
+  }
+
+  @Delete('push/subscriptions/:id')
+  async revokePushSubscription(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    await this.service.revokePushSubscription(userId, id);
+    return { ok: true };
   }
 }

@@ -11,8 +11,9 @@ import {
 import { ulid } from 'ulid';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../../skin-journal/skin-journal.constants';
 import { User } from '../../users/entities/user.entity';
+import { PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT } from '../notifications.constants';
 
-export type NotificationChannel = 'email' | 'in_app';
+export type NotificationChannel = 'email' | 'in_app' | 'push';
 
 @Entity('user_notification_preferences')
 export class UserNotificationPreference {
@@ -54,6 +55,12 @@ export class UserNotificationPreference {
 
   @Column({ type: 'boolean', default: true })
   recording_reminder_enabled: boolean;
+
+  @Column({ type: 'boolean', default: true })
+  product_expiry_alerts_enabled: boolean;
+
+  @Column({ type: 'integer', default: PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT })
+  product_expiry_notice_days: number;
 
   @Column({ type: 'integer', default: 120 })
   suggestion_lead_time_minutes: number;

@@ -9,25 +9,36 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
 import { type PaginatedResult } from '../common/utils/cursor-pagination';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../skin-journal/skin-journal.constants';
 import { User } from '../users/entities/user.entity';
 import { InAppNotification } from './entities/in-app-notification.entity';
 import { ScheduledNotification } from './entities/scheduled-notification.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
+import { PushNotificationsService } from './push-notifications.service';
 import { NotificationResponseDto } from './dto/notification-response.dto';
 import {
   PreferencesResponseDto,
   UpdatePreferencesDto,
 } from './dto/notification-preference.dto';
 import {
+  PushPublicKeyResponseDto,
+  PushStatusResponseDto,
+  PushSubscriptionResponseDto,
+  UpsertPushSubscriptionDto,
+} from './dto/push-notification-subscription.dto';
+import {
   NOTIFICATION_PAGE_DEFAULT_LIMIT,
   NOTIFICATION_PAGE_MAX_LIMIT,
+  PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
 } from './notifications.constants';
 import {
   applyNotificationCursor,
   applyPreferenceUpdates,
   buildNotificationNextCursor,
+  buildProductExpiryDispatchParams,
+  canSendNotificationEmail,
   clampInteger,
   DispatchNotificationParams,
   isDelayedByQuietHours,
@@ -35,7 +46,10 @@ import {
   isUniqueConstraintError,
   notificationCursorFingerprint,
   NOTIFICATION_READ_BUCKET_SQL,
+  requiresNotificationInApp,
+  requiresNotificationPush,
   runPhotoReminderSweep,
+  runProductExpiryAlertSweep,
   runScheduledNotificationSweep,
   scheduleAfterQuietHours,
 } from './notifications.service.helpers';
@@ -50,6 +64,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationsService.name);
   private reminderTimer: NodeJS.Timeout | null = null;
   private scheduledTimer: NodeJS.Timeout | null = null;
+  private productExpiryTimer: NodeJS.Timeout | null = null;
 
   constructor(
     @InjectRepository(InAppNotification)
@@ -62,7 +77,10 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     private readonly users: Repository<User>,
     @InjectRepository(SkinJournalEntry)
     private readonly entries: Repository<SkinJournalEntry>,
+    @InjectRepository(InventoryProduct)
+    private readonly inventoryProducts: Repository<InventoryProduct>,
     private readonly mailService: MailService,
+    private readonly pushNotifications: PushNotificationsService,
   ) {}
 
   onModuleInit(): void {
@@ -93,6 +111,19 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       5 * 60 * 1000,
     );
     this.scheduledTimer.unref();
+    this.productExpiryTimer = setInterval(
+      () => {
+        void this.runProductExpiryAlertSweep(new Date()).catch((error) => {
+          this.logger.warn(
+            `Product expiry alert sweep failed: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+          );
+        });
+      },
+      60 * 60 * 1000,
+    );
+    this.productExpiryTimer.unref();
   }
 
   onModuleDestroy(): void {
@@ -103,6 +134,10 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (this.scheduledTimer) {
       clearInterval(this.scheduledTimer);
       this.scheduledTimer = null;
+    }
+    if (this.productExpiryTimer) {
+      clearInterval(this.productExpiryTimer);
+      this.productExpiryTimer = null;
     }
   }
 
@@ -193,6 +228,19 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
+    const sendInApp =
+      prefs.channels.includes('in_app') ||
+      requiresNotificationInApp(params.kind);
+    const sendEmail =
+      prefs.channels.includes('email') && canSendNotificationEmail(params.kind);
+    const sendPush =
+      params.forcePush ||
+      requiresNotificationPush(params.kind) ||
+      prefs.channels.includes('push');
+    if (!sendInApp && !sendEmail && !sendPush) {
+      return null;
+    }
+
     const notificationUser = await this.resolveNotificationUser(
       params,
       prefs,
@@ -221,12 +269,16 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     }
 
     let saved: InAppNotification | null = null;
-    if (prefs.channels.includes('in_app')) {
+    if (sendInApp) {
       saved = await this.createInAppNotification(params);
     }
 
-    if (prefs.channels.includes('email')) {
+    if (sendEmail) {
       await this.dispatchEmail(params, notificationUser);
+    }
+
+    if (sendPush) {
+      await this.dispatchPush(params, notificationUser, saved);
     }
 
     return saved;
@@ -259,6 +311,74 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  async runProductExpiryAlertForProduct(
+    userId: string,
+    productId: string,
+    now: Date = new Date(),
+  ): Promise<InAppNotification | null> {
+    const product = await this.inventoryProducts.findOne({
+      where: { id: productId, user_id: userId },
+    });
+    if (!product) {
+      return null;
+    }
+
+    const [prefs, user] = await Promise.all([
+      this.ensurePreferences(userId),
+      this.users.findOne({ where: { id: userId } }),
+    ]);
+    const dispatchParams = buildProductExpiryDispatchParams({
+      product,
+      prefs,
+      user,
+      now,
+    });
+    if (!dispatchParams) {
+      return null;
+    }
+
+    return this.dispatchWithPreferences(dispatchParams, prefs, user);
+  }
+
+  async runProductExpiryAlertSweep(now: Date = new Date()) {
+    return runProductExpiryAlertSweep(
+      {
+        inventoryProducts: this.inventoryProducts,
+        users: this.users,
+        ensurePreferences: (userId) => this.ensurePreferences(userId),
+        dispatchWithPreferences: (params, prefs, user) =>
+          this.dispatchWithPreferences(params, prefs, user),
+      },
+      now,
+    );
+  }
+
+  getPushPublicKey(): PushPublicKeyResponseDto {
+    return this.pushNotifications.getPublicKey();
+  }
+
+  listPushSubscriptions(
+    userId: string,
+  ): Promise<PushSubscriptionResponseDto[]> {
+    return this.pushNotifications.listSubscriptions(userId);
+  }
+
+  getPushStatus(userId: string): Promise<PushStatusResponseDto> {
+    return this.pushNotifications.getStatus(userId);
+  }
+
+  upsertPushSubscription(
+    userId: string,
+    dto: UpsertPushSubscriptionDto,
+    userAgent?: string | null,
+  ): Promise<PushSubscriptionResponseDto> {
+    return this.pushNotifications.upsertSubscription(userId, dto, userAgent);
+  }
+
+  async revokePushSubscription(userId: string, id: string): Promise<void> {
+    await this.pushNotifications.revokeSubscription(userId, id);
+  }
+
   private async ensurePreferences(
     userId: string,
   ): Promise<UserNotificationPreference> {
@@ -279,6 +399,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         suggestion_ready_enabled: true,
         slot_start_enabled: true,
         recording_reminder_enabled: true,
+        product_expiry_alerts_enabled: true,
+        product_expiry_notice_days: PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
         suggestion_lead_time_minutes: 120,
         quiet_hours_enabled: false,
         quiet_hours_start: '22:30',
@@ -328,13 +450,45 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async dispatchPush(
+    params: DispatchNotificationParams,
+    user?: User | null,
+    notification?: InAppNotification | null,
+  ): Promise<void> {
+    try {
+      await this.pushNotifications.sendNotificationPush({
+        userId: params.userId,
+        kind: params.kind,
+        titleKey: params.titleKey,
+        bodyKey: params.bodyKey,
+        severity: params.severity,
+        payload: params.payload,
+        deepLink: params.deepLink,
+        dedupeKey: params.dedupeKey,
+        notificationId: notification?.id,
+        language: user?.preferred_language,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Notification push failed for ${params.kind}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
   private async resolveNotificationUser(
     params: DispatchNotificationParams,
     prefs: UserNotificationPreference,
     prefetchedUser?: User | null,
   ): Promise<User | null> {
     if (prefetchedUser) return prefetchedUser;
-    if (!prefs.quiet_hours_enabled && !prefs.channels.includes('email')) {
+    if (
+      !prefs.quiet_hours_enabled &&
+      !prefs.channels.includes('email') &&
+      !prefs.channels.includes('push') &&
+      !params.forcePush
+    ) {
       return null;
     }
     return this.users.findOne({ where: { id: params.userId } });

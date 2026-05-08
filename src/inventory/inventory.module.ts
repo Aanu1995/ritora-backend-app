@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogueModule } from '../catalogue/catalogue.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UsersModule } from '../users/users.module';
 import { InventoryController } from './inventory.controller';
@@ -10,6 +11,7 @@ import { InventoryProduct } from './entities/inventory-product.entity';
 @Module({
   imports: [
     CatalogueModule,
+    NotificationsModule,
     UsersModule,
     TypeOrmModule.forFeature([InventoryProduct, SkinProfile]),
   ],

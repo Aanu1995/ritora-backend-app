@@ -2,6 +2,7 @@ import Joi, { type CustomHelpers } from 'joi';
 
 const COOKIE_DOMAIN_PATTERN =
   /^(?:\.[a-z0-9-]+(?:\.[a-z0-9-]+)*|localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)*)$/i;
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 const environmentSecret = Joi.when('NODE_ENV', {
   is: 'production',
@@ -59,6 +60,56 @@ function validateCookieDomain(value: string, helpers: CustomHelpers<string>) {
   }
 
   return trimmed;
+}
+
+function validateBase64UrlBytes(
+  value: string,
+  expectedBytes: number,
+  helpers: CustomHelpers<string>,
+) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (!BASE64URL_PATTERN.test(trimmed)) {
+    return helpers.error('any.invalid');
+  }
+
+  const padding = '='.repeat((4 - (trimmed.length % 4)) % 4);
+  const decoded = Buffer.from(
+    `${trimmed}${padding}`.replace(/-/g, '+').replace(/_/g, '/'),
+    'base64',
+  );
+
+  if (decoded.length !== expectedBytes) {
+    return helpers.error('any.invalid');
+  }
+
+  return trimmed;
+}
+
+function validateVapidPublicKey(value: string, helpers: CustomHelpers<string>) {
+  const decoded = validateBase64UrlBytes(value, 65, helpers);
+  if (typeof decoded !== 'string') {
+    return decoded;
+  }
+
+  const padding = '='.repeat((4 - (decoded.length % 4)) % 4);
+  const bytes = Buffer.from(
+    `${decoded}${padding}`.replace(/-/g, '+').replace(/_/g, '/'),
+    'base64',
+  );
+
+  return bytes[0] === 4 ? decoded : helpers.error('any.invalid');
+}
+
+function validateVapidPrivateKey(
+  value: string,
+  helpers: CustomHelpers<string>,
+) {
+  return validateBase64UrlBytes(value, 32, helpers);
 }
 
 function validateCookieSettings(
@@ -324,6 +375,36 @@ export const envValidationSchema = Joi.object({
       .required(),
     otherwise: Joi.string()
       .uri({ scheme: ['http', 'https'] })
+      .required(),
+  }),
+  WEB_PUSH_VAPID_PUBLIC_KEY: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(1).custom(validateVapidPublicKey).required(),
+    otherwise: Joi.string()
+      .trim()
+      .allow('')
+      .custom(validateVapidPublicKey)
+      .required(),
+  }),
+  WEB_PUSH_VAPID_PRIVATE_KEY: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().trim().min(1).custom(validateVapidPrivateKey).required(),
+    otherwise: Joi.string()
+      .trim()
+      .allow('')
+      .custom(validateVapidPrivateKey)
+      .required(),
+  }),
+  WEB_PUSH_SUBJECT: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string()
+      .trim()
+      .uri({ scheme: ['mailto', 'https'] })
+      .required(),
+    otherwise: Joi.string()
+      .trim()
+      .uri({ scheme: ['mailto', 'http', 'https'] })
+      .allow('')
       .required(),
   }),
   SWAGGER_ENABLED: Joi.boolean().required(),

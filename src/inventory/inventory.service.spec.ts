@@ -5,6 +5,7 @@ import { CataloguePhotoProcessorService } from '../catalogue/catalogue-photo-pro
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { decodeCursor } from '../common/utils/cursor-pagination';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { InventoryService } from './inventory.service';
@@ -187,6 +188,9 @@ describe('InventoryService', () => {
   const dataAccess = {
     recordDataAccess: jest.fn().mockResolvedValue(undefined),
   };
+  const notificationsService = {
+    runProductExpiryAlertForProduct: jest.fn().mockResolvedValue(null),
+  };
 
   beforeEach(async () => {
     queryBuilder = createMockQueryBuilder();
@@ -194,6 +198,7 @@ describe('InventoryService', () => {
     cataloguePhotoStorageService.saveHeroImage.mockClear();
     cataloguePhotoStorageService.toPersistentImageUrls.mockClear();
     cataloguePhotoStorageService.resolvePublicImageUrls.mockClear();
+    notificationsService.runProductExpiryAlertForProduct.mockClear();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventoryService,
@@ -214,6 +219,7 @@ describe('InventoryService', () => {
           useValue: cataloguePhotoStorageService,
         },
         { provide: UserDataAccessLogService, useValue: dataAccess },
+        { provide: NotificationsService, useValue: notificationsService },
       ],
     }).compile();
 
@@ -259,6 +265,9 @@ describe('InventoryService', () => {
     expect(
       cataloguePhotoStorageService.toPersistentImageUrls,
     ).toHaveBeenCalled();
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
     expect(result.id).toBe('inventory-1');
   });
 
@@ -352,6 +361,22 @@ describe('InventoryService', () => {
     expect(result.identity.imageUrls).toEqual([signedUrl]);
   });
 
+  it('evaluates product expiry alerts after product updates', async () => {
+    const entity = createEntity('inventory-1');
+    repo.findOne.mockResolvedValue(entity);
+    repo.save.mockImplementation(async (value) => value as InventoryProduct);
+
+    await service.update('user-1', 'inventory-1', {
+      userFields: {
+        expiresAt: '2026-05-01T00:00:00.000Z',
+      },
+    });
+
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
+  });
+
   it('processes and uploads a product image for edit flows', async () => {
     const uploadedImage: UploadedCatalogueImage = {
       originalname: 'product.jpg',
@@ -398,6 +423,30 @@ describe('InventoryService', () => {
     expect(archived.status).toBe(ShelfStatus.Archived);
     expect(restored.status).toBe(ShelfStatus.Active);
     expect(finished.status).toBe(ShelfStatus.FinishedUp);
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
+  });
+
+  it('evaluates product expiry alerts after bulk restore', async () => {
+    await service.restoreMany('user-1', ['inventory-1', 'inventory-2']);
+
+    expect(repo.update).toHaveBeenCalledWith(
+      {
+        user_id: 'user-1',
+        id: expect.any(Object),
+      },
+      { status: ShelfStatus.Active },
+    );
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-2');
   });
 
   it('returns paginated inventory lists with a next cursor', async () => {

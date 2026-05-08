@@ -16,6 +16,11 @@ import {
   UserNotificationPreference,
 } from '../entities/user-notification-preference.entity';
 import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
+import {
+  PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
+  PRODUCT_EXPIRY_NOTICE_DAYS_MAX,
+  PRODUCT_EXPIRY_NOTICE_DAYS_MIN,
+} from '../notifications.constants';
 
 export const SUGGESTION_LEAD_TIME_MIN_MINUTES = 30;
 export const SUGGESTION_LEAD_TIME_MAX_MINUTES = 720;
@@ -38,7 +43,7 @@ export class UpdatePreferencesDto {
   @IsOptional()
   @IsArray()
   @ArrayUnique()
-  @IsIn(['email', 'in_app'], { each: true })
+  @IsIn(['email', 'in_app', 'push'], { each: true })
   channels?: NotificationChannel[];
 
   @IsOptional() @IsBoolean() reaction_alerts_enabled?: boolean;
@@ -51,6 +56,14 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() suggestion_ready_enabled?: boolean;
   @IsOptional() @IsBoolean() slot_start_enabled?: boolean;
   @IsOptional() @IsBoolean() recording_reminder_enabled?: boolean;
+  @IsOptional() @IsBoolean() product_expiry_alerts_enabled?: boolean;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsInt()
+  @Min(PRODUCT_EXPIRY_NOTICE_DAYS_MIN)
+  @Max(PRODUCT_EXPIRY_NOTICE_DAYS_MAX)
+  product_expiry_notice_days?: number;
 
   @EmptyStringToUndefined()
   @IsOptional()
@@ -108,6 +121,15 @@ export class PreferencesResponseDto {
   @ApiProperty()
   recording_reminder_enabled: boolean;
 
+  @ApiProperty()
+  product_expiry_alerts_enabled: boolean;
+
+  @ApiProperty({
+    minimum: PRODUCT_EXPIRY_NOTICE_DAYS_MIN,
+    maximum: PRODUCT_EXPIRY_NOTICE_DAYS_MAX,
+  })
+  product_expiry_notice_days: number;
+
   @ApiProperty({
     minimum: SUGGESTION_LEAD_TIME_MIN_MINUTES,
     maximum: SUGGESTION_LEAD_TIME_MAX_MINUTES,
@@ -139,6 +161,10 @@ export class PreferencesResponseDto {
     dto.suggestion_ready_enabled = p.suggestion_ready_enabled;
     dto.slot_start_enabled = p.slot_start_enabled;
     dto.recording_reminder_enabled = p.recording_reminder_enabled;
+    dto.product_expiry_alerts_enabled = p.product_expiry_alerts_enabled ?? true;
+    dto.product_expiry_notice_days = normalizeProductExpiryNoticeDays(
+      p.product_expiry_notice_days,
+    );
     dto.suggestion_lead_time_minutes = p.suggestion_lead_time_minutes;
     dto.quiet_hours_enabled = p.quiet_hours_enabled;
     dto.quiet_hours_start = normalizeHhmm(p.quiet_hours_start);
@@ -146,6 +172,16 @@ export class PreferencesResponseDto {
     dto.photo_tutorial_completed = p.photo_tutorial_completed;
     return dto;
   }
+}
+
+function normalizeProductExpiryNoticeDays(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT;
+  }
+  return Math.max(
+    PRODUCT_EXPIRY_NOTICE_DAYS_MIN,
+    Math.min(PRODUCT_EXPIRY_NOTICE_DAYS_MAX, value),
+  );
 }
 
 function normalizeHhmm(value: string | null | undefined): string {

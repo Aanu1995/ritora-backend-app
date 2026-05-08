@@ -15,6 +15,7 @@ import { SkinJournalInsightJob } from '../entities/skin-journal-insight-job.enti
 import { SkinJournalInsightState } from '../entities/skin-journal-insight-state.entity';
 import { SkinJournalWrapped } from '../entities/skin-journal-wrapped.entity';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../skin-journal.constants';
+import { PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT } from '../../notifications/notifications.constants';
 import { buildDeterministicInsights } from '../skin-journal-insight-detectors';
 import { KnowledgeBaseService } from '../insights/knowledge-base/knowledge-base.service';
 import { SkinJournalPhotoInterpretationService } from '../services/skin-journal-photo-interpretation.service';
@@ -190,6 +191,8 @@ export class SkinJournalDemoSeeder {
     preference.insight_alerts_enabled = true;
     preference.ai_polished_insights_enabled = true;
     preference.wrapped_alerts_enabled = true;
+    preference.product_expiry_alerts_enabled = true;
+    preference.product_expiry_notice_days = PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT;
     preference.photo_tutorial_completed = true;
     await this.preferences.save(preference);
   }

@@ -1,10 +1,23 @@
 import { Between, In, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import {
+  diffShelfCalendarDays,
+  parseShelfPlainDate,
+  resolveShelfToday,
+} from '../shelf/shelf-date.utils';
+import { ShelfStatus } from '../shelf/shelf.types';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import {
   resolveSkinJournalTimeZone,
   todayInTimeZone,
 } from '../skin-journal/skin-journal.utils';
 import { User } from '../users/entities/user.entity';
+import {
+  PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
+  PRODUCT_EXPIRY_NOTICE_DAYS_MAX,
+  PRODUCT_EXPIRY_NOTICE_DAYS_MIN,
+  PRODUCT_EXPIRY_SWEEP_BATCH_SIZE,
+} from './notifications.constants';
 import {
   InAppNotification,
   NotificationKind,
@@ -41,11 +54,25 @@ export type DispatchNotificationParams = {
   deepLink?: string;
   dedupeKey?: string;
   bypassQuietHours?: boolean;
+  forcePush?: boolean;
 };
 
 const PHOTO_REMINDER_SWEEP_BATCH_SIZE = 1000;
 const SCHEDULED_NOTIFICATION_BATCH_SIZE = 100;
 const SCHEDULED_NOTIFICATION_MAX_ATTEMPTS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export type ProductExpiryAlertSweepResult = {
+  processed: number;
+  dispatched: number;
+};
+
+export type ProductExpiryDispatchInput = {
+  product: InventoryProduct;
+  prefs: UserNotificationPreference;
+  user: User | null;
+  now: Date;
+};
 
 export async function runPhotoReminderSweep(
   params: {
@@ -158,6 +185,140 @@ export async function runScheduledNotificationSweep(
   return { sent, failed };
 }
 
+export async function runProductExpiryAlertSweep(
+  params: {
+    inventoryProducts: Repository<InventoryProduct>;
+    users: Repository<User>;
+    ensurePreferences: (userId: string) => Promise<UserNotificationPreference>;
+    dispatchWithPreferences: (
+      params: DispatchNotificationParams,
+      prefs: UserNotificationPreference,
+      user?: User | null,
+    ) => Promise<InAppNotification | null>;
+  },
+  now: Date,
+): Promise<ProductExpiryAlertSweepResult> {
+  let lastProductId: string | null = null;
+  let processed = 0;
+  let dispatched = 0;
+  const maxCandidateExpiry = new Date(
+    now.getTime() + (PRODUCT_EXPIRY_NOTICE_DAYS_MAX + 2) * DAY_MS,
+  );
+
+  while (true) {
+    const products = await params.inventoryProducts.find({
+      where: {
+        status: ShelfStatus.Active,
+        effective_expires_at: LessThanOrEqual(maxCandidateExpiry),
+        ...(lastProductId ? { id: MoreThan(lastProductId) } : {}),
+      },
+      order: { id: 'ASC' },
+      take: PRODUCT_EXPIRY_SWEEP_BATCH_SIZE,
+    });
+    if (products.length === 0) {
+      return { processed, dispatched };
+    }
+
+    const usersById = await loadUsersById(
+      params.users,
+      products.map((product) => product.user_id),
+    );
+    const preferencesByUserId = new Map<string, UserNotificationPreference>();
+
+    for (const product of products) {
+      processed += 1;
+      let prefs = preferencesByUserId.get(product.user_id);
+      if (!prefs) {
+        prefs = await params.ensurePreferences(product.user_id);
+        preferencesByUserId.set(product.user_id, prefs);
+      }
+
+      const dispatchParams = buildProductExpiryDispatchParams({
+        product,
+        prefs,
+        user: usersById.get(product.user_id) ?? null,
+        now,
+      });
+      if (!dispatchParams) {
+        continue;
+      }
+
+      const notification = await params.dispatchWithPreferences(
+        dispatchParams,
+        prefs,
+        usersById.get(product.user_id) ?? null,
+      );
+      if (notification) {
+        dispatched += 1;
+      }
+    }
+
+    if (products.length < PRODUCT_EXPIRY_SWEEP_BATCH_SIZE) {
+      return { processed, dispatched };
+    }
+    lastProductId = products[products.length - 1]?.id ?? lastProductId;
+  }
+}
+
+export function buildProductExpiryDispatchParams({
+  product,
+  prefs,
+  user,
+  now,
+}: ProductExpiryDispatchInput): DispatchNotificationParams | null {
+  if (product.status !== ShelfStatus.Active || !product.effective_expires_at) {
+    return null;
+  }
+
+  const expiresDate = parseShelfPlainDate(product.effective_expires_at);
+  if (!expiresDate) {
+    return null;
+  }
+
+  const timeZone = resolveSkinJournalTimeZone(user?.time_zone ?? null);
+  const today = resolveShelfToday(timeZone, now);
+  const daysUntilExpiry = diffShelfCalendarDays(today, expiresDate);
+  const noticeDays = normalizeProductExpiryNoticeDays(
+    prefs.product_expiry_notice_days,
+  );
+  const kind =
+    daysUntilExpiry <= 0
+      ? 'product_expired'
+      : daysUntilExpiry <= noticeDays
+        ? 'product_nearing_expiry'
+        : null;
+
+  if (!kind) {
+    return null;
+  }
+
+  const productName = [product.brand, product.name]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(' ');
+
+  return {
+    userId: product.user_id,
+    kind,
+    titleKey: `notificationsPage.kinds.${kind}.title`,
+    bodyKey: `notificationsPage.kinds.${kind}.body`,
+    severity: kind === 'product_expired' ? 'critical' : 'warning',
+    payload: {
+      productId: product.id,
+      brand: product.brand,
+      name: product.name,
+      productName: productName || product.name || product.brand,
+      expiresAt: product.effective_expires_at.toISOString(),
+      daysUntilExpiry,
+      noticeDays,
+    },
+    deepLink: `/shelf/${product.id}`,
+    dedupeKey: `${kind}:${product.id}:${expiresDate.toString()}`,
+    bypassQuietHours: true,
+    forcePush: true,
+  };
+}
+
 export async function scheduleAfterQuietHours(
   params: DispatchNotificationParams,
   prefs: UserNotificationPreference,
@@ -223,6 +384,10 @@ export function applyPreferenceUpdates(
     prefs.slot_start_enabled = dto.slot_start_enabled;
   if (dto.recording_reminder_enabled !== undefined)
     prefs.recording_reminder_enabled = dto.recording_reminder_enabled;
+  if (dto.product_expiry_alerts_enabled !== undefined)
+    prefs.product_expiry_alerts_enabled = dto.product_expiry_alerts_enabled;
+  if (dto.product_expiry_notice_days !== undefined)
+    prefs.product_expiry_notice_days = dto.product_expiry_notice_days;
   if (dto.suggestion_lead_time_minutes !== undefined)
     prefs.suggestion_lead_time_minutes = dto.suggestion_lead_time_minutes;
   if (dto.quiet_hours_enabled !== undefined)
@@ -317,7 +482,34 @@ export function isNotificationKindEnabled(
   if (kind === 'slot_start') return prefs.slot_start_enabled !== false;
   if (kind === 'recording_reminder')
     return prefs.recording_reminder_enabled !== false;
+  if (kind === 'product_nearing_expiry' || kind === 'product_expired') {
+    return prefs.product_expiry_alerts_enabled !== false;
+  }
   return true;
+}
+
+export function canSendNotificationEmail(kind: NotificationKind): boolean {
+  return kind !== 'product_nearing_expiry' && kind !== 'product_expired';
+}
+
+export function requiresNotificationInApp(kind: NotificationKind): boolean {
+  return kind === 'product_nearing_expiry' || kind === 'product_expired';
+}
+
+export function requiresNotificationPush(kind: NotificationKind): boolean {
+  return kind === 'product_nearing_expiry' || kind === 'product_expired';
+}
+
+export function normalizeProductExpiryNoticeDays(
+  value: number | null | undefined,
+): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT;
+  }
+  return Math.max(
+    PRODUCT_EXPIRY_NOTICE_DAYS_MIN,
+    Math.min(PRODUCT_EXPIRY_NOTICE_DAYS_MAX, value),
+  );
 }
 
 export function clampInteger(value: number, min: number, max: number): number {

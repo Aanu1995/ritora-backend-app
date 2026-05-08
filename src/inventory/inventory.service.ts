@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -24,6 +25,7 @@ import {
   type ShelfProductSnapshot,
 } from '../shelf/shelf.types';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   hasCompletedEssentialSkinProfile,
   skinProfileRequiredException,
@@ -67,6 +69,8 @@ type InventoryCursorTuple = [string, string] | [string, string, string];
 
 @Injectable()
 export class InventoryService {
+  private readonly logger = new Logger(InventoryService.name);
+
   constructor(
     @InjectRepository(InventoryProduct)
     private readonly inventoryRepository: Repository<InventoryProduct>,
@@ -75,6 +79,7 @@ export class InventoryService {
     private readonly cataloguePhotoProcessorService: CataloguePhotoProcessorService,
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
     private readonly dataAccessLog: UserDataAccessLogService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async list(
@@ -150,6 +155,7 @@ export class InventoryService {
       this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
     );
     const saved = await this.inventoryRepository.save(entity);
+    await this.evaluateProductExpiryAlerts(userId, saved);
     return this.toResponseDto(saved);
   }
 
@@ -168,6 +174,7 @@ export class InventoryService {
       this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
     );
     const saved = await this.inventoryRepository.save(product);
+    await this.evaluateProductExpiryAlerts(userId, saved);
     return this.toResponseDto(saved);
   }
 
@@ -255,6 +262,7 @@ export class InventoryService {
 
   async restoreMany(userId: string, ids: string[]): Promise<void> {
     await this.updateManyStatuses(userId, ids, ShelfStatus.Active);
+    await this.evaluateProductExpiryAlertsForIds(userId, ids);
   }
 
   async markFinishedMany(userId: string, ids: string[]): Promise<void> {
@@ -269,7 +277,51 @@ export class InventoryService {
     const product = await this.findByIdOrFail(userId, id);
     product.status = status;
     const saved = await this.inventoryRepository.save(product);
+    if (status === ShelfStatus.Active) {
+      await this.evaluateProductExpiryAlerts(userId, saved);
+    }
     return this.toResponseDto(saved);
+  }
+
+  private async evaluateProductExpiryAlerts(
+    userId: string,
+    product: InventoryProduct,
+  ): Promise<void> {
+    if (product.status !== ShelfStatus.Active) {
+      return;
+    }
+    try {
+      await this.notificationsService.runProductExpiryAlertForProduct(
+        userId,
+        product.id,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Product expiry alert evaluation failed for ${product.id}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async evaluateProductExpiryAlertsForIds(
+    userId: string,
+    productIds: string[],
+  ): Promise<void> {
+    for (const productId of productIds) {
+      try {
+        await this.notificationsService.runProductExpiryAlertForProduct(
+          userId,
+          productId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Product expiry alert evaluation failed for ${productId}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      }
+    }
   }
 
   private normalizeManagedMediaRefs(

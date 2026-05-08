@@ -1,12 +1,19 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { MailService } from '../mail/mail.service';
+import {
+  DataProvenance,
+  ProductCategory,
+  ShelfStatus,
+} from '../shelf/shelf.types';
 import { User } from '../users/entities/user.entity';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { InAppNotification } from './entities/in-app-notification.entity';
 import { ScheduledNotification } from './entities/scheduled-notification.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
 import { NotificationsService } from './notifications.service';
+import { PushNotificationsService } from './push-notifications.service';
 
 const repo = () => ({
   create: jest.fn((data) => data),
@@ -27,6 +34,72 @@ const notificationQueryBuilder = () => ({
   getMany: jest.fn().mockResolvedValue([]),
 });
 
+function inventoryProduct(
+  overrides: Partial<InventoryProduct> = {},
+): InventoryProduct {
+  return {
+    id: 'product-1',
+    user_id: 'user-1',
+    brand: 'CeraVe',
+    name: 'Retinol Serum',
+    category: ProductCategory.Serum,
+    barcode: null,
+    status: ShelfStatus.Active,
+    provenance: DataProvenance.PhotoLookup,
+    brand_search: 'cerave',
+    name_search: 'retinol serum',
+    search_document: 'cerave retinol serum',
+    opened_at: new Date('2026-04-01T00:00:00.000Z'),
+    expires_at: null,
+    period_after_opening_months: 12,
+    effective_expires_at: new Date('2026-05-10T00:00:00.000Z'),
+    identity: {
+      brand: 'CeraVe',
+      name: 'Retinol Serum',
+      category: ProductCategory.Serum,
+      barcode: null,
+      imageUrls: [],
+      sizeMl: null,
+      description: null,
+      benefits: [],
+      suitedFor: [],
+      inciIngredients: [],
+      inciLastConfirmedAt: null,
+    },
+    guidance: {
+      applicationMethod: null,
+      quantity: null,
+      steps: [],
+      cautions: [],
+      waitMinutes: null,
+    },
+    manufacturer: {
+      brand: 'CeraVe',
+      parentCompany: null,
+      countryOfOrigin: null,
+      countryOfManufacture: null,
+      supportEmail: null,
+      productUrl: null,
+      websiteUrl: null,
+    },
+    user_fields: {
+      openedAt: '2026-04-01T00:00:00.000Z',
+      expiresAt: null,
+      periodAfterOpeningMonths: 12,
+      pricePaid: null,
+      pricePaidCurrency: null,
+      purchasedFrom: null,
+      personalNotes: null,
+      preferredTimeOfDay: null,
+    },
+    created_at: new Date('2026-04-01T00:00:00.000Z'),
+    updated_at: new Date('2026-04-01T00:00:00.000Z'),
+    user: undefined as never,
+    generateId: jest.fn(),
+    ...overrides,
+  };
+}
+
 describe('NotificationsService', () => {
   let service: NotificationsService;
   let notifications: ReturnType<typeof repo>;
@@ -34,8 +107,10 @@ describe('NotificationsService', () => {
   let preferences: ReturnType<typeof repo>;
   let users: ReturnType<typeof repo>;
   let entries: ReturnType<typeof repo>;
+  let inventoryProducts: ReturnType<typeof repo>;
   let notificationQb: ReturnType<typeof notificationQueryBuilder>;
   const mailService = { sendNotificationEmail: jest.fn() };
+  const pushNotifications = { sendNotificationPush: jest.fn() };
 
   beforeEach(async () => {
     notifications = repo();
@@ -45,7 +120,11 @@ describe('NotificationsService', () => {
     preferences = repo();
     users = repo();
     entries = repo();
+    inventoryProducts = repo();
+    mailService.sendNotificationEmail.mockClear();
     mailService.sendNotificationEmail.mockResolvedValue(undefined);
+    pushNotifications.sendNotificationPush.mockClear();
+    pushNotifications.sendNotificationPush.mockResolvedValue(undefined);
 
     const module = await Test.createTestingModule({
       providers: [
@@ -64,7 +143,12 @@ describe('NotificationsService', () => {
         },
         { provide: getRepositoryToken(User), useValue: users },
         { provide: getRepositoryToken(SkinJournalEntry), useValue: entries },
+        {
+          provide: getRepositoryToken(InventoryProduct),
+          useValue: inventoryProducts,
+        },
         { provide: MailService, useValue: mailService },
+        { provide: PushNotificationsService, useValue: pushNotifications },
       ],
     }).compile();
 
@@ -225,6 +309,45 @@ describe('NotificationsService', () => {
     );
   });
 
+  it('persists product expiry alert preferences from the API', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      photo_reminder_local_time: '08:00',
+      photo_reminder_enabled: true,
+      reaction_alerts_enabled: true,
+      simplification_alerts_enabled: true,
+      insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
+      wrapped_alerts_enabled: true,
+      photo_tutorial_completed: false,
+      suggestion_ready_enabled: true,
+      slot_start_enabled: true,
+      recording_reminder_enabled: true,
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      suggestion_lead_time_minutes: 120,
+      quiet_hours_enabled: false,
+      quiet_hours_start: '22:30',
+      quiet_hours_end: '06:30',
+    });
+    preferences.save.mockImplementation(async (value) => value);
+
+    const result = await service.updatePreferences('user-1', {
+      product_expiry_alerts_enabled: false,
+      product_expiry_notice_days: 30,
+    });
+
+    expect(preferences.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product_expiry_alerts_enabled: false,
+        product_expiry_notice_days: 30,
+      }),
+    );
+    expect(result.product_expiry_alerts_enabled).toBe(false);
+    expect(result.product_expiry_notice_days).toBe(30);
+  });
+
   it('normalizes database time values to HH:mm for the preferences API', async () => {
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
@@ -262,6 +385,231 @@ describe('NotificationsService', () => {
     expect(result).toBeNull();
     expect(notifications.save).not.toHaveBeenCalled();
     expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
+    expect(pushNotifications.sendNotificationPush).not.toHaveBeenCalled();
+  });
+
+  it('sends product expiry notifications through push and never email', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app', 'email'],
+      product_expiry_alerts_enabled: true,
+      quiet_hours_enabled: false,
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'a@example.com',
+      time_zone: 'UTC',
+    });
+
+    await service.dispatch({
+      userId: 'user-1',
+      kind: 'product_nearing_expiry',
+      titleKey: 'notificationsPage.kinds.product_nearing_expiry.title',
+      bodyKey: 'notificationsPage.kinds.product_nearing_expiry.body',
+      severity: 'warning',
+    });
+
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'product_nearing_expiry' }),
+    );
+    expect(pushNotifications.sendNotificationPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        kind: 'product_nearing_expiry',
+      }),
+    );
+    expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('keeps a product expiry in-app dedupe record even when global in-app is disabled', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: [],
+      product_expiry_alerts_enabled: true,
+      quiet_hours_enabled: false,
+    });
+    notifications.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 'existing-expiry',
+      user_id: 'user-1',
+      kind: 'product_nearing_expiry',
+      dedupe_key: 'product_nearing_expiry:product-1:2026-05-10',
+    });
+
+    await service.dispatch({
+      userId: 'user-1',
+      kind: 'product_nearing_expiry',
+      titleKey: 'notificationsPage.kinds.product_nearing_expiry.title',
+      bodyKey: 'notificationsPage.kinds.product_nearing_expiry.body',
+      dedupeKey: 'product_nearing_expiry:product-1:2026-05-10',
+    });
+
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'product_nearing_expiry',
+        dedupe_key: 'product_nearing_expiry:product-1:2026-05-10',
+      }),
+    );
+    expect(pushNotifications.sendNotificationPush).toHaveBeenCalledTimes(1);
+
+    notifications.save.mockClear();
+    pushNotifications.sendNotificationPush.mockClear();
+
+    await service.dispatch({
+      userId: 'user-1',
+      kind: 'product_nearing_expiry',
+      titleKey: 'notificationsPage.kinds.product_nearing_expiry.title',
+      bodyKey: 'notificationsPage.kinds.product_nearing_expiry.body',
+      dedupeKey: 'product_nearing_expiry:product-1:2026-05-10',
+    });
+
+    expect(notifications.save).not.toHaveBeenCalled();
+    expect(pushNotifications.sendNotificationPush).not.toHaveBeenCalled();
+    expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('creates a nearing-expiry notification within the user notice window', async () => {
+    inventoryProducts.findOne.mockResolvedValue(
+      inventoryProduct({
+        effective_expires_at: new Date('2026-05-10T00:00:00.000Z'),
+      }),
+    );
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app', 'email'],
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      quiet_hours_enabled: false,
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'a@example.com',
+      time_zone: 'UTC',
+    });
+    notifications.findOne.mockResolvedValue(null);
+
+    await service.runProductExpiryAlertForProduct(
+      'user-1',
+      'product-1',
+      new Date('2026-05-01T09:00:00.000Z'),
+    );
+
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        kind: 'product_nearing_expiry',
+        severity: 'warning',
+        dedupe_key: 'product_nearing_expiry:product-1:2026-05-10',
+        deep_link: '/shelf/product-1',
+        payload: expect.objectContaining({
+          productId: 'product-1',
+          daysUntilExpiry: 9,
+          noticeDays: 14,
+        }),
+      }),
+    );
+    expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
+    expect(pushNotifications.sendNotificationPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        kind: 'product_nearing_expiry',
+        deepLink: '/shelf/product-1',
+      }),
+    );
+  });
+
+  it('keeps product expiry alerts immediate during quiet hours', async () => {
+    inventoryProducts.findOne.mockResolvedValue(
+      inventoryProduct({
+        effective_expires_at: new Date('2026-05-10T00:00:00.000Z'),
+      }),
+    );
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      quiet_hours_enabled: true,
+      quiet_hours_start: '00:00',
+      quiet_hours_end: '23:59',
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      time_zone: 'UTC',
+    });
+    notifications.findOne.mockResolvedValue(null);
+
+    await service.runProductExpiryAlertForProduct(
+      'user-1',
+      'product-1',
+      new Date('2026-05-01T09:00:00.000Z'),
+    );
+
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'product_nearing_expiry' }),
+    );
+    expect(scheduledNotifications.save).not.toHaveBeenCalled();
+  });
+
+  it('creates an expired notification once the product reaches expiry', async () => {
+    inventoryProducts.findOne.mockResolvedValue(
+      inventoryProduct({
+        effective_expires_at: new Date('2026-05-01T00:00:00.000Z'),
+      }),
+    );
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      quiet_hours_enabled: false,
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      time_zone: 'UTC',
+    });
+    notifications.findOne.mockResolvedValue(null);
+
+    await service.runProductExpiryAlertForProduct(
+      'user-1',
+      'product-1',
+      new Date('2026-05-01T09:00:00.000Z'),
+    );
+
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'product_expired',
+        severity: 'critical',
+        dedupe_key: 'product_expired:product-1:2026-05-01',
+      }),
+    );
+  });
+
+  it('skips products that are inactive or missing expiry data', async () => {
+    inventoryProducts.findOne.mockResolvedValue(
+      inventoryProduct({
+        status: ShelfStatus.Archived,
+        effective_expires_at: new Date('2026-05-01T00:00:00.000Z'),
+      }),
+    );
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      time_zone: 'UTC',
+    });
+
+    const result = await service.runProductExpiryAlertForProduct(
+      'user-1',
+      'product-1',
+      new Date('2026-05-01T09:00:00.000Z'),
+    );
+
+    expect(result).toBeNull();
+    expect(notifications.save).not.toHaveBeenCalled();
   });
 
   it('uses dedupe keys to avoid repeated polling notifications and emails', async () => {
