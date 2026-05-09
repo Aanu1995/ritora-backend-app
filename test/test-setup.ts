@@ -162,6 +162,10 @@ export async function createCompletedSkinProfile(
         sunscreen_filter: 'hybrid',
         sunscreen_finish: 'natural',
       },
+      lifestyleContext: {
+        water_hardness: 'unknown',
+        water_sensitivity: 'none',
+      },
       budgetTier: 'mid',
       allowSmartPicks: true,
       countryCode: 'SE',

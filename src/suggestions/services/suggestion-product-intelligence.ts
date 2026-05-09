@@ -5,6 +5,12 @@ import {
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import { SuggestionProductScore } from '../suggestion-context.types';
+import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
+import {
+  buildEnvironmentAdaptationPolicy,
+  isDryHumidity,
+  isHighUvRisk,
+} from '../../environment-intelligence/environment-adaptation-policy';
 import {
   SuggestionDaypart,
   SuggestionEvidenceSourceId,
@@ -69,6 +75,7 @@ export function scoreProductForSuggestion(
     lockedProductIds: Set<string>;
     conservativeRestart: boolean;
     ingredientIntelligence?: ProductIngredientIntelligence;
+    environment?: EnvironmentContextSummary | null;
   },
 ): SuggestionProductScore {
   const activeTags = detectActiveTags(product);
@@ -77,9 +84,9 @@ export function scoreProductForSuggestion(
     activeTags,
     options.ingredientIntelligence,
   );
-  const evidenceSourceIds = buildProductEvidenceSourceIds(
-    product.category,
-    activeTags,
+  const evidenceSourceIds = mergeEvidenceSourceIds(
+    buildProductEvidenceSourceIds(product.category, activeTags),
+    options.environment?.sourceIds ?? [],
   );
   const reasons: string[] = [];
   const cautions: string[] = [
@@ -138,6 +145,18 @@ export function scoreProductForSuggestion(
   if (productDataQuality.quality === 'insufficient') {
     score -= 20;
     cautions.push('product data is incomplete; suggestion confidence reduced');
+  }
+  if (options.environment) {
+    const environmentScore = buildEnvironmentAdaptationPolicy(
+      options.environment,
+    ).scoreCategory(product.category);
+    score += environmentScore;
+    applyEnvironmentReasons(
+      product.category,
+      options.environment,
+      reasons,
+      cautions,
+    );
   }
 
   return {
@@ -266,6 +285,32 @@ function isDaytimeSuggestion(daypart: SuggestionDaypart): boolean {
   return (
     daypart === SuggestionDaypart.Morning || daypart === SuggestionDaypart.Noon
   );
+}
+
+function applyEnvironmentReasons(
+  category: ProductCategory,
+  environment: EnvironmentContextSummary,
+  reasons: string[],
+  cautions: string[],
+): void {
+  if (
+    category === ProductCategory.SunProtection &&
+    isHighUvRisk(environment.uvRisk)
+  ) {
+    reasons.push('high UV fit');
+  }
+  if (
+    category === ProductCategory.Moisturizer &&
+    isDryHumidity(environment.humidityBand)
+  ) {
+    reasons.push('dry air barrier support');
+  }
+  if (
+    category === ProductCategory.Exfoliant &&
+    isDryHumidity(environment.humidityBand)
+  ) {
+    cautions.push('dry air can make exfoliation feel harsher');
+  }
 }
 
 function matchesGoal(

@@ -178,6 +178,7 @@ function buildReadySuggestionFields(
     ai_error: null,
     ai_retry_count: job.attempt_count,
     generation_context: inputs.contextSummary,
+    environment_snapshot_id: inputs.environmentSnapshotId,
   };
 }
 

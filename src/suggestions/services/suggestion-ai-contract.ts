@@ -343,6 +343,7 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
         onDemand: inputs.contextSummary.onDemand,
         routineBreak: inputs.contextSummary.routineBreak,
         productScores: inputs.contextSummary.productScores.slice(0, 20),
+        environment: inputs.contextSummary.environment,
         applicationPatterns: inputs.contextSummary.applicationPatterns,
         safetyConstraints: inputs.contextSummary.safetyConstraints,
         governance: inputs.contextSummary.governance,

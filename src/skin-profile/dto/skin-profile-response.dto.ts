@@ -99,6 +99,9 @@ export class SkinProfileResponseDto {
   hasHealthContextConsent: boolean;
 
   @ApiProperty()
+  hasLocationContextConsent: boolean;
+
+  @ApiProperty()
   hasHormonalContextConsent: boolean;
 
   @ApiProperty()
@@ -116,6 +119,7 @@ export class SkinProfileResponseDto {
     options: {
       completeness?: number;
       hasHealthContextConsent?: boolean;
+      hasLocationContextConsent?: boolean;
       hasHormonalContextConsent?: boolean;
     } = {},
   ): SkinProfileResponseDto {
@@ -148,6 +152,7 @@ export class SkinProfileResponseDto {
       hormonalContext: profile.hormonal_context ?? {},
       completeness: options.completeness ?? 0,
       hasHealthContextConsent: options.hasHealthContextConsent ?? false,
+      hasLocationContextConsent: options.hasLocationContextConsent ?? false,
       hasHormonalContextConsent: options.hasHormonalContextConsent ?? false,
       createdAt: toIsoString(profile.created_at),
       updatedAt: toIsoString(profile.updated_at),

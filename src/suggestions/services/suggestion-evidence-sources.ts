@@ -69,6 +69,46 @@ const EVIDENCE_SOURCES: Record<
       'Topical retinoids can be drying, may worsen eczema, and are commonly applied at night with daytime sunscreen and moisturizer support.',
     reviewedAt: REVIEWED_AT,
   },
+  [SuggestionEvidenceSourceId.NationalEczemaSocietyHardWater]: {
+    id: SuggestionEvidenceSourceId.NationalEczemaSocietyHardWater,
+    title: 'SOFTER trial: hard water and eczema',
+    organization: 'National Eczema Society',
+    url: 'https://eczema.org/research/eczema-research-initiatives/softer/',
+    evidenceType: 'clinical_reference',
+    summary:
+      'Hard-water exposure can affect skin barrier comfort for some sensitive users; gentle cleansing and moisturizing support are reasonable non-diagnostic guidance.',
+    reviewedAt: REVIEWED_AT,
+  },
+  [SuggestionEvidenceSourceId.OpenMeteoWeather]: {
+    id: SuggestionEvidenceSourceId.OpenMeteoWeather,
+    title: 'Weather Forecast API',
+    organization: 'Open-Meteo',
+    url: 'https://open-meteo.com/en/docs',
+    evidenceType: 'environmental_data_provider',
+    summary:
+      'Weather forecast data provides temperature, relative humidity, weather code, and UV context for city-level routine adaptation.',
+    reviewedAt: REVIEWED_AT,
+  },
+  [SuggestionEvidenceSourceId.OpenMeteoAirQuality]: {
+    id: SuggestionEvidenceSourceId.OpenMeteoAirQuality,
+    title: 'Air Quality API',
+    organization: 'Open-Meteo',
+    url: 'https://open-meteo.com/en/docs/air-quality-api',
+    evidenceType: 'environmental_data_provider',
+    summary:
+      'Air-quality data provides European AQI, particulate matter, UV, and pollen context for city-level routine adaptation.',
+    reviewedAt: REVIEWED_AT,
+  },
+  [SuggestionEvidenceSourceId.OpenMeteoSeasonalForecast]: {
+    id: SuggestionEvidenceSourceId.OpenMeteoSeasonalForecast,
+    title: 'Seasonal Forecast API',
+    organization: 'Open-Meteo',
+    url: 'https://open-meteo.com/en/docs/seasonal-forecast-api',
+    evidenceType: 'environmental_data_provider',
+    summary:
+      'Seasonal forecast data provides broad transition signals, used only for gentle routine-preparation guidance.',
+    reviewedAt: REVIEWED_AT,
+  },
 };
 
 export function getSuggestionEvidenceSources(

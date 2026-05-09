@@ -35,6 +35,7 @@ describe('SuggestionAiGenerator', () => {
       recentApplications: [],
       aiPersonalizationAllowed: true,
       aiPersonalizationBlockedReason: null,
+      environmentSnapshotId: null,
       contextSummary: {
         cacheKey: 'ctx',
         builtAt: '2026-04-29T06:00:00.000Z',
@@ -43,6 +44,7 @@ describe('SuggestionAiGenerator', () => {
         daypart: SuggestionDaypart.Morning,
         requestSource: SuggestionRequestSource.Scheduled,
         onDemand: null,
+        environment: null,
         skinProfile: {
           primaryGoal: null,
           skinType: null,
@@ -193,6 +195,7 @@ function inputsWithScoredShelfProducts(
     recentApplications: [],
     aiPersonalizationAllowed: true,
     aiPersonalizationBlockedReason: null,
+    environmentSnapshotId: null,
     contextSummary: {
       cacheKey: 'ctx-products',
       builtAt: '2026-04-29T06:00:00.000Z',
@@ -201,6 +204,7 @@ function inputsWithScoredShelfProducts(
       daypart,
       requestSource: SuggestionRequestSource.Scheduled,
       onDemand: null,
+      environment: null,
       skinProfile: {
         primaryGoal: 'barrier support',
         skinType: null,

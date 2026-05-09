@@ -1,4 +1,6 @@
 import { ObjectLiteral, Repository } from 'typeorm';
+import { EnvironmentLocationCache } from '../../environment-intelligence/entities/environment-location-cache.entity';
+import { EnvironmentSnapshot } from '../../environment-intelligence/entities/environment-snapshot.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
 import { SuggestionGapAction } from '../entities/suggestion-gap-action.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
@@ -13,6 +15,8 @@ describe('SuggestionRetentionService', () => {
   const gapActionRepo = repo<SuggestionGapAction>();
   const overrideRepo = repo<SuggestionReactionOverride>();
   const reminderSnoozeRepo = repo<SuggestionRecordingReminderSnooze>();
+  const environmentLocationRepo = repo<EnvironmentLocationCache>();
+  const environmentSnapshotRepo = repo<EnvironmentSnapshot>();
   const observability = {
     record: jest.fn(),
   } as unknown as jest.Mocked<SuggestionObservabilityService>;
@@ -23,6 +27,8 @@ describe('SuggestionRetentionService', () => {
     gapActionRepo,
     overrideRepo,
     reminderSnoozeRepo,
+    environmentLocationRepo,
+    environmentSnapshotRepo,
     observability,
   );
 
@@ -32,6 +38,8 @@ describe('SuggestionRetentionService', () => {
     gapActionRepo.delete.mockResolvedValue({ affected: 0, raw: [] });
     overrideRepo.delete.mockResolvedValue({ affected: 1, raw: [] });
     reminderSnoozeRepo.delete.mockResolvedValue({ affected: 1, raw: [] });
+    environmentLocationRepo.delete.mockResolvedValue({ affected: 1, raw: [] });
+    environmentSnapshotRepo.delete.mockResolvedValue({ affected: 2, raw: [] });
     suggestionRepo.createQueryBuilder.mockReturnValue(queryBuilder as never);
     queryBuilder.execute.mockResolvedValue({
       affected: 3,
@@ -46,9 +54,15 @@ describe('SuggestionRetentionService', () => {
     ).resolves.toEqual({
       contextCachesDeleted: 2,
       sensitiveSuggestionFieldsCleared: 3,
+      environmentSnapshotsDeleted: 2,
+      environmentLocationCachesDeleted: 1,
     });
 
     expect(cacheRepo.delete).toHaveBeenCalled();
+    expect(environmentSnapshotRepo.delete).toHaveBeenCalledWith({
+      created_at: expect.any(Object),
+    });
+    expect(environmentLocationRepo.delete).toHaveBeenCalled();
     expect(queryBuilder.set).toHaveBeenCalledWith({
       ai_explanation: null,
       generation_context: null,
@@ -60,6 +74,8 @@ describe('SuggestionRetentionService', () => {
         metadata: {
           contextCachesDeleted: 2,
           sensitiveSuggestionFieldsCleared: 3,
+          environmentSnapshotsDeleted: 2,
+          environmentLocationCachesDeleted: 1,
         },
       }),
     );

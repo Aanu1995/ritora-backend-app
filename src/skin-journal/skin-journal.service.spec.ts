@@ -11,6 +11,10 @@ import { UserConsent } from '../users/entities/user-consent.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { UserConsentType } from '../users/user-consent.constants';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  SkinProfileWaterHardness,
+  SkinProfileWaterSensitivity,
+} from '../skin-profile/dto/skin-profile.constants';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
@@ -213,7 +217,10 @@ function completeSkinProfile(
       sunscreen_filter: 'hybrid',
       sunscreen_finish: 'natural',
     },
-    lifestyle_context: {},
+    lifestyle_context: {
+      water_hardness: SkinProfileWaterHardness.Unknown,
+      water_sensitivity: SkinProfileWaterSensitivity.None,
+    },
     shopping_preferences: {},
     hormonal_context: {},
     created_at: new Date('2026-04-29T00:00:00.000Z'),

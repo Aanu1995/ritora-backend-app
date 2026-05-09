@@ -6,6 +6,19 @@ import {
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import {
+  EnvironmentAirQualityRisk,
+  EnvironmentConfidence,
+  EnvironmentHumidityBand,
+  EnvironmentProviderName,
+  EnvironmentSeason,
+  EnvironmentSignalKind,
+  EnvironmentStatus,
+  EnvironmentTemperatureBand,
+  EnvironmentUvRisk,
+  EnvironmentWaterHardness,
+  EnvironmentWaterSensitivity,
+} from '../../environment-intelligence/environment-intelligence.constants';
+import {
   SuggestionContextSummary,
   SuggestionProductScore,
 } from '../suggestion-context.types';
@@ -48,9 +61,14 @@ describe('suggestion AI contract', () => {
     expect(prompt).toContain('Trusted evidence summaries');
     expect(prompt).toContain('plain user-facing words');
     expect(prompt).toContain(SuggestionEvidenceSourceId.AadSunscreenSelection);
+    expect(prompt).toContain(SuggestionEvidenceSourceId.OpenMeteoWeather);
     expect(prompt).toContain('Daily SPF 50');
+    expect(prompt).toContain('environment');
+    expect(prompt).toContain(EnvironmentSignalKind.SeasonalTransitionUvRising);
     expect(prompt).toContain('productScores');
     expect(prompt).not.toContain('data:image');
+    expect(prompt).not.toContain('Stockholm');
+    expect(prompt).not.toContain('59.33');
   });
 
   it('treats on-demand free text as context instead of instructions', () => {
@@ -159,6 +177,7 @@ function generationInputs(): SuggestionGenerationInputs {
     routineSteps: [],
     recentJournalEntries: [],
     recentApplications: [],
+    environmentSnapshotId: 'environment-1',
     aiPersonalizationAllowed: true,
     aiPersonalizationBlockedReason: null,
     contextSummary: contextSummary(product),
@@ -211,6 +230,35 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
       recentlyResumed: false,
       lastPausedFrom: null,
       lastPausedUntil: null,
+    },
+    environment: {
+      status: EnvironmentStatus.Available,
+      provider: EnvironmentProviderName.OpenMeteo,
+      generatedAt: '2026-05-04T06:00:00.000Z',
+      locationPersonalized: true,
+      season: EnvironmentSeason.Spring,
+      temperatureCelsius: 18,
+      temperatureBand: EnvironmentTemperatureBand.Mild,
+      humidity: 38,
+      humidityBand: EnvironmentHumidityBand.Dry,
+      uvIndex: 6,
+      uvRisk: EnvironmentUvRisk.High,
+      airQualityIndex: 28,
+      airQualityRisk: EnvironmentAirQualityRisk.Fair,
+      pm25: 7,
+      pm10: 14,
+      pollenRisk: null,
+      conditionLabel: 'Clear',
+      waterHardness: EnvironmentWaterHardness.Unknown,
+      waterSensitivity: EnvironmentWaterSensitivity.None,
+      climateSensitivities: ['dry_air'],
+      transitionSignals: [EnvironmentSignalKind.SeasonalTransitionUvRising],
+      confidence: EnvironmentConfidence.Provider,
+      stale: false,
+      sourceIds: [
+        SuggestionEvidenceSourceId.OpenMeteoWeather,
+        SuggestionEvidenceSourceId.OpenMeteoAirQuality,
+      ],
     },
     productScores: [productScore],
     applicationPatterns: {

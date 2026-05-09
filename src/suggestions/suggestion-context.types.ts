@@ -1,4 +1,5 @@
 import type { PreferredTimeOfDay, ProductCategory } from '../shelf/shelf.types';
+import type { EnvironmentContextSummary } from '../environment-intelligence/environment-intelligence.types';
 import {
   SuggestionDaypart,
   SuggestionEvidenceSourceId,
@@ -37,6 +38,7 @@ export interface SuggestionContextSummary {
     lastPausedFrom: string | null;
     lastPausedUntil: string | null;
   };
+  environment: EnvironmentContextSummary | null;
   productScores: SuggestionProductScore[];
   applicationPatterns: {
     days: number;

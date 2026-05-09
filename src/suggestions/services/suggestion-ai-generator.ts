@@ -71,6 +71,7 @@ export interface SuggestionGenerationInputs {
   recentJournalEntries: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
   contextSummary: SuggestionContextSummary;
+  environmentSnapshotId: string | null;
   aiPersonalizationAllowed: boolean;
   aiPersonalizationBlockedReason: string | null;
 }

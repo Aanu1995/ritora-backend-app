@@ -2,6 +2,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ulid } from 'ulid';
+import { isPostgresUniqueConstraintError } from '../../common/utils/database-errors';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import type { ProductForAnalysis } from '../../ingredients/ingredients.types';
@@ -10,6 +11,8 @@ import { InventoryProduct } from '../../inventory/entities/inventory-product.ent
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
+import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
+import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
 import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
@@ -34,10 +37,7 @@ import {
   type ProductIngredientIntelligence,
 } from './suggestion-product-intelligence';
 import { buildRoutineBreakSummary } from './suggestion-routine-break-context';
-import {
-  buildSuggestionContextCacheKey,
-  isUniqueConstraintError,
-} from './suggestion-context-cache-key';
+import { buildSuggestionContextCacheKey } from './suggestion-context-cache-key';
 import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
 
 @Injectable()
@@ -58,6 +58,7 @@ export class SuggestionContextBuilder {
       targetTime: toTimeOnlyString(inputs.targetTime),
       requestSource: inputs.requestSource ?? SuggestionRequestSource.Scheduled,
       requestContext: inputs.requestContext ?? null,
+      environment: inputs.environment ?? null,
     };
     const cacheKey = buildSuggestionContextCacheKey(normalizedInputs);
     const shouldCache =
@@ -98,6 +99,9 @@ export class SuggestionContextBuilder {
         this.matchingService,
         normalizedInputs.shelfActiveProducts,
       );
+    const environmentPolicy = buildEnvironmentAdaptationPolicy(
+      normalizedInputs.environment,
+    );
     const productScores = normalizedInputs.shelfActiveProducts
       .map((product) =>
         scoreProductForSuggestion(product, {
@@ -112,6 +116,7 @@ export class SuggestionContextBuilder {
           ingredientIntelligence: ingredientIntelligenceByProductId.get(
             product.id,
           ),
+          environment: normalizedInputs.environment,
         }),
       )
       .sort((a, b) => b.suitabilityScore - a.suitabilityScore);
@@ -136,6 +141,7 @@ export class SuggestionContextBuilder {
         normalizedInputs.recentRoutineBreaks ?? [],
         normalizedInputs.targetDate,
       ),
+      environment: normalizedInputs.environment,
       productScores,
       applicationPatterns,
       safetyConstraints: [],
@@ -153,12 +159,17 @@ export class SuggestionContextBuilder {
     const skippedCandidates = skippedReasonsFromPolicy(baseContext);
     const summary = {
       ...baseContext,
-      safetyConstraints: buildSafetyConstraints(baseContext),
+      safetyConstraints: [
+        ...buildSafetyConstraints(baseContext),
+        ...environmentPolicy.safetyConstraints,
+      ],
       skippedCandidates,
       evidenceSources: getSuggestionEvidenceSources(
         mergeEvidenceSourceIds(
           ...productScores.map((product) => product.evidenceSourceIds),
           ...skippedCandidates.map((candidate) => candidate.sourceIds),
+          normalizedInputs.environment?.sourceIds ?? [],
+          ...environmentPolicy.signals.map((signal) => signal.sourceIds),
         ),
       ),
     };
@@ -186,7 +197,7 @@ export class SuggestionContextBuilder {
           }),
         );
       } catch (error) {
-        if (!isUniqueConstraintError(error)) throw error;
+        if (!isPostgresUniqueConstraintError(error)) throw error;
         await this.contextCacheRepo.update(
           {
             user_id: inputs.userId,
@@ -214,6 +225,7 @@ export interface SuggestionContextBuilderInput {
   recentJournalEntries: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
   recentRoutineBreaks?: RoutineBreak[];
+  environment?: EnvironmentContextSummary | null;
   aiPersonalizationAllowed?: boolean;
   aiPersonalizationBlockedReason?: string | null;
 }

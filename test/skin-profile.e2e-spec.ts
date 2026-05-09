@@ -165,6 +165,10 @@ describe('Skin Profile (e2e)', () => {
           sunscreen_filter: 'hybrid',
           sunscreen_finish: 'natural',
         },
+        lifestyleContext: {
+          water_hardness: 'unknown',
+          water_sensitivity: 'none',
+        },
         budgetTier: 'mid',
         allowSmartPicks: true,
         countryCode: 'SE',
@@ -207,6 +211,10 @@ describe('Skin Profile (e2e)', () => {
           non_comedogenic: true,
           sunscreen_filter: 'hybrid',
           sunscreen_finish: 'natural',
+        },
+        lifestyleContext: {
+          water_hardness: 'unknown',
+          water_sensitivity: 'none',
         },
         budgetTier: 'mid',
         allowSmartPicks: true,

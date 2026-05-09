@@ -1,5 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  EnvironmentAirQualityRisk,
+  EnvironmentConfidence,
+  EnvironmentHumidityBand,
+  EnvironmentProviderName,
+  EnvironmentSeason,
+  EnvironmentSignalKind,
+  EnvironmentStatus,
+  EnvironmentTemperatureBand,
+  EnvironmentUvRisk,
+  EnvironmentWaterHardness,
+  EnvironmentWaterSensitivity,
+} from '../../environment-intelligence/environment-intelligence.constants';
+import { SuggestionEvidenceSourceId } from '../suggestions.constants';
+import {
   SUGGESTION_DAYPARTS,
   SUGGESTION_MODES,
   SUGGESTION_SLOT_LIFECYCLE_STATUSES,
@@ -31,6 +45,103 @@ export class TodaysSuggestionWeatherSummaryDto {
 
   @ApiProperty({ nullable: true })
   conditionLabel: string | null;
+}
+
+export class TodaysSuggestionEnvironmentSummaryDto {
+  @ApiProperty({ enum: Object.values(EnvironmentStatus) })
+  status: EnvironmentStatus;
+
+  @ApiProperty({ enum: Object.values(EnvironmentProviderName) })
+  provider: EnvironmentProviderName;
+
+  @ApiProperty()
+  generatedAt: string;
+
+  @ApiProperty()
+  locationPersonalized: boolean;
+
+  @ApiProperty({ enum: Object.values(EnvironmentSeason) })
+  season: EnvironmentSeason;
+
+  @ApiProperty({ nullable: true })
+  temperatureCelsius: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    enum: Object.values(EnvironmentTemperatureBand),
+  })
+  temperatureBand: EnvironmentTemperatureBand | null;
+
+  @ApiProperty({ nullable: true })
+  humidity: number | null;
+
+  @ApiProperty({ nullable: true, enum: Object.values(EnvironmentHumidityBand) })
+  humidityBand: EnvironmentHumidityBand | null;
+
+  @ApiProperty({ nullable: true })
+  uvIndex: number | null;
+
+  @ApiProperty({ enum: Object.values(EnvironmentUvRisk) })
+  uvRisk: EnvironmentUvRisk;
+
+  @ApiProperty({ nullable: true })
+  airQualityIndex: number | null;
+
+  @ApiProperty({ enum: Object.values(EnvironmentAirQualityRisk) })
+  airQualityRisk: EnvironmentAirQualityRisk;
+
+  @ApiProperty({ nullable: true })
+  pm25: number | null;
+
+  @ApiProperty({ nullable: true })
+  pm10: number | null;
+
+  @ApiProperty({ nullable: true })
+  pollenRisk: string | null;
+
+  @ApiProperty({ nullable: true })
+  conditionLabel: string | null;
+
+  @ApiProperty({ enum: Object.values(EnvironmentWaterHardness) })
+  waterHardness: EnvironmentWaterHardness;
+
+  @ApiProperty({ enum: Object.values(EnvironmentWaterSensitivity) })
+  waterSensitivity: EnvironmentWaterSensitivity;
+
+  @ApiProperty({ type: [String] })
+  climateSensitivities: string[];
+
+  @ApiProperty({ enum: Object.values(EnvironmentSignalKind), isArray: true })
+  transitionSignals: EnvironmentSignalKind[];
+
+  @ApiProperty({ enum: Object.values(EnvironmentConfidence) })
+  confidence: EnvironmentConfidence;
+
+  @ApiProperty()
+  stale: boolean;
+
+  @ApiProperty({
+    enum: Object.values(SuggestionEvidenceSourceId),
+    isArray: true,
+  })
+  sourceIds: SuggestionEvidenceSourceId[];
+}
+
+export class TodaysSuggestionEnvironmentAlertDto {
+  @ApiProperty({ enum: Object.values(EnvironmentSignalKind) })
+  kind: EnvironmentSignalKind;
+
+  @ApiProperty()
+  title: string;
+
+  @ApiProperty()
+  message: string;
+
+  @ApiProperty({
+    enum: Object.values(SuggestionEvidenceSourceId),
+    isArray: true,
+  })
+  sourceIds: SuggestionEvidenceSourceId[];
 }
 
 export class TodaysSuggestionReactionAlertDto {
@@ -247,6 +358,15 @@ export class TodaysSuggestionResponseDto {
 
   @ApiProperty({ nullable: true, type: TodaysSuggestionWeatherSummaryDto })
   weatherSummary: TodaysSuggestionWeatherSummaryDto | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: TodaysSuggestionEnvironmentSummaryDto,
+  })
+  environmentSummary: TodaysSuggestionEnvironmentSummaryDto | null;
+
+  @ApiProperty({ type: [TodaysSuggestionEnvironmentAlertDto] })
+  environmentAlerts: TodaysSuggestionEnvironmentAlertDto[];
 
   @ApiProperty({ type: [TodaysSuggestionSlotDto] })
   slots: TodaysSuggestionSlotDto[];

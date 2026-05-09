@@ -6,6 +6,10 @@ import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-stora
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { decodeCursor } from '../common/utils/cursor-pagination';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  SkinProfileWaterHardness,
+  SkinProfileWaterSensitivity,
+} from '../skin-profile/dto/skin-profile.constants';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { InventoryService } from './inventory.service';
@@ -161,7 +165,10 @@ function completeSkinProfile(
     safety_context: {},
     reaction_history: {},
     active_tolerances: {},
-    lifestyle_context: {},
+    lifestyle_context: {
+      water_hardness: SkinProfileWaterHardness.Unknown,
+      water_sensitivity: SkinProfileWaterSensitivity.None,
+    },
     shopping_preferences: {},
     hormonal_context: {},
     user: {

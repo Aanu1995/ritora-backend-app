@@ -219,6 +219,7 @@ function generationInputs(
     recentApplications: [],
     aiPersonalizationAllowed: true,
     aiPersonalizationBlockedReason: null,
+    environmentSnapshotId: null,
     contextSummary: contextSummary(),
   };
 }
@@ -232,6 +233,7 @@ function contextSummary(): SuggestionContextSummary {
     daypart: 'morning',
     requestSource: 'scheduled',
     onDemand: null,
+    environment: null,
     skinProfile: {
       primaryGoal: null,
       skinType: null,

@@ -8,6 +8,11 @@ import {
   SuggestionEvidenceSourceId,
   SuggestionSafetyFlagJson,
 } from '../suggestions.constants';
+import {
+  buildEnvironmentAdaptationPolicy,
+  isHighUvRisk,
+} from '../../environment-intelligence/environment-adaptation-policy';
+import { EnvironmentSignalKind } from '../../environment-intelligence/environment-intelligence.constants';
 import type { SuggestionGenerationStepOutput } from './suggestion-ai-generator';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
 import { isStrongActiveTag } from './suggestion-product-intelligence';
@@ -49,6 +54,9 @@ export function buildPolicySafetyFlags(
     .filter((product): product is SuggestionProductScore => Boolean(product));
   const selectedTags = new Set(selectedProducts.flatMap((p) => p.activeTags));
   const flags: SuggestionSafetyFlagJson[] = [];
+  const environmentPolicy = buildEnvironmentAdaptationPolicy(
+    context.environment,
+  );
 
   if (context.reaction.hasSignal || context.reaction.barrierCompromised) {
     flags.push({
@@ -123,6 +131,32 @@ export function buildPolicySafetyFlags(
         SuggestionEvidenceSourceId.AadRetinoidRetinol,
         SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
       ],
+    });
+  }
+  if (
+    context.environment &&
+    isHighUvRisk(context.environment.uvRisk) &&
+    !selectedProducts.some(
+      (product) => product.category === ProductCategory.SunProtection,
+    )
+  ) {
+    flags.push({
+      severity: 'info',
+      message: 'UV is high today, so daytime sunscreen matters.',
+      ingredientSlugs: ['spf'],
+      sourceIds: [
+        SuggestionEvidenceSourceId.OpenMeteoWeather,
+        SuggestionEvidenceSourceId.AadSunscreenSelection,
+      ],
+    });
+  }
+  for (const signal of environmentPolicy.signals) {
+    if (signal.kind === EnvironmentSignalKind.HighUv) continue;
+    flags.push({
+      severity: signal.severity,
+      message: signal.message,
+      ingredientSlugs: [],
+      sourceIds: signal.sourceIds,
     });
   }
   return dedupeFlags(flags);

@@ -227,6 +227,10 @@ export enum SuggestionEvidenceSourceId {
   FdaAhaSunSensitivity = 'fda_aha_sun_sensitivity',
   MayoDrySkinCare = 'mayo_dry_skin_care',
   DermNetTopicalRetinoids = 'dermnet_topical_retinoids',
+  NationalEczemaSocietyHardWater = 'national_eczema_society_hard_water',
+  OpenMeteoWeather = 'open_meteo_weather',
+  OpenMeteoAirQuality = 'open_meteo_air_quality',
+  OpenMeteoSeasonalForecast = 'open_meteo_seasonal_forecast',
 }
 
 export interface SuggestionEvidenceSourceJson {
@@ -237,7 +241,8 @@ export interface SuggestionEvidenceSourceJson {
   evidenceType:
     | 'dermatology_association'
     | 'regulatory_guidance'
-    | 'clinical_reference';
+    | 'clinical_reference'
+    | 'environmental_data_provider';
   summary: string;
   reviewedAt: string;
 }

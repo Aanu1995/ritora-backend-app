@@ -10,6 +10,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Not, Repository } from 'typeorm';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
+import { isPostgresUniqueConstraintError } from '../../common/utils/database-errors';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ShelfStatus } from '../../shelf/shelf.types';
 import { User } from '../../users/entities/user.entity';
@@ -38,7 +39,6 @@ import { SuggestionObservabilityService } from './suggestion-observability.servi
 import { RoutineBreakService } from './routine-break.service';
 import {
   buildRequestContext,
-  isUniqueConstraintError,
   normalizeRequestId,
 } from './suggestion-on-demand.utils';
 
@@ -97,7 +97,7 @@ export class SuggestionOnDemandService {
         now,
       });
     } catch (error) {
-      if (requestId && isUniqueConstraintError(error)) {
+      if (requestId && isPostgresUniqueConstraintError(error)) {
         const duplicate = await this.findExistingRequest(user.id, requestId);
         if (duplicate) {
           await this.recordDuplicateRequest(user.id, duplicate.id);

@@ -54,6 +54,8 @@ import {
   TENDENCY_LEVELS,
   TEXTURE_PREFERENCES,
   WATER_INTAKE_LEVELS,
+  WATER_HARDNESS_LEVELS,
+  WATER_SENSITIVITY_LEVELS,
 } from './skin-profile.constants';
 import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 
@@ -338,6 +340,25 @@ export class LifestyleContextDto {
   @IsOptional()
   @IsIn([...WATER_INTAKE_LEVELS])
   water_intake?: string;
+
+  @ApiPropertyOptional({ enum: WATER_HARDNESS_LEVELS })
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn([...WATER_HARDNESS_LEVELS])
+  water_hardness?: string;
+
+  @ApiPropertyOptional({ enum: WATER_SENSITIVITY_LEVELS })
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn([...WATER_SENSITIVITY_LEVELS])
+  water_sensitivity?: string;
+
+  @ApiPropertyOptional()
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  water_reaction_notes?: string | null;
 
   @ApiPropertyOptional({ type: [String] })
   @EmptyStringToUndefined()

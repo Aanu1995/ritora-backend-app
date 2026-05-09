@@ -3,13 +3,27 @@ import { ObjectLiteral, Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
+import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { User } from '../../users/entities/user.entity';
+import { EnvironmentContextService } from '../../environment-intelligence/environment-context.service';
+import {
+  EnvironmentConfidence,
+  EnvironmentAirQualityRisk,
+  EnvironmentProviderName,
+  EnvironmentSeason,
+  EnvironmentStatus,
+  EnvironmentUvRisk,
+  EnvironmentWaterHardness,
+  EnvironmentWaterSensitivity,
+} from '../../environment-intelligence/environment-intelligence.constants';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
+import { SuggestionHistoryExportService } from './suggestion-history-export.service';
 import { SuggestionHistoryReader } from './suggestion-history-reader.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
+import { SuggestionRegenerationService } from './suggestion-regeneration.service';
 import { SuggestionsService } from './suggestions.service';
 import { TodaysSuggestionReactionService } from './todays-suggestion-reaction.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
@@ -21,13 +35,14 @@ describe('SuggestionsService', () => {
   const slotRepo = repo<ScheduleSlot>();
   const applicationLogRepo = repo<ApplicationLog>();
   const preferenceRepo = repo<UserNotificationPreference>();
+  const skinProfileRepo = repo<SkinProfile>();
   const historyReader = {
     getHistory: jest.fn(),
     getHistoryDay: jest.fn(),
   } as unknown as jest.Mocked<SuggestionHistoryReader>;
   const historyExporter = {
     exportCsv: jest.fn(),
-  };
+  } as unknown as jest.Mocked<SuggestionHistoryExportService>;
   const usageGuard = {
     evaluateRegeneration: jest.fn(),
   } as unknown as jest.Mocked<SuggestionAiUsageGuard>;
@@ -45,20 +60,31 @@ describe('SuggestionsService', () => {
     getBreakState: jest.fn(),
     isRoutineBreakActive: jest.fn(),
   } as unknown as jest.Mocked<RoutineBreakService>;
-
-  const service = new SuggestionsService(
+  const environmentContext = {
+    buildContext: jest.fn(),
+  } as unknown as jest.Mocked<EnvironmentContextService>;
+  const regenerationService = new SuggestionRegenerationService(
     suggestionRepo,
     jobRepo,
     slotRepo,
-    applicationLogRepo,
-    preferenceRepo,
-    historyReader,
-    historyExporter as never,
     usageGuard,
     observability,
+    routineBreakService,
+  );
+
+  const service = new SuggestionsService(
+    suggestionRepo,
+    slotRepo,
+    applicationLogRepo,
+    preferenceRepo,
+    skinProfileRepo,
+    historyReader,
+    historyExporter,
+    regenerationService,
     reactionService,
     todayActionService,
     routineBreakService,
+    environmentContext,
   );
 
   beforeEach(() => {
@@ -95,6 +121,11 @@ describe('SuggestionsService', () => {
       routineBreak: null,
     });
     routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
+    skinProfileRepo.findOne.mockResolvedValue(null);
+    environmentContext.buildContext.mockResolvedValue({
+      summary: environmentSummary(),
+      snapshot: null,
+    });
   });
 
   afterEach(() => {
@@ -362,7 +393,7 @@ describe('SuggestionsService', () => {
     );
   });
 
-  it('hides elapsed schedule slots when no suggestion was provided', async () => {
+  it('hides elapsed schedule slots while still returning environment context', async () => {
     jest.setSystemTime(new Date('2026-04-29T20:35:00.000Z'));
     preferenceRepo.findOne.mockResolvedValue({
       suggestion_lead_time_minutes: 120,
@@ -382,6 +413,24 @@ describe('SuggestionsService', () => {
 
     expect(result.slots).toEqual([]);
     expect(result.summary.total).toBe(0);
+    expect(result.weatherSummary).toEqual({
+      temperatureCelsius: null,
+      uvIndex: null,
+      humidity: null,
+      conditionLabel: null,
+    });
+    expect(result.environmentSummary).toEqual(environmentSummary());
+    expect(result.environmentAlerts).toEqual([]);
+    expect(skinProfileRepo.findOne).toHaveBeenCalledWith({
+      where: { user_id: 'user-1' },
+    });
+    expect(environmentContext.buildContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        targetDate: '2026-04-29',
+        timeZone: 'UTC',
+      }),
+    );
   });
 
   it('hides stale pending slots after the recordable window has passed', async () => {
@@ -409,6 +458,14 @@ describe('SuggestionsService', () => {
 
     expect(result.slots).toEqual([]);
     expect(result.summary.total).toBe(0);
+    expect(result.environmentSummary).toEqual(environmentSummary());
+    expect(environmentContext.buildContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        targetDate: '2026-04-29',
+        timeZone: 'UTC',
+      }),
+    );
   });
 
   it('returns the active routine break and hides unprovided paused slots from Today', async () => {
@@ -665,6 +722,7 @@ describe('SuggestionsService', () => {
     historyReader.getHistoryDay.mockResolvedValue({
       date: '2026-04-28',
       weatherSummary: null,
+      environmentSummary: null,
       moodScore: null,
       hydrationTrend: null,
       reactionFlagged: false,
@@ -717,6 +775,35 @@ function user(): User {
     id: 'user-1',
     time_zone: 'UTC',
   } as User;
+}
+
+function environmentSummary() {
+  return {
+    status: EnvironmentStatus.Degraded,
+    provider: EnvironmentProviderName.ProfileOnly,
+    generatedAt: '2026-04-29T10:00:00.000Z',
+    locationPersonalized: false,
+    season: EnvironmentSeason.Spring,
+    temperatureCelsius: null,
+    temperatureBand: null,
+    humidity: null,
+    humidityBand: null,
+    uvIndex: null,
+    uvRisk: EnvironmentUvRisk.Unknown,
+    airQualityIndex: null,
+    airQualityRisk: EnvironmentAirQualityRisk.Unknown,
+    pm25: null,
+    pm10: null,
+    pollenRisk: null,
+    conditionLabel: null,
+    waterHardness: EnvironmentWaterHardness.Unknown,
+    waterSensitivity: EnvironmentWaterSensitivity.None,
+    climateSensitivities: [],
+    transitionSignals: [],
+    confidence: EnvironmentConfidence.Degraded,
+    stale: false,
+    sourceIds: [],
+  };
 }
 
 function scheduleSlot(input: {

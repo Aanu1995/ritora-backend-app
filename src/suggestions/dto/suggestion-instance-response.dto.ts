@@ -8,6 +8,7 @@ import {
   SuggestionGenerationContext,
   SuggestionInstance,
 } from '../entities/suggestion-instance.entity';
+import { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import {
   SUGGESTION_DAYPARTS,
   SUGGESTION_GENERATION_STATUSES,
@@ -108,6 +109,13 @@ export class SuggestionInstanceResponseDto {
   })
   inputTrace: SuggestionGenerationContext | null;
 
+  @ApiProperty({
+    nullable: true,
+    type: 'object',
+    additionalProperties: true,
+  })
+  environmentSummary: EnvironmentContextSummary | null;
+
   @ApiProperty({ type: 'array', items: { type: 'object' } })
   evidenceSources: SuggestionEvidenceSourceJson[];
 
@@ -160,6 +168,7 @@ export class SuggestionInstanceResponseDto {
     );
     dto.safetyFlags = instance.safety_flags ?? [];
     dto.inputTrace = instance.generation_context ?? null;
+    dto.environmentSummary = instance.generation_context?.environment ?? null;
     dto.evidenceSources =
       instance.generation_context?.evidenceSources ??
       getSuggestionEvidenceSources([

@@ -2,11 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { EnvironmentContextService } from '../../environment-intelligence/environment-context.service';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { ShelfStatus } from '../../shelf/shelf.types';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
+import { DEFAULT_TIME_ZONE } from '../../common/timezone/timezone.utils';
 import { User } from '../../users/entities/user.entity';
 import { UserDataAccessLogService } from '../../users/user-data-access-log.service';
 import {
@@ -71,6 +73,7 @@ export class SuggestionGenerationContextService {
     private readonly usageGuard: SuggestionAiUsageGuard,
     private readonly consentService: SuggestionConsentService,
     private readonly contextBuilder: SuggestionContextBuilder,
+    private readonly environmentContext: EnvironmentContextService,
     private readonly todayActionService: SuggestionTodayActionService,
     private readonly observability: SuggestionObservabilityService,
     private readonly dataAccessLog: UserDataAccessLogService,
@@ -103,6 +106,13 @@ export class SuggestionGenerationContextService {
     );
 
     const daypart = deriveSuggestionDaypart(slot.slot_time);
+    const environment = await this.environmentContext.buildContext({
+      userId: user.id,
+      profile: contextData.skinProfile,
+      targetDate,
+      targetTime,
+      timeZone: user.time_zone ?? DEFAULT_TIME_ZONE,
+    });
     const contextSummary = await this.contextBuilder.build({
       userId: user.id,
       targetDate,
@@ -116,6 +126,7 @@ export class SuggestionGenerationContextService {
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
       recentRoutineBreaks: contextData.recentRoutineBreaks,
+      environment: environment.summary,
       aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
       aiPersonalizationBlockedReason: personalization.blockedReason,
     });
@@ -138,6 +149,7 @@ export class SuggestionGenerationContextService {
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
       contextSummary,
+      environmentSnapshotId: environment.snapshot?.id ?? null,
       aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
       aiPersonalizationBlockedReason: personalization.blockedReason,
     };
@@ -160,6 +172,13 @@ export class SuggestionGenerationContextService {
     );
 
     const daypart = deriveSuggestionDaypart(targetTime);
+    const environment = await this.environmentContext.buildContext({
+      userId: user.id,
+      profile: contextData.skinProfile,
+      targetDate,
+      targetTime,
+      timeZone: user.time_zone ?? DEFAULT_TIME_ZONE,
+    });
     const contextSummary = await this.contextBuilder.build({
       userId: user.id,
       targetDate,
@@ -173,6 +192,7 @@ export class SuggestionGenerationContextService {
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
       recentRoutineBreaks: contextData.recentRoutineBreaks,
+      environment: environment.summary,
       aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
       aiPersonalizationBlockedReason: personalization.blockedReason,
     });
@@ -192,6 +212,7 @@ export class SuggestionGenerationContextService {
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
       contextSummary,
+      environmentSnapshotId: environment.snapshot?.id ?? null,
       aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
       aiPersonalizationBlockedReason: personalization.blockedReason,
     };

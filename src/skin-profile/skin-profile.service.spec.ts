@@ -80,6 +80,8 @@ describe('SkinProfileService', () => {
       id: '01TESTUSER',
       email: 'test@example.com',
       email_verified: true,
+      date_of_birth: '1992-04-15',
+      sex_at_birth: 'female',
       ...overrides,
     }) as User;
 
@@ -87,6 +89,7 @@ describe('SkinProfileService', () => {
     ({
       id: '01PROFILE',
       user_id: '01TESTUSER',
+      user: fakeUser(),
       skin_type: 'oily',
       skin_tone: 'medium',
       ethnicity: 'black',
@@ -110,6 +113,10 @@ describe('SkinProfileService', () => {
         non_comedogenic: true,
         sunscreen_filter: 'hybrid',
         sunscreen_finish: 'natural',
+      },
+      lifestyle_context: {
+        water_hardness: 'unknown',
+        water_sensitivity: 'none',
       },
       concern_details: {
         per_concern: [{ concern: 'acne', severity: 'moderate', priority: 1 }],
@@ -145,6 +152,10 @@ describe('SkinProfileService', () => {
       sunscreen_filter: 'hybrid',
       sunscreen_finish: 'natural',
     },
+    lifestyleContext: {
+      water_hardness: 'unknown',
+      water_sensitivity: 'none',
+    },
     concernDetails: {
       per_concern: [{ concern: 'acne', severity: 'moderate', priority: 1 }],
     },
@@ -176,6 +187,18 @@ describe('SkinProfileService', () => {
         service.create('01TESTUSER', {
           ...validCreateDto(),
           skinBehavior: { sunscreen_habit: 'most_days' },
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('requires water context choices during profile creation', async () => {
+      usersService.findById.mockResolvedValue(fakeUser());
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.create('01TESTUSER', {
+          ...validCreateDto(),
+          lifestyleContext: {},
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -346,6 +369,25 @@ describe('SkinProfileService', () => {
       );
     });
 
+    it('does not recreate location consent on unrelated profile updates', async () => {
+      const profile = fakeProfile({
+        country_code: 'SE',
+        city: 'Stockholm',
+      });
+      repo.findOne.mockResolvedValue(profile);
+      consentsRepo.findOne.mockResolvedValue(null);
+
+      await service.update('01TESTUSER', { skinType: 'dry' });
+
+      expect(consentsRepo.save).not.toHaveBeenCalled();
+      expect(dataAccessLogService.recordConsentEvent).not.toHaveBeenCalledWith(
+        '01TESTUSER',
+        UserConsentType.LocationProcessing,
+        UserDataAccessEventType.ConsentGranted,
+        UserDataAccessPurpose.ConsentGrant,
+      );
+    });
+
     it('revokes location consent when location data is removed', async () => {
       const profile = fakeProfile();
       repo.findOne.mockResolvedValue(profile);
@@ -361,6 +403,39 @@ describe('SkinProfileService', () => {
       await service.update('01TESTUSER', {
         countryCode: null,
         city: null,
+      });
+
+      expect(consentsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: '01CONSENT',
+          granted: false,
+        }),
+      );
+      expect(dataAccessLogService.recordConsentEvent).toHaveBeenCalledWith(
+        '01TESTUSER',
+        UserConsentType.LocationProcessing,
+        UserDataAccessEventType.ConsentRevoked,
+        UserDataAccessPurpose.ConsentRevoke,
+      );
+    });
+
+    it('revokes location consent when user opts out but keeps location data', async () => {
+      const profile = fakeProfile({
+        country_code: 'SE',
+        city: 'Stockholm',
+      });
+      repo.findOne.mockResolvedValue(profile);
+      consentsRepo.findOne.mockResolvedValue({
+        id: '01CONSENT',
+        user_id: '01TESTUSER',
+        consent_type: UserConsentType.LocationProcessing,
+        granted: true,
+        revoked_at: null,
+        created_at: new Date(),
+      });
+
+      await service.update('01TESTUSER', {
+        locationConsent: false,
       });
 
       expect(consentsRepo.save).toHaveBeenCalledWith(
@@ -456,6 +531,57 @@ describe('SkinProfileService', () => {
   });
 
   describe('computeCompleteness', () => {
+    it('weights completed essentials as the required foundation', () => {
+      expect(service.computeCompleteness(fakeProfile())).toBe(65);
+    });
+
+    it('does not count location as water context completeness', () => {
+      const withLocationOnly = fakeProfile({
+        country_code: 'SE',
+        city: 'Stockholm',
+        lifestyle_context: {
+          water_hardness: 'unknown',
+          water_sensitivity: 'none',
+        },
+      });
+
+      expect(service.computeCompleteness(withLocationOnly)).toBe(65);
+    });
+
+    it('keeps water context inside the essential score', () => {
+      const withWaterContext = fakeProfile({
+        lifestyle_context: {
+          water_hardness: 'hard',
+          water_sensitivity: 'suspected',
+        },
+      });
+
+      expect(service.computeCompleteness(withWaterContext)).toBe(65);
+    });
+
+    it('reaches full completeness when all applicable profile sections are filled', () => {
+      const profile = fakeProfile({
+        active_tolerances: {
+          retinoids: { tolerance: 'tolerates_well' },
+        },
+        reaction_history: {
+          entries: [{ trigger: 'Salicylic acid' }],
+        },
+        lifestyle_context: {
+          sleep: '6_to_8',
+          water_hardness: 'hard',
+          water_sensitivity: 'suspected',
+        },
+        pregnancy_status: 'not_pregnant',
+        safety_context: {
+          conditions: ['eczema'],
+        },
+        hormonal_context: { cycle_pattern: 'regular' },
+      });
+
+      expect(service.computeCompleteness(profile)).toBe(100);
+    });
+
     it('does not require hormonal context for male profiles', () => {
       const profile = fakeProfile({
         user: fakeUser({ sex_at_birth: 'male' }),
@@ -467,6 +593,8 @@ describe('SkinProfileService', () => {
         },
         lifestyle_context: {
           sleep: '6_to_8',
+          water_hardness: 'hard',
+          water_sensitivity: 'none',
         },
         pregnancy_status: 'not_pregnant',
         safety_context: {

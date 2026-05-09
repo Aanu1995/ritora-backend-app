@@ -1,5 +1,6 @@
 import { DataSource, ObjectLiteral, Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { EnvironmentContextService } from '../../environment-intelligence/environment-context.service';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
@@ -42,6 +43,9 @@ describe('SuggestionGenerationService', () => {
   const contextBuilder = {
     build: jest.fn(),
   } as unknown as jest.Mocked<SuggestionContextBuilder>;
+  const environmentContext = {
+    buildContext: jest.fn(),
+  } as unknown as jest.Mocked<EnvironmentContextService>;
   const todayActionService = {
     shouldIgnoreReactionContext: jest.fn(),
   } as unknown as jest.Mocked<SuggestionTodayActionService>;
@@ -81,6 +85,7 @@ describe('SuggestionGenerationService', () => {
       usageGuard,
       consentService,
       contextBuilder,
+      environmentContext,
       todayActionService,
       observability,
       dataAccessLog,
@@ -123,6 +128,10 @@ describe('SuggestionGenerationService', () => {
       estimatedCostTodayUsd: 0,
     });
     todayActionService.shouldIgnoreReactionContext.mockResolvedValue(false);
+    environmentContext.buildContext.mockResolvedValue({
+      summary: null,
+      snapshot: null,
+    } as never);
     routineBreakRepo.find.mockResolvedValue([]);
     routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
     suggestionRepo.update.mockResolvedValue({ affected: 1 } as never);
@@ -761,6 +770,7 @@ function contextSummary(): SuggestionContextSummary {
     daypart: 'morning',
     requestSource: 'scheduled',
     onDemand: null,
+    environment: null,
     skinProfile: {
       primaryGoal: 'barrier support',
       skinType: null,

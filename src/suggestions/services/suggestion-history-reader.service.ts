@@ -7,6 +7,7 @@ import { ApplicationLog } from '../../application-tracking/entities/application-
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
+import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import { User } from '../../users/entities/user.entity';
 import {
   SuggestionHistoryDayDto,
@@ -111,6 +112,11 @@ export class SuggestionHistoryReader {
       const appliedCount = countAppliedItems(log);
       const totalSteps = suggestion.steps?.length ?? 0;
       const day = getOrCreateHistoryDay(dayMap, suggestionDate);
+      day.environmentSummary ??=
+        suggestion.generation_context?.environment ?? null;
+      day.weatherSummary ??= buildWeatherSummary(
+        suggestion.generation_context?.environment ?? null,
+      );
       applyJournalMetadata(day, journalEntryByDate.get(suggestionDate));
       day.reactionFlagged =
         day.reactionFlagged || suggestion.has_reaction_signal;
@@ -198,7 +204,11 @@ export class SuggestionHistoryReader {
     return applyJournalMetadata(
       {
         date,
-        weatherSummary: null,
+        weatherSummary: buildWeatherSummary(
+          suggestions[0]?.generation_context?.environment ?? null,
+        ),
+        environmentSummary:
+          suggestions[0]?.generation_context?.environment ?? null,
         moodScore: null,
         hydrationTrend: null,
         reactionFlagged: suggestions.some(
@@ -302,4 +312,14 @@ export class SuggestionHistoryReader {
         Boolean(suggestion),
       );
   }
+}
+
+function buildWeatherSummary(environment: EnvironmentContextSummary | null) {
+  if (!environment) return null;
+  return {
+    temperatureCelsius: environment.temperatureCelsius,
+    uvIndex: environment.uvIndex,
+    humidity: environment.humidity,
+    conditionLabel: environment.conditionLabel,
+  };
 }

@@ -1,5 +1,6 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ProductCategory } from '../../shelf/shelf.types';
+import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
 import type {
   SuggestionGenerationInputs,
   SuggestionGenerationStepOutput,
@@ -77,6 +78,14 @@ export function deterministicExplanation(
         label: 'Evidence',
         detail: `${inputs.contextSummary.evidenceSources.length} trusted sources informed the safety check.`,
       },
+      ...(inputs.contextSummary.environment
+        ? [
+            {
+              label: 'Environment',
+              detail: environmentDetail(inputs.contextSummary.environment),
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -92,6 +101,9 @@ export function buildDeterministicGapRecommendations(
     (score) => score.category === ProductCategory.Moisturizer,
   );
   const gaps: SuggestionGapRecommendationJson[] = [];
+  const environmentPolicy = buildEnvironmentAdaptationPolicy(
+    inputs.contextSummary.environment,
+  );
 
   if (
     (inputs.daypart === SuggestionDaypart.Morning ||
@@ -124,10 +136,44 @@ export function buildDeterministicGapRecommendations(
     });
   }
 
+  for (const gap of environmentPolicy.gapRecommendations) {
+    const alreadyCovered = gaps.some(
+      (candidate) =>
+        candidate.ingredientOrCategory.toLowerCase() ===
+        gap.ingredientOrCategory.toLowerCase(),
+    );
+    if (!alreadyCovered) {
+      gaps.push({
+        ...gap,
+        budgetTier: null,
+        goalAlignment:
+          gap.goalAlignment ?? inputs.skinProfile?.primary_goal ?? null,
+      });
+    }
+  }
+
   return gaps.map((gap) => ({
     ...gap,
     sourceIds: mergeEvidenceSourceIds(gap.sourceIds),
   }));
+}
+
+function environmentDetail(
+  environment: NonNullable<
+    SuggestionGenerationInputs['contextSummary']['environment']
+  >,
+): string {
+  const parts = [
+    environment.conditionLabel,
+    environment.uvRisk !== 'unknown' ? `UV ${environment.uvRisk}` : null,
+    environment.humidityBand,
+    environment.airQualityRisk !== 'unknown'
+      ? `air ${environment.airQualityRisk}`
+      : null,
+  ].filter(Boolean);
+  return parts.length > 0
+    ? parts.join(' · ')
+    : 'Environment data was considered.';
 }
 
 function selectBaselineProducts(

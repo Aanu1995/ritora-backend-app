@@ -33,7 +33,10 @@ import {
   EmptyStringToUndefined,
 } from '../../common/dto/empty-string.transforms';
 import { SuggestionInstanceResponseDto } from './suggestion-instance-response.dto';
-import { TodaysSuggestionWeatherSummaryDto } from './todays-suggestion-response.dto';
+import {
+  TodaysSuggestionEnvironmentSummaryDto,
+  TodaysSuggestionWeatherSummaryDto,
+} from './todays-suggestion-response.dto';
 
 export class SuggestionHistoryListQueryDto {
   @ApiPropertyOptional({ enum: SUGGESTION_HISTORY_RANGES })
@@ -164,6 +167,12 @@ export class SuggestionHistoryDayDto {
 
   @ApiProperty({ nullable: true, type: TodaysSuggestionWeatherSummaryDto })
   weatherSummary: TodaysSuggestionWeatherSummaryDto | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: TodaysSuggestionEnvironmentSummaryDto,
+  })
+  environmentSummary: TodaysSuggestionEnvironmentSummaryDto | null;
 
   @ApiProperty({ nullable: true })
   moodScore: number | null;

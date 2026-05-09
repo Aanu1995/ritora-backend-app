@@ -24,9 +24,14 @@ import {
   ACTIVE_INGREDIENT_KEYS,
   ACTIVE_TOLERANCE_LEVELS,
   SKIN_PROFILE_ERROR_CODES,
+  SkinProfileSexAtBirth,
 } from './dto/skin-profile.constants';
 import { UpdateSkinProfileDto } from './dto/update-skin-profile.dto';
 import { SkinProfile } from './entities/skin-profile.entity';
+import {
+  computeSkinProfileCompleteness,
+  isHormonalContextApplicable,
+} from './skin-profile-completion';
 import {
   getSensitiveSkinProfileConsentTypes,
   hasSkinProfileHealthContextData,
@@ -44,35 +49,6 @@ type FindSkinProfileOptions = {
   accessPurpose?: UserDataAccessPurpose;
   actorType?: UserDataAccessActorType;
 };
-
-const HORMONAL_CONTEXT_COMPLETENESS_FIELD = (p: SkinProfile) =>
-  Object.keys(p.hormonal_context ?? {}).length > 0;
-
-const COMPLETENESS_FIELDS: Array<(profile: SkinProfile) => boolean> = [
-  (p) => Boolean(p.skin_type),
-  (p) => Boolean(p.fitzpatrick_phototype),
-  (p) => Boolean(p.skin_tone),
-  (p) => Boolean(p.ethnicity),
-  (p) => Boolean(p.primary_goal),
-  (p) => (p.current_concerns?.length ?? 0) > 0,
-  (p) => Boolean(p.skin_behavior?.sunscreen_habit),
-  (p) => Boolean(p.skin_behavior?.pih_tendency),
-  (p) => Boolean(p.skin_behavior?.melasma_tendency),
-  (p) => Boolean(p.skin_behavior?.keloid_tendency),
-  (p) => Object.keys(p.active_tolerances ?? {}).length > 0,
-  (p) => (p.reaction_history?.entries?.length ?? 0) > 0,
-  (p) => Boolean(p.lifestyle_context?.sleep || p.lifestyle_context?.stress),
-  (p) => Boolean(p.routine_preferences?.pace),
-  (p) => Boolean(p.budget_tier),
-  (p) => Boolean(p.pregnancy_status),
-  HORMONAL_CONTEXT_COMPLETENESS_FIELD,
-  (p) =>
-    Boolean(p.under_dermatologist_care) ||
-    (p.safety_context?.conditions?.length ?? 0) > 0 ||
-    (p.safety_context?.medications?.length ?? 0) > 0 ||
-    (p.safety_context?.recent_procedures?.length ?? 0) > 0 ||
-    Boolean(p.safety_context?.photosensitizing_other),
-];
 
 @Injectable()
 export class SkinProfileService {
@@ -172,7 +148,7 @@ export class SkinProfileService {
       lifestyle_context: dto.lifestyleContext ?? {},
       shopping_preferences: dto.shoppingPreferences ?? {},
       hormonal_context:
-        this.resolveSexAtBirth(dto) === 'male'
+        this.resolveSexAtBirth(dto) === SkinProfileSexAtBirth.Male
           ? {}
           : (dto.hormonalContext ?? {}),
     });
@@ -181,6 +157,7 @@ export class SkinProfileService {
     await this.syncLocationConsent(
       userId,
       this.hasLocationData(savedProfile.country_code, savedProfile.city),
+      dto.locationConsent,
     );
     await this.syncHealthContextConsent(
       userId,
@@ -264,7 +241,7 @@ export class SkinProfileService {
       profile.lifestyle_context = dto.lifestyleContext ?? {};
     if (dto.shoppingPreferences !== undefined)
       profile.shopping_preferences = dto.shoppingPreferences ?? {};
-    if (nextSexAtBirth === 'male') {
+    if (nextSexAtBirth === SkinProfileSexAtBirth.Male) {
       profile.hormonal_context = {};
     } else if (dto.hormonalContext !== undefined) {
       profile.hormonal_context = dto.hormonalContext ?? {};
@@ -274,6 +251,7 @@ export class SkinProfileService {
     await this.syncLocationConsent(
       userId,
       this.hasLocationData(savedProfile.country_code, savedProfile.city),
+      dto.locationConsent,
     );
     await this.syncHealthContextConsent(
       userId,
@@ -293,7 +271,7 @@ export class SkinProfileService {
       throw new NotFoundException('Skin profile not found');
     }
     await this.profileRepository.remove(profile);
-    await this.syncLocationConsent(userId, false);
+    await this.syncLocationConsent(userId, false, false);
     await this.syncHealthContextConsent(userId, false);
     await this.syncHormonalContextConsent(userId, false);
   }
@@ -330,25 +308,16 @@ export class SkinProfileService {
     return Boolean(await this.findActiveHealthContextConsent(userId));
   }
 
+  async hasActiveLocationContextConsent(userId: string): Promise<boolean> {
+    return Boolean(await this.findActiveLocationConsent(userId));
+  }
+
   async hasActiveHormonalContextConsent(userId: string): Promise<boolean> {
     return Boolean(await this.findActiveHormonalContextConsent(userId));
   }
 
   computeCompleteness(profile: SkinProfile): number {
-    if (!profile) {
-      return 0;
-    }
-
-    const fields = this.isHormonalContextApplicable(profile)
-      ? COMPLETENESS_FIELDS
-      : COMPLETENESS_FIELDS.filter(
-          (check) => check !== HORMONAL_CONTEXT_COMPLETENESS_FIELD,
-        );
-    const adjustedFilled = fields.reduce(
-      (count, check) => count + (check(profile) ? 1 : 0),
-      0,
-    );
-    return Math.round((adjustedFilled / fields.length) * 100);
+    return computeSkinProfileCompleteness(profile);
   }
 
   private hasLocationData(
@@ -438,7 +407,7 @@ export class SkinProfileService {
   }
 
   private isHormonalContextApplicable(profile: SkinProfile): boolean {
-    return profile.user?.sex_at_birth !== 'male';
+    return isHormonalContextApplicable(profile);
   }
 
   private resolveSexAtBirth(
@@ -457,7 +426,8 @@ export class SkinProfileService {
     existingProfile?: SkinProfile,
   ): void {
     if (
-      this.resolveSexAtBirth(dto, existingProfile) !== 'male' ||
+      this.resolveSexAtBirth(dto, existingProfile) !==
+        SkinProfileSexAtBirth.Male ||
       Object.keys(dto.hormonalContext ?? {}).length === 0
     ) {
       return;
@@ -472,6 +442,7 @@ export class SkinProfileService {
   private assertEssentialCreatePayload(dto: CreateSkinProfileDto): void {
     const routine = dto.routinePreferences ?? {};
     const behavior = dto.skinBehavior ?? {};
+    const lifestyle = dto.lifestyleContext ?? {};
     const concernDetails = dto.concernDetails?.per_concern ?? [];
     const hasConcernSeverity = (dto.currentConcerns ?? []).every((concern) =>
       concernDetails.some(
@@ -498,6 +469,8 @@ export class SkinProfileService {
       routine.non_comedogenic == null ? null : 'nonComedogenic',
       routine.sunscreen_filter,
       routine.sunscreen_finish,
+      lifestyle.water_hardness,
+      lifestyle.water_sensitivity,
       dto.budgetTier,
       dto.allowSmartPicks == null ? null : 'allowSmartPicks',
     ].filter((value) => !value);
@@ -604,6 +577,9 @@ export class SkinProfileService {
     }
 
     const activeConsent = await this.findActiveLocationConsent(userId);
+    if (activeConsent && dto.locationConsent === false) {
+      return;
+    }
     if (activeConsent) {
       return;
     }
@@ -696,11 +672,20 @@ export class SkinProfileService {
   private async syncLocationConsent(
     userId: string,
     hasLocationData: boolean,
+    explicitConsent: boolean | undefined,
   ): Promise<void> {
     const activeConsent = await this.findActiveLocationConsent(userId);
 
+    if (activeConsent && explicitConsent === false) {
+      await this.revokeLocationConsent(userId, activeConsent);
+      return;
+    }
+
     if (hasLocationData) {
       if (activeConsent) {
+        return;
+      }
+      if (explicitConsent !== true) {
         return;
       }
 
@@ -724,17 +709,22 @@ export class SkinProfileService {
       return;
     }
 
-    if (activeConsent) {
-      activeConsent.granted = false;
-      activeConsent.revoked_at = nowDate();
-      await this.consentsRepository.save(activeConsent);
-      await this.dataAccessLogService.recordConsentEvent(
-        userId,
-        UserConsentType.LocationProcessing,
-        UserDataAccessEventType.ConsentRevoked,
-        UserDataAccessPurpose.ConsentRevoke,
-      );
-    }
+    if (activeConsent) await this.revokeLocationConsent(userId, activeConsent);
+  }
+
+  private async revokeLocationConsent(
+    userId: string,
+    activeConsent: UserConsent,
+  ): Promise<void> {
+    activeConsent.granted = false;
+    activeConsent.revoked_at = nowDate();
+    await this.consentsRepository.save(activeConsent);
+    await this.dataAccessLogService.recordConsentEvent(
+      userId,
+      UserConsentType.LocationProcessing,
+      UserDataAccessEventType.ConsentRevoked,
+      UserDataAccessPurpose.ConsentRevoke,
+    );
   }
 
   private async syncHealthContextConsent(

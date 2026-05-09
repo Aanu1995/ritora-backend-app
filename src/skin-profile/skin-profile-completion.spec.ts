@@ -1,5 +1,6 @@
 import type { SkinProfile } from './entities/skin-profile.entity';
 import {
+  computeSkinProfileCompleteness,
   hasCompletedEssentialSkinProfile,
   skinProfileRequiredException,
 } from './skin-profile-completion';
@@ -33,6 +34,10 @@ function completeProfile(overrides: Partial<SkinProfile> = {}): SkinProfile {
       sunscreen_filter: 'hybrid',
       sunscreen_finish: 'natural',
     },
+    lifestyle_context: {
+      water_hardness: 'unknown',
+      water_sensitivity: 'none',
+    },
     budget_tier: 'mid',
     allow_smart_picks: true,
     ...overrides,
@@ -62,6 +67,38 @@ describe('skin profile completion helpers', () => {
         }),
       ),
     ).toBe(false);
+  });
+
+  it('rejects profiles without water context choices', () => {
+    expect(
+      hasCompletedEssentialSkinProfile(
+        completeProfile({ lifestyle_context: {} }),
+      ),
+    ).toBe(false);
+  });
+
+  it('scores essential completion separately from optional context', () => {
+    expect(computeSkinProfileCompleteness(completeProfile())).toBe(65);
+    expect(
+      computeSkinProfileCompleteness(
+        completeProfile({
+          active_tolerances: {
+            retinoids: { tolerance: 'tolerates_well' },
+          },
+          reaction_history: {
+            entries: [{ trigger: 'Retinoid' }],
+          },
+          pregnancy_status: 'not_pregnant',
+          safety_context: { conditions: ['eczema'] },
+          lifestyle_context: {
+            sleep: '6_to_8',
+            water_hardness: 'hard',
+            water_sensitivity: 'suspected',
+          },
+          hormonal_context: { cycle_pattern: 'regular' },
+        }),
+      ),
+    ).toBe(100);
   });
 
   it('uses a stable error code for prerequisite failures', () => {

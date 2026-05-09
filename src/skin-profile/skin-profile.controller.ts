@@ -53,7 +53,9 @@ import {
   SUNSCREEN_TOLERANCES,
   TENDENCY_LEVELS,
   TEXTURE_PREFERENCES,
+  WATER_HARDNESS_LEVELS,
   WATER_INTAKE_LEVELS,
+  WATER_SENSITIVITY_LEVELS,
 } from './dto/skin-profile.constants';
 import { SkinProfileService } from './skin-profile.service';
 
@@ -96,6 +98,8 @@ export class SkinProfileController {
       sleepLevels: [...SLEEP_LEVELS],
       stressLevels: [...STRESS_LEVELS],
       waterIntakeLevels: [...WATER_INTAKE_LEVELS],
+      waterHardnessLevels: [...WATER_HARDNESS_LEVELS],
+      waterSensitivityLevels: [...WATER_SENSITIVITY_LEVELS],
       dietFlags: [...DIET_FLAGS],
       smokingLevels: [...SMOKING_LEVELS],
       alcoholLevels: [...ALCOHOL_LEVELS],
@@ -128,6 +132,8 @@ export class SkinProfileController {
     }
     return SkinProfileResponseDto.fromEntity(profile, {
       completeness: this.skinProfileService.computeCompleteness(profile),
+      hasLocationContextConsent:
+        await this.skinProfileService.hasActiveLocationContextConsent(userId),
       hasHealthContextConsent:
         await this.skinProfileService.hasActiveHealthContextConsent(userId),
       hasHormonalContextConsent:
@@ -144,6 +150,8 @@ export class SkinProfileController {
     const profile = await this.skinProfileService.create(userId, dto);
     return SkinProfileResponseDto.fromEntity(profile, {
       completeness: this.skinProfileService.computeCompleteness(profile),
+      hasLocationContextConsent:
+        await this.skinProfileService.hasActiveLocationContextConsent(userId),
       hasHealthContextConsent:
         await this.skinProfileService.hasActiveHealthContextConsent(userId),
       hasHormonalContextConsent:
@@ -160,6 +168,8 @@ export class SkinProfileController {
     const profile = await this.skinProfileService.update(userId, dto);
     return SkinProfileResponseDto.fromEntity(profile, {
       completeness: this.skinProfileService.computeCompleteness(profile),
+      hasLocationContextConsent:
+        await this.skinProfileService.hasActiveLocationContextConsent(userId),
       hasHealthContextConsent:
         await this.skinProfileService.hasActiveHealthContextConsent(userId),
       hasHormonalContextConsent:
@@ -176,6 +186,8 @@ export class SkinProfileController {
     const profile = await this.skinProfileService.clearHealthContext(userId);
     return SkinProfileResponseDto.fromEntity(profile, {
       completeness: this.skinProfileService.computeCompleteness(profile),
+      hasLocationContextConsent:
+        await this.skinProfileService.hasActiveLocationContextConsent(userId),
       hasHealthContextConsent:
         await this.skinProfileService.hasActiveHealthContextConsent(userId),
       hasHormonalContextConsent:
@@ -192,6 +204,8 @@ export class SkinProfileController {
     const profile = await this.skinProfileService.clearHormonalContext(userId);
     return SkinProfileResponseDto.fromEntity(profile, {
       completeness: this.skinProfileService.computeCompleteness(profile),
+      hasLocationContextConsent:
+        await this.skinProfileService.hasActiveLocationContextConsent(userId),
       hasHealthContextConsent:
         await this.skinProfileService.hasActiveHealthContextConsent(userId),
       hasHormonalContextConsent:

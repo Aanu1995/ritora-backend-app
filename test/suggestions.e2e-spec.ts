@@ -1,6 +1,8 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { ENVIRONMENT_PROVIDER } from '../src/environment-intelligence/environment-provider.interface';
+import { EnvironmentProviderName } from '../src/environment-intelligence/environment-intelligence.constants';
 import { SlotModeValue } from '../src/schedule/dto/schedule.constants';
 import { ProductCategory } from '../src/shelf/shelf.types';
 import { SuggestionGenerationJob } from '../src/suggestions/entities/suggestion-generation-job.entity';
@@ -105,11 +107,39 @@ describe('Suggestions on-demand (e2e)', () => {
       buildOutput(inputs),
     ),
   };
+  const environmentProvider = {
+    resolveLocation: jest.fn().mockResolvedValue({
+      provider: EnvironmentProviderName.OpenMeteo,
+      providerLocationId: 'test-stockholm',
+      label: 'Stockholm, Sweden',
+      latitude: 59.33,
+      longitude: 18.06,
+      timeZone: 'Europe/Stockholm',
+      confidence: 0.9,
+    }),
+    fetchSnapshot: jest.fn().mockResolvedValue({
+      provider: EnvironmentProviderName.OpenMeteo,
+      fetchedAt: '2026-05-06T06:00:00.000Z',
+      temperatureCelsius: 15,
+      humidity: 45,
+      uvIndex: 4,
+      airQualityIndex: 24,
+      pm25: 6,
+      pm10: 12,
+      pollenRisk: null,
+      conditionLabel: 'Cloudy',
+      seasonalTrend: {
+        humidityDropping: false,
+        uvRising: false,
+      },
+    }),
+  };
 
   beforeAll(async () => {
     mockMail = new MockMailService();
     app = await createTestApp(mockMail, [
       { provider: SuggestionAiGenerator, useValue: aiGenerator },
+      { provider: ENVIRONMENT_PROVIDER, useValue: environmentProvider },
     ]);
 
     await request(app.getHttpServer())

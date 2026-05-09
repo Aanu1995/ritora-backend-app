@@ -75,24 +75,24 @@ function historicalSlotFromSuggestion(
   userId: string,
   suggestion: SuggestionInstance,
 ): ScheduleSlot {
-  return {
-    id: historicalSlotIdForSuggestion(suggestion),
-    user_id: userId,
-    day_of_week: mapDayOfWeekShort(
-      'UTC',
-      new Date(`${toDateOnlyString(suggestion.target_date)}T00:00:00.000Z`),
-    ),
-    slot_time: toTimeOnlyString(suggestion.target_time),
-    mode:
-      suggestion.mode === SuggestionMode.Manual
-        ? SlotModeValue.Manual
-        : SlotModeValue.Ai,
-    slot_notes: null,
-    specialist_provider_name: null,
-    specialist_clinic_name: null,
-    specialist_active_since: null,
-    specialist_safety_notes: null,
-    deleted_at: null,
-    steps: [],
-  } as unknown as ScheduleSlot;
+  const slot = new ScheduleSlot();
+  slot.id = historicalSlotIdForSuggestion(suggestion);
+  slot.user_id = userId;
+  slot.day_of_week = mapDayOfWeekShort(
+    'UTC',
+    new Date(`${toDateOnlyString(suggestion.target_date)}T00:00:00.000Z`),
+  );
+  slot.slot_time = toTimeOnlyString(suggestion.target_time);
+  slot.mode =
+    suggestion.mode === SuggestionMode.Manual
+      ? SlotModeValue.Manual
+      : SlotModeValue.Ai;
+  slot.slot_notes = null;
+  slot.specialist_provider_name = null;
+  slot.specialist_clinic_name = null;
+  slot.specialist_active_since = null;
+  slot.specialist_safety_notes = null;
+  slot.deleted_at = null;
+  slot.steps = [];
+  return slot;
 }

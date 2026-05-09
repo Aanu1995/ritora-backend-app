@@ -1,5 +1,6 @@
 import { FindOptionsWhere, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { ulid } from 'ulid';
+import { isPostgresUniqueConstraintError } from '../../common/utils/database-errors';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionRequestSource } from '../suggestions.constants';
@@ -30,7 +31,7 @@ export async function insertSuggestionGenerationJob(
     await repo.insert(buildJobRow(draft));
     return true;
   } catch (error) {
-    if (isUniqueConstraintError(error)) return false;
+    if (isPostgresUniqueConstraintError(error)) return false;
     throw error;
   }
 }
@@ -129,13 +130,4 @@ function suggestionInstanceIdForSource(
   return requestSource === SuggestionRequestSource.OnDemand
     ? (draft.suggestion_instance_id ?? null)
     : null;
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === '23505'
-  );
 }

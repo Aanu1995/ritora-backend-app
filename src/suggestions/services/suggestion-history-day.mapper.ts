@@ -53,6 +53,7 @@ export function emptyHistoryDay(date: string): SuggestionHistoryDayDto {
   return {
     date,
     weatherSummary: null,
+    environmentSummary: null,
     moodScore: null,
     hydrationTrend: null,
     reactionFlagged: false,

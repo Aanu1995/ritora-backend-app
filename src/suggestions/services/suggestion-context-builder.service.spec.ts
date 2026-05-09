@@ -11,6 +11,19 @@ import {
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { MatchingService } from '../../ingredients/matching.service';
+import {
+  EnvironmentAirQualityRisk,
+  EnvironmentConfidence,
+  EnvironmentHumidityBand,
+  EnvironmentProviderName,
+  EnvironmentSeason,
+  EnvironmentSignalKind,
+  EnvironmentStatus,
+  EnvironmentTemperatureBand,
+  EnvironmentUvRisk,
+  EnvironmentWaterHardness,
+  EnvironmentWaterSensitivity,
+} from '../../environment-intelligence/environment-intelligence.constants';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
 import { SuggestionEvidenceSourceId } from '../suggestions.constants';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
@@ -49,6 +62,7 @@ describe('SuggestionContextBuilder', () => {
       ],
       recentJournalEntries: [reactionJournalEntry()],
       recentApplications: [applicationLog()],
+      environment: highUvDryEnvironment(),
     });
 
     expect(summary.skinProfile).toEqual(
@@ -82,7 +96,16 @@ describe('SuggestionContextBuilder', () => {
         'avoid_new_strong_actives',
         'daytime_spf_available',
         'space_strong_actives',
+        'environment_high_uv',
+        'environment_barrier_support',
       ]),
+    );
+    expect(summary.environment).toEqual(
+      expect.objectContaining({
+        uvRisk: EnvironmentUvRisk.High,
+        humidityBand: EnvironmentHumidityBand.Dry,
+        transitionSignals: [EnvironmentSignalKind.SeasonalTransitionUvRising],
+      }),
     );
     expect(summary.governance).toEqual(
       expect.objectContaining({
@@ -109,9 +132,13 @@ describe('SuggestionContextBuilder', () => {
           productId: 'spf-1',
           dataQuality: 'partial',
           activeTags: ['spf'],
-          evidenceSourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+          evidenceSourceIds: expect.arrayContaining([
+            SuggestionEvidenceSourceId.AadSunscreenSelection,
+            SuggestionEvidenceSourceId.OpenMeteoWeather,
+          ]),
           suitabilityReasons: expect.arrayContaining([
             'daytime sun protection fit',
+            'high UV fit',
           ]),
         }),
       ]),
@@ -122,6 +149,7 @@ describe('SuggestionContextBuilder', () => {
           productId: 'retinoid-1',
           sourceIds: expect.arrayContaining([
             SuggestionEvidenceSourceId.AadRetinoidRetinol,
+            SuggestionEvidenceSourceId.OpenMeteoWeather,
           ]),
         }),
       ]),
@@ -251,6 +279,39 @@ function emptyInput() {
     routineSteps: [],
     recentJournalEntries: [],
     recentApplications: [],
+    environment: null,
+  };
+}
+
+function highUvDryEnvironment() {
+  return {
+    status: EnvironmentStatus.Available,
+    provider: EnvironmentProviderName.OpenMeteo,
+    generatedAt: '2026-04-29T06:00:00.000Z',
+    locationPersonalized: true,
+    season: EnvironmentSeason.Spring,
+    temperatureCelsius: 18,
+    temperatureBand: EnvironmentTemperatureBand.Mild,
+    humidity: 34,
+    humidityBand: EnvironmentHumidityBand.Dry,
+    uvIndex: 7,
+    uvRisk: EnvironmentUvRisk.High,
+    airQualityIndex: 24,
+    airQualityRisk: EnvironmentAirQualityRisk.Fair,
+    pm25: 6,
+    pm10: 12,
+    pollenRisk: null,
+    conditionLabel: 'Clear',
+    waterHardness: EnvironmentWaterHardness.Moderate,
+    waterSensitivity: EnvironmentWaterSensitivity.None,
+    climateSensitivities: ['dry_air'],
+    transitionSignals: [EnvironmentSignalKind.SeasonalTransitionUvRising],
+    confidence: EnvironmentConfidence.Provider,
+    stale: false,
+    sourceIds: [
+      SuggestionEvidenceSourceId.OpenMeteoWeather,
+      SuggestionEvidenceSourceId.OpenMeteoAirQuality,
+    ],
   };
 }
 

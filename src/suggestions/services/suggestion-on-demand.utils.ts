@@ -8,12 +8,6 @@ export function normalizeRequestId(
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function isUniqueConstraintError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error
-    ? (error as { code?: unknown }).code === '23505'
-    : false;
-}
-
 export function buildRequestContext(
   payload: CreateOnDemandSuggestionDto,
   now: Date,

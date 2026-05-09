@@ -21,6 +21,7 @@ const mockService = () => ({
   clearHormonalContext: jest.fn(),
   computeCompleteness: jest.fn().mockReturnValue(0),
   hasActiveHealthContextConsent: jest.fn().mockResolvedValue(false),
+  hasActiveLocationContextConsent: jest.fn().mockResolvedValue(false),
   hasActiveHormonalContextConsent: jest.fn().mockResolvedValue(false),
 });
 

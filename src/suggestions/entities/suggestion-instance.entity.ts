@@ -12,6 +12,7 @@ import {
 } from 'typeorm';
 import { ulid } from 'ulid';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
+import { EnvironmentSnapshot } from '../../environment-intelligence/entities/environment-snapshot.entity';
 import { encryptedJsonFieldTransformer } from '../../skin-profile/skin-profile-field-encryption';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
@@ -174,6 +175,9 @@ export class SuggestionInstance {
   @Column({ type: 'varchar', length: 26, nullable: true })
   supersedes_id: string | null;
 
+  @Column({ type: 'varchar', length: 26, nullable: true })
+  environment_snapshot_id: string | null;
+
   @Column({ type: 'text', nullable: true })
   ai_error: string | null;
 
@@ -193,6 +197,13 @@ export class SuggestionInstance {
   @ManyToOne(() => ScheduleSlot, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'slot_id' })
   slot: ScheduleSlot | null;
+
+  @ManyToOne(() => EnvironmentSnapshot, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'environment_snapshot_id' })
+  environment_snapshot: EnvironmentSnapshot | null;
 
   @OneToMany(() => SuggestionStep, (step) => step.suggestion_instance)
   steps: SuggestionStep[];

@@ -77,6 +77,16 @@ export const SEX_AT_BIRTH = [
   'prefer_not_to_say',
 ] as const;
 
+export const SkinProfileSexAtBirth = {
+  Female: 'female',
+  Male: 'male',
+  Intersex: 'intersex',
+  PreferNotToSay: 'prefer_not_to_say',
+} as const;
+
+export type SkinProfileSexAtBirth =
+  (typeof SkinProfileSexAtBirth)[keyof typeof SkinProfileSexAtBirth];
+
 export const SKIN_CONDITIONS = [
   'rosacea',
   'eczema',
@@ -208,6 +218,38 @@ export const STRESS_LEVELS = ['low', 'moderate', 'high'] as const;
 export const SLEEP_LEVELS = ['under_6', '6_to_8', 'over_8'] as const;
 
 export const WATER_INTAKE_LEVELS = ['low', 'moderate', 'high'] as const;
+
+export const WATER_HARDNESS_LEVELS = [
+  'unknown',
+  'soft',
+  'moderate',
+  'hard',
+] as const;
+
+export const SkinProfileWaterHardness = {
+  Unknown: 'unknown',
+  Soft: 'soft',
+  Moderate: 'moderate',
+  Hard: 'hard',
+} as const;
+
+export type SkinProfileWaterHardness =
+  (typeof SkinProfileWaterHardness)[keyof typeof SkinProfileWaterHardness];
+
+export const WATER_SENSITIVITY_LEVELS = [
+  'none',
+  'suspected',
+  'confirmed',
+] as const;
+
+export const SkinProfileWaterSensitivity = {
+  None: 'none',
+  Suspected: 'suspected',
+  Confirmed: 'confirmed',
+} as const;
+
+export type SkinProfileWaterSensitivity =
+  (typeof SkinProfileWaterSensitivity)[keyof typeof SkinProfileWaterSensitivity];
 
 export const DIET_FLAGS = [
   'high_sugar',

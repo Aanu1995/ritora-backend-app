@@ -88,6 +88,9 @@ export interface LifestyleContext {
   sleep?: string;
   stress?: string;
   water_intake?: string;
+  water_hardness?: string;
+  water_sensitivity?: string;
+  water_reaction_notes?: string | null;
   diet_flags?: string[];
   smoking?: string;
   alcohol?: string;

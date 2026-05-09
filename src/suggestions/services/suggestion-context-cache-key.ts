@@ -12,12 +12,6 @@ export function buildSuggestionContextCacheKey(
     .slice(0, 32);
 }
 
-export function isUniqueConstraintError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error
-    ? (error as { code?: unknown }).code === '23505'
-    : false;
-}
-
 function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
   return {
     targetDate: inputs.targetDate,
@@ -81,6 +75,21 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
           ]),
       ]),
     routineBreaks: routineBreakCacheParts(inputs.recentRoutineBreaks ?? []),
+    environment: inputs.environment
+      ? {
+          generatedAt: inputs.environment.generatedAt,
+          status: inputs.environment.status,
+          provider: inputs.environment.provider,
+          season: inputs.environment.season,
+          temperatureBand: inputs.environment.temperatureBand,
+          humidityBand: inputs.environment.humidityBand,
+          uvRisk: inputs.environment.uvRisk,
+          airQualityRisk: inputs.environment.airQualityRisk,
+          waterHardness: inputs.environment.waterHardness,
+          waterSensitivity: inputs.environment.waterSensitivity,
+          transitionSignals: inputs.environment.transitionSignals,
+        }
+      : null,
     aiPersonalizationAllowed: inputs.aiPersonalizationAllowed ?? true,
     aiPersonalizationBlockedReason:
       inputs.aiPersonalizationBlockedReason ?? null,

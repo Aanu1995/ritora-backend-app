@@ -3,6 +3,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { ApplicationLogItem } from '../application-tracking/entities/application-log-item.entity';
 import { IngredientsModule } from '../ingredients/ingredients.module';
+import { EnvironmentIntelligenceModule } from '../environment-intelligence/environment-intelligence.module';
+import { EnvironmentLocationCache } from '../environment-intelligence/entities/environment-location-cache.entity';
+import { EnvironmentSnapshot } from '../environment-intelligence/entities/environment-snapshot.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
@@ -36,6 +39,7 @@ import { SuggestionHistoryExportService } from './services/suggestion-history-ex
 import { SuggestionHistoryReader } from './services/suggestion-history-reader.service';
 import { SuggestionObservabilityService } from './services/suggestion-observability.service';
 import { SuggestionOnDemandService } from './services/suggestion-on-demand.service';
+import { SuggestionRegenerationService } from './services/suggestion-regeneration.service';
 import { SuggestionRetentionService } from './services/suggestion-retention.service';
 import { RoutineBreakService } from './services/routine-break.service';
 import { SuggestionScheduler } from './services/suggestion-scheduler.service';
@@ -56,6 +60,8 @@ import { SuggestionsController } from './suggestions.controller';
       SuggestionGapAction,
       SuggestionRecordingReminderSnooze,
       SuggestionReactionOverride,
+      EnvironmentLocationCache,
+      EnvironmentSnapshot,
       RoutineBreak,
       ScheduleSlot,
       RoutineStep,
@@ -71,6 +77,7 @@ import { SuggestionsController } from './suggestions.controller';
       UserConsent,
     ]),
     IngredientsModule,
+    EnvironmentIntelligenceModule,
     NotificationsModule,
     UsersModule,
   ],
@@ -90,6 +97,7 @@ import { SuggestionsController } from './suggestions.controller';
     SuggestionReminderWorker,
     SuggestionObservabilityService,
     SuggestionOnDemandService,
+    SuggestionRegenerationService,
     SuggestionRetentionService,
     RoutineBreakService,
     SuggestionTodayActionService,
