@@ -38,6 +38,7 @@ import {
 import {
   NOTIFICATION_PAGE_DEFAULT_LIMIT,
   NOTIFICATION_PAGE_MAX_LIMIT,
+  NOTIFICATION_RETENTION_SWEEP_INTERVAL_MS,
   PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
 } from './notifications.constants';
 import {
@@ -57,6 +58,7 @@ import {
   requiresNotificationPush,
   runPhotoReminderSweep,
   runProductExpiryAlertSweep,
+  runReadNotificationRetentionSweep,
   runScheduledNotificationSweep,
   scheduleAfterQuietHours,
 } from './notifications.service.helpers';
@@ -72,6 +74,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   private reminderTimer: NodeJS.Timeout | null = null;
   private scheduledTimer: NodeJS.Timeout | null = null;
   private productExpiryTimer: NodeJS.Timeout | null = null;
+  private readRetentionTimer: NodeJS.Timeout | null = null;
 
   constructor(
     @InjectRepository(InAppNotification)
@@ -132,6 +135,16 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       60 * 60 * 1000,
     );
     this.productExpiryTimer.unref();
+    this.readRetentionTimer = setInterval(() => {
+      void this.runReadNotificationRetentionSweep(new Date()).catch((error) => {
+        this.logger.warn(
+          `Read notification retention sweep failed: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      });
+    }, NOTIFICATION_RETENTION_SWEEP_INTERVAL_MS);
+    this.readRetentionTimer.unref();
   }
 
   onModuleDestroy(): void {
@@ -146,6 +159,10 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (this.productExpiryTimer) {
       clearInterval(this.productExpiryTimer);
       this.productExpiryTimer = null;
+    }
+    if (this.readRetentionTimer) {
+      clearInterval(this.readRetentionTimer);
+      this.readRetentionTimer = null;
     }
   }
 
@@ -356,6 +373,15 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         ensurePreferences: (userId) => this.ensurePreferences(userId),
         dispatchWithPreferences: (params, prefs, user) =>
           this.dispatchWithPreferences(params, prefs, user),
+      },
+      now,
+    );
+  }
+
+  async runReadNotificationRetentionSweep(now: Date = new Date()) {
+    return runReadNotificationRetentionSweep(
+      {
+        notifications: this.notifications,
       },
       now,
     );

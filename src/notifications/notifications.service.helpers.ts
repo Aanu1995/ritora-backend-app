@@ -1,4 +1,12 @@
-import { Between, In, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import {
+  Between,
+  In,
+  LessThan,
+  LessThanOrEqual,
+  MoreThan,
+  Not,
+  Repository,
+} from 'typeorm';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import {
   diffShelfCalendarDays,
@@ -18,6 +26,8 @@ import {
   PRODUCT_EXPIRY_NOTICE_DAYS_MAX,
   PRODUCT_EXPIRY_NOTICE_DAYS_MIN,
   PRODUCT_EXPIRY_SWEEP_BATCH_SIZE,
+  NOTIFICATION_READ_RETENTION_DAYS,
+  NOTIFICATION_SAFETY_READ_RETENTION_DAYS,
 } from './notifications.constants';
 import {
   InAppNotification,
@@ -62,10 +72,20 @@ const PHOTO_REMINDER_SWEEP_BATCH_SIZE = 1000;
 const SCHEDULED_NOTIFICATION_BATCH_SIZE = 100;
 const SCHEDULED_NOTIFICATION_MAX_ATTEMPTS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const LONG_RETENTION_NOTIFICATION_KINDS: readonly NotificationKind[] = [
+  'reaction_detected',
+  'simplification_started',
+  'doctor_referral',
+  'product_expired',
+];
 
 export type ProductExpiryAlertSweepResult = {
   processed: number;
   dispatched: number;
+};
+
+export type NotificationRetentionSweepResult = {
+  deleted: number;
 };
 
 export type ProductExpiryDispatchInput = {
@@ -259,6 +279,32 @@ export async function runProductExpiryAlertSweep(
     }
     lastProductId = products[products.length - 1]?.id ?? lastProductId;
   }
+}
+
+export async function runReadNotificationRetentionSweep(
+  params: {
+    notifications: Repository<InAppNotification>;
+  },
+  now: Date,
+): Promise<NotificationRetentionSweepResult> {
+  const standardCutoff = subtractDays(now, NOTIFICATION_READ_RETENTION_DAYS);
+  const safetyCutoff = subtractDays(
+    now,
+    NOTIFICATION_SAFETY_READ_RETENTION_DAYS,
+  );
+
+  const standard = await params.notifications.delete({
+    kind: Not(In([...LONG_RETENTION_NOTIFICATION_KINDS])),
+    read_at: LessThan(standardCutoff),
+  });
+  const safety = await params.notifications.delete({
+    kind: In([...LONG_RETENTION_NOTIFICATION_KINDS]),
+    read_at: LessThan(safetyCutoff),
+  });
+
+  return {
+    deleted: (standard.affected ?? 0) + (safety.affected ?? 0),
+  };
 }
 
 export function buildProductExpiryDispatchParams({
@@ -516,6 +562,10 @@ export function normalizeProductExpiryNoticeDays(
 export function clampInteger(value: number, min: number, max: number): number {
   if (!Number.isInteger(value)) return min;
   return Math.max(min, Math.min(max, value));
+}
+
+function subtractDays(value: Date, days: number): Date {
+  return new Date(value.getTime() - days * DAY_MS);
 }
 
 export function isUniqueConstraintError(error: unknown): boolean {

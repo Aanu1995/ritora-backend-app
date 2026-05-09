@@ -19,6 +19,7 @@ import { PushNotificationsService } from './push-notifications.service';
 const repo = () => ({
   create: jest.fn((data) => data),
   createQueryBuilder: jest.fn(),
+  delete: jest.fn().mockResolvedValue({ affected: 0 }),
   find: jest.fn().mockResolvedValue([]),
   findOne: jest.fn().mockResolvedValue(null),
   save: jest.fn(async (data) => data),
@@ -307,6 +308,33 @@ describe('NotificationsService', () => {
     expect(notificationQb.take).toHaveBeenCalledWith(3);
     expect(result.items.map((item) => item.id)).toEqual(['unread-1', 'read-1']);
     expect(result.nextCursor).toEqual(expect.any(String));
+  });
+
+  it('purges old read notifications without touching unread or recent rows', async () => {
+    notifications.delete
+      .mockResolvedValueOnce({ affected: 4 })
+      .mockResolvedValueOnce({ affected: 1 });
+
+    const result = await service.runReadNotificationRetentionSweep(
+      new Date('2026-05-10T12:00:00.000Z'),
+    );
+
+    expect(result).toEqual({ deleted: 5 });
+    expect(notifications.delete).toHaveBeenCalledTimes(2);
+    expect(notifications.delete).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        kind: expect.any(Object),
+        read_at: expect.any(Object),
+      }),
+    );
+    expect(notifications.delete).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        kind: expect.any(Object),
+        read_at: expect.any(Object),
+      }),
+    );
   });
 
   it('dispatches in-app notifications and attempts email when enabled', async () => {

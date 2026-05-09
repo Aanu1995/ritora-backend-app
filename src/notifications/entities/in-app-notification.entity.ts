@@ -37,6 +37,9 @@ const encryptedPayloadTransformer = encryptedJsonFieldTransformer<Record<
   'read_at',
   'created_at',
 ])
+@Index('IDX_in_app_notifications_read_retention', ['kind', 'read_at'], {
+  where: '"read_at" IS NOT NULL',
+})
 @Index('IDX_in_app_notifications_user_unread', ['user_id'], {
   where: '"read_at" IS NULL',
 })

@@ -101,6 +101,22 @@ describe('SuggestionsController', () => {
     );
   });
 
+  it('accepts the x-timezone header alias used by authenticated clients', async () => {
+    service.getTodaysSuggestion.mockResolvedValue({
+      date: '2026-05-04',
+    } as never);
+
+    await controller.getTodaysSuggestion(
+      user(),
+      requestWithTimeZone(' Europe/Stockholm ', 'x-timezone'),
+    );
+
+    expect(service.getTodaysSuggestion).toHaveBeenCalledWith(
+      user(),
+      'Europe/Stockholm',
+    );
+  });
+
   it('uses null for missing timezone headers and delegates single suggestion actions', async () => {
     service.getTodaysSuggestion.mockResolvedValue({
       date: '2026-05-04',
@@ -317,10 +333,13 @@ function user(): User {
   return { id: 'user-1' } as User;
 }
 
-function requestWithTimeZone(value: string | null): Request {
+function requestWithTimeZone(
+  value: string | null,
+  headerName = 'x-time-zone',
+): Request {
   return {
     header: jest.fn((name: string) =>
-      name === 'x-time-zone' ? value : undefined,
+      name === headerName ? value : undefined,
     ),
   } as unknown as Request;
 }

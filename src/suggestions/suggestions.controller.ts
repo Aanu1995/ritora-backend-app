@@ -14,6 +14,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { readTimeZoneHeaderFromRequest } from '../common/timezone/timezone-header.utils';
 import { User } from '../users/entities/user.entity';
 import {
   SuggestionAiConsentResponseDto,
@@ -264,9 +265,7 @@ export class SuggestionsController {
 }
 
 function requestTimeZone(request: Request): string | null {
-  const headerValue = request.header('x-time-zone');
-  if (typeof headerValue !== 'string') return null;
-  return headerValue.trim() || null;
+  return readTimeZoneHeaderFromRequest(request);
 }
 
 function toAiConsentResponse(decision: {
