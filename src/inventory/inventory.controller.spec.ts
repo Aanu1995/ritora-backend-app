@@ -1,5 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
+import {
+  DataProvenance,
+  ProductCategory,
+  ShelfStatus,
+} from '../shelf/shelf.types';
 import { InventoryController } from './inventory.controller';
 import { InventoryService } from './inventory.service';
 
@@ -7,7 +12,9 @@ const mockInventoryService = () => ({
   getStats: jest.fn(),
   list: jest.fn(),
   create: jest.fn(),
+  createWithProductImage: jest.fn(),
   uploadProductImage: jest.fn(),
+  uploadAndAttachProductImage: jest.fn(),
   archiveMany: jest.fn(),
   restoreMany: jest.fn(),
   markFinishedMany: jest.fn(),
@@ -30,6 +37,52 @@ describe('InventoryController', () => {
       inventoryService as unknown as InventoryService,
     );
   });
+
+  function createMultipartProductPayload(): string {
+    return JSON.stringify({
+      identity: {
+        brand: 'CeraVe',
+        name: 'Serum',
+        category: ProductCategory.Serum,
+        barcode: null,
+        imageUrls: [],
+        sizeMl: 30,
+        description: 'A gentle serum.',
+        benefits: ['smooths'],
+        suitedFor: ['dry skin'],
+        inciIngredients: ['Aqua'],
+        inciLastConfirmedAt: null,
+      },
+      guidance: {
+        applicationMethod: null,
+        quantity: null,
+        steps: ['Apply once daily.'],
+        cautions: [],
+        waitMinutes: null,
+      },
+      manufacturer: {
+        brand: 'CeraVe',
+        parentCompany: null,
+        countryOfOrigin: null,
+        countryOfManufacture: null,
+        supportEmail: null,
+        productUrl: null,
+        websiteUrl: null,
+      },
+      userFields: {
+        openedAt: null,
+        expiresAt: null,
+        periodAfterOpeningMonths: 12,
+        pricePaid: null,
+        pricePaidCurrency: null,
+        purchasedFrom: null,
+        personalNotes: null,
+        preferredTimeOfDay: null,
+      },
+      status: ShelfStatus.Active,
+      provenance: DataProvenance.PhotoLookup,
+    });
+  }
 
   it('forwards stats, list, and create requests to the service', async () => {
     const stats = { all: 2, active: 1 };
@@ -80,8 +133,68 @@ describe('InventoryController', () => {
     await expect(controller.uploadImage('user-1', undefined)).rejects.toThrow(
       BadRequestException,
     );
-    expect(inventoryService.uploadProductImage).toHaveBeenCalledWith(
+    expect(inventoryService.uploadProductImage).toHaveBeenCalledWith(file);
+  });
+
+  it('creates products with a draft-local image only after final save', async () => {
+    const file = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      size: 10,
+      buffer: Buffer.from('image'),
+    } as UploadedCatalogueImage;
+    const product = { id: 'product-1' };
+    inventoryService.createWithProductImage.mockResolvedValue(product);
+
+    await expect(
+      controller.createWithImage(
+        'user-1',
+        file,
+        createMultipartProductPayload(),
+      ),
+    ).resolves.toBe(product);
+    expect(() =>
+      controller.createWithImage(
+        'user-1',
+        undefined,
+        createMultipartProductPayload(),
+      ),
+    ).toThrow(BadRequestException);
+    expect(() => controller.createWithImage('user-1', file, undefined)).toThrow(
+      BadRequestException,
+    );
+
+    expect(inventoryService.createWithProductImage).toHaveBeenCalledWith(
       'user-1',
+      expect.objectContaining({
+        identity: expect.objectContaining({
+          brand: 'CeraVe',
+          imageUrls: [],
+        }),
+      }),
+      file,
+    );
+  });
+
+  it('uploads and attaches product images to existing products', async () => {
+    const file = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      size: 10,
+      buffer: Buffer.from('image'),
+    } as UploadedCatalogueImage;
+    const product = { id: 'product-1' };
+    inventoryService.uploadAndAttachProductImage.mockResolvedValue(product);
+
+    await expect(
+      controller.uploadImageToProduct('user-1', 'product-1', file),
+    ).resolves.toBe(product);
+    await expect(
+      controller.uploadImageToProduct('user-1', 'product-1', undefined),
+    ).rejects.toThrow(BadRequestException);
+    expect(inventoryService.uploadAndAttachProductImage).toHaveBeenCalledWith(
+      'user-1',
+      'product-1',
       file,
     );
   });

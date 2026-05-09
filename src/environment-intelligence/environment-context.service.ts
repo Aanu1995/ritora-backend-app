@@ -12,7 +12,9 @@ import {
 } from '../users/user-consent.constants';
 import {
   ENVIRONMENT_CONTEXT_CACHE_TTL_MINUTES,
+  ENVIRONMENT_DEGRADED_CONTEXT_CACHE_TTL_MINUTES,
   ENVIRONMENT_LOCATION_CACHE_TTL_DAYS,
+  ENVIRONMENT_PARTIAL_CONTEXT_CACHE_TTL_MINUTES,
   ENVIRONMENT_WATER_HARDNESS_VALUES,
   ENVIRONMENT_WATER_SENSITIVITY_VALUES,
   EnvironmentConfidence,
@@ -89,7 +91,7 @@ export class EnvironmentContextService {
     });
     if (
       cached?.summary &&
-      cachedSummaryMatchesRequest(cached.summary, input, canUseLocation)
+      cachedSummaryMatchesRequest(cached.summary, input, canUseLocation, now)
     ) {
       return { summary: cached.summary, snapshot: cached };
     }
@@ -211,10 +213,7 @@ export class EnvironmentContextService {
     summary: EnvironmentContextSummary,
     locationCacheId: string | null = null,
   ): Promise<EnvironmentBuildResult> {
-    const expiresAt = new Date(
-      (input.now ?? new Date()).getTime() +
-        ENVIRONMENT_CONTEXT_CACHE_TTL_MINUTES * 60_000,
-    );
+    const expiresAt = buildSnapshotExpiry(input.now ?? new Date(), summary);
     const snapshot = await this.snapshotRepo.save(
       this.snapshotRepo.create({
         user_id: input.userId,
@@ -374,9 +373,11 @@ function cachedSummaryMatchesRequest(
   summary: EnvironmentContextSummary,
   input: EnvironmentBuildInput,
   canUseLocation: boolean,
+  now: Date,
 ): boolean {
   const current = waterAndClimate(input.profile);
   return (
+    isReusableSummary(summary, canUseLocation, now) &&
     summary.locationPersonalized === canUseLocation &&
     summary.waterHardness === current.waterHardness &&
     summary.waterSensitivity === current.waterSensitivity &&
@@ -384,6 +385,76 @@ function cachedSummaryMatchesRequest(
       summary.climateSensitivities,
       current.climateSensitivities,
     )
+  );
+}
+
+function buildSnapshotExpiry(
+  now: Date,
+  summary: EnvironmentContextSummary,
+): Date {
+  const ttlMinutes =
+    summary.status === EnvironmentStatus.Degraded &&
+    summary.locationPersonalized
+      ? ENVIRONMENT_DEGRADED_CONTEXT_CACHE_TTL_MINUTES
+      : hasMissingProviderAirQuality(summary)
+        ? ENVIRONMENT_PARTIAL_CONTEXT_CACHE_TTL_MINUTES
+        : ENVIRONMENT_CONTEXT_CACHE_TTL_MINUTES;
+  return new Date(now.getTime() + ttlMinutes * 60_000);
+}
+
+function isReusableSummary(
+  summary: EnvironmentContextSummary,
+  canUseLocation: boolean,
+  now: Date,
+): boolean {
+  if (
+    summary.status !== EnvironmentStatus.Degraded ||
+    !summary.locationPersonalized ||
+    !canUseLocation
+  ) {
+    return isReusablePartialSummary(summary, now);
+  }
+
+  const generatedAtMs = Date.parse(summary.generatedAt);
+  if (!Number.isFinite(generatedAtMs)) {
+    return false;
+  }
+
+  return (
+    now.getTime() - generatedAtMs <
+    ENVIRONMENT_DEGRADED_CONTEXT_CACHE_TTL_MINUTES * 60_000
+  );
+}
+
+function isReusablePartialSummary(
+  summary: EnvironmentContextSummary,
+  now: Date,
+): boolean {
+  if (!hasMissingProviderAirQuality(summary)) {
+    return true;
+  }
+
+  const generatedAtMs = Date.parse(summary.generatedAt);
+  if (!Number.isFinite(generatedAtMs)) {
+    return false;
+  }
+
+  return (
+    now.getTime() - generatedAtMs <
+    ENVIRONMENT_PARTIAL_CONTEXT_CACHE_TTL_MINUTES * 60_000
+  );
+}
+
+function hasMissingProviderAirQuality(
+  summary: EnvironmentContextSummary,
+): boolean {
+  return (
+    summary.status === EnvironmentStatus.Available &&
+    summary.locationPersonalized &&
+    summary.airQualityIndex === null &&
+    summary.pm25 === null &&
+    summary.pm10 === null &&
+    summary.pollenRisk === null
   );
 }
 

@@ -1,5 +1,9 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import {
+  CATALOGUE_PRODUCT_DRAFT_UPLOAD_FIELD,
+  CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD,
+} from '../src/catalogue/catalogue-photo.constants';
 import { CataloguePhotoProcessorService } from '../src/catalogue/catalogue-photo-processor.service';
 import { CataloguePhotoStorageService } from '../src/catalogue/catalogue-photo-storage.service';
 import {
@@ -246,6 +250,12 @@ describe('Inventory (e2e)', () => {
   };
 
   const cataloguePhotoStorageService = {
+    startHeroImageUpload: jest.fn(() => ({
+      url: Promise.resolve(
+        'https://cdn.example.com/product-images/processed/uploaded-image.webp?signed=upload',
+      ),
+      cleanup: jest.fn().mockResolvedValue(undefined),
+    })),
     saveHeroImage: jest.fn(
       async () =>
         'https://cdn.example.com/product-images/processed/uploaded-image.webp?signed=upload',
@@ -564,7 +574,11 @@ describe('Inventory (e2e)', () => {
     const uploadResponse = await request(app.getHttpServer())
       .post('/api/v1/inventory/products/upload-image')
       .set('Authorization', `Bearer ${accessToken}`)
-      .attach('image', Buffer.from('fake-image-data'), 'product.jpg')
+      .attach(
+        CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD,
+        Buffer.from('fake-image-data'),
+        'product.jpg',
+      )
       .expect(201);
 
     const body = getUploadImageResponse(uploadResponse);
@@ -575,5 +589,60 @@ describe('Inventory (e2e)', () => {
       cataloguePhotoProcessorService.prepareHeroImageForStorage,
     ).toHaveBeenCalled();
     expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalled();
+  });
+
+  it('creates inventory products with an image only during final save', async () => {
+    const uploadResponse = await request(app.getHttpServer())
+      .post('/api/v1/inventory/products/with-image')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .field(
+        CATALOGUE_PRODUCT_DRAFT_UPLOAD_FIELD,
+        JSON.stringify(createInventoryDraft({ imageUrls: [] })),
+      )
+      .attach(
+        CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD,
+        Buffer.from('fake-image-data'),
+        'product.jpg',
+      )
+      .expect(201);
+    const createdProduct = getInventoryProductFromResponse(uploadResponse);
+
+    expect(createdProduct.identity.imageUrls).toEqual([
+      'https://cdn.example.com/product-images/processed/uploaded-image.webp?signed=fresh',
+    ]);
+    expect(
+      cataloguePhotoProcessorService.prepareHeroImageForStorage,
+    ).toHaveBeenCalled();
+    expect(
+      cataloguePhotoStorageService.startHeroImageUpload,
+    ).toHaveBeenCalled();
+  });
+
+  it('uploads and attaches product images to existing products', async () => {
+    const createdProduct = getInventoryProductFromResponse(
+      await authPost('/inventory/products', createInventoryDraft()).expect(201),
+    );
+
+    const uploadResponse = await request(app.getHttpServer())
+      .post(`/api/v1/inventory/products/${createdProduct.id}/upload-image`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach(
+        CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD,
+        Buffer.from('fake-image-data'),
+        'product.jpg',
+      )
+      .expect(201);
+    const updatedProduct = getInventoryProductFromResponse(uploadResponse);
+
+    expect(updatedProduct.identity.imageUrls).toEqual([
+      'https://cdn.example.com/product-images/processed/uploaded-image.webp?signed=fresh',
+    ]);
+
+    const fetchedProduct = getInventoryProductFromResponse(
+      await authGet(`/inventory/products/${createdProduct.id}`).expect(200),
+    );
+    expect(fetchedProduct.identity.imageUrls).toEqual([
+      'https://cdn.example.com/product-images/processed/uploaded-image.webp?signed=fresh',
+    ]);
   });
 });

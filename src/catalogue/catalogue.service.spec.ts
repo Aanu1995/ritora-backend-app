@@ -32,7 +32,7 @@ describe('CatalogueService', () => {
     cataloguePhotoStorageService = harness.cataloguePhotoStorageService;
   });
 
-  it('extracts a product from multiple photos and persists the selected hero image', async () => {
+  it('extracts product metadata from multiple photos without persisting a draft image', async () => {
     const heroImage = createUploadedImage('heroImage');
     const ingredientImage = createUploadedImage('ingredientImage');
     const directionsImage = createUploadedImage('directionsImage');
@@ -47,6 +47,7 @@ describe('CatalogueService', () => {
           description: 'A resurfacing serum for smoother-looking skin.',
           benefits: ['smoother texture'],
           suitedFor: ['sensitive skin'],
+          imageUrls: ['https://example.com/draft-only-photo.webp'],
           inciIngredients: ['Aqua', 'Glycerin'],
         },
         guidance: {
@@ -126,20 +127,13 @@ describe('CatalogueService', () => {
     ).toHaveBeenCalledWith([heroImage, ingredientImage, directionsImage], 2);
     expect(
       cataloguePhotoStorageService.startHeroImageUpload,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        buffer: directionsImage.buffer,
-        mimetype: 'image/jpeg',
-      }),
-    );
+    ).not.toHaveBeenCalled();
     expect(officialPageProvider.extract).toHaveBeenCalledWith(
       'https://example.com/resurfacing-retinol-serum',
     );
     expect(result?.provenance).toBe('photo-lookup');
     expect(result?.source).toBe(CatalogueSource.UserPhotos);
-    expect(result?.identity.imageUrls).toEqual([
-      'https://signed.example.com/product-images/processed/front-photo.webp',
-    ]);
+    expect(result?.identity.imageUrls).toBeUndefined();
     expect(result?.identity.description).toBe(
       'A resurfacing serum for smoother-looking skin.',
     );
@@ -350,14 +344,10 @@ describe('CatalogueService', () => {
     expect(result?.evidence).toEqual([]);
   });
 
-  it('returns a usable photo lookup without image urls when remote storage is unavailable', async () => {
+  it('returns a usable photo lookup without uploading the product image', async () => {
     const heroImage = createUploadedImage('heroImage');
     const labelImage = createUploadedImage('labelImage');
 
-    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
-      url: Promise.resolve(null),
-      cleanup: jest.fn().mockResolvedValue(undefined),
-    });
     openAiExtractorProvider.extractFromImages.mockResolvedValue({
       data: {
         identity: {
@@ -376,6 +366,9 @@ describe('CatalogueService', () => {
     const result = await service.extractFromImages([heroImage, labelImage], 0);
 
     expect(result?.identity.imageUrls).toBeUndefined();
+    expect(
+      cataloguePhotoStorageService.startHeroImageUpload,
+    ).not.toHaveBeenCalled();
     expect(result?.identity.brand).toBe('Round Lab');
     expect(result?.source).toBe(CatalogueSource.UserPhotos);
   });

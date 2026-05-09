@@ -12,6 +12,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -37,6 +38,10 @@ const SUPPORTED_MIME_TYPES = new Set([
   'image/heic',
   'image/heif',
 ]);
+const SIGNING_KEY_ERROR_MESSAGE =
+  'Skin journal photo signing is not configured correctly';
+const PRIVATE_KEY_HEADER_PATTERN = /^-----BEGIN (?:RSA )?PRIVATE KEY-----$/;
+const PRIVATE_KEY_FOOTER_PATTERN = /^-----END (?:RSA )?PRIVATE KEY-----$/;
 
 type StoredPhoto = {
   object_key: string;
@@ -96,6 +101,7 @@ export class SkinJournalPhotoStorageService {
     const runtimeConfig = this.getRuntimeConfig();
 
     if (runtimeConfig) {
+      this.assertUsableSigningKey(runtimeConfig.cloudFrontPrivateKey);
       await this.s3Client.send(
         new PutObjectCommand({
           Bucket: runtimeConfig.bucketName,
@@ -221,6 +227,7 @@ export class SkinJournalPhotoStorageService {
       return `${SKIN_JOURNAL_LOCAL_MEDIA_URL_PREFIX}/${payload}.${this.signLocalMediaPayload(payload)}`;
     }
 
+    this.assertUsableSigningKey(runtimeConfig.cloudFrontPrivateKey);
     return getSignedCloudFrontUrl({
       url: new URL(
         objectKey,
@@ -368,6 +375,21 @@ export class SkinJournalPhotoStorageService {
       this.config.getOrThrow<string>('JWT_SECRET').trim() ||
       DEV_LOCAL_MEDIA_SIGNING_SECRET
     );
+  }
+
+  private assertUsableSigningKey(privateKey: string): void {
+    const lines = privateKey.split('\n').filter(Boolean);
+    const header = lines.at(0);
+    const footer = lines.at(-1);
+
+    if (
+      !header ||
+      !footer ||
+      !PRIVATE_KEY_HEADER_PATTERN.test(header) ||
+      !PRIVATE_KEY_FOOTER_PATTERN.test(footer)
+    ) {
+      throw new ServiceUnavailableException(SIGNING_KEY_ERROR_MESSAGE);
+    }
   }
 }
 

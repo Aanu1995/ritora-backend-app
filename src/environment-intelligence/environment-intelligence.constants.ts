@@ -124,9 +124,13 @@ export type EnvironmentSignalKind =
   (typeof EnvironmentSignalKind)[keyof typeof EnvironmentSignalKind];
 
 export const ENVIRONMENT_CONTEXT_CACHE_TTL_MINUTES = 60;
+export const ENVIRONMENT_DEGRADED_CONTEXT_CACHE_TTL_MINUTES = 5;
+export const ENVIRONMENT_PARTIAL_CONTEXT_CACHE_TTL_MINUTES = 5;
 export const ENVIRONMENT_LOCATION_CACHE_TTL_DAYS = 30;
 export const ENVIRONMENT_SNAPSHOT_RETENTION_DAYS = 90;
 export const OPEN_METEO_BASE_URL = 'https://api.open-meteo.com';
+export const OPEN_METEO_AIR_QUALITY_BASE_URL =
+  'https://air-quality-api.open-meteo.com';
 export const OPEN_METEO_GEOCODING_BASE_URL =
   'https://geocoding-api.open-meteo.com';
 export const OPEN_METEO_FETCH_TIMEOUT_MS = 6_000;

@@ -112,6 +112,13 @@ describe('OpenMeteoEnvironmentProvider', () => {
         },
       }),
     );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining(
+        'https://air-quality-api.open-meteo.com/v1/air-quality?',
+      ),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('degrades cleanly when provider payloads are malformed', async () => {

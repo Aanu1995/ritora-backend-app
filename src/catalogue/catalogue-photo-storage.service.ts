@@ -4,7 +4,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as getSignedCloudFrontUrl } from '@aws-sdk/cloudfront-signer';
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ulid } from 'ulid';
 import {
@@ -26,6 +26,11 @@ type HeroImageUpload = {
   url: Promise<string | null>;
   cleanup: () => Promise<void>;
 };
+
+const SIGNING_KEY_ERROR_MESSAGE =
+  'Product image signing is not configured correctly';
+const PRIVATE_KEY_HEADER_PATTERN = /^-----BEGIN (?:RSA )?PRIVATE KEY-----$/;
+const PRIVATE_KEY_FOOTER_PATTERN = /^-----END (?:RSA )?PRIVATE KEY-----$/;
 
 @Injectable()
 export class CataloguePhotoStorageService {
@@ -49,6 +54,8 @@ export class CataloguePhotoStorageService {
         cleanup: async () => {},
       };
     }
+
+    this.assertUsableSigningKey(runtimeConfig.cloudFrontPrivateKey);
 
     const objectKey = `${CATALOGUE_PRODUCT_IMAGE_PROCESSED_PREFIX}/${ulid()}.webp`;
     const upload = this.putHeroImage(file, objectKey, runtimeConfig);
@@ -144,6 +151,7 @@ export class CataloguePhotoStorageService {
     objectKey: string,
     runtimeConfig: MediaRuntimeConfig,
   ): string {
+    this.assertUsableSigningKey(runtimeConfig.cloudFrontPrivateKey);
     const canonicalUrl = this.createManagedBaseUrl(objectKey, runtimeConfig);
 
     return getSignedCloudFrontUrl({
@@ -235,5 +243,20 @@ export class CataloguePhotoStorageService {
     return this.configService.getOrThrow<string>(
       'PRODUCT_MEDIA_CLOUDFRONT_URL',
     );
+  }
+
+  private assertUsableSigningKey(privateKey: string): void {
+    const lines = privateKey.split('\n').filter(Boolean);
+    const header = lines.at(0);
+    const footer = lines.at(-1);
+
+    if (
+      !header ||
+      !footer ||
+      !PRIVATE_KEY_HEADER_PATTERN.test(header) ||
+      !PRIVATE_KEY_FOOTER_PATTERN.test(footer)
+    ) {
+      throw new ServiceUnavailableException(SIGNING_KEY_ERROR_MESSAGE);
+    }
   }
 }

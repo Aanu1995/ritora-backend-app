@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  OPEN_METEO_AIR_QUALITY_BASE_URL,
   EnvironmentProviderName,
   OPEN_METEO_BASE_URL,
   OPEN_METEO_FETCH_TIMEOUT_MS,
@@ -163,7 +164,7 @@ export class OpenMeteoEnvironmentProvider implements EnvironmentProvider {
       forecast_days: '1',
     });
     const payload = await fetchJson(
-      `${OPEN_METEO_BASE_URL}/v1/air-quality?${params.toString()}`,
+      `${OPEN_METEO_AIR_QUALITY_BASE_URL}/v1/air-quality?${params.toString()}`,
       this.logger,
     );
     return parseAirQualityResponse(payload);

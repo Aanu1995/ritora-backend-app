@@ -146,6 +146,69 @@ export class InventoryService {
     dto: CreateInventoryProductDto,
   ): Promise<InventoryProductResponseDto> {
     await this.assertSkinProfileReadyForProductCreation(userId);
+    return this.createValidatedProduct(userId, dto);
+  }
+
+  async createWithProductImage(
+    userId: string,
+    dto: CreateInventoryProductDto,
+    file: UploadedCatalogueImage,
+  ): Promise<InventoryProductResponseDto> {
+    await this.assertSkinProfileReadyForProductCreation(userId);
+    assertValidInventoryDraft(dto);
+
+    const processed =
+      await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
+        file,
+      );
+    const upload =
+      this.cataloguePhotoStorageService.startHeroImageUpload(processed);
+
+    const imageUrl = await this.resolveCreateImageUpload(upload);
+
+    try {
+      return await this.createValidatedProduct(userId, {
+        ...dto,
+        identity: {
+          ...dto.identity,
+          imageUrls: [imageUrl],
+        },
+      });
+    } catch (error) {
+      await upload.cleanup();
+      throw error;
+    }
+  }
+
+  private async resolveCreateImageUpload(upload: {
+    url: Promise<string | null>;
+    cleanup: () => Promise<void>;
+  }): Promise<string> {
+    try {
+      const imageUrl = await upload.url;
+      if (!imageUrl) {
+        throw new ServiceUnavailableException(
+          'Product image storage is not configured',
+        );
+      }
+
+      return imageUrl;
+    } catch (error) {
+      await upload.cleanup();
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        'Product image upload is unavailable right now',
+      );
+    }
+  }
+
+  private async createValidatedProduct(
+    userId: string,
+    dto: CreateInventoryProductDto,
+  ): Promise<InventoryProductResponseDto> {
     assertValidInventoryDraft(dto);
     const normalized = normalizeInventorySnapshot(
       toInventorySnapshotFromCreateDto(dto),
@@ -167,22 +230,13 @@ export class InventoryService {
     const product = await this.findByIdOrFail(userId, id);
     const merged = mergeInventorySnapshot(this.toSnapshot(product), dto);
     assertValidInventoryDraft(merged);
-    const normalized = normalizeInventorySnapshot(merged);
 
-    Object.assign(
-      product,
-      this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
-    );
-    const saved = await this.inventoryRepository.save(product);
+    const saved = await this.saveSnapshot(userId, product, merged);
     await this.evaluateProductExpiryAlerts(userId, saved);
     return this.toResponseDto(saved);
   }
 
-  async uploadProductImage(
-    userId: string,
-    file: UploadedCatalogueImage,
-  ): Promise<string> {
-    await this.assertSkinProfileReadyForProductCreation(userId);
+  async uploadProductImage(file: UploadedCatalogueImage): Promise<string> {
     const processed =
       await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
         file,
@@ -197,6 +251,24 @@ export class InventoryService {
     }
 
     return imageUrl;
+  }
+
+  async uploadAndAttachProductImage(
+    userId: string,
+    id: string,
+    file: UploadedCatalogueImage,
+  ): Promise<InventoryProductResponseDto> {
+    const product = await this.findByIdOrFail(userId, id);
+    const imageUrl = await this.uploadProductImage(file);
+    const merged = mergeInventorySnapshot(this.toSnapshot(product), {
+      identity: {
+        imageUrls: [imageUrl],
+      },
+    });
+    assertValidInventoryDraft(merged);
+
+    const saved = await this.saveSnapshot(userId, product, merged);
+    return this.toResponseDto(saved);
   }
 
   private async assertSkinProfileReadyForProductCreation(
@@ -336,6 +408,21 @@ export class InventoryService {
         ),
       },
     };
+  }
+
+  private async saveSnapshot(
+    userId: string,
+    product: InventoryProduct,
+    snapshot: ShelfProductSnapshot,
+  ): Promise<InventoryProduct> {
+    const normalized = normalizeInventorySnapshot(snapshot);
+
+    Object.assign(
+      product,
+      this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
+    );
+
+    return this.inventoryRepository.save(product);
   }
 
   private toResponseDto(entity: InventoryProduct): InventoryProductResponseDto {

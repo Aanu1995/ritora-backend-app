@@ -99,6 +99,30 @@ describe('CataloguePhotoStorageService', () => {
     );
   });
 
+  it('rejects malformed signing keys before uploading to S3', async () => {
+    const service = new CataloguePhotoStorageService(
+      createConfigService({
+        AWS_REGION: 'eu-west-1',
+        PRODUCT_MEDIA_BUCKET: 'ritora-dev-product-media',
+        PRODUCT_MEDIA_CLOUDFRONT_URL: 'https://d111111abcdef8.cloudfront.net',
+        PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID: 'K123',
+        PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY:
+          '-----BEGIN PRIVATE KEY-----\\nabc',
+      }),
+    );
+    const send = jest.fn().mockResolvedValue({});
+    (service as unknown as { s3Client: { send: jest.Mock } }).s3Client = {
+      send,
+    };
+
+    await expect(service.saveHeroImage(image)).rejects.toMatchObject({
+      response: expect.objectContaining({
+        message: 'Product image signing is not configured correctly',
+      }),
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('canonicalizes managed media urls before persistence and re-signs them on reads', () => {
     const service = new CataloguePhotoStorageService(
       createConfigService({

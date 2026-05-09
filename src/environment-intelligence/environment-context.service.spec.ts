@@ -234,7 +234,7 @@ describe('EnvironmentContextService', () => {
     expect(result.snapshot).toBe(cachedSnapshot);
   });
 
-  it('reuses a degraded location-personalized snapshot after provider resolution previously failed', async () => {
+  it('reuses a fresh degraded location-personalized snapshot after provider resolution previously failed', async () => {
     const cachedSnapshot = {
       id: 'snapshot-1',
       summary: environmentSummary({
@@ -258,13 +258,92 @@ describe('EnvironmentContextService', () => {
       targetDate: '2026-05-08',
       targetTime: '08:17',
       timeZone: 'Europe/Stockholm',
-      now: new Date('2026-05-08T06:17:00.000Z'),
+      now: new Date('2026-05-08T06:04:00.000Z'),
     });
 
     expect(provider.resolveLocation).not.toHaveBeenCalled();
     expect(provider.fetchSnapshot).not.toHaveBeenCalled();
     expect(snapshotRepo.save).not.toHaveBeenCalled();
     expect(result.snapshot).toBe(cachedSnapshot);
+  });
+
+  it('refreshes an old degraded location-personalized snapshot instead of hiding climate for the full weather cache window', async () => {
+    locationRepo.findOne.mockResolvedValue(locationCache());
+    snapshotRepo.findOne.mockResolvedValue({
+      id: 'snapshot-1',
+      summary: environmentSummary({
+        status: EnvironmentStatus.Degraded,
+        provider: EnvironmentProviderName.OpenMeteo,
+        generatedAt: '2026-05-08T06:00:00.000Z',
+        locationPersonalized: true,
+        confidence: EnvironmentConfidence.Degraded,
+        temperatureCelsius: null,
+        temperatureBand: null,
+        humidity: null,
+        humidityBand: null,
+        uvIndex: null,
+        airQualityIndex: null,
+      }),
+    } as EnvironmentSnapshot);
+
+    const result = await service.buildContext({
+      userId: 'user-1',
+      profile: skinProfile(),
+      targetDate: '2026-05-08',
+      targetTime: '08:17',
+      timeZone: 'Europe/Stockholm',
+      now: new Date('2026-05-08T06:08:00.000Z'),
+    });
+
+    expect(provider.fetchSnapshot).toHaveBeenCalledTimes(1);
+    expect(snapshotRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        location_cache_id: 'location-1',
+        summary: expect.objectContaining({
+          status: EnvironmentStatus.Available,
+          temperatureCelsius: 16,
+        }),
+      }),
+    );
+    expect(result.summary.status).toBe(EnvironmentStatus.Available);
+  });
+
+  it('refreshes an old weather-only provider snapshot so air quality can recover', async () => {
+    locationRepo.findOne.mockResolvedValue(locationCache());
+    snapshotRepo.findOne.mockResolvedValue({
+      id: 'snapshot-1',
+      summary: environmentSummary({
+        generatedAt: '2026-05-08T06:00:00.000Z',
+        airQualityIndex: null,
+        airQualityRisk: EnvironmentAirQualityRisk.Unknown,
+        pm25: null,
+        pm10: null,
+        pollenRisk: null,
+      }),
+    } as EnvironmentSnapshot);
+
+    const result = await service.buildContext({
+      userId: 'user-1',
+      profile: skinProfile(),
+      targetDate: '2026-05-08',
+      targetTime: '08:17',
+      timeZone: 'Europe/Stockholm',
+      now: new Date('2026-05-08T06:08:00.000Z'),
+    });
+
+    expect(provider.fetchSnapshot).toHaveBeenCalledTimes(1);
+    expect(snapshotRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        location_cache_id: 'location-1',
+        summary: expect.objectContaining({
+          airQualityIndex: 32,
+          pm25: 8,
+          pm10: 18,
+          pollenRisk: 'moderate',
+        }),
+      }),
+    );
+    expect(result.summary.airQualityIndex).toBe(32);
   });
 
   it('recovers when another request creates the same location cache first', async () => {

@@ -4,6 +4,7 @@ import {
   BadRequestException,
   InternalServerErrorException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
@@ -154,6 +155,33 @@ describe('SkinJournalPhotoStorageService', () => {
 
     await service.deletePhoto(stored.object_key);
     expect(send.mock.calls[1][0]).toBeInstanceOf(DeleteObjectCommand);
+  });
+
+  it('rejects malformed CloudFront signing keys before uploading to S3', async () => {
+    const service = new SkinJournalPhotoStorageService(
+      config({
+        AWS_REGION: 'eu-west-1',
+        SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-skin-media',
+        SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL:
+          'https://d111111abcdef8.cloudfront.net',
+        SKIN_JOURNAL_MEDIA_CLOUDFRONT_KEY_PAIR_ID: 'K123',
+        SKIN_JOURNAL_MEDIA_CLOUDFRONT_PRIVATE_KEY: 'not-a-private-key',
+      }),
+    );
+    const send = jest.fn().mockResolvedValue({});
+    (service as unknown as { s3Client: { send: jest.Mock } }).s3Client = {
+      send,
+    };
+
+    await expect(
+      service.storePhoto({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        buffer: await imageBuffer(),
+        contentType: 'image/jpeg',
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('does not fall back to local media storage in production', async () => {

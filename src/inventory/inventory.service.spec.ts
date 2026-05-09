@@ -189,6 +189,7 @@ describe('InventoryService', () => {
   };
   const cataloguePhotoStorageService = {
     saveHeroImage: jest.fn(),
+    startHeroImageUpload: jest.fn(),
     toPersistentImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
     resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
   };
@@ -203,6 +204,7 @@ describe('InventoryService', () => {
     queryBuilder = createMockQueryBuilder();
     cataloguePhotoProcessorService.prepareHeroImageForStorage.mockClear();
     cataloguePhotoStorageService.saveHeroImage.mockClear();
+    cataloguePhotoStorageService.startHeroImageUpload.mockReset();
     cataloguePhotoStorageService.toPersistentImageUrls.mockClear();
     cataloguePhotoStorageService.resolvePublicImageUrls.mockClear();
     notificationsService.runProductExpiryAlertForProduct.mockClear();
@@ -308,7 +310,7 @@ describe('InventoryService', () => {
     expect(repo.save).not.toHaveBeenCalled();
   });
 
-  it('rejects product image uploads when the skin profile is missing', async () => {
+  it('uploads product images without reading skin profile data', async () => {
     skinProfiles.findOne.mockResolvedValue(null);
     const uploadedImage: UploadedCatalogueImage = {
       originalname: 'product.jpg',
@@ -316,18 +318,177 @@ describe('InventoryService', () => {
       buffer: Buffer.from('image'),
       size: 5,
     };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const imageUrl =
+      'https://signed.example.com/product-images/processed/photo.webp';
 
-    await expect(
-      service.uploadProductImage('user-1', uploadedImage),
-    ).rejects.toMatchObject({
-      response: expect.objectContaining({
-        code: 'skin_profile_required',
-      }),
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
+
+    const result = await service.uploadProductImage(uploadedImage);
+
+    expect(result).toBe(imageUrl);
+    expect(skinProfiles.findOne).not.toHaveBeenCalled();
+    expect(
+      cataloguePhotoProcessorService.prepareHeroImageForStorage,
+    ).toHaveBeenCalledWith(uploadedImage);
+  });
+
+  it('creates a product and attaches its image in one save flow', async () => {
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const managedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp?Policy=test';
+    const persistedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp';
+    const signedUrl = `${persistedUrl}?Policy=fresh`;
+    const cleanup = jest.fn().mockResolvedValue(undefined);
+    const saved = createEntity('inventory-3', {
+      identity: {
+        ...createSnapshot().identity,
+        imageUrls: [persistedUrl],
+      },
     });
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+      url: Promise.resolve(managedUrl),
+      cleanup,
+    });
+    cataloguePhotoStorageService.toPersistentImageUrls.mockReturnValueOnce([
+      persistedUrl,
+    ]);
+    cataloguePhotoStorageService.resolvePublicImageUrls.mockReturnValueOnce([
+      signedUrl,
+    ]);
+    repo.save.mockResolvedValue(saved);
+
+    const result = await service.createWithProductImage(
+      'user-1',
+      createSnapshot({
+        identity: { ...createSnapshot().identity, imageUrls: [] },
+      }) as never,
+      uploadedImage,
+    );
 
     expect(
       cataloguePhotoProcessorService.prepareHeroImageForStorage,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledWith(uploadedImage);
+    expect(
+      cataloguePhotoStorageService.startHeroImageUpload,
+    ).toHaveBeenCalledWith(processedImage);
+    expect(
+      cataloguePhotoStorageService.toPersistentImageUrls,
+    ).toHaveBeenCalledWith([managedUrl]);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(result.identity.imageUrls).toEqual([signedUrl]);
+  });
+
+  it('cleans up an uploaded image when create-with-image persistence fails', async () => {
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const cleanup = jest.fn().mockResolvedValue(undefined);
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+      url: Promise.resolve(
+        'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp?Policy=test',
+      ),
+      cleanup,
+    });
+    repo.save.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(
+      service.createWithProductImage(
+        'user-1',
+        createSnapshot({
+          identity: { ...createSnapshot().identity, imageUrls: [] },
+        }) as never,
+        uploadedImage,
+      ),
+    ).rejects.toThrow('database unavailable');
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a clean unavailable error when create-with-image upload fails', async () => {
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const cleanup = jest.fn().mockResolvedValue(undefined);
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+      url: Promise.reject(new Error('s3 unavailable')),
+      cleanup,
+    });
+
+    await expect(
+      service.createWithProductImage(
+        'user-1',
+        createSnapshot({
+          identity: { ...createSnapshot().identity, imageUrls: [] },
+        }) as never,
+        uploadedImage,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        message: 'Product image upload is unavailable right now',
+      }),
+    });
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(repo.save).not.toHaveBeenCalled();
   });
 
   it('stores managed media as stable refs and re-signs them for responses', async () => {
@@ -407,7 +568,7 @@ describe('InventoryService', () => {
     );
     cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
 
-    const result = await service.uploadProductImage('user-1', uploadedImage);
+    const result = await service.uploadProductImage(uploadedImage);
 
     expect(
       cataloguePhotoProcessorService.prepareHeroImageForStorage,
@@ -416,6 +577,63 @@ describe('InventoryService', () => {
       processedImage,
     );
     expect(result).toBe(imageUrl);
+  });
+
+  it('uploads and attaches a product image to an existing product', async () => {
+    const entity = createEntity('inventory-1');
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const managedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp?Policy=test';
+    const persistedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp';
+    const signedUrl = `${persistedUrl}?Policy=fresh`;
+
+    repo.findOne.mockResolvedValue(entity);
+    repo.save.mockImplementation(async (value) => value as InventoryProduct);
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(managedUrl);
+    cataloguePhotoStorageService.toPersistentImageUrls.mockReturnValueOnce([
+      persistedUrl,
+    ]);
+    cataloguePhotoStorageService.resolvePublicImageUrls.mockReturnValueOnce([
+      signedUrl,
+    ]);
+
+    const result = await service.uploadAndAttachProductImage(
+      'user-1',
+      'inventory-1',
+      uploadedImage,
+    );
+
+    expect(
+      cataloguePhotoStorageService.toPersistentImageUrls,
+    ).toHaveBeenCalledWith([managedUrl]);
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({
+          imageUrls: [persistedUrl],
+        }),
+      }),
+    );
+    expect(result.identity.imageUrls).toEqual([signedUrl]);
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).not.toHaveBeenCalled();
   });
 
   it('archives, restores, and marks products as finished', async () => {
