@@ -17,6 +17,7 @@ import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AllowBrowserCache } from '../common/decorators/http-cache.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { SkinJournalService } from './skin-journal.service';
 import { UpsertEntryDto } from './dto/upsert-entry.dto';
@@ -68,6 +69,7 @@ export class SkinJournalController {
   }
 
   @Public()
+  @AllowBrowserCache()
   @Get('media/:token')
   async getSignedLocalMedia(
     @Param('token') token: string,

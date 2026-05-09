@@ -10,7 +10,6 @@ import {
   Res,
   UnauthorizedException,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
@@ -21,7 +20,6 @@ import { setLocaleCookie } from '../common/i18n/locale-cookie';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { OriginCheckGuard } from '../common/guards/origin-check.guard';
-import { NoCacheInterceptor } from '../common/interceptors/no-cache.interceptor';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { ConfirmPasswordDto } from './dto/confirm-password.dto';
@@ -73,7 +71,6 @@ type OAuthRequest = Request & {
 
 @ApiTags('auth')
 @Controller('auth')
-@UseInterceptors(NoCacheInterceptor)
 export class AuthController {
   private readonly cookieRefreshName: string;
   private readonly webAppUrl: string;

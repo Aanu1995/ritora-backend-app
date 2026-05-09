@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthenticatedTimezoneCaptureInterceptor } from './common/interceptors/authenticated-timezone-capture.interceptor';
+import { NoCacheInterceptor } from './common/interceptors/no-cache.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
@@ -73,6 +74,10 @@ import { UsersModule } from './users/users.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuthenticatedTimezoneCaptureInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: NoCacheInterceptor,
     },
   ],
 })
