@@ -17,6 +17,14 @@ describe('SkinJournalAnalysisEvaluationModule', () => {
         MODULE_METADATA.PROVIDERS,
         SkinJournalAnalysisEvaluationModule,
       ),
-    ).toEqual([SkinJournalAnalysisService, SkinJournalPhotoStorageService]);
+    ).toEqual([
+      SkinJournalAnalysisService,
+      expect.objectContaining({
+        provide: SkinJournalPhotoStorageService,
+        useValue: expect.objectContaining({
+          readPhotoBuffer: expect.any(Function),
+        }),
+      }),
+    ]);
   });
 });

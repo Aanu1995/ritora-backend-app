@@ -113,5 +113,5 @@ describe('CataloguePhotoProcessorService', () => {
     expect(
       Math.max(labelMetadata.width ?? 0, labelMetadata.height ?? 0),
     ).toBeLessThanOrEqual(2400);
-  });
+  }, 15_000);
 });

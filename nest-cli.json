@@ -6,12 +6,10 @@
     "deleteOutDir": true,
     "assets": [
       {
-        "include": "mail/templates/**/*",
-        "watchAssets": true
+        "include": "mail/templates/**/*"
       },
       {
-        "include": "ingredients/seed/*.json",
-        "watchAssets": true
+        "include": "ingredients/seed/*.json"
       }
     ]
   }
