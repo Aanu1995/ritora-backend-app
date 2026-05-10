@@ -146,6 +146,29 @@ describe('CataloguePhotoStorageService', () => {
     ).toEqual(['https://signed.example.com/product-image.webp']);
   });
 
+  it('falls back to canonical managed media urls when read-time signing fails', () => {
+    const service = new CataloguePhotoStorageService(
+      createConfigService({
+        PRODUCT_MEDIA_BUCKET: 'ritora-dev-product-media',
+        PRODUCT_MEDIA_CLOUDFRONT_URL: 'https://d111111abcdef8.cloudfront.net',
+        PRODUCT_MEDIA_CLOUDFRONT_KEY_PAIR_ID: 'K123',
+        PRODUCT_MEDIA_CLOUDFRONT_PRIVATE_KEY:
+          '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
+      }),
+    );
+    jest.mocked(getSignedCloudFrontUrl).mockImplementationOnce(() => {
+      throw new Error('Signing failed');
+    });
+
+    expect(
+      service.resolvePublicImageUrls([
+        'https://d111111abcdef8.cloudfront.net/product-images/processed/test.webp',
+      ]),
+    ).toEqual([
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/test.webp',
+    ]);
+  });
+
   it('returns null when managed media storage is not configured', async () => {
     const service = new CataloguePhotoStorageService(createConfigService());
 

@@ -8,8 +8,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { CataloguePhotoStorageService } from '../../catalogue/catalogue-photo-storage.service';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { User } from '../../users/entities/user.entity';
 import { RegenerateSuggestionDto } from '../dto/suggestion-history.dto';
@@ -39,6 +41,7 @@ export class SuggestionRegenerationService {
     private readonly usageGuard: SuggestionAiUsageGuard,
     private readonly observability: SuggestionObservabilityService,
     private readonly routineBreakService: RoutineBreakService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async regenerateSuggestion(
@@ -162,6 +165,16 @@ export class SuggestionRegenerationService {
       last_error: payload.reason ? `regenerate:${payload.reason}` : null,
     });
 
-    return SuggestionInstanceResponseDto.fromEntity(replacement);
+    return SuggestionInstanceResponseDto.fromEntity(
+      replacement,
+      this.productImageOptions(),
+    );
+  }
+
+  private productImageOptions(): ProductImageUrlResolverOptions {
+    return {
+      resolveProductImageUrls: (imageUrls) =>
+        this.cataloguePhotoStorageService.resolvePublicImageUrls(imageUrls),
+    };
   }
 }

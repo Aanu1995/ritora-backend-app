@@ -4,6 +4,7 @@ import {
   toIsoString,
   toTimeOnlyString,
 } from '../../common/utils/date';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import {
   SuggestionGenerationContext,
   SuggestionInstance,
@@ -139,7 +140,7 @@ export class SuggestionInstanceResponseDto {
     options: {
       applicationLogId?: string | null;
       gapActionByKey?: ReadonlyMap<string, SuggestionGapActionKind>;
-    } = {},
+    } & ProductImageUrlResolverOptions = {},
   ): SuggestionInstanceResponseDto {
     const dto = new SuggestionInstanceResponseDto();
     dto.id = instance.id;
@@ -183,7 +184,7 @@ export class SuggestionInstanceResponseDto {
     dto.steps = (instance.steps ?? [])
       .slice()
       .sort((a, b) => a.step_order - b.step_order)
-      .map((step) => SuggestionStepResponseDto.fromEntity(step));
+      .map((step) => SuggestionStepResponseDto.fromEntity(step, options));
     dto.applicationLogId = options.applicationLogId ?? null;
     dto.createdAt = toIsoString(instance.created_at);
     dto.updatedAt = toIsoString(instance.updated_at);

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { ApplicationLogItem } from '../application-tracking/entities/application-log-item.entity';
+import { CatalogueModule } from '../catalogue/catalogue.module';
 import { IngredientsModule } from '../ingredients/ingredients.module';
 import { EnvironmentIntelligenceModule } from '../environment-intelligence/environment-intelligence.module';
 import { EnvironmentLocationCache } from '../environment-intelligence/entities/environment-location-cache.entity';
@@ -76,6 +77,7 @@ import { SuggestionsController } from './suggestions.controller';
       User,
       UserConsent,
     ]),
+    CatalogueModule,
     IngredientsModule,
     EnvironmentIntelligenceModule,
     NotificationsModule,

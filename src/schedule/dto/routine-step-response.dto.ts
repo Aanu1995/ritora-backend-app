@@ -1,6 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { toIsoString } from '../../common/utils/date';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import {
+  ProductImageUrlResolverOptions,
+  resolveInventoryProductImageUrl,
+} from '../../inventory/product-image-url-resolver';
 import { RoutineStep } from '../entities/routine-step.entity';
 
 export class RoutineStepProductSummaryDto {
@@ -38,8 +42,11 @@ export class RoutineStepProductSummaryDto {
     this.status = status;
   }
 
-  static fromEntity(product: InventoryProduct): RoutineStepProductSummaryDto {
-    const imageUrl = product.identity?.imageUrls?.[0] ?? null;
+  static fromEntity(
+    product: InventoryProduct,
+    options: ProductImageUrlResolverOptions = {},
+  ): RoutineStepProductSummaryDto {
+    const imageUrl = resolveInventoryProductImageUrl(product, options);
     return new RoutineStepProductSummaryDto(
       product.id,
       product.brand,
@@ -114,9 +121,12 @@ export class RoutineStepResponseDto {
     this.updatedAt = updatedAt;
   }
 
-  static fromEntity(step: RoutineStep): RoutineStepResponseDto {
+  static fromEntity(
+    step: RoutineStep,
+    options: ProductImageUrlResolverOptions = {},
+  ): RoutineStepResponseDto {
     const product = step.product
-      ? RoutineStepProductSummaryDto.fromEntity(step.product)
+      ? RoutineStepProductSummaryDto.fromEntity(step.product, options)
       : null;
     return new RoutineStepResponseDto(
       step.id,

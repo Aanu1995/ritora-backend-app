@@ -14,6 +14,10 @@ import {
 import { EmptyStringToNull } from '../../common/dto/empty-string.transforms';
 import { toIsoString } from '../../common/utils/date';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import {
+  ProductImageUrlResolverOptions,
+  resolveInventoryProductImageUrl,
+} from '../../inventory/product-image-url-resolver';
 import { ApplicationLogItem } from '../entities/application-log-item.entity';
 import {
   ApplicationItemProductSnapshot,
@@ -41,13 +45,16 @@ export class ApplicationProductSummaryDto {
   @ApiProperty()
   status: string;
 
-  static fromEntity(product: InventoryProduct): ApplicationProductSummaryDto {
+  static fromEntity(
+    product: InventoryProduct,
+    options: ProductImageUrlResolverOptions = {},
+  ): ApplicationProductSummaryDto {
     const dto = new ApplicationProductSummaryDto();
     dto.id = product.id;
     dto.brand = product.brand;
     dto.name = product.name;
     dto.category = product.category;
-    dto.imageUrl = product.identity?.imageUrls?.[0] ?? null;
+    dto.imageUrl = resolveInventoryProductImageUrl(product, options);
     dto.status = product.status;
     return dto;
   }
@@ -189,7 +196,10 @@ export class ApplicationLogItemResponseDto {
   @ApiProperty({ nullable: true, type: ApplicationProductSummaryDto })
   substitutedWithProduct: ApplicationProductSummaryDto | null;
 
-  static fromEntity(item: ApplicationLogItem): ApplicationLogItemResponseDto {
+  static fromEntity(
+    item: ApplicationLogItem,
+    options: ProductImageUrlResolverOptions = {},
+  ): ApplicationLogItemResponseDto {
     const dto = new ApplicationLogItemResponseDto();
     dto.id = item.id;
     dto.stepOrder = item.step_order;
@@ -210,10 +220,13 @@ export class ApplicationLogItemResponseDto {
     dto.appliedSnapshot = item.applied_snapshot;
     dto.appliedAt = item.applied_at ? toIsoString(item.applied_at) : null;
     dto.product = item.product
-      ? ApplicationProductSummaryDto.fromEntity(item.product)
+      ? ApplicationProductSummaryDto.fromEntity(item.product, options)
       : null;
     dto.substitutedWithProduct = item.substituted_with_product
-      ? ApplicationProductSummaryDto.fromEntity(item.substituted_with_product)
+      ? ApplicationProductSummaryDto.fromEntity(
+          item.substituted_with_product,
+          options,
+        )
       : null;
     return dto;
   }

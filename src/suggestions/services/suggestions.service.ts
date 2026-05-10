@@ -6,8 +6,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { CataloguePhotoStorageService } from '../../catalogue/catalogue-photo-storage.service';
 import { EnvironmentContextService } from '../../environment-intelligence/environment-context.service';
 import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { toIsoString } from '../../common/utils/date';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
@@ -78,6 +80,7 @@ export class SuggestionsService {
     private readonly todayActionService: SuggestionTodayActionService,
     private readonly routineBreakService: RoutineBreakService,
     private readonly environmentContext: EnvironmentContextService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async getTodaysSuggestion(
@@ -135,6 +138,7 @@ export class SuggestionsService {
     const suggestionBySlot = mapLatestSuggestionBySlot(scheduledSuggestions);
     const applicationLogBySuggestion =
       mapLatestApplicationLogBySuggestion(applications);
+    const productImageOptions = this.productImageOptions();
     const gapActionMaps = await this.todayActionService.getGapActionMaps(
       user.id,
       suggestions.map((suggestion) => suggestion.id),
@@ -175,6 +179,7 @@ export class SuggestionsService {
           : null,
         visibleAt,
         lifecycle,
+        ...productImageOptions,
       });
     });
     const onDemandDtos = onDemandSuggestions
@@ -183,6 +188,7 @@ export class SuggestionsService {
           suggestion,
           applicationLog: applicationLogBySuggestion.get(suggestion.id) ?? null,
           gapActionByKey: gapActionMaps.get(suggestion.id),
+          ...productImageOptions,
         }),
       )
       .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
@@ -277,6 +283,7 @@ export class SuggestionsService {
     return SuggestionInstanceResponseDto.fromEntity(suggestion, {
       applicationLogId: log?.id ?? null,
       gapActionByKey: gapActionMaps.get(suggestion.id),
+      ...this.productImageOptions(),
     });
   }
 
@@ -314,5 +321,12 @@ export class SuggestionsService {
     date: string,
   ): Promise<SuggestionHistoryDayDto> {
     return this.historyReader.getHistoryDay(user, requestTimeZone, date);
+  }
+
+  private productImageOptions(): ProductImageUrlResolverOptions {
+    return {
+      resolveProductImageUrls: (imageUrls) =>
+        this.cataloguePhotoStorageService.resolvePublicImageUrls(imageUrls),
+    };
   }
 }

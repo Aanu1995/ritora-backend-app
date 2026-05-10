@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, Repository } from 'typeorm';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
+import { ProductImageUrlResolverOptions } from '../inventory/product-image-url-resolver';
 import { User } from '../users/entities/user.entity';
 import {
   EditApplicationDto,
@@ -39,6 +41,7 @@ export class ApplicationTrackingService {
     private readonly versionRepo: Repository<ApplicationLogVersion>,
     private readonly validation: ApplicationTrackingValidationService,
     private readonly reactiveRegeneration: ApplicationReactiveRegenerationService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async record(
@@ -180,7 +183,10 @@ export class ApplicationTrackingService {
         where: { id: savedLog.id },
         relations: ['items', 'items.product', 'items.substituted_with_product'],
       });
-      return ApplicationLogResponseDto.fromEntity(fresh!);
+      return ApplicationLogResponseDto.fromEntity(
+        fresh!,
+        this.productImageOptions(),
+      );
     });
     await this.reactiveRegeneration.queueAfterApplicationChange(user, response);
     return response;
@@ -197,7 +203,10 @@ export class ApplicationTrackingService {
         'Application record belongs to another user.',
       );
     }
-    return ApplicationLogResponseDto.fromEntity(log);
+    return ApplicationLogResponseDto.fromEntity(
+      log,
+      this.productImageOptions(),
+    );
   }
 
   async getVersions(
@@ -328,7 +337,10 @@ export class ApplicationTrackingService {
             'items.substituted_with_product',
           ],
         });
-        return ApplicationLogResponseDto.fromEntity(fresh!);
+        return ApplicationLogResponseDto.fromEntity(
+          fresh!,
+          this.productImageOptions(),
+        );
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -338,5 +350,12 @@ export class ApplicationTrackingService {
       }
       throw error;
     }
+  }
+
+  private productImageOptions(): ProductImageUrlResolverOptions {
+    return {
+      resolveProductImageUrls: (imageUrls) =>
+        this.cataloguePhotoStorageService.resolvePublicImageUrls(imageUrls),
+    };
   }
 }

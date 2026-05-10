@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -8,7 +8,7 @@ import { AuthenticatedTimezoneCaptureInterceptor } from './common/interceptors/a
 import { NoCacheInterceptor } from './common/interceptors/no-cache.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { databaseConfig } from './config/database.config';
-import { envValidationSchema } from './config/env.validation';
+import { AppConfigModule } from './config/app-config.module';
 import { buildPinoHttpOptions } from './observability/logging.config';
 import { AppBadgesModule } from './app-badges/app-badges.module';
 import { ApplicationTrackingModule } from './application-tracking/application-tracking.module';
@@ -26,15 +26,7 @@ import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath:
-        process.env.NODE_ENV === 'test' ? ['.env.test', '.env'] : '.env',
-      validationSchema: envValidationSchema,
-      validationOptions: {
-        abortEarly: true,
-      },
-    }),
+    AppConfigModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({

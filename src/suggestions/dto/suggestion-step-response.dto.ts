@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import {
+  ProductImageUrlResolverOptions,
+  resolveInventoryProductImageUrl,
+} from '../../inventory/product-image-url-resolver';
+import {
   SuggestionSafetyFlagJson,
   SuggestionStepChipJson,
   SuggestionStepProvenance,
@@ -28,13 +32,14 @@ export class SuggestionStepProductSummaryDto {
 
   static fromEntity(
     product: InventoryProduct,
+    options: ProductImageUrlResolverOptions = {},
   ): SuggestionStepProductSummaryDto {
     const dto = new SuggestionStepProductSummaryDto();
     dto.id = product.id;
     dto.brand = product.brand;
     dto.name = product.name;
     dto.category = product.category;
-    dto.imageUrl = product.identity?.imageUrls?.[0] ?? null;
+    dto.imageUrl = resolveInventoryProductImageUrl(product, options);
     dto.status = product.status;
     return dto;
   }
@@ -97,7 +102,10 @@ export class SuggestionStepResponseDto {
   })
   product: SuggestionStepProductSummaryDto | null;
 
-  static fromEntity(step: SuggestionStep): SuggestionStepResponseDto {
+  static fromEntity(
+    step: SuggestionStep,
+    options: ProductImageUrlResolverOptions = {},
+  ): SuggestionStepResponseDto {
     const dto = new SuggestionStepResponseDto();
     dto.id = step.id;
     dto.stepOrder = step.step_order;
@@ -117,7 +125,7 @@ export class SuggestionStepResponseDto {
     dto.chips = step.chips ?? [];
     dto.safetyWarnings = step.safety_warnings ?? [];
     dto.product = step.product
-      ? SuggestionStepProductSummaryDto.fromEntity(step.product)
+      ? SuggestionStepProductSummaryDto.fromEntity(step.product, options)
       : null;
     return dto;
   }

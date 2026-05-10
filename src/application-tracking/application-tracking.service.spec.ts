@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { DataSource, ObjectLiteral, Repository } from 'typeorm';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import { User } from '../users/entities/user.entity';
 import { ApplicationReactiveRegenerationService } from './application-reactive-regeneration.service';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
@@ -22,6 +23,9 @@ describe('ApplicationTrackingService', () => {
   const reactiveRegeneration = {
     queueAfterApplicationChange: jest.fn(),
   } as unknown as jest.Mocked<ApplicationReactiveRegenerationService>;
+  const cataloguePhotoStorageService = {
+    resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  } as unknown as jest.Mocked<CataloguePhotoStorageService>;
 
   let txLogRepo: jest.Mocked<Repository<ApplicationLog>>;
   let txItemRepo: jest.Mocked<Repository<ApplicationLogItem>>;
@@ -41,6 +45,7 @@ describe('ApplicationTrackingService', () => {
       versionRepo,
       validation,
       reactiveRegeneration,
+      cataloguePhotoStorageService,
     );
   });
 

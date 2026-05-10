@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { toIsoString } from '../../common/utils/date';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { ScheduleSlot } from '../entities/schedule-slot.entity';
 import { RoutineStepResponseDto } from './routine-step-response.dto';
 
@@ -76,11 +77,14 @@ export class ScheduleSlotResponseDto {
     this.updatedAt = updatedAt;
   }
 
-  static fromEntity(slot: ScheduleSlot): ScheduleSlotResponseDto {
+  static fromEntity(
+    slot: ScheduleSlot,
+    options: ProductImageUrlResolverOptions = {},
+  ): ScheduleSlotResponseDto {
     const steps = (slot.steps ?? [])
       .slice()
       .sort((a, b) => a.step_order - b.step_order)
-      .map((step) => RoutineStepResponseDto.fromEntity(step));
+      .map((step) => RoutineStepResponseDto.fromEntity(step, options));
 
     return new ScheduleSlotResponseDto(
       slot.id,

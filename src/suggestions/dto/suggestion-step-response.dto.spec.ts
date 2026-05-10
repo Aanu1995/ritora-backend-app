@@ -39,4 +39,47 @@ describe('SuggestionStepResponseDto', () => {
       }),
     );
   });
+
+  it('resolves product image urls with the shelf media resolver', () => {
+    const dto = SuggestionStepResponseDto.fromEntity(
+      {
+        id: 'step-1',
+        step_order: 0,
+        routine_step_id: null,
+        inventory_product_id: 'product-1',
+        product_brand_snapshot: null,
+        product_name_snapshot: null,
+        step_label: 'serum',
+        custom_label: null,
+        application_method: null,
+        quantity: null,
+        wait_after_minutes: null,
+        explanation: null,
+        routine_note_snapshot: null,
+        provenance: 'ai_added',
+        chips: [],
+        safety_warnings: [],
+        product: {
+          id: 'product-1',
+          brand: 'Ritora Lab',
+          name: 'Barrier Serum',
+          category: 'serum',
+          status: 'active',
+          identity: {
+            imageUrls: [
+              'https://media.example.com/product-images/barrier-serum.webp',
+            ],
+          },
+        },
+      } as unknown as SuggestionStep,
+      {
+        resolveProductImageUrls: (imageUrls) =>
+          imageUrls.map((imageUrl) => `${imageUrl}?signed=true`),
+      },
+    );
+
+    expect(dto.product?.imageUrl).toBe(
+      'https://media.example.com/product-images/barrier-serum.webp?signed=true',
+    );
+  });
 });

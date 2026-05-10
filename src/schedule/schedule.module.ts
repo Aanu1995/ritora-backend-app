@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { CatalogueModule } from '../catalogue/catalogue.module';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { UserNotificationPreference } from '../notifications/entities/user-notification-preference.entity';
 import { SuggestionGenerationJob } from '../suggestions/entities/suggestion-generation-job.entity';
@@ -14,6 +15,7 @@ import { ScheduleService } from './schedule.service';
 
 @Module({
   imports: [
+    CatalogueModule,
     TypeOrmModule.forFeature([
       ScheduleSlot,
       RoutineStep,

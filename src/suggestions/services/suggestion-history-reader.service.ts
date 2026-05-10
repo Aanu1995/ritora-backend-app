@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { toDateOnlyString } from '../../common/utils/date';
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { CataloguePhotoStorageService } from '../../catalogue/catalogue-photo-storage.service';
+import { toDateOnlyString } from '../../common/utils/date';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
@@ -54,6 +56,7 @@ export class SuggestionHistoryReader {
     private readonly applicationLogRepo: Repository<ApplicationLog>,
     @InjectRepository(SkinJournalEntry)
     private readonly journalEntryRepo: Repository<SkinJournalEntry>,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async getHistory(
@@ -178,6 +181,7 @@ export class SuggestionHistoryReader {
     ).get(date);
     const logBySuggestion = mapLogsBySuggestion(logs);
     const slotById = await this.loadSlotMap(suggestions);
+    const productImageOptions = this.productImageOptions();
     const slots: SuggestionHistorySlotSummaryDto[] = suggestions.map(
       (suggestion) => {
         const log = logBySuggestion.get(suggestion.id) ?? null;
@@ -193,9 +197,10 @@ export class SuggestionHistoryReader {
           ),
           suggestion: SuggestionInstanceResponseDto.fromEntity(suggestion, {
             applicationLogId: log?.id ?? null,
+            ...productImageOptions,
           }),
           applicationLog: log
-            ? ApplicationLogResponseDto.fromEntity(log)
+            ? ApplicationLogResponseDto.fromEntity(log, productImageOptions)
             : null,
         };
       },
@@ -235,6 +240,13 @@ export class SuggestionHistoryReader {
       },
       relations,
     });
+  }
+
+  private productImageOptions(): ProductImageUrlResolverOptions {
+    return {
+      resolveProductImageUrls: (imageUrls) =>
+        this.cataloguePhotoStorageService.resolvePublicImageUrls(imageUrls),
+    };
   }
 
   private async loadSlotMap(

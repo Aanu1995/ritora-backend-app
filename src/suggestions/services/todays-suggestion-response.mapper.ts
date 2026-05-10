@@ -1,6 +1,7 @@
 import { ApplicationLogResponseDto } from '../../application-tracking/dto/application-log-response.dto';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { toDateOnlyString, toIsoString } from '../../common/utils/date';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { SlotModeValue } from '../../schedule/dto/schedule.constants';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import {
@@ -29,7 +30,7 @@ type BuildTodaySlotInput = {
   recordingReminderSnoozedUntil: Date | null;
   visibleAt: Date;
   lifecycle: SuggestionLifecycle;
-};
+} & ProductImageUrlResolverOptions;
 
 export function buildTodaySlotDto({
   slot,
@@ -39,7 +40,9 @@ export function buildTodaySlotDto({
   recordingReminderSnoozedUntil,
   visibleAt,
   lifecycle,
+  resolveProductImageUrls,
 }: BuildTodaySlotInput): TodaysSuggestionSlotDto {
+  const productImageOptions = { resolveProductImageUrls };
   return {
     slotId: slot.id,
     daypart: deriveSuggestionDaypart(slot.slot_time),
@@ -60,12 +63,16 @@ export function buildTodaySlotDto({
       ? toIsoString(recordingReminderSnoozedUntil)
       : null,
     applicationLog: applicationLog
-      ? ApplicationLogResponseDto.fromEntity(applicationLog)
+      ? ApplicationLogResponseDto.fromEntity(
+          applicationLog,
+          productImageOptions,
+        )
       : null,
     suggestion: suggestion
       ? SuggestionInstanceResponseDto.fromEntity(suggestion, {
           applicationLogId: applicationLog?.id ?? null,
           gapActionByKey,
+          ...productImageOptions,
         })
       : null,
   };
@@ -151,12 +158,20 @@ export function shouldExposeTodaySlot(slot: TodaysSuggestionSlotDto): boolean {
   return slot.suggestion?.generationStatus === SuggestionGenerationStatus.Ready;
 }
 
-export function buildTodayOnDemandDto(params: {
-  suggestion: SuggestionInstance;
-  applicationLog: ApplicationLog | null;
-  gapActionByKey?: ReadonlyMap<string, SuggestionGapActionKind>;
-}): TodaysOnDemandSuggestionDto {
-  const { suggestion, applicationLog, gapActionByKey } = params;
+export function buildTodayOnDemandDto(
+  params: {
+    suggestion: SuggestionInstance;
+    applicationLog: ApplicationLog | null;
+    gapActionByKey?: ReadonlyMap<string, SuggestionGapActionKind>;
+  } & ProductImageUrlResolverOptions,
+): TodaysOnDemandSuggestionDto {
+  const {
+    suggestion,
+    applicationLog,
+    gapActionByKey,
+    resolveProductImageUrls,
+  } = params;
+  const productImageOptions = { resolveProductImageUrls };
   const status = onDemandStatus(suggestion, applicationLog);
   return {
     id: suggestion.id,
@@ -164,11 +179,15 @@ export function buildTodayOnDemandDto(params: {
     requestedAt: toIsoString(suggestion.visible_at ?? suggestion.created_at),
     recording: applicationLog ? buildRecordingDto(applicationLog) : null,
     applicationLog: applicationLog
-      ? ApplicationLogResponseDto.fromEntity(applicationLog)
+      ? ApplicationLogResponseDto.fromEntity(
+          applicationLog,
+          productImageOptions,
+        )
       : null,
     suggestion: SuggestionInstanceResponseDto.fromEntity(suggestion, {
       applicationLogId: applicationLog?.id ?? null,
       gapActionByKey,
+      ...productImageOptions,
     }),
   };
 }

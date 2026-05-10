@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from '../app.module';
 import { SkinJournalAnalysisService } from '../skin-journal/services/skin-journal-analysis.service';
+import { SkinJournalAnalysisEvaluationModule } from '../skin-journal/analysis-evaluation/skin-journal-analysis-evaluation.module';
 import {
   SKIN_JOURNAL_ANALYSIS_EVALUATION_FIXTURES,
   type SkinJournalAnalysisEvaluationFixture,
@@ -19,9 +19,12 @@ interface EvaluationCliOptions {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: ['error', 'warn', 'log'],
-  });
+  const app = await NestFactory.createApplicationContext(
+    SkinJournalAnalysisEvaluationModule,
+    {
+      logger: ['error', 'warn', 'log'],
+    },
+  );
 
   try {
     const analysis = app.get(SkinJournalAnalysisService);

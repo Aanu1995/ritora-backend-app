@@ -144,7 +144,11 @@ export class CataloguePhotoStorageService {
       return imageUrl;
     }
 
-    return this.createSignedManagedUrl(objectKey, runtimeConfig);
+    try {
+      return this.createSignedManagedUrl(objectKey, runtimeConfig);
+    } catch {
+      return this.createManagedBaseUrl(objectKey, runtimeConfig);
+    }
   }
 
   private createSignedManagedUrl(

@@ -1,5 +1,6 @@
 import { ObjectLiteral, Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { CataloguePhotoStorageService } from '../../catalogue/catalogue-photo-storage.service';
 import { decodeCursor } from '../../common/utils/cursor-pagination';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
@@ -14,12 +15,16 @@ describe('SuggestionHistoryReader', () => {
   const slotRepo = repo<ScheduleSlot>();
   const applicationLogRepo = repo<ApplicationLog>();
   const journalEntryRepo = repo<SkinJournalEntry>();
+  const cataloguePhotoStorageService = {
+    resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  } as unknown as jest.Mocked<CataloguePhotoStorageService>;
   const historyQueryBuilder = queryBuilder();
   const reader = new SuggestionHistoryReader(
     suggestionRepo,
     slotRepo,
     applicationLogRepo,
     journalEntryRepo,
+    cataloguePhotoStorageService,
   );
   const exporter = new SuggestionHistoryExportService(
     suggestionRepo,

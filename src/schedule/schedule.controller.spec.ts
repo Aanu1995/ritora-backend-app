@@ -1,6 +1,7 @@
 import { ScheduleSlot } from './entities/schedule-slot.entity';
 import { ScheduleController } from './schedule.controller';
 import { ScheduleService } from './schedule.service';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 
 const mockScheduleService = () => ({
   getForUser: jest.fn(),
@@ -39,6 +40,9 @@ function createSlot(overrides: Partial<ScheduleSlot> = {}): ScheduleSlot {
 describe('ScheduleController', () => {
   let controller: ScheduleController;
   let scheduleService: ReturnType<typeof mockScheduleService>;
+  const cataloguePhotoStorageService = {
+    resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  } as unknown as jest.Mocked<CataloguePhotoStorageService>;
 
   beforeEach(() => {
     scheduleService = mockScheduleService();
@@ -48,6 +52,7 @@ describe('ScheduleController', () => {
     scheduleService.resolveTodayDay.mockReturnValue('mon');
     controller = new ScheduleController(
       scheduleService as unknown as ScheduleService,
+      cataloguePhotoStorageService,
     );
   });
 

@@ -4,6 +4,7 @@ import {
   toIsoString,
   toTimeOnlyString,
 } from '../../common/utils/date';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { ApplicationLogItemResponseDto } from './application-log-item.dto';
 import { ApplicationLog } from '../entities/application-log.entity';
 import { ApplicationLogVersion } from '../entities/application-log-version.entity';
@@ -65,7 +66,10 @@ export class ApplicationLogResponseDto {
   @ApiProperty()
   updatedAt: string;
 
-  static fromEntity(log: ApplicationLog): ApplicationLogResponseDto {
+  static fromEntity(
+    log: ApplicationLog,
+    options: ProductImageUrlResolverOptions = {},
+  ): ApplicationLogResponseDto {
     const dto = new ApplicationLogResponseDto();
     dto.id = log.id;
     dto.suggestionInstanceId = log.suggestion_instance_id;
@@ -85,7 +89,7 @@ export class ApplicationLogResponseDto {
     dto.items = (log.items ?? [])
       .slice()
       .sort((a, b) => a.step_order - b.step_order)
-      .map((item) => ApplicationLogItemResponseDto.fromEntity(item));
+      .map((item) => ApplicationLogItemResponseDto.fromEntity(item, options));
     dto.createdAt = toIsoString(log.created_at);
     dto.updatedAt = toIsoString(log.updated_at);
     return dto;

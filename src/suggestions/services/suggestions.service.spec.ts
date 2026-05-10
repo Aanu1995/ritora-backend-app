@@ -1,6 +1,7 @@
 import { ConflictException, HttpException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { CataloguePhotoStorageService } from '../../catalogue/catalogue-photo-storage.service';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
@@ -63,6 +64,9 @@ describe('SuggestionsService', () => {
   const environmentContext = {
     buildContext: jest.fn(),
   } as unknown as jest.Mocked<EnvironmentContextService>;
+  const cataloguePhotoStorageService = {
+    resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  } as unknown as jest.Mocked<CataloguePhotoStorageService>;
   const regenerationService = new SuggestionRegenerationService(
     suggestionRepo,
     jobRepo,
@@ -70,6 +74,7 @@ describe('SuggestionsService', () => {
     usageGuard,
     observability,
     routineBreakService,
+    cataloguePhotoStorageService,
   );
 
   const service = new SuggestionsService(
@@ -85,6 +90,7 @@ describe('SuggestionsService', () => {
     todayActionService,
     routineBreakService,
     environmentContext,
+    cataloguePhotoStorageService,
   );
 
   beforeEach(() => {
@@ -375,6 +381,12 @@ describe('SuggestionsService', () => {
         }),
       }),
     );
+    expect(result.slots[0]?.suggestion?.steps[0]?.product?.imageUrl).toBe(
+      'https://media.example.com/barrier-serum.webp',
+    );
+    expect(
+      cataloguePhotoStorageService.resolvePublicImageUrls,
+    ).toHaveBeenCalledWith(['https://media.example.com/barrier-serum.webp']);
     expect(result.slots[1]).toEqual(
       expect.objectContaining({
         slotId: 'slot-locked',
@@ -930,7 +942,16 @@ function suggestionStep(): SuggestionStep {
     chips: [],
     safety_warnings: [],
     created_at: new Date('2026-04-29T09:55:00.000Z'),
-    product: null,
+    product: {
+      id: 'product-1',
+      brand: 'Ava Lab',
+      name: 'Barrier Serum',
+      category: 'serum',
+      status: 'active',
+      identity: {
+        imageUrls: ['https://media.example.com/barrier-serum.webp'],
+      },
+    },
   } as unknown as SuggestionStep;
 }
 

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CatalogueModule } from '../catalogue/catalogue.module';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { ScheduledNotification } from '../notifications/entities/scheduled-notification.entity';
 import { UserNotificationPreference } from '../notifications/entities/user-notification-preference.entity';
@@ -19,6 +20,7 @@ import { ApplicationTrackingValidationService } from './application-tracking-val
 
 @Module({
   imports: [
+    CatalogueModule,
     TypeOrmModule.forFeature([
       ApplicationLog,
       ApplicationLogItem,

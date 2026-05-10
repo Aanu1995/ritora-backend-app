@@ -9,9 +9,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Not, Repository } from 'typeorm';
+import { CataloguePhotoStorageService } from '../../catalogue/catalogue-photo-storage.service';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { isPostgresUniqueConstraintError } from '../../common/utils/database-errors';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { ShelfStatus } from '../../shelf/shelf.types';
 import { User } from '../../users/entities/user.entity';
 import { CreateOnDemandSuggestionDto } from '../dto/on-demand-suggestion.dto';
@@ -54,6 +56,7 @@ export class SuggestionOnDemandService {
     private readonly usageGuard: SuggestionAiUsageGuard,
     private readonly consentService: SuggestionConsentService,
     private readonly observability: SuggestionObservabilityService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async create(
@@ -67,7 +70,7 @@ export class SuggestionOnDemandService {
       : null;
     if (existing) {
       await this.recordDuplicateRequest(user.id, existing.id);
-      return SuggestionInstanceResponseDto.fromEntity(existing);
+      return this.toResponse(existing);
     }
 
     if (await this.routineBreakService.isRoutineBreakActive(user.id)) {
@@ -101,7 +104,7 @@ export class SuggestionOnDemandService {
         const duplicate = await this.findExistingRequest(user.id, requestId);
         if (duplicate) {
           await this.recordDuplicateRequest(user.id, duplicate.id);
-          return SuggestionInstanceResponseDto.fromEntity(duplicate);
+          return this.toResponse(duplicate);
         }
       }
       throw error;
@@ -118,7 +121,7 @@ export class SuggestionOnDemandService {
         intensity: requestContext.intensity,
       },
     });
-    return SuggestionInstanceResponseDto.fromEntity(suggestion);
+    return this.toResponse(suggestion);
   }
 
   async retryFailed(
@@ -131,13 +134,13 @@ export class SuggestionOnDemandService {
         user_id: user.id,
         request_source: SuggestionRequestSource.OnDemand,
       },
-      relations: ['steps'],
+      relations: ['steps', 'steps.product'],
     });
     if (!suggestion) {
       throw new NotFoundException('On-demand suggestion not found.');
     }
     if (suggestion.generation_status !== SuggestionGenerationStatus.Failed) {
-      return SuggestionInstanceResponseDto.fromEntity(suggestion);
+      return this.toResponse(suggestion);
     }
 
     if (await this.routineBreakService.isRoutineBreakActive(user.id)) {
@@ -161,7 +164,7 @@ export class SuggestionOnDemandService {
         retryFromStatus: SuggestionGenerationStatus.Failed,
       },
     });
-    return SuggestionInstanceResponseDto.fromEntity(queued);
+    return this.toResponse(queued);
   }
 
   private async findExistingRequest(
@@ -174,7 +177,7 @@ export class SuggestionOnDemandService {
         request_source: SuggestionRequestSource.OnDemand,
         request_id: requestId,
       },
-      relations: ['steps'],
+      relations: ['steps', 'steps.product'],
     });
   }
 
@@ -393,5 +396,21 @@ export class SuggestionOnDemandService {
         reusedExistingSuggestion: true,
       },
     });
+  }
+
+  private toResponse(
+    suggestion: SuggestionInstance,
+  ): SuggestionInstanceResponseDto {
+    return SuggestionInstanceResponseDto.fromEntity(
+      suggestion,
+      this.productImageOptions(),
+    );
+  }
+
+  private productImageOptions(): ProductImageUrlResolverOptions {
+    return {
+      resolveProductImageUrls: (imageUrls) =>
+        this.cataloguePhotoStorageService.resolvePublicImageUrls(imageUrls),
+    };
   }
 }

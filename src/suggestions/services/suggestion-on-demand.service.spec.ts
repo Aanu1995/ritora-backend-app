@@ -4,6 +4,7 @@ import {
   HttpException,
 } from '@nestjs/common';
 import { DataSource, EntityTarget, ObjectLiteral, Repository } from 'typeorm';
+import { CataloguePhotoStorageService } from '../../catalogue/catalogue-photo-storage.service';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
@@ -29,6 +30,9 @@ describe('SuggestionOnDemandService', () => {
   const observability = {
     record: jest.fn(),
   } as unknown as jest.Mocked<SuggestionObservabilityService>;
+  const cataloguePhotoStorageService = {
+    resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  } as unknown as jest.Mocked<CataloguePhotoStorageService>;
 
   let txSuggestionRepo: jest.Mocked<Repository<SuggestionInstance>>;
   let txJobRepo: jest.Mocked<Repository<SuggestionGenerationJob>>;
@@ -47,6 +51,7 @@ describe('SuggestionOnDemandService', () => {
       usageGuard,
       consentService,
       observability,
+      cataloguePhotoStorageService,
     );
 
     routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
