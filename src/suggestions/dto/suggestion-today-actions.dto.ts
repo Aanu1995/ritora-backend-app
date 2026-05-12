@@ -13,6 +13,12 @@ import {
   SUGGESTION_GAP_ACTION_KINDS,
   SuggestionGapActionKind,
 } from '../suggestions.constants';
+import { SuggestionGapActionSourceType } from '../entities/suggestion-gap-action.entity';
+
+export const SUGGESTION_GAP_ACTION_SOURCE_TYPES = [
+  'today',
+  'smart_pick',
+] as const satisfies readonly SuggestionGapActionSourceType[];
 
 export class NormalRoutineOverrideResponseDto {
   @ApiProperty()
@@ -26,15 +32,31 @@ export class NormalRoutineOverrideResponseDto {
 }
 
 export class RecordSuggestionGapActionDto {
-  @ApiProperty()
+  @ApiProperty({ enum: SUGGESTION_GAP_ACTION_SOURCE_TYPES, required: false })
+  @IsOptional()
+  @IsIn(SUGGESTION_GAP_ACTION_SOURCE_TYPES)
+  sourceType?: SuggestionGapActionSourceType;
+
+  @ApiProperty({ required: false })
+  @EmptyStringToUndefined()
+  @IsOptional()
   @IsString()
   @MaxLength(26)
-  suggestionInstanceId: string;
+  suggestionInstanceId?: string;
 
-  @ApiProperty()
+  @ApiProperty({ required: false })
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(26)
+  smartPickProductSuggestionId?: string;
+
+  @ApiProperty({ required: false })
+  @EmptyStringToUndefined()
+  @IsOptional()
   @IsString()
   @MaxLength(160)
-  ingredientOrCategory: string;
+  ingredientOrCategory?: string;
 
   @ApiProperty({ enum: SUGGESTION_GAP_ACTION_KINDS })
   @IsIn(SUGGESTION_GAP_ACTION_KINDS)
@@ -43,7 +65,13 @@ export class RecordSuggestionGapActionDto {
 
 export class SuggestionGapActionResponseDto {
   @ApiProperty()
-  suggestionInstanceId: string;
+  sourceType: SuggestionGapActionSourceType;
+
+  @ApiProperty({ nullable: true })
+  suggestionInstanceId: string | null;
+
+  @ApiProperty({ nullable: true })
+  smartPickProductSuggestionId: string | null;
 
   @ApiProperty()
   ingredientOrCategory: string;

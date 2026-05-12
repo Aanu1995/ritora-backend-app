@@ -21,6 +21,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { SkinJournalModule } from './skin-journal/skin-journal.module';
 import { SkinProfileModule } from './skin-profile/skin-profile.module';
+import { SmartPicksModule } from './smart-picks/smart-picks.module';
 import { SuggestionsModule } from './suggestions/suggestions.module';
 import { UsersModule } from './users/users.module';
 
@@ -51,6 +52,7 @@ import { UsersModule } from './users/users.module';
     ScheduleModule,
     SkinJournalModule,
     SkinProfileModule,
+    SmartPicksModule,
     SuggestionsModule,
     UsersModule,
   ],

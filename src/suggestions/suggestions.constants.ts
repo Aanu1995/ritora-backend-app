@@ -177,6 +177,8 @@ export type SuggestionObservabilityEventKind =
   | 'safety_rule_rejected'
   | 'ai_budget_blocked'
   | 'consent_degraded'
+  | 'smart_pick_generation_completed'
+  | 'smart_pick_generation_degraded'
   | 'retention_purged';
 
 export type SuggestionObservabilitySeverity = 'info' | 'warning' | 'critical';

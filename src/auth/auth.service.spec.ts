@@ -11,8 +11,11 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { hashSync } from 'bcrypt';
 import { createHash } from 'crypto';
 import type { Response } from 'express';
+import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
+import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.entity';
 import { SkinJournalService } from '../skin-journal/skin-journal.service';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
@@ -68,6 +71,9 @@ describe('AuthService', () => {
   let sessionsRepo: Record<string, jest.Mock>;
   let consentsRepo: Record<string, jest.Mock>;
   let skinProfileRepo: Record<string, jest.Mock>;
+  let smartPickSnapshotsRepo: Record<string, jest.Mock>;
+  let smartPickSuggestionsRepo: Record<string, jest.Mock>;
+  let suggestionGapActionsRepo: Record<string, jest.Mock>;
   let dataAccessLogService: Record<string, jest.Mock>;
 
   beforeEach(async () => {
@@ -116,6 +122,16 @@ describe('AuthService', () => {
       findOne: jest.fn().mockResolvedValue(null),
     };
 
+    smartPickSnapshotsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    smartPickSuggestionsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    suggestionGapActionsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+
     dataAccessLogService = {
       recordDataAccess: jest.fn().mockResolvedValue(undefined),
     };
@@ -133,6 +149,18 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(AuthSession), useValue: sessionsRepo },
         { provide: getRepositoryToken(UserConsent), useValue: consentsRepo },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfileRepo },
+        {
+          provide: getRepositoryToken(SmartPickSnapshot),
+          useValue: smartPickSnapshotsRepo,
+        },
+        {
+          provide: getRepositoryToken(SmartPickProductSuggestion),
+          useValue: smartPickSuggestionsRepo,
+        },
+        {
+          provide: getRepositoryToken(SuggestionGapAction),
+          useValue: suggestionGapActionsRepo,
+        },
         { provide: UserDataAccessLogService, useValue: dataAccessLogService },
         { provide: SkinJournalService, useValue: skinJournalService },
         {
@@ -925,6 +953,68 @@ describe('AuthService', () => {
         created_at: new Date('2024-01-01'),
         updated_at: new Date('2024-01-02'),
       });
+      smartPickSnapshotsRepo.find.mockResolvedValue([
+        {
+          mode: 'refine',
+          coverage_json: { filled: 4, total: 5, slots: [] },
+          gaps_json: [
+            {
+              ingredientOrCategory: 'Replacement for Serum',
+              normalizedKey: 'replacement-for-serum',
+              priority: 'priority',
+              reason: 'History suggests a replacement.',
+              goalAlignment: 'acne',
+              sourceIds: [],
+              gapKind: 'replacement',
+              replacementFor: null,
+            },
+          ],
+          covered_json: [],
+          redundancy_json: [],
+          recap_json: {
+            primaryGoal: 'acne',
+            skinType: 'oily',
+            location: { city: 'Stockholm', countryCode: 'SE' },
+            budgetTier: 'mid',
+            ethnicity: 'black',
+          },
+          inputs_hash: 'hash-1',
+          generated_at: new Date('2026-05-12T09:00:00.000Z'),
+          expires_at: new Date('2026-05-13T09:00:00.000Z'),
+        },
+      ]);
+      smartPickSuggestionsRepo.find.mockResolvedValue([
+        {
+          ingredient_or_category: 'Replacement for Serum',
+          normalized_key: 'replacement-for-serum',
+          brand: 'Better Brand',
+          product_name: 'Gentle Serum',
+          budget_tier: 'mid',
+          price_cents: 2100,
+          currency: 'USD',
+          availability_status: 'import_only',
+          verification_status: 'ai_named',
+          recommendation_rank_reason: 'Better fit for the goal.',
+          local_alternative_reason: 'Local option may be less targeted.',
+          retailer_data_checked_at: new Date('2026-05-12T09:00:00.000Z'),
+          retailer_data_expires_at: new Date('2026-05-19T09:00:00.000Z'),
+          source_ids: [],
+          gap_reason: 'History suggests a replacement.',
+          goal_alignment: 'acne',
+          created_at: new Date('2026-05-12T09:00:00.000Z'),
+          updated_at: new Date('2026-05-12T09:00:00.000Z'),
+        },
+      ]);
+      suggestionGapActionsRepo.find.mockResolvedValue([
+        {
+          source_type: 'smart_pick',
+          ingredient_or_category: 'Replacement for Serum',
+          normalized_key: 'replacement-for-serum',
+          action: 'saved',
+          created_at: new Date('2026-05-12T10:00:00.000Z'),
+          updated_at: new Date('2026-05-12T10:00:00.000Z'),
+        },
+      ]);
 
       const result = await service.exportData(user.id, 'Password1');
 
@@ -939,6 +1029,16 @@ describe('AuthService', () => {
       });
       expect(result.consents).toHaveLength(1);
       expect(result.sessions).toHaveLength(1);
+      expect(result.smartPicks.snapshots).toHaveLength(1);
+      expect(result.smartPicks.productSuggestions[0]).toMatchObject({
+        ingredientOrCategory: 'Replacement for Serum',
+        productName: 'Gentle Serum',
+        availabilityStatus: 'import_only',
+      });
+      expect(result.smartPicks.actions[0]).toMatchObject({
+        normalizedKey: 'replacement-for-serum',
+        action: 'saved',
+      });
       expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
         user.id,
         [UserConsentType.LocationProcessing],

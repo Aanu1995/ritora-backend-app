@@ -306,6 +306,7 @@ export const envValidationSchema = Joi.object({
   INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: Joi.string().trim().required(),
   SKIN_JOURNAL_ANALYSIS_AI_MODEL: Joi.string().trim().allow('').required(),
   SUGGESTION_AI_MODEL: Joi.string().trim().allow('').required(),
+  SMART_PICKS_AI_MODEL: Joi.string().trim().allow('').required(),
   OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
     .trim()
     .allow('')

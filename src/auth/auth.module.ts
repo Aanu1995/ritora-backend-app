@@ -5,6 +5,9 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { SkinJournalModule } from '../skin-journal/skin-journal.module';
+import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
+import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.entity';
+import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
@@ -32,7 +35,14 @@ import { JwtStrategy } from './strategies/jwt.strategy';
         },
       }),
     }),
-    TypeOrmModule.forFeature([AuthSession, UserConsent, SkinProfile]),
+    TypeOrmModule.forFeature([
+      AuthSession,
+      UserConsent,
+      SkinProfile,
+      SmartPickSnapshot,
+      SmartPickProductSuggestion,
+      SuggestionGapAction,
+    ]),
     UsersModule,
     MailModule,
     SkinJournalModule,

@@ -47,6 +47,9 @@ import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { AuthSession } from './entities/auth-session.entity';
 import { OAuthIdentityProfile, OAuthProvider } from './oauth/oauth-profile';
+import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
+import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.entity';
+import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
 
 type AccountExportConsent = {
   consentType: UserConsentType;
@@ -70,8 +73,51 @@ type AccountExportData = {
   user: UserResponseDto;
   skinProfile: SkinProfileResponseDto | null;
   skinJournal: SkinJournalExportPayload | null;
+  smartPicks: AccountExportSmartPicks;
   consents: AccountExportConsent[];
   sessions: AccountExportSession[];
+};
+
+type AccountExportSmartPicks = {
+  snapshots: Array<{
+    mode: string;
+    coverage: unknown;
+    gaps: unknown;
+    covered: unknown;
+    redundancy: unknown;
+    recap: unknown;
+    inputsHash: string;
+    generatedAt: string;
+    expiresAt: string;
+  }>;
+  productSuggestions: Array<{
+    ingredientOrCategory: string;
+    normalizedKey: string;
+    brand: string;
+    productName: string;
+    budgetTier: string | null;
+    priceCents: number | null;
+    currency: string | null;
+    availabilityStatus: string;
+    verificationStatus: string;
+    recommendationRankReason: string | null;
+    localAlternativeReason: string | null;
+    retailerDataCheckedAt: string | null;
+    retailerDataExpiresAt: string | null;
+    sourceIds: string[];
+    gapReason: string | null;
+    goalAlignment: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  actions: Array<{
+    sourceType: string;
+    ingredientOrCategory: string;
+    normalizedKey: string;
+    action: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 };
 
 type OAuthProviderConfig = {
@@ -119,6 +165,12 @@ export class AuthService {
     private readonly consentsRepository: Repository<UserConsent>,
     @InjectRepository(SkinProfile)
     private readonly skinProfileRepository: Repository<SkinProfile>,
+    @InjectRepository(SmartPickSnapshot)
+    private readonly smartPickSnapshotRepository: Repository<SmartPickSnapshot>,
+    @InjectRepository(SmartPickProductSuggestion)
+    private readonly smartPickProductSuggestionRepository: Repository<SmartPickProductSuggestion>,
+    @InjectRepository(SuggestionGapAction)
+    private readonly suggestionGapActionRepository: Repository<SuggestionGapAction>,
     private readonly dataAccessLogService: UserDataAccessLogService,
     private readonly skinJournalService: SkinJournalService,
   ) {
@@ -631,6 +683,7 @@ export class AuthService {
     }
     const skinJournal =
       await this.skinJournalService.exportAllDataForAccount(userId);
+    const smartPicks = await this.exportSmartPicksData(userId);
 
     return {
       user: UserResponseDto.fromEntity(user),
@@ -645,6 +698,7 @@ export class AuthService {
           })
         : null,
       skinJournal,
+      smartPicks,
       consents: consents.map((c) => ({
         consentType: c.consent_type,
         consentVersion: c.consent_version,
@@ -660,6 +714,71 @@ export class AuthService {
         createdAt: toIsoString(s.created_at),
         lastUsedAt: toIsoString(s.last_used_at),
         revokedAt: toNullableIsoString(s.revoked_at),
+      })),
+    };
+  }
+
+  private async exportSmartPicksData(
+    userId: string,
+  ): Promise<AccountExportSmartPicks> {
+    const [snapshots, productSuggestions, actions] = await Promise.all([
+      this.smartPickSnapshotRepository.find({
+        where: { user_id: userId },
+        order: { generated_at: 'DESC' },
+      }),
+      this.smartPickProductSuggestionRepository.find({
+        where: { user_id: userId },
+        order: { created_at: 'DESC' },
+      }),
+      this.suggestionGapActionRepository.find({
+        where: { user_id: userId },
+        order: { created_at: 'DESC' },
+      }),
+    ]);
+
+    return {
+      snapshots: snapshots.map((snapshot) => ({
+        mode: snapshot.mode,
+        coverage: snapshot.coverage_json,
+        gaps: snapshot.gaps_json,
+        covered: snapshot.covered_json,
+        redundancy: snapshot.redundancy_json,
+        recap: snapshot.recap_json,
+        inputsHash: snapshot.inputs_hash,
+        generatedAt: toIsoString(snapshot.generated_at),
+        expiresAt: toIsoString(snapshot.expires_at),
+      })),
+      productSuggestions: productSuggestions.map((suggestion) => ({
+        ingredientOrCategory: suggestion.ingredient_or_category,
+        normalizedKey: suggestion.normalized_key,
+        brand: suggestion.brand,
+        productName: suggestion.product_name,
+        budgetTier: suggestion.budget_tier,
+        priceCents: suggestion.price_cents,
+        currency: suggestion.currency,
+        availabilityStatus: suggestion.availability_status,
+        verificationStatus: suggestion.verification_status,
+        recommendationRankReason: suggestion.recommendation_rank_reason,
+        localAlternativeReason: suggestion.local_alternative_reason,
+        retailerDataCheckedAt: toNullableIsoString(
+          suggestion.retailer_data_checked_at,
+        ),
+        retailerDataExpiresAt: toNullableIsoString(
+          suggestion.retailer_data_expires_at,
+        ),
+        sourceIds: suggestion.source_ids,
+        gapReason: suggestion.gap_reason,
+        goalAlignment: suggestion.goal_alignment,
+        createdAt: toIsoString(suggestion.created_at),
+        updatedAt: toIsoString(suggestion.updated_at),
+      })),
+      actions: actions.map((action) => ({
+        sourceType: action.source_type,
+        ingredientOrCategory: action.ingredient_or_category,
+        normalizedKey: action.normalized_key,
+        action: action.action,
+        createdAt: toIsoString(action.created_at),
+        updatedAt: toIsoString(action.updated_at),
       })),
     };
   }

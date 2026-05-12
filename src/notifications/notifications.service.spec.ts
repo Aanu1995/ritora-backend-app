@@ -475,6 +475,41 @@ describe('NotificationsService', () => {
     expect(result.product_expiry_notice_days).toBe(30);
   });
 
+  it('persists Smart Picks notification preferences from the API', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      photo_reminder_local_time: '08:00',
+      photo_reminder_enabled: true,
+      reaction_alerts_enabled: true,
+      simplification_alerts_enabled: true,
+      insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
+      wrapped_alerts_enabled: true,
+      photo_tutorial_completed: false,
+      suggestion_ready_enabled: true,
+      smart_pick_ready_enabled: false,
+      slot_start_enabled: true,
+      recording_reminder_enabled: true,
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      suggestion_lead_time_minutes: 120,
+      quiet_hours_enabled: false,
+      quiet_hours_start: '22:30',
+      quiet_hours_end: '06:30',
+    });
+    preferences.save.mockImplementation(async (value) => value);
+
+    const result = await service.updatePreferences('user-1', {
+      smart_pick_ready_enabled: true,
+    });
+
+    expect(preferences.save).toHaveBeenCalledWith(
+      expect.objectContaining({ smart_pick_ready_enabled: true }),
+    );
+    expect(result.smart_pick_ready_enabled).toBe(true);
+  });
+
   it('normalizes database time values to HH:mm for the preferences API', async () => {
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
@@ -513,6 +548,25 @@ describe('NotificationsService', () => {
     expect(notifications.save).not.toHaveBeenCalled();
     expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
     expect(pushNotifications.sendNotificationPush).not.toHaveBeenCalled();
+  });
+
+  it('does not create Smart Picks notifications when the optional gate is disabled', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      smart_pick_ready_enabled: false,
+    });
+
+    const result = await service.dispatch({
+      userId: 'user-1',
+      kind: 'smart_pick_ready',
+      titleKey: 'notificationsPage.kinds.smart_pick_ready.title',
+      bodyKey: 'notificationsPage.kinds.smart_pick_ready.body',
+      deepLink: '/smart-picks',
+    });
+
+    expect(result).toBeNull();
+    expect(notifications.save).not.toHaveBeenCalled();
   });
 
   it('sends product expiry notifications through push and never email', async () => {

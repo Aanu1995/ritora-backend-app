@@ -253,6 +253,7 @@ describe('Suggestions on-demand (e2e)', () => {
 
   it('snapshots scheduled routine step notes and returns them in today suggestions', async () => {
     const { timeZone, slotTime } = openTodaySlotWindow();
+    await setCurrentUserTimeZone(timeZone);
     const targetDate = readString(
       (await authGet('/suggestions/today', timeZone).expect(200)).body,
       'date',
@@ -373,6 +374,14 @@ describe('Suggestions on-demand (e2e)', () => {
       throw new Error('Could not resolve e2e user id.');
     }
     return id;
+  }
+
+  async function setCurrentUserTimeZone(timeZone: string): Promise<void> {
+    const dataSource = app.get(DataSource);
+    await dataSource.query('UPDATE users SET time_zone = $1 WHERE email = $2', [
+      timeZone,
+      TEST_USER.email,
+    ]);
   }
 
   async function moveSuggestionToDate(

@@ -188,7 +188,9 @@ describe('SuggestionsController', () => {
       reactionEntryId: 'entry-1',
     });
     todayActionService.recordGapAction.mockResolvedValue({
+      sourceType: 'today',
       suggestionInstanceId: 'suggestion-1',
+      smartPickProductSuggestionId: null,
       ingredientOrCategory: 'Vitamin C serum',
       normalizedKey: 'vitamin-c-serum',
       action: 'saved',

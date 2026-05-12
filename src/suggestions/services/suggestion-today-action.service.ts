@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, IsNull, MoreThan, Repository } from 'typeorm';
 import { toIsoString } from '../../common/utils/date';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
+import { SmartPickProductSuggestion } from '../../smart-picks/entities/smart-pick-product-suggestion.entity';
 import { RoutineSimplificationEvent } from '../../skin-journal/entities/routine-simplification-event.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { User } from '../../users/entities/user.entity';
@@ -44,6 +45,8 @@ export class SuggestionTodayActionService {
     private readonly reminderSnoozeRepo: Repository<SuggestionRecordingReminderSnooze>,
     @InjectRepository(SuggestionInstance)
     private readonly suggestionRepo: Repository<SuggestionInstance>,
+    @InjectRepository(SmartPickProductSuggestion)
+    private readonly smartPickProductSuggestionRepo: Repository<SmartPickProductSuggestion>,
     @InjectRepository(SkinJournalEntry)
     private readonly entryRepo: Repository<SkinJournalEntry>,
     @InjectRepository(RoutineSimplificationEvent)
@@ -105,6 +108,22 @@ export class SuggestionTodayActionService {
     user: User,
     payload: RecordSuggestionGapActionDto,
   ): Promise<SuggestionGapActionResponseDto> {
+    const sourceType = payload.sourceType ?? 'today';
+    if (sourceType === 'smart_pick') {
+      return this.recordSmartPickGapAction(user, payload);
+    }
+    return this.recordTodayGapAction(user, payload);
+  }
+
+  private async recordTodayGapAction(
+    user: User,
+    payload: RecordSuggestionGapActionDto,
+  ): Promise<SuggestionGapActionResponseDto> {
+    if (!payload.suggestionInstanceId || !payload.ingredientOrCategory) {
+      throw new BadRequestException(
+        'suggestionInstanceId and ingredientOrCategory are required.',
+      );
+    }
     const suggestion = await this.suggestionRepo.findOne({
       where: { id: payload.suggestionInstanceId },
     });
@@ -129,9 +148,54 @@ export class SuggestionTodayActionService {
       this.gapActionRepo.create({
         ...(existing ?? {}),
         user_id: user.id,
+        source_type: 'today',
         suggestion_instance_id: suggestion.id,
+        smart_pick_product_suggestion_id: null,
         ingredient_or_category: payload.ingredientOrCategory,
         normalized_key: normalizedKey,
+        action: payload.action,
+      }),
+    );
+    return toGapActionResponse(action);
+  }
+
+  private async recordSmartPickGapAction(
+    user: User,
+    payload: RecordSuggestionGapActionDto,
+  ): Promise<SuggestionGapActionResponseDto> {
+    if (!payload.smartPickProductSuggestionId) {
+      throw new BadRequestException(
+        'smartPickProductSuggestionId is required for Smart Picks actions.',
+      );
+    }
+    const suggestion = await this.smartPickProductSuggestionRepo.findOne({
+      where: { id: payload.smartPickProductSuggestionId },
+    });
+    if (!suggestion) {
+      throw new NotFoundException('Smart Pick product suggestion not found.');
+    }
+    if (suggestion.user_id !== user.id) {
+      throw new ForbiddenException(
+        'Smart Pick product suggestion belongs to another user.',
+      );
+    }
+    const existing = await this.gapActionRepo.findOne({
+      where: {
+        user_id: user.id,
+        source_type: 'smart_pick',
+        smart_pick_product_suggestion_id: suggestion.id,
+        normalized_key: suggestion.normalized_key,
+      },
+    });
+    const action = await this.gapActionRepo.save(
+      this.gapActionRepo.create({
+        ...(existing ?? {}),
+        user_id: user.id,
+        source_type: 'smart_pick',
+        suggestion_instance_id: null,
+        smart_pick_product_suggestion_id: suggestion.id,
+        ingredient_or_category: suggestion.ingredient_or_category,
+        normalized_key: suggestion.normalized_key,
         action: payload.action,
       }),
     );
@@ -146,11 +210,13 @@ export class SuggestionTodayActionService {
     const rows = await this.gapActionRepo.find({
       where: {
         user_id: userId,
+        source_type: 'today',
         suggestion_instance_id: In(Array.from(new Set(suggestionIds))),
       },
     });
     const result = new Map<string, Map<string, SuggestionGapActionKind>>();
     for (const row of rows) {
+      if (!row.suggestion_instance_id) continue;
       const map =
         result.get(row.suggestion_instance_id) ??
         new Map<string, SuggestionGapActionKind>();
@@ -266,7 +332,9 @@ function toGapActionResponse(
   action: SuggestionGapAction,
 ): SuggestionGapActionResponseDto {
   return {
+    sourceType: action.source_type,
     suggestionInstanceId: action.suggestion_instance_id,
+    smartPickProductSuggestionId: action.smart_pick_product_suggestion_id,
     ingredientOrCategory: action.ingredient_or_category,
     normalizedKey: action.normalized_key,
     action: action.action,

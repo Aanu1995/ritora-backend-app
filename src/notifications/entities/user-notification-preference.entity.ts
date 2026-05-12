@@ -50,6 +50,9 @@ export class UserNotificationPreference {
   @Column({ type: 'boolean', default: true })
   suggestion_ready_enabled: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  smart_pick_ready_enabled: boolean;
+
   @Column({ type: 'boolean', default: true })
   slot_start_enabled: boolean;
 

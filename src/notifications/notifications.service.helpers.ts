@@ -427,6 +427,8 @@ export function applyPreferenceUpdates(
     prefs.photo_tutorial_completed = dto.photo_tutorial_completed;
   if (dto.suggestion_ready_enabled !== undefined)
     prefs.suggestion_ready_enabled = dto.suggestion_ready_enabled;
+  if (dto.smart_pick_ready_enabled !== undefined)
+    prefs.smart_pick_ready_enabled = dto.smart_pick_ready_enabled;
   if (dto.slot_start_enabled !== undefined)
     prefs.slot_start_enabled = dto.slot_start_enabled;
   if (dto.recording_reminder_enabled !== undefined)
@@ -526,6 +528,8 @@ export function isNotificationKindEnabled(
   if (kind === 'wrapped_ready') return prefs.wrapped_alerts_enabled !== false;
   if (kind === 'suggestion_ready')
     return prefs.suggestion_ready_enabled !== false;
+  if (kind === 'smart_pick_ready')
+    return prefs.smart_pick_ready_enabled === true;
   if (kind === 'slot_start') return prefs.slot_start_enabled !== false;
   if (kind === 'recording_reminder')
     return prefs.recording_reminder_enabled !== false;

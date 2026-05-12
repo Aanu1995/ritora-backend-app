@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { RoutineSimplificationEvent } from '../../skin-journal/entities/routine-simplification-event.entity';
+import { SmartPickProductSuggestion } from '../../smart-picks/entities/smart-pick-product-suggestion.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionGapAction } from '../entities/suggestion-gap-action.entity';
@@ -14,6 +15,7 @@ describe('SuggestionTodayActionService', () => {
   const gapActionRepo = repo<SuggestionGapAction>();
   const reminderSnoozeRepo = repo<SuggestionRecordingReminderSnooze>();
   const suggestionRepo = repo<SuggestionInstance>();
+  const productSuggestionRepo = repo<SmartPickProductSuggestion>();
   const entryRepo = repo<SkinJournalEntry>();
   const simplificationRepo = repo<RoutineSimplificationEvent>();
   const service = new SuggestionTodayActionService(
@@ -21,6 +23,7 @@ describe('SuggestionTodayActionService', () => {
     gapActionRepo,
     reminderSnoozeRepo,
     suggestionRepo,
+    productSuggestionRepo,
     entryRepo,
     simplificationRepo,
   );
@@ -113,7 +116,9 @@ describe('SuggestionTodayActionService', () => {
         action: 'saved',
       }),
     ).resolves.toEqual({
+      sourceType: 'today',
       suggestionInstanceId: 'suggestion-1',
+      smartPickProductSuggestionId: null,
       ingredientOrCategory: 'Vitamin C Serum',
       normalizedKey: 'vitamin-c-serum',
       action: 'saved',
@@ -122,8 +127,44 @@ describe('SuggestionTodayActionService', () => {
     expect(gapActionRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: 'user-1',
+        source_type: 'today',
         suggestion_instance_id: 'suggestion-1',
+        smart_pick_product_suggestion_id: null,
         normalized_key: 'vitamin-c-serum',
+        action: 'saved',
+      }),
+    );
+  });
+
+  it('persists smart pick actions only for owned product suggestions', async () => {
+    productSuggestionRepo.findOne.mockResolvedValue(
+      smartPickProductSuggestion(),
+    );
+    gapActionRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.recordGapAction(user(), {
+        sourceType: 'smart_pick',
+        smartPickProductSuggestionId: 'pick-1',
+        action: 'saved',
+      }),
+    ).resolves.toEqual({
+      sourceType: 'smart_pick',
+      suggestionInstanceId: null,
+      smartPickProductSuggestionId: 'pick-1',
+      ingredientOrCategory: 'Broad-spectrum sunscreen SPF 30+',
+      normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+      action: 'saved',
+    });
+
+    expect(gapActionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        source_type: 'smart_pick',
+        suggestion_instance_id: null,
+        smart_pick_product_suggestion_id: 'pick-1',
+        ingredient_or_category: 'Broad-spectrum sunscreen SPF 30+',
+        normalized_key: 'broad-spectrum-sunscreen-spf-30',
         action: 'saved',
       }),
     );
@@ -150,6 +191,42 @@ describe('SuggestionTodayActionService', () => {
         action: 'dismissed',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects smart pick actions for another user', async () => {
+    const spoofed = smartPickProductSuggestion();
+    spoofed.user_id = 'user-2';
+    productSuggestionRepo.findOne.mockResolvedValue(spoofed);
+
+    await expect(
+      service.recordGapAction(user(), {
+        sourceType: 'smart_pick',
+        smartPickProductSuggestionId: 'pick-1',
+        action: 'saved',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('loads only today gap actions into today suggestion maps', async () => {
+    gapActionRepo.find.mockResolvedValue([
+      {
+        suggestion_instance_id: 'suggestion-1',
+        normalized_key: 'vitamin-c-serum',
+        action: 'saved',
+      } as SuggestionGapAction,
+    ]);
+
+    await expect(
+      service.getGapActionMaps('user-1', ['suggestion-1']),
+    ).resolves.toEqual(
+      new Map([['suggestion-1', new Map([['vitamin-c-serum', 'saved']])]]),
+    );
+    expect(gapActionRepo.find).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        user_id: 'user-1',
+        source_type: 'today',
+      }),
+    });
   });
 
   it('persists and returns active recording reminder snoozes', async () => {
@@ -227,4 +304,37 @@ function suggestion(): SuggestionInstance {
       },
     ],
   } as unknown as SuggestionInstance;
+}
+
+function smartPickProductSuggestion(): SmartPickProductSuggestion {
+  return {
+    id: 'pick-1',
+    user_id: 'user-1',
+    ingredient_or_category: 'Broad-spectrum sunscreen SPF 30+',
+    normalized_key: 'broad-spectrum-sunscreen-spf-30',
+    brand: 'La Roche-Posay',
+    product_name: 'Anthelios Mineral SPF 50',
+    budget_tier: 'mid',
+    price_cents: 2499,
+    currency: 'USD',
+    retailers_json: [],
+    reasoning_chips_json: [],
+    reasoning_facts_json: {},
+    ruled_out_json: [],
+    alternatives_json: [],
+    source_ids: [],
+    verification_status: 'ai_named',
+    availability_status: 'local',
+    recommendation_rank_reason: 'Best local SPF fit.',
+    local_alternative_reason: null,
+    retailer_data_checked_at: new Date('2026-05-04T10:00:00.000Z'),
+    retailer_data_expires_at: new Date('2026-05-11T10:00:00.000Z'),
+    inputs_hash: 'hash-1',
+    gap_reason: 'No SPF on shelf.',
+    goal_alignment: 'sun protection',
+    created_at: new Date('2026-05-04T10:00:00.000Z'),
+    updated_at: new Date('2026-05-04T10:00:00.000Z'),
+    user: undefined as never,
+    generateId: jest.fn(),
+  };
 }

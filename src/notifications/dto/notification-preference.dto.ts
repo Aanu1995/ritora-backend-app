@@ -54,6 +54,7 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() photo_tutorial_completed?: boolean;
 
   @IsOptional() @IsBoolean() suggestion_ready_enabled?: boolean;
+  @IsOptional() @IsBoolean() smart_pick_ready_enabled?: boolean;
   @IsOptional() @IsBoolean() slot_start_enabled?: boolean;
   @IsOptional() @IsBoolean() recording_reminder_enabled?: boolean;
   @IsOptional() @IsBoolean() product_expiry_alerts_enabled?: boolean;
@@ -116,6 +117,9 @@ export class PreferencesResponseDto {
   suggestion_ready_enabled: boolean;
 
   @ApiProperty()
+  smart_pick_ready_enabled: boolean;
+
+  @ApiProperty()
   slot_start_enabled: boolean;
 
   @ApiProperty()
@@ -159,6 +163,7 @@ export class PreferencesResponseDto {
     dto.ai_polished_insights_enabled = p.ai_polished_insights_enabled;
     dto.wrapped_alerts_enabled = p.wrapped_alerts_enabled;
     dto.suggestion_ready_enabled = p.suggestion_ready_enabled;
+    dto.smart_pick_ready_enabled = p.smart_pick_ready_enabled ?? false;
     dto.slot_start_enabled = p.slot_start_enabled;
     dto.recording_reminder_enabled = p.recording_reminder_enabled;
     dto.product_expiry_alerts_enabled = p.product_expiry_alerts_enabled ?? true;

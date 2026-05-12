@@ -20,6 +20,7 @@ import { User } from '../users/entities/user.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
 import { RoutineBreak } from './entities/routine-break.entity';
+import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
 import { SuggestionInstance } from './entities/suggestion-instance.entity';
 import { SuggestionStep } from './entities/suggestion-step.entity';
 import { SuggestionGenerationJob } from './entities/suggestion-generation-job.entity';
@@ -59,6 +60,7 @@ import { SuggestionsController } from './suggestions.controller';
       SuggestionContextCache,
       SuggestionObservabilityEvent,
       SuggestionGapAction,
+      SmartPickProductSuggestion,
       SuggestionRecordingReminderSnooze,
       SuggestionReactionOverride,
       EnvironmentLocationCache,

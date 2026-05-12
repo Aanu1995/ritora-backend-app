@@ -449,6 +449,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         ai_polished_insights_enabled: true,
         wrapped_alerts_enabled: true,
         suggestion_ready_enabled: true,
+        smart_pick_ready_enabled: false,
         slot_start_enabled: true,
         recording_reminder_enabled: true,
         product_expiry_alerts_enabled: true,

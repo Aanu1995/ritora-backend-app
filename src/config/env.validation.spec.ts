@@ -63,6 +63,7 @@ function developmentEnv(
     INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
     SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'gpt-5.5',
     SUGGESTION_AI_MODEL: 'gpt-5.5',
+    SMART_PICKS_AI_MODEL: 'gpt-5.5',
     OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
     OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: '',
     INSIGHTS_AI_MODEL: 'gpt-5.5',
@@ -203,6 +204,7 @@ describe('envValidationSchema', () => {
     expect(result.value.INGREDIENT_TRANSLATION_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.SKIN_JOURNAL_ANALYSIS_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.SUGGESTION_AI_MODEL).toBe('gpt-5.5');
+    expect(result.value.SMART_PICKS_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.INSIGHTS_AI_MODEL).toBe('gpt-5.5');
   });
 

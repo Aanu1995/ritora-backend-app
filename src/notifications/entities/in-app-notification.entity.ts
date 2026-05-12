@@ -22,7 +22,8 @@ export type NotificationKind =
   | 'slot_start'
   | 'recording_reminder'
   | 'product_nearing_expiry'
-  | 'product_expired';
+  | 'product_expired'
+  | 'smart_pick_ready';
 
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 
