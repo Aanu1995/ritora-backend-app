@@ -6,6 +6,7 @@ import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-stora
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { decodeCursor } from '../common/utils/cursor-pagination';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import {
   SkinProfileWaterHardness,
   SkinProfileWaterSensitivity,
@@ -199,6 +200,9 @@ describe('InventoryService', () => {
   const notificationsService = {
     runProductExpiryAlertForProduct: jest.fn().mockResolvedValue(null),
   };
+  const smartPicksPreparation = {
+    scheduleForUser: jest.fn(),
+  };
 
   beforeEach(async () => {
     queryBuilder = createMockQueryBuilder();
@@ -208,6 +212,7 @@ describe('InventoryService', () => {
     cataloguePhotoStorageService.toPersistentImageUrls.mockClear();
     cataloguePhotoStorageService.resolvePublicImageUrls.mockClear();
     notificationsService.runProductExpiryAlertForProduct.mockClear();
+    smartPicksPreparation.scheduleForUser.mockClear();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventoryService,
@@ -229,6 +234,10 @@ describe('InventoryService', () => {
         },
         { provide: UserDataAccessLogService, useValue: dataAccess },
         { provide: NotificationsService, useValue: notificationsService },
+        {
+          provide: SmartPicksPreparationService,
+          useValue: smartPicksPreparation,
+        },
       ],
     }).compile();
 
@@ -277,6 +286,9 @@ describe('InventoryService', () => {
     expect(
       notificationsService.runProductExpiryAlertForProduct,
     ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
     expect(result.id).toBe('inventory-1');
   });
 
@@ -292,6 +304,7 @@ describe('InventoryService', () => {
     });
 
     expect(repo.save).not.toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
   });
 
   it('rejects product creation when the skin profile is incomplete', async () => {
@@ -308,6 +321,7 @@ describe('InventoryService', () => {
     });
 
     expect(repo.save).not.toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
   });
 
   it('uploads product images without reading skin profile data', async () => {
@@ -543,6 +557,9 @@ describe('InventoryService', () => {
     expect(
       notificationsService.runProductExpiryAlertForProduct,
     ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('processes and uploads a product image for edit flows', async () => {
@@ -654,6 +671,10 @@ describe('InventoryService', () => {
     expect(
       notificationsService.runProductExpiryAlertForProduct,
     ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledTimes(3);
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('evaluates product expiry alerts after bulk restore', async () => {

@@ -4,11 +4,13 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { nowDate } from '../common/utils/date';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UserDataAccessLog } from '../users/entities/user-data-access-log.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
@@ -62,6 +64,8 @@ export class SkinProfileService {
     private readonly usersService: UsersService,
     private readonly dataAccessLogService: UserDataAccessLogService,
     configService: ConfigService,
+    @Optional()
+    private readonly smartPicksPreparation?: SmartPicksPreparationService,
   ) {
     this.privacyVersion = configService.getOrThrow('LEGAL_PRIVACY_VERSION');
   }
@@ -167,6 +171,7 @@ export class SkinProfileService {
       userId,
       this.hasHormonalContextData(savedProfile),
     );
+    this.scheduleSmartPicksPreparation(userId);
 
     return savedProfile;
   }
@@ -261,6 +266,7 @@ export class SkinProfileService {
       userId,
       this.hasHormonalContextData(savedProfile),
     );
+    this.scheduleSmartPicksPreparation(userId);
 
     return savedProfile;
   }
@@ -274,6 +280,7 @@ export class SkinProfileService {
     await this.syncLocationConsent(userId, false, false);
     await this.syncHealthContextConsent(userId, false);
     await this.syncHormonalContextConsent(userId, false);
+    this.scheduleSmartPicksPreparation(userId);
   }
 
   async clearHealthContext(userId: string): Promise<SkinProfile> {
@@ -288,6 +295,7 @@ export class SkinProfileService {
 
     const savedProfile = await this.profileRepository.save(profile);
     await this.syncHealthContextConsent(userId, false);
+    this.scheduleSmartPicksPreparation(userId);
     return savedProfile;
   }
 
@@ -301,7 +309,12 @@ export class SkinProfileService {
 
     const savedProfile = await this.profileRepository.save(profile);
     await this.syncHormonalContextConsent(userId, false);
+    this.scheduleSmartPicksPreparation(userId);
     return savedProfile;
+  }
+
+  private scheduleSmartPicksPreparation(userId: string): void {
+    this.smartPicksPreparation?.scheduleForUser(userId);
   }
 
   async hasActiveHealthContextConsent(userId: string): Promise<boolean> {

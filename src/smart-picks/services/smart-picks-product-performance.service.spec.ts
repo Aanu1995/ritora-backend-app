@@ -185,9 +185,153 @@ describe('summarizeSmartPicksProductPerformance', () => {
     );
     expect(summary[0].replacementReason).toContain('reaction signals');
   });
+
+  it('treats clear improvement in recent photo history as working, not replacement-ready', () => {
+    const summary = summarizeSmartPicksProductPerformance({
+      products: [product('serum-1', ProductCategory.Serum)],
+      applicationLogs: logsForProduct('serum-1', consistentUsageDates()),
+      journalEntries: [
+        journalEntry('2026-02-12', concern('hyperpigmentation', 'severe')),
+        journalEntry('2026-03-18', concern('hyperpigmentation', 'moderate')),
+        journalEntry(
+          '2026-05-10',
+          concern('hyperpigmentation', 'mild', 'improved'),
+        ),
+      ],
+      primaryGoal: 'fade dark marks',
+      referenceDate: new Date('2026-05-12T09:00:00.000Z'),
+    });
+
+    expect(summary[0]).toEqual(
+      expect.objectContaining({
+        goalTrend: SmartPicksProductPerformanceSignal.Working,
+        replacementCandidate: false,
+      }),
+    );
+  });
+
+  it('uses overall worsening when the matching concern has no direct change signal', () => {
+    const summary = summarizeSmartPicksProductPerformance({
+      products: [product('serum-1', ProductCategory.Serum)],
+      applicationLogs: logsForProduct('serum-1', consistentUsageDates()),
+      journalEntries: [
+        journalEntry('2026-02-12', concern('acne', 'mild')),
+        journalEntry('2026-03-18', concern('acne', 'mild')),
+        journalEntry('2026-05-10', concern('acne', 'mild'), {
+          overallChange: 'worsened',
+        }),
+      ],
+      primaryGoal: 'calm breakouts',
+      referenceDate: new Date('2026-05-12T09:00:00.000Z'),
+    });
+
+    expect(summary[0]).toEqual(
+      expect.objectContaining({
+        goalTrend: SmartPicksProductPerformanceSignal.NotImproving,
+        replacementCandidate: true,
+      }),
+    );
+  });
+
+  it('does not replace non-treatment basics just because a photo trend is flat', () => {
+    const summary = summarizeSmartPicksProductPerformance({
+      products: [product('cleanser-1', ProductCategory.Cleanser)],
+      applicationLogs: logsForProduct('cleanser-1', [
+        '2026-02-20',
+        '2026-02-23',
+        '2026-02-26',
+        '2026-03-02',
+        '2026-03-05',
+        '2026-03-09',
+        '2026-03-12',
+        '2026-03-16',
+        '2026-03-19',
+        '2026-03-23',
+        '2026-03-26',
+        '2026-03-30',
+        '2026-04-02',
+        '2026-04-06',
+        '2026-04-09',
+        '2026-04-13',
+        '2026-04-16',
+        '2026-04-20',
+        '2026-04-23',
+        '2026-04-27',
+        '2026-04-30',
+        '2026-05-04',
+        '2026-05-07',
+        '2026-05-10',
+      ]),
+      journalEntries: [
+        journalEntry('2026-02-12', concern('acne', 'moderate')),
+        journalEntry('2026-03-12', concern('acne', 'moderate')),
+        journalEntry('2026-05-10', concern('acne', 'moderate')),
+      ],
+      primaryGoal: 'calm breakouts',
+      referenceDate: new Date('2026-05-12T09:00:00.000Z'),
+    });
+
+    expect(summary[0]).toEqual(
+      expect.objectContaining({
+        goalTrend: SmartPicksProductPerformanceSignal.NotImproving,
+        replacementCandidate: false,
+      }),
+    );
+  });
+
+  it('counts substituted product use but ignores skipped application items', () => {
+    const summary = summarizeSmartPicksProductPerformance({
+      products: [product('serum-1', ProductCategory.Serum)],
+      applicationLogs: [
+        applicationLog('2026-05-01', {
+          status: ApplicationItemStatus.Substituted,
+          inventoryProductId: 'other-product',
+          substitutedWithProductId: 'serum-1',
+        }),
+        applicationLog('2026-05-02', {
+          status: ApplicationItemStatus.Skipped,
+          inventoryProductId: 'serum-1',
+        }),
+      ],
+      journalEntries: [],
+      primaryGoal: 'fade dark marks',
+      referenceDate: new Date('2026-05-12T09:00:00.000Z'),
+    });
+
+    expect(summary[0]).toEqual(
+      expect.objectContaining({
+        usageDaysLast90: 1,
+        firstUsedAt: '2026-05-01',
+        lastUsedAt: '2026-05-01',
+      }),
+    );
+  });
 });
 
 describe('SmartPicksProductPerformanceService', () => {
+  it('does not read history repositories when there are no products', async () => {
+    const applicationLogs = { find: jest.fn() };
+    const journalEntries = { find: jest.fn() };
+    const service = new SmartPicksProductPerformanceService(
+      applicationLogs as unknown as ConstructorParameters<
+        typeof SmartPicksProductPerformanceService
+      >[0],
+      journalEntries as unknown as ConstructorParameters<
+        typeof SmartPicksProductPerformanceService
+      >[1],
+    );
+
+    await expect(
+      service.summarizeForUser({
+        userId: 'user-1',
+        products: [],
+        primaryGoal: 'fade dark marks',
+      }),
+    ).resolves.toEqual([]);
+    expect(applicationLogs.find).not.toHaveBeenCalled();
+    expect(journalEntries.find).not.toHaveBeenCalled();
+  });
+
   it('fails closed when history repositories are unavailable', async () => {
     const service = new SmartPicksProductPerformanceService(
       {
@@ -240,6 +384,35 @@ function logsForProduct(productId: string, dates: string[]): ApplicationLog[] {
   })) as ApplicationLog[];
 }
 
+function consistentUsageDates(): string[] {
+  return [
+    '2026-02-20',
+    '2026-02-23',
+    '2026-02-26',
+    '2026-03-02',
+    '2026-03-05',
+    '2026-03-09',
+    '2026-03-12',
+    '2026-03-16',
+    '2026-03-19',
+    '2026-03-23',
+    '2026-03-26',
+    '2026-03-30',
+    '2026-04-02',
+    '2026-04-06',
+    '2026-04-09',
+    '2026-04-13',
+    '2026-04-16',
+    '2026-04-20',
+    '2026-04-23',
+    '2026-04-27',
+    '2026-04-30',
+    '2026-05-04',
+    '2026-05-07',
+    '2026-05-10',
+  ];
+}
+
 function journalEntry(
   date: string,
   detectedConcern: AnalysisObservations['detected_concerns'][number],
@@ -248,6 +421,7 @@ function journalEntry(
     needsRetake?: boolean;
     lightingQuality?: AnalysisObservations['image_quality']['lighting_quality'];
     faceDetected?: boolean;
+    overallChange?: AnalysisObservations['overall_change_from_previous'];
   } = {},
 ): SkinJournalEntry {
   const reactionDetected = options.reactionDetected ?? false;
@@ -281,7 +455,7 @@ function journalEntry(
         indicators: [],
       },
       overall_assessment: 'Stable.',
-      overall_change_from_previous: 'stable',
+      overall_change_from_previous: options.overallChange ?? 'stable',
       should_flag_for_doctor: false,
     },
   } as unknown as SkinJournalEntry;
@@ -290,13 +464,38 @@ function journalEntry(
 function concern(
   concernName: AnalysisObservations['detected_concerns'][number]['concern'],
   severity: AnalysisObservations['detected_concerns'][number]['severity'],
+  change: AnalysisObservations['detected_concerns'][number]['change_from_previous'] = 'stable',
 ): AnalysisObservations['detected_concerns'][number] {
   return {
     concern: concernName,
     severity,
     locations: ['cheeks'],
     confidence: 0.86,
-    change_from_previous: 'stable',
+    change_from_previous: change,
     change_confidence: 0.82,
   };
+}
+
+function applicationLog(
+  date: string,
+  item: {
+    status: ApplicationItemStatus;
+    inventoryProductId: string | null;
+    substitutedWithProductId?: string | null;
+  },
+): ApplicationLog {
+  return {
+    id: `log-${date}`,
+    user_id: 'user-1',
+    target_date: date,
+    items: [
+      {
+        id: `item-${date}`,
+        inventory_product_id: item.inventoryProductId,
+        substituted_with_product_id: item.substitutedWithProductId ?? null,
+        status: item.status,
+        applied_snapshot: null,
+      } as ApplicationLogItem,
+    ],
+  } as ApplicationLog;
 }

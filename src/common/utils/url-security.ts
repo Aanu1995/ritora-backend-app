@@ -31,7 +31,7 @@ function isPrivateIpv4Address(hostname: string): boolean {
 }
 
 function isPrivateIpv6Address(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
   return (
     normalized === '::1' ||
@@ -42,7 +42,7 @@ function isPrivateIpv6Address(hostname: string): boolean {
 }
 
 function hasPrivateHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   const ipVersion = isIP(normalized);
 
   if (normalized === 'localhost' || normalized.endsWith('.localhost')) {

@@ -24,6 +24,20 @@ export type SmartPicksAvailabilityStatus =
 export const SMART_PICKS_AVAILABILITY_STATUSES: readonly SmartPicksAvailabilityStatus[] =
   ['local', 'import_only', 'unavailable', 'unknown'] as const;
 
+export type SmartPicksProductVerificationStatus =
+  | 'ai_named'
+  | 'retailer_verified'
+  | 'retailer_unverified'
+  | 'unavailable';
+
+export const SMART_PICKS_PRODUCT_VERIFICATION_STATUSES: readonly SmartPicksProductVerificationStatus[] =
+  [
+    'ai_named',
+    'retailer_verified',
+    'retailer_unverified',
+    'unavailable',
+  ] as const;
+
 export const SmartPicksGapKind = {
   Missing: 'missing',
   Environment: 'environment',
@@ -212,7 +226,7 @@ export interface SmartPicksProductPick {
   ruledOut: SmartPicksRuledOutProduct[];
   sourceIds: SuggestionEvidenceSourceId[];
   alternatives: SmartPicksProductPick[];
-  verificationStatus: 'ai_named' | 'unavailable';
+  verificationStatus: SmartPicksProductVerificationStatus;
   availabilityStatus: SmartPicksAvailabilityStatus;
   recommendationRankReason: string | null;
   localAlternativeReason: string | null;
@@ -220,6 +234,34 @@ export interface SmartPicksProductPick {
   retailerDataStale: boolean;
   userAction: 'saved' | 'dismissed' | null;
   createdAt: string;
+}
+
+export const SmartPicksStarterKitStepStatus = {
+  Covered: 'covered',
+  Recommended: 'recommended',
+  Wait: 'wait',
+} as const;
+
+export type SmartPicksStarterKitStepStatus =
+  (typeof SmartPicksStarterKitStepStatus)[keyof typeof SmartPicksStarterKitStepStatus];
+
+export interface SmartPicksStarterKitStep {
+  order: number;
+  role: SmartPicksCoverageRole;
+  title: string;
+  ingredientOrCategory: string;
+  normalizedKey: string;
+  status: SmartPicksStarterKitStepStatus;
+  ownedProductId: string | null;
+  ownedProductName: string | null;
+  reason: string;
+  pick: SmartPicksProductPick | null;
+  sourceIds: SuggestionEvidenceSourceId[];
+}
+
+export interface SmartPicksStarterKit {
+  summary: string | null;
+  steps: SmartPicksStarterKitStep[];
 }
 
 export interface SmartPicksGapSnapshot {
@@ -285,6 +327,7 @@ export interface SmartPicksOverview {
   skinProfileRequired: boolean;
   productSuggestionsUnavailable: boolean;
   emptyState: SmartPicksEmptyState;
+  starterKit: SmartPicksStarterKit;
 }
 
 export interface SmartPicksWishlistItem {

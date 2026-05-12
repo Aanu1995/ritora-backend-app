@@ -60,6 +60,9 @@ export class SmartPicksOverviewResponseDto {
   @ApiProperty()
   emptyState: SmartPicksOverview['emptyState'];
 
+  @ApiProperty()
+  starterKit: SmartPicksOverview['starterKit'];
+
   constructor(init: SmartPicksOverview) {
     Object.assign(this, init);
   }

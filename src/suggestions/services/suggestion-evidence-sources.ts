@@ -39,6 +39,26 @@ const EVIDENCE_SOURCES: Record<
       'Common acne-supporting actives include salicylic acid, benzoyl peroxide, azelaic acid, and retinoids; irritation risk still matters.',
     reviewedAt: REVIEWED_AT,
   },
+  [SuggestionEvidenceSourceId.AadMelasmaTreatment]: {
+    id: SuggestionEvidenceSourceId.AadMelasmaTreatment,
+    title: 'Melasma: Overview',
+    organization: 'American Academy of Dermatology',
+    url: 'https://www.aad.org/public/diseases/a-z/melasma-overview',
+    evidenceType: 'dermatology_association',
+    summary:
+      'Melasma support starts with daily sun protection; darker skin tones can need a cautious plan because irritation can worsen discoloration.',
+    reviewedAt: REVIEWED_AT,
+  },
+  [SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation]: {
+    id: SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+    title: 'Postinflammatory hyperpigmentation',
+    organization: 'DermNet',
+    url: 'https://dermnetnz.org/topics/postinflammatory-hyperpigmentation',
+    evidenceType: 'clinical_reference',
+    summary:
+      'Post-inflammatory hyperpigmentation care emphasizes sunscreen and cautious pigment-supporting topicals such as azelaic acid or retinoids when appropriate.',
+    reviewedAt: REVIEWED_AT,
+  },
   [SuggestionEvidenceSourceId.FdaAhaSunSensitivity]: {
     id: SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
     title: 'Labeling for Cosmetics Containing Alpha Hydroxy Acids',

@@ -16,6 +16,7 @@ import { User } from '../../users/entities/user.entity';
 import {
   SmartPicksAvailabilityStatus,
   SmartPicksBudgetTier,
+  SmartPicksProductVerificationStatus,
   SmartPicksReasoningChip,
   SmartPicksRetailer,
   SmartPicksRuledOutProduct,
@@ -110,7 +111,7 @@ export class SmartPickProductSuggestion {
   source_ids: SuggestionEvidenceSourceId[];
 
   @Column({ type: 'varchar', length: 20, default: 'ai_named' })
-  verification_status: 'ai_named' | 'unavailable';
+  verification_status: SmartPicksProductVerificationStatus;
 
   @Column({ type: 'varchar', length: 24, default: 'unknown' })
   availability_status: SmartPicksAvailabilityStatus;

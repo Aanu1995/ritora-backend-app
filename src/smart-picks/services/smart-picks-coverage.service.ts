@@ -75,13 +75,28 @@ export function isPriorityMissingRole(
   const goal = primaryGoal?.toLowerCase() ?? '';
   return [
     'acne',
+    'breakout',
+    'blemish',
+    'pimple',
     'dark',
     'hyperpigmentation',
     'marks',
     'texture',
+    'rough',
+    'pore',
     'tone',
+    'redness',
+    'irritation',
+    'barrier',
+    'dry',
+    'dehydrat',
+    'hydration',
+    'hydrate',
     'fine',
     'aging',
+    'ageing',
+    'wrinkle',
+    'firm',
   ].some((token) => goal.includes(token));
 }
 
@@ -89,12 +104,13 @@ function roleForProduct(
   product: InventoryProduct,
   filledByRole: ReadonlyMap<SmartPicksCoverageRole, InventoryProduct>,
 ): SmartPicksCoverageRole | null {
+  const fallbackRole = roleForProductText(product, filledByRole);
   switch (product.category) {
     case ProductCategory.Cleanser:
       return 'cleanse';
     case ProductCategory.Toner:
     case ProductCategory.Essence:
-      return 'hydrate';
+      return fallbackRole ?? 'hydrate';
     case ProductCategory.Moisturizer:
       return 'moisturise';
     case ProductCategory.SunProtection:
@@ -104,8 +120,51 @@ function roleForProduct(
     case ProductCategory.Exfoliant:
     case ProductCategory.Serum:
     case ProductCategory.Treatment:
-      return filledByRole.has('treat') ? 'treatment-secondary' : 'treat';
+      return (
+        fallbackRole ??
+        (filledByRole.has('treat') ? 'treatment-secondary' : 'treat')
+      );
     default:
-      return null;
+      return fallbackRole;
   }
+}
+
+function roleForProductText(
+  product: InventoryProduct,
+  filledByRole: ReadonlyMap<SmartPicksCoverageRole, InventoryProduct>,
+): SmartPicksCoverageRole | null {
+  const text = [
+    product.brand,
+    product.name,
+    product.category,
+    ...(product.identity?.benefits ?? []),
+    ...(product.identity?.inciIngredients ?? []),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  if (/\b(spf|sunscreen|sun protection|pa\+{2,})\b/.test(text)) {
+    return 'spf';
+  }
+  if (/\b(cleanser|cleansing|cleanse|face wash|gel wash)\b/.test(text)) {
+    return 'cleanse';
+  }
+  if (/\b(moisturi[sz]er|cream|lotion|barrier|ceramide)\b/.test(text)) {
+    return 'moisturise';
+  }
+  if (
+    /\b(toner|essence|hydrating serum|hyaluronic|glycerin|beta-glucan|polyglutamic)\b/.test(
+      text,
+    )
+  ) {
+    return 'hydrate';
+  }
+  if (
+    /\b(serum|treatment|retinol|retinoid|azelaic|salicylic|benzoyl|exfoliant|aha|bha|pha|vitamin c)\b/.test(
+      text,
+    )
+  ) {
+    return filledByRole.has('treat') ? 'treatment-secondary' : 'treat';
+  }
+  return null;
 }

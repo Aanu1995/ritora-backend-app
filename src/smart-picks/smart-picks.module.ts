@@ -10,14 +10,17 @@ import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
 import { SuggestionObservabilityEvent } from '../suggestions/entities/suggestion-observability-event.entity';
 import { SuggestionObservabilityService } from '../suggestions/services/suggestion-observability.service';
+import { User } from '../users/entities/user.entity';
 import { SmartPickProductSuggestion } from './entities/smart-pick-product-suggestion.entity';
 import { SmartPickSnapshot } from './entities/smart-pick-snapshot.entity';
 import { SmartPicksAiGenerator } from './services/smart-picks-ai-generator';
 import { SmartPicksContextBuilder } from './services/smart-picks-context-builder';
 import { SmartPicksCoverageService } from './services/smart-picks-coverage.service';
 import { SmartPicksOverviewService } from './services/smart-picks-overview.service';
+import { SmartPicksPreparationService } from './services/smart-picks-preparation.service';
 import { SmartPicksProductPerformanceService } from './services/smart-picks-product-performance.service';
 import { SmartPicksRedundancyService } from './services/smart-picks-redundancy.service';
+import { SmartPicksRetailerVerifierService } from './services/smart-picks-retailer-verifier.service';
 import { SmartPicksWishlistService } from './services/smart-picks-wishlist.service';
 import { SmartPicksController } from './smart-picks.controller';
 
@@ -35,6 +38,7 @@ import { SmartPicksController } from './smart-picks.controller';
       InventoryProduct,
       ApplicationLog,
       SkinJournalEntry,
+      User,
     ]),
   ],
   providers: [
@@ -42,11 +46,14 @@ import { SmartPicksController } from './smart-picks.controller';
     SmartPicksContextBuilder,
     SmartPicksCoverageService,
     SmartPicksOverviewService,
+    SmartPicksPreparationService,
     SmartPicksProductPerformanceService,
     SmartPicksRedundancyService,
+    SmartPicksRetailerVerifierService,
     SmartPicksWishlistService,
     SuggestionObservabilityService,
   ],
   controllers: [SmartPicksController],
+  exports: [SmartPicksPreparationService],
 })
 export class SmartPicksModule {}

@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
@@ -33,6 +34,7 @@ describe('SkinProfileService', () => {
   let consentsRepo: Record<string, jest.Mock>;
   let usersService: Record<string, jest.Mock>;
   let dataAccessLogService: Record<string, jest.Mock>;
+  let smartPicksPreparation: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     repo = mockRepo();
@@ -47,6 +49,9 @@ describe('SkinProfileService', () => {
       recordConsentEvent: jest.fn().mockResolvedValue(undefined),
       listForUser: jest.fn().mockResolvedValue([]),
     };
+    smartPicksPreparation = {
+      scheduleForUser: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -55,6 +60,10 @@ describe('SkinProfileService', () => {
         { provide: getRepositoryToken(UserConsent), useValue: consentsRepo },
         { provide: UsersService, useValue: usersService },
         { provide: UserDataAccessLogService, useValue: dataAccessLogService },
+        {
+          provide: SmartPicksPreparationService,
+          useValue: smartPicksPreparation,
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -177,6 +186,9 @@ describe('SkinProfileService', () => {
           sex_at_birth: 'female',
         }),
       );
+      expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+        '01TESTUSER',
+      );
     });
 
     it('rejects incomplete essentials', async () => {
@@ -272,6 +284,7 @@ describe('SkinProfileService', () => {
       await expect(
         service.create('01TESTUSER', validCreateDto()),
       ).rejects.toThrow(ConflictException);
+      expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
     });
 
     it('requires health consent for health context', async () => {

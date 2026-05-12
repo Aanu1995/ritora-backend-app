@@ -179,6 +179,10 @@ export type SuggestionObservabilityEventKind =
   | 'consent_degraded'
   | 'smart_pick_generation_completed'
   | 'smart_pick_generation_degraded'
+  | 'smart_pick_ai_failed'
+  | 'smart_pick_no_pick'
+  | 'smart_pick_quality_drift'
+  | 'smart_pick_unsafe_output_blocked'
   | 'retention_purged';
 
 export type SuggestionObservabilitySeverity = 'info' | 'warning' | 'critical';
@@ -226,6 +230,8 @@ export enum SuggestionEvidenceSourceId {
   AadSunscreenSelection = 'aad_sunscreen_selection',
   AadRetinoidRetinol = 'aad_retinoid_retinol',
   AadAcneTreatment = 'aad_acne_treatment',
+  AadMelasmaTreatment = 'aad_melasma_treatment',
+  DermNetPostInflammatoryHyperpigmentation = 'dermnet_post_inflammatory_hyperpigmentation',
   FdaAhaSunSensitivity = 'fda_aha_sun_sensitivity',
   MayoDrySkinCare = 'mayo_dry_skin_care',
   DermNetTopicalRetinoids = 'dermnet_topical_retinoids',

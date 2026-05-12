@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -26,6 +27,7 @@ import {
 } from '../shelf/shelf.types';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import {
   hasCompletedEssentialSkinProfile,
   skinProfileRequiredException,
@@ -80,6 +82,8 @@ export class InventoryService {
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
     private readonly dataAccessLog: UserDataAccessLogService,
     private readonly notificationsService: NotificationsService,
+    @Optional()
+    private readonly smartPicksPreparation?: SmartPicksPreparationService,
   ) {}
 
   async list(
@@ -219,6 +223,7 @@ export class InventoryService {
     );
     const saved = await this.inventoryRepository.save(entity);
     await this.evaluateProductExpiryAlerts(userId, saved);
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
   }
 
@@ -233,6 +238,7 @@ export class InventoryService {
 
     const saved = await this.saveSnapshot(userId, product, merged);
     await this.evaluateProductExpiryAlerts(userId, saved);
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
   }
 
@@ -268,6 +274,7 @@ export class InventoryService {
     assertValidInventoryDraft(merged);
 
     const saved = await this.saveSnapshot(userId, product, merged);
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
   }
 
@@ -294,6 +301,7 @@ export class InventoryService {
   async remove(userId: string, id: string): Promise<void> {
     const product = await this.findByIdOrFail(userId, id);
     await this.inventoryRepository.remove(product);
+    this.scheduleSmartPicksPreparation(userId);
   }
 
   async removeMany(userId: string, ids: string[]): Promise<void> {
@@ -305,6 +313,7 @@ export class InventoryService {
       user_id: userId,
       id: In(ids),
     });
+    this.scheduleSmartPicksPreparation(userId);
   }
 
   async archive(
@@ -352,6 +361,7 @@ export class InventoryService {
     if (status === ShelfStatus.Active) {
       await this.evaluateProductExpiryAlerts(userId, saved);
     }
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
   }
 
@@ -453,6 +463,11 @@ export class InventoryService {
         status,
       },
     );
+    this.scheduleSmartPicksPreparation(userId);
+  }
+
+  private scheduleSmartPicksPreparation(userId: string): void {
+    this.smartPicksPreparation?.scheduleForUser(userId);
   }
 
   private buildNextCursor(

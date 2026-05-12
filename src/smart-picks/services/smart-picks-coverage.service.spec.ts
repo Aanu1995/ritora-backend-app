@@ -37,6 +37,47 @@ describe('SmartPicksCoverageService', () => {
     expect(slotState(coverage, 'spf')).toBe('filled');
     expect(coverage.filled).toBe(5);
   });
+
+  it('uses product text as a fallback when shelf category is too broad or wrong', () => {
+    const coverage = service.compute(
+      [
+        product('spf-1', ProductCategory.Other, 'Relief Sun SPF 50 PA++++'),
+        product('cream-1', ProductCategory.Other, 'Ceramide Barrier Cream'),
+        product('wash-1', ProductCategory.Other, 'Low pH Gel Cleanser'),
+      ],
+      'simple hydration',
+    );
+
+    expect(slotName(coverage, 'spf')).toBe(
+      'Test Brand Relief Sun SPF 50 PA++++',
+    );
+    expect(slotName(coverage, 'moisturise')).toBe(
+      'Test Brand Ceramide Barrier Cream',
+    );
+    expect(slotName(coverage, 'cleanse')).toBe(
+      'Test Brand Low pH Gel Cleanser',
+    );
+    expect(slotState(coverage, 'treat')).toBe('missing-priority');
+  });
+
+  it('routes hydrating serums to hydration instead of treating any serum as a treatment', () => {
+    const coverage = service.compute(
+      [
+        product(
+          'serum-1',
+          ProductCategory.Serum,
+          'Hyaluronic Hydration Serum',
+          ['hyaluronic acid', 'glycerin'],
+        ),
+      ],
+      'calm breakouts',
+    );
+
+    expect(slotName(coverage, 'hydrate')).toBe(
+      'Test Brand Hyaluronic Hydration Serum',
+    );
+    expect(slotState(coverage, 'treat')).toBe('missing-priority');
+  });
 });
 
 type Coverage = ReturnType<SmartPicksCoverageService['compute']>;
@@ -63,6 +104,7 @@ function product(
   id: string,
   category: ProductCategory,
   name: string,
+  inciIngredients: string[] = [],
 ): InventoryProduct {
   return {
     id,
@@ -73,6 +115,6 @@ function product(
     status: ShelfStatus.Active,
     created_at: new Date('2026-05-01T00:00:00.000Z'),
     updated_at: new Date('2026-05-01T00:00:00.000Z'),
-    identity: { inciIngredients: [] },
+    identity: { inciIngredients },
   } as unknown as InventoryProduct;
 }

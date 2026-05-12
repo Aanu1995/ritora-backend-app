@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
 import { toIsoString } from '../../common/utils/date';
 import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
+import type { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { ProductCategory } from '../../shelf/shelf.types';
+import type { ConcernDetails } from '../../skin-profile/entities/skin-profile.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { normalizeSuggestionGapKey } from '../../suggestions/services/suggestion-gap-actions';
 import { mergeEvidenceSourceIds } from '../../suggestions/services/suggestion-evidence-sources';
@@ -34,8 +37,12 @@ import {
   SmartPicksRecap,
   SmartPicksRedundancyGroup,
   SmartPicksSnapshotPayload,
+  SmartPicksStarterKit,
+  SmartPicksStarterKitStep,
+  SmartPicksStarterKitStepStatus,
 } from '../smart-picks.types';
 import {
+  SmartPicksAiGenerationDiagnostics,
   GeneratedSmartPick,
   SmartPicksAiGenerator,
 } from './smart-picks-ai-generator';
@@ -45,12 +52,32 @@ import {
 } from './smart-picks-context-builder';
 import { SmartPicksCoverageService } from './smart-picks-coverage.service';
 import { SmartPicksRedundancyService } from './smart-picks-redundancy.service';
+import { SmartPicksRetailerVerifierService } from './smart-picks-retailer-verifier.service';
 
 const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const DISMISSAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 const RETAILER_DATA_FRESHNESS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_REPLACEMENT_USAGE_DAYS = 20;
 const MIN_REPLACEMENT_PHOTO_CHECKPOINTS = 2;
+const STARTER_KIT_ROLES: readonly SmartPicksCoverage['slots'][number]['role'][] =
+  ['cleanse', 'moisturise', 'spf', 'treat'];
+const STARTER_TREATMENT_WAIT_REASON =
+  'Your current goal does not need a treatment product yet. Build cleanser, moisturizer, and sunscreen first.';
+
+type StarterTreatmentDecision = {
+  ingredientOrCategory: string;
+  goalAlignment: string;
+  reason: string;
+  sourceIds: SuggestionEvidenceSourceId[];
+  alignmentSignals: readonly string[];
+};
+
+type StarterTreatmentDecisionInput = {
+  primaryGoal: string | null;
+  currentConcerns: readonly string[];
+  concernDetails: ConcernDetails | null;
+  pregnancyStatus: string | null;
+};
 
 type SmartPickActionSummary = {
   actionByKey: Map<string, SuggestionGapActionKind>;
@@ -60,11 +87,15 @@ type SmartPickActionSummary = {
 
 @Injectable()
 export class SmartPicksOverviewService {
+  private readonly logger = new Logger(SmartPicksOverviewService.name);
+  private readonly backgroundGenerationJobs = new Map<string, Promise<void>>();
+
   constructor(
     private readonly contextBuilder: SmartPicksContextBuilder,
     private readonly coverageService: SmartPicksCoverageService,
     private readonly redundancyService: SmartPicksRedundancyService,
     private readonly aiGenerator: SmartPicksAiGenerator,
+    private readonly retailerVerifier: SmartPicksRetailerVerifierService,
     private readonly notifications: NotificationsService,
     private readonly observability: SuggestionObservabilityService,
     @InjectRepository(SmartPickSnapshot)
@@ -98,7 +129,7 @@ export class SmartPicksOverviewService {
         .filter((gap) => gap.priority === 'priority')
         .map((gap) => gap.normalizedKey),
     );
-    const snapshotPayload = await this.generateSnapshotPayload(context);
+    const snapshotPayload = this.buildSnapshotPayload(context);
     const snapshot = await this.saveSnapshot(context, snapshotPayload, cached);
     await this.maybeDispatchReadyNotification(
       context,
@@ -106,6 +137,12 @@ export class SmartPicksOverviewService {
       snapshotPayload.priorityGaps,
     );
     return this.hydrateOverview(context, snapshot);
+  }
+
+  async waitForBackgroundGeneration(): Promise<void> {
+    while (this.backgroundGenerationJobs.size > 0) {
+      await Promise.allSettled(this.backgroundGenerationJobs.values());
+    }
   }
 
   async updateBudget(
@@ -124,32 +161,14 @@ export class SmartPicksOverviewService {
     return this.getOverview(user, null);
   }
 
-  private async generateSnapshotPayload(
+  private buildSnapshotPayload(
     context: SmartPicksContext,
-  ): Promise<SmartPicksSnapshotPayload> {
+  ): SmartPicksSnapshotPayload {
     const coverage = this.coverageService.compute(
       context.activeProducts,
       context.skinProfile?.primary_goal ?? null,
     );
-    const dismissedKeys = await this.loadRecentlyDismissedKeys(context.user.id);
     const gaps = buildGapSnapshots(context, coverage);
-    const gapsForGeneration = gaps.filter(
-      (gap) => !dismissedKeys.has(gap.normalizedKey),
-    );
-    const generatedPicks = await this.aiGenerator.generate(
-      context,
-      gapsForGeneration,
-    );
-    await this.persistGeneratedPicks(
-      context,
-      gapsForGeneration,
-      generatedPicks,
-    );
-    await this.recordGenerationMetrics(
-      context,
-      gapsForGeneration,
-      generatedPicks,
-    );
     const recap = buildRecap(context);
 
     return {
@@ -157,7 +176,7 @@ export class SmartPicksOverviewService {
       coverage,
       priorityGaps: gaps
         .filter((gap) => gap.priority === 'priority')
-        .slice(0, 3),
+        .slice(0, context.mode === 'starter' ? 4 : 3),
       considerGaps: gaps
         .filter((gap) => gap.priority === 'consider')
         .slice(0, 2),
@@ -200,7 +219,7 @@ export class SmartPicksOverviewService {
   ): Promise<SmartPicksOverview> {
     const gaps = (snapshot.gaps_json ?? []).map(normalizeGapSnapshot);
     const suggestions = await this.productSuggestionRepo.find({
-      where: { user_id: context.user.id },
+      where: { user_id: context.user.id, inputs_hash: context.inputsHash },
     });
     const suggestionsByKey = new Map(
       suggestions.map((suggestion) => [suggestion.normalized_key, suggestion]),
@@ -228,6 +247,17 @@ export class SmartPicksOverviewService {
       .filter((gap): gap is SmartPicksGap => Boolean(gap));
     const visibleGaps = [...priorityGaps, ...considerGaps];
     const productSuggestionsUnavailable = visibleGaps.some((gap) => !gap.pick);
+    const missingGenerationGaps = gaps.filter(
+      (gap) =>
+        !suggestionsByKey.has(gap.normalizedKey) &&
+        actionSummary.actionByKey.get(gap.normalizedKey) !== 'dismissed',
+    );
+    this.enqueueProductPickGeneration(context, missingGenerationGaps);
+    this.enqueueRetailerRefresh(suggestions);
+    const starterKit =
+      context.mode === 'starter'
+        ? buildStarterKit(context, snapshot.coverage_json, visibleGaps)
+        : emptyStarterKit();
 
     return {
       mode: snapshot.mode,
@@ -250,6 +280,7 @@ export class SmartPicksOverviewService {
         redundancy: snapshot.redundancy_json ?? [],
         productSuggestionsUnavailable,
       }),
+      starterKit,
     };
   }
 
@@ -276,7 +307,100 @@ export class SmartPicksOverviewService {
         redundancy: [],
         productSuggestionsUnavailable: false,
       }),
+      starterKit: emptyStarterKit(),
     };
+  }
+
+  private enqueueProductPickGeneration(
+    context: SmartPicksContext,
+    gaps: SmartPicksGapSnapshot[],
+  ): void {
+    if (gaps.length === 0) return;
+    const jobKey = `picks:${context.user.id}:${context.mode}:${context.inputsHash}`;
+    if (this.backgroundGenerationJobs.has(jobKey)) return;
+
+    const job = this.generateProductPicks(context, gaps)
+      .catch((error) => {
+        this.logger.warn(
+          `Smart Picks background product generation failed: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      })
+      .finally(() => {
+        this.backgroundGenerationJobs.delete(jobKey);
+      });
+    this.backgroundGenerationJobs.set(jobKey, job);
+  }
+
+  private enqueueRetailerRefresh(
+    suggestions: readonly SmartPickProductSuggestion[],
+  ): void {
+    for (const suggestion of suggestions.filter(isRetailerDataStale)) {
+      const jobKey = `retailers:${suggestion.user_id}:${suggestion.id}`;
+      if (this.backgroundGenerationJobs.has(jobKey)) continue;
+      const job = this.refreshRetailerData(suggestion)
+        .catch((error) => {
+          this.logger.warn(
+            `Smart Picks retailer refresh failed: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+          );
+        })
+        .finally(() => {
+          this.backgroundGenerationJobs.delete(jobKey);
+        });
+      this.backgroundGenerationJobs.set(jobKey, job);
+    }
+  }
+
+  private async generateProductPicks(
+    context: SmartPicksContext,
+    gaps: SmartPicksGapSnapshot[],
+  ): Promise<void> {
+    const dismissedKeys = await this.loadRecentlyDismissedKeys(context.user.id);
+    const gapsForGeneration = gaps.filter(
+      (gap) => !dismissedKeys.has(gap.normalizedKey),
+    );
+    if (gapsForGeneration.length === 0) return;
+
+    const generationResult = await this.aiGenerator.generateWithDiagnostics(
+      context,
+      gapsForGeneration,
+    );
+    const verifiedPicks = await this.verifyGeneratedPicks(
+      generationResult.picks,
+    );
+    await this.persistGeneratedPicks(context, gapsForGeneration, verifiedPicks);
+    await this.recordGenerationMetrics(
+      context,
+      gapsForGeneration,
+      verifiedPicks,
+      generationResult.diagnostics,
+    );
+  }
+
+  private async verifyGeneratedPicks(
+    generatedPicks: Map<string, GeneratedSmartPick>,
+  ): Promise<Map<string, GeneratedSmartPick>> {
+    const verifiedPicks = new Map<string, GeneratedSmartPick>();
+    await Promise.all(
+      Array.from(generatedPicks.entries()).map(async ([key, pick]) => {
+        verifiedPicks.set(
+          key,
+          await this.retailerVerifier.verifyGeneratedPick(pick),
+        );
+      }),
+    );
+    return verifiedPicks;
+  }
+
+  private async refreshRetailerData(
+    suggestion: SmartPickProductSuggestion,
+  ): Promise<void> {
+    const verified =
+      await this.retailerVerifier.verifyStoredSuggestion(suggestion);
+    await this.productSuggestionRepo.save(verified);
   }
 
   private async persistGeneratedPicks(
@@ -343,6 +467,7 @@ export class SmartPicksOverviewService {
     context: SmartPicksContext,
     gaps: SmartPicksGapSnapshot[],
     generatedPicks: ReadonlyMap<string, GeneratedSmartPick>,
+    diagnostics: SmartPicksAiGenerationDiagnostics,
   ): Promise<void> {
     const picks = Array.from(generatedPicks.values());
     const missingPickCount = Math.max(0, gaps.length - generatedPicks.size);
@@ -369,8 +494,100 @@ export class SmartPicksOverviewService {
           ),
         ).length,
         mode: context.mode,
+        rawGapCount: diagnostics.rawGapCount,
+        blockedSafetyCount: diagnostics.blockedSafetyCount,
+        blockedBudgetCount: diagnostics.blockedBudgetCount,
+        blockedOwnedCount: diagnostics.blockedOwnedCount,
+        invalidPickCount: diagnostics.invalidPickCount,
       },
     });
+    await this.recordProductionMonitoringSignals({
+      context,
+      gaps,
+      picks,
+      diagnostics,
+      missingPickCount,
+    });
+  }
+
+  private async recordProductionMonitoringSignals(input: {
+    context: SmartPicksContext;
+    gaps: SmartPicksGapSnapshot[];
+    picks: GeneratedSmartPick[];
+    diagnostics: SmartPicksAiGenerationDiagnostics;
+    missingPickCount: number;
+  }): Promise<void> {
+    const { context, gaps, picks, diagnostics, missingPickCount } = input;
+    const privacySafeBase = {
+      requestedGapCount: gaps.length,
+      generatedPickCount: picks.length,
+      mode: context.mode,
+    };
+    if (diagnostics.providerFailed || diagnostics.providerSkippedReason) {
+      await this.observability.record({
+        kind: 'smart_pick_ai_failed',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          providerFailed: diagnostics.providerFailed,
+          providerSkippedReason: diagnostics.providerSkippedReason,
+        },
+      });
+    }
+    if (diagnostics.blockedSafetyCount > 0) {
+      await this.observability.record({
+        kind: 'smart_pick_unsafe_output_blocked',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          blockedSafetyCount: diagnostics.blockedSafetyCount,
+        },
+      });
+    }
+    if (missingPickCount > 0) {
+      await this.observability.record({
+        kind: 'smart_pick_no_pick',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          missingPickCount,
+        },
+      });
+    }
+
+    const unavailablePickCount = picks.filter(
+      (pick) => pick.availabilityStatus === 'unavailable',
+    ).length;
+    const unknownAvailabilityCount = picks.filter(
+      (pick) => pick.availabilityStatus === 'unknown',
+    ).length;
+    const nonLocalWithoutLocalAlternativeCount = picks.filter(
+      (pick) =>
+        pick.availabilityStatus !== 'local' &&
+        !pick.alternatives.some(
+          (alternative) => alternative.availabilityStatus === 'local',
+        ),
+    ).length;
+    if (
+      unavailablePickCount > 0 ||
+      unknownAvailabilityCount > 0 ||
+      nonLocalWithoutLocalAlternativeCount > 0
+    ) {
+      await this.observability.record({
+        kind: 'smart_pick_quality_drift',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          unavailablePickCount,
+          unknownAvailabilityCount,
+          nonLocalWithoutLocalAlternativeCount,
+        },
+      });
+    }
   }
 
   private async loadActionSummary(
@@ -514,6 +731,133 @@ function buildEmptyState(
     canAssessReplacements: historyReadiness.canAssessReplacements,
     historyReadiness,
   };
+}
+
+function emptyStarterKit(): SmartPicksStarterKit {
+  return { summary: null, steps: [] };
+}
+
+function buildStarterKit(
+  context: SmartPicksContext,
+  coverage: SmartPicksCoverage,
+  visibleGaps: SmartPicksGap[],
+): SmartPicksStarterKit {
+  const slotsByRole = new Map(coverage.slots.map((slot) => [slot.role, slot]));
+  const gapsByRole = new Map(
+    visibleGaps
+      .filter((gap) => gap.gapKind === SmartPicksGapKind.Starter)
+      .map((gap) => [starterRoleForGap(gap), gap]),
+  );
+  const steps = STARTER_KIT_ROLES.map((role, index) => {
+    const slot = slotsByRole.get(role) ?? null;
+    const gap = gapsByRole.get(role) ?? null;
+    if (gap) {
+      return starterRecommendedStep(role, index + 1, gap);
+    }
+    if (slot?.state === 'filled') {
+      return starterCoveredStep(role, index + 1, slot);
+    }
+    return starterWaitStep(role, index + 1);
+  });
+
+  return {
+    summary:
+      context.activeProducts.length === 0
+        ? 'Start with the essentials. Add treatment last.'
+        : 'Complete the missing starter steps before adding extra products.',
+    steps,
+  };
+}
+
+function starterCoveredStep(
+  role: SmartPicksCoverage['slots'][number]['role'],
+  order: number,
+  slot: SmartPicksCoverage['slots'][number],
+): SmartPicksStarterKitStep {
+  return {
+    order,
+    role,
+    title: starterStepTitle(role),
+    ingredientOrCategory: starterStepTitle(role),
+    normalizedKey: normalizeSuggestionGapKey(starterStepTitle(role)),
+    status: SmartPicksStarterKitStepStatus.Covered,
+    ownedProductId: slot.filledByProductId,
+    ownedProductName: slot.filledByName,
+    reason: `You already have this starter step covered by ${slot.filledByName}.`,
+    pick: null,
+    sourceIds: [],
+  };
+}
+
+function starterRecommendedStep(
+  role: SmartPicksCoverage['slots'][number]['role'],
+  order: number,
+  gap: SmartPicksGap,
+): SmartPicksStarterKitStep {
+  return {
+    order,
+    role,
+    title: starterStepTitle(role),
+    ingredientOrCategory: gap.ingredientOrCategory,
+    normalizedKey: gap.normalizedKey,
+    status: SmartPicksStarterKitStepStatus.Recommended,
+    ownedProductId: null,
+    ownedProductName: null,
+    reason: gap.reason,
+    pick: gap.pick,
+    sourceIds: gap.sourceIds,
+  };
+}
+
+function starterWaitStep(
+  role: SmartPicksCoverage['slots'][number]['role'],
+  order: number,
+): SmartPicksStarterKitStep {
+  return {
+    order,
+    role,
+    title: starterStepTitle(role),
+    ingredientOrCategory: starterStepTitle(role),
+    normalizedKey: normalizeSuggestionGapKey(starterStepTitle(role)),
+    status: SmartPicksStarterKitStepStatus.Wait,
+    ownedProductId: null,
+    ownedProductName: null,
+    reason:
+      role === 'treat'
+        ? STARTER_TREATMENT_WAIT_REASON
+        : 'Wait on this step until your starter routine has the basics covered.',
+    pick: null,
+    sourceIds: [],
+  };
+}
+
+function starterStepTitle(
+  role: SmartPicksCoverage['slots'][number]['role'],
+): string {
+  switch (role) {
+    case 'cleanse':
+      return 'Cleanse';
+    case 'moisturise':
+      return 'Moisturise';
+    case 'spf':
+      return 'Protect';
+    case 'treat':
+      return 'Treat';
+    default:
+      return role;
+  }
+}
+
+function starterRoleForGap(
+  gap: SmartPicksGapSnapshot | SmartPicksGap,
+): SmartPicksCoverage['slots'][number]['role'] {
+  const key = gap.normalizedKey.toLowerCase();
+  if (key.includes('cleanser') || key.includes('cleanse')) return 'cleanse';
+  if (key.includes('moisturizer') || key.includes('moisturiser')) {
+    return 'moisturise';
+  }
+  if (key.includes('sunscreen') || key.includes('spf')) return 'spf';
+  return 'treat';
 }
 
 function resolveEmptyReason(
@@ -670,13 +1014,17 @@ export function buildGapSnapshots(
         SmartPicksGapKind.Starter,
       );
     }
-    if (missing.has('treat')) {
+    const treatmentDecision = starterTreatmentDecision(context.skinProfile);
+    if (
+      treatmentDecision &&
+      !hasGoalAlignedStarterTreatment(context.activeProducts, treatmentDecision)
+    ) {
       add(
-        treatmentGapForGoal(goal),
+        treatmentDecision.ingredientOrCategory,
         'priority',
-        'One gentle treatment is enough while your routine is still sparse.',
-        [SuggestionEvidenceSourceId.AadAcneTreatment],
-        goal,
+        treatmentDecision.reason,
+        treatmentDecision.sourceIds,
+        treatmentDecision.goalAlignment,
         SmartPicksGapKind.Starter,
       );
     }
@@ -796,21 +1144,263 @@ function replacementSourceIds(
   return [SuggestionEvidenceSourceId.AadAcneTreatment];
 }
 
+function starterTreatmentDecision(
+  profile: SkinProfile | null,
+): StarterTreatmentDecision | null {
+  return starterTreatmentDecisionFromInput({
+    primaryGoal: profile?.primary_goal ?? null,
+    currentConcerns: profile?.current_concerns ?? [],
+    concernDetails: profile?.concern_details ?? null,
+    pregnancyStatus: profile?.pregnancy_status ?? null,
+  });
+}
+
+function starterTreatmentDecisionFromInput(
+  input: StarterTreatmentDecisionInput,
+): StarterTreatmentDecision | null {
+  const text = [
+    input.primaryGoal,
+    ...input.currentConcerns,
+    ...(input.concernDetails?.per_concern ?? []).map(
+      (entry) => `${entry.concern} ${entry.severity ?? ''}`,
+    ),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (!text.trim()) return null;
+  if (hasAnySignal(text, ['acne', 'breakout', 'blemish', 'pimple'])) {
+    return {
+      ingredientOrCategory:
+        'Low-irritation acne treatment with azelaic acid or BHA',
+      goalAlignment: 'breakout control',
+      reason:
+        'Your profile points to breakouts, so the starter kit needs one gentle acne treatment rather than several actives.',
+      sourceIds: [
+        SuggestionEvidenceSourceId.AadAcneTreatment,
+        SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
+      ],
+      alignmentSignals: [
+        'azelaic',
+        'salicylic',
+        'bha',
+        'benzoyl',
+        'adapalene',
+        'retinoid',
+        'retinol',
+      ],
+    };
+  }
+  if (
+    hasAnySignal(text, [
+      'dark',
+      'spot',
+      'mark',
+      'tone',
+      'hyperpigmentation',
+      'pih',
+      'melasma',
+      'uneven',
+    ])
+  ) {
+    return {
+      ingredientOrCategory: 'Azelaic acid or tranexamic acid dark-spot serum',
+      goalAlignment: 'dark mark support',
+      reason:
+        'Your profile points to dark marks or uneven tone, so the starter kit needs one PIH-aware treatment after sunscreen is in place.',
+      sourceIds: [
+        SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+        SuggestionEvidenceSourceId.AadMelasmaTreatment,
+        SuggestionEvidenceSourceId.AadAcneTreatment,
+        SuggestionEvidenceSourceId.AadRetinoidRetinol,
+      ],
+      alignmentSignals: [
+        'azelaic',
+        'tranexamic',
+        'vitamin c',
+        'ascorbic',
+        'kojic',
+        'alpha arbutin',
+        'arbutin',
+        'retinoid',
+        'retinol',
+        'tretinoin',
+      ],
+    };
+  }
+  if (hasAnySignal(text, ['texture', 'rough', 'bump', 'clogged', 'pore'])) {
+    return {
+      ingredientOrCategory: 'Gentle AHA/PHA texture treatment',
+      goalAlignment: 'texture support',
+      reason:
+        'Your profile points to rough texture or clogged pores, so the starter kit needs one slow-introduction texture treatment.',
+      sourceIds: [
+        SuggestionEvidenceSourceId.AadAcneTreatment,
+        SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
+      ],
+      alignmentSignals: [
+        'aha',
+        'pha',
+        'glycolic',
+        'lactic',
+        'mandelic',
+        'salicylic',
+        'bha',
+        'retinoid',
+        'retinol',
+      ],
+    };
+  }
+  if (
+    hasAnySignal(text, [
+      'redness',
+      'irritation',
+      'sensitive',
+      'barrier',
+      'calm',
+      'soothe',
+      'rosacea',
+    ])
+  ) {
+    return {
+      ingredientOrCategory:
+        'Barrier-calming serum with niacinamide or panthenol',
+      goalAlignment: 'calm and barrier support',
+      reason:
+        'Your profile points to redness or irritation, so the starter kit should stay calming and barrier-focused.',
+      sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+      alignmentSignals: [
+        'niacinamide',
+        'panthenol',
+        'centella',
+        'azelaic',
+        'madecassoside',
+        'allantoin',
+      ],
+    };
+  }
+  if (
+    hasAnySignal(text, ['dry', 'dehydrat', 'hydration', 'hydrate', 'plump'])
+  ) {
+    return {
+      ingredientOrCategory: 'Hydrating serum with glycerin or hyaluronic acid',
+      goalAlignment: 'hydration support',
+      reason:
+        'Your profile points to hydration as a goal, so the starter kit can include one simple hydrating support step.',
+      sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+      alignmentSignals: [
+        'hyaluronic',
+        'glycerin',
+        'polyglutamic',
+        'beta-glucan',
+        'panthenol',
+        'snail',
+        'urea',
+      ],
+    };
+  }
+  if (hasAnySignal(text, ['fine', 'aging', 'ageing', 'wrinkle', 'firm'])) {
+    if (isPregnancyCautionActive(input.pregnancyStatus)) {
+      return {
+        ingredientOrCategory:
+          'Pregnancy-conscious peptide or bakuchiol night treatment',
+        goalAlignment: 'early aging support',
+        reason:
+          'Your profile points to early aging support, but your safety context means the starter kit should avoid retinoid picks.',
+        sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+        alignmentSignals: ['peptide', 'bakuchiol'],
+      };
+    }
+    return {
+      ingredientOrCategory: 'Beginner retinoid or retinal night treatment',
+      goalAlignment: 'early aging support',
+      reason:
+        'Your profile points to early aging support, so the starter kit needs one gentle night treatment with moisturizer support.',
+      sourceIds: [
+        SuggestionEvidenceSourceId.AadRetinoidRetinol,
+        SuggestionEvidenceSourceId.DermNetTopicalRetinoids,
+      ],
+      alignmentSignals: [
+        'retinol',
+        'retinal',
+        'retinoid',
+        'adapalene',
+        'tretinoin',
+      ],
+    };
+  }
+
+  return null;
+}
+
+function hasAnySignal(text: string, signals: readonly string[]): boolean {
+  return signals.some((signal) => text.includes(signal));
+}
+
+function hasGoalAlignedStarterTreatment(
+  products: readonly InventoryProduct[],
+  decision: StarterTreatmentDecision,
+): boolean {
+  return products.some((product) => {
+    const text = productSearchText(product);
+    if (!isStarterTreatmentProduct(product, text)) return false;
+    return decision.alignmentSignals.some((signal) => text.includes(signal));
+  });
+}
+
+function isStarterTreatmentProduct(
+  product: InventoryProduct,
+  text: string,
+): boolean {
+  if (
+    [
+      ProductCategory.Exfoliant,
+      ProductCategory.Serum,
+      ProductCategory.Treatment,
+    ].includes(product.category)
+  ) {
+    return true;
+  }
+  return /\b(serum|treatment|retinol|retinal|retinoid|azelaic|tranexamic|salicylic|benzoyl|exfoliant|aha|bha|pha|vitamin c|ascorbic|niacinamide|panthenol|peptide|bakuchiol)\b/.test(
+    text,
+  );
+}
+
+function productSearchText(product: InventoryProduct): string {
+  return [
+    product.brand,
+    product.name,
+    product.category,
+    ...(product.identity?.benefits ?? []),
+    ...(product.identity?.inciIngredients ?? []),
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
+function isPregnancyCautionActive(status: string | null): boolean {
+  const normalized = status?.trim().toLowerCase();
+  if (!normalized) return false;
+  return ![
+    'not_pregnant',
+    'not pregnant',
+    'none',
+    'no',
+    'unknown',
+    'prefer_not_to_say',
+  ].includes(normalized);
+}
+
 function treatmentGapForGoal(primaryGoal: string | null): string {
-  const goal = primaryGoal?.toLowerCase() ?? '';
-  if (goal.includes('dark') || goal.includes('tone')) {
-    return 'PIH-aware brightening serum';
-  }
-  if (goal.includes('acne') || goal.includes('breakout')) {
-    return 'Low-irritation acne treatment';
-  }
-  if (goal.includes('texture')) {
-    return 'Gentle texture treatment';
-  }
-  if (goal.includes('fine') || goal.includes('aging')) {
-    return 'Beginner retinoid alternative';
-  }
-  return 'Gentle targeted treatment';
+  return (
+    starterTreatmentDecisionFromInput({
+      primaryGoal,
+      currentConcerns: [],
+      concernDetails: null,
+      pregnancyStatus: null,
+    })?.ingredientOrCategory ?? 'Gentle targeted treatment'
+  );
 }
 
 export function toProductPick(
