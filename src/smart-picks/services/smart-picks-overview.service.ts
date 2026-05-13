@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThan, Repository } from 'typeorm';
+import { In, MoreThan, Not, Repository } from 'typeorm';
 import { toIsoString } from '../../common/utils/date';
 import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
 import type { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
@@ -51,14 +51,13 @@ import {
   SmartPicksContextBuilder,
 } from './smart-picks-context-builder';
 import { SmartPicksCoverageService } from './smart-picks-coverage.service';
+import { buildGoalGapCandidates } from './smart-picks-goal-gap-policy';
 import { SmartPicksRedundancyService } from './smart-picks-redundancy.service';
-import { SmartPicksRetailerVerifierService } from './smart-picks-retailer-verifier.service';
 
-const SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const DISMISSAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
-const RETAILER_DATA_FRESHNESS_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_REPLACEMENT_USAGE_DAYS = 20;
 const MIN_REPLACEMENT_PHOTO_CHECKPOINTS = 2;
+const SMART_PICKS_AI_GAP_BATCH_SIZE = 2;
 const STARTER_KIT_ROLES: readonly SmartPicksCoverage['slots'][number]['role'][] =
   ['cleanse', 'moisturise', 'spf', 'treat'];
 const STARTER_TREATMENT_WAIT_REASON =
@@ -80,7 +79,8 @@ type StarterTreatmentDecisionInput = {
 };
 
 type SmartPickActionSummary = {
-  actionByKey: Map<string, SuggestionGapActionKind>;
+  dismissedKeys: Set<string>;
+  savedSuggestionIds: Set<string>;
   dismissedGapCount: number;
   nextEligibleAt: Date | null;
 };
@@ -95,7 +95,6 @@ export class SmartPicksOverviewService {
     private readonly coverageService: SmartPicksCoverageService,
     private readonly redundancyService: SmartPicksRedundancyService,
     private readonly aiGenerator: SmartPicksAiGenerator,
-    private readonly retailerVerifier: SmartPicksRetailerVerifierService,
     private readonly notifications: NotificationsService,
     private readonly observability: SuggestionObservabilityService,
     @InjectRepository(SmartPickSnapshot)
@@ -131,6 +130,7 @@ export class SmartPicksOverviewService {
     );
     const snapshotPayload = this.buildSnapshotPayload(context);
     const snapshot = await this.saveSnapshot(context, snapshotPayload, cached);
+    await this.pruneStaleProductSuggestions(context);
     await this.maybeDispatchReadyNotification(
       context,
       previousPriorityKeys,
@@ -166,7 +166,7 @@ export class SmartPicksOverviewService {
   ): SmartPicksSnapshotPayload {
     const coverage = this.coverageService.compute(
       context.activeProducts,
-      context.skinProfile?.primary_goal ?? null,
+      coverageGoalText(context),
     );
     const gaps = buildGapSnapshots(context, coverage);
     const recap = buildRecap(context);
@@ -179,7 +179,7 @@ export class SmartPicksOverviewService {
         .slice(0, context.mode === 'starter' ? 4 : 3),
       considerGaps: gaps
         .filter((gap) => gap.priority === 'consider')
-        .slice(0, 2),
+        .slice(0, considerGapLimit(context)),
       covered: coverage.slots
         .filter((slot) => slot.state === 'filled' && slot.filledByName)
         .map((slot) => ({
@@ -208,7 +208,6 @@ export class SmartPicksOverviewService {
       recap_json: payload.recap,
       inputs_hash: context.inputsHash,
       generated_at: now,
-      expires_at: new Date(now.getTime() + SNAPSHOT_TTL_MS),
     });
     return this.snapshotRepo.save(snapshot);
   }
@@ -229,9 +228,12 @@ export class SmartPicksOverviewService {
       gaps.map((gap) => gap.normalizedKey),
     );
     const toGap = (gap: SmartPicksGapSnapshot): SmartPicksGap | null => {
-      const action = actionSummary.actionByKey.get(gap.normalizedKey) ?? null;
-      if (action === 'dismissed') return null;
+      if (actionSummary.dismissedKeys.has(gap.normalizedKey)) return null;
       const suggestion = suggestionsByKey.get(gap.normalizedKey) ?? null;
+      const action =
+        suggestion && actionSummary.savedSuggestionIds.has(suggestion.id)
+          ? 'saved'
+          : null;
       return {
         ...gap,
         pick: suggestion ? toProductPick(suggestion, action) : null,
@@ -250,10 +252,9 @@ export class SmartPicksOverviewService {
     const missingGenerationGaps = gaps.filter(
       (gap) =>
         !suggestionsByKey.has(gap.normalizedKey) &&
-        actionSummary.actionByKey.get(gap.normalizedKey) !== 'dismissed',
+        !actionSummary.dismissedKeys.has(gap.normalizedKey),
     );
     this.enqueueProductPickGeneration(context, missingGenerationGaps);
-    this.enqueueRetailerRefresh(suggestions);
     const starterKit =
       context.mode === 'starter'
         ? buildStarterKit(context, snapshot.coverage_json, visibleGaps)
@@ -333,27 +334,6 @@ export class SmartPicksOverviewService {
     this.backgroundGenerationJobs.set(jobKey, job);
   }
 
-  private enqueueRetailerRefresh(
-    suggestions: readonly SmartPickProductSuggestion[],
-  ): void {
-    for (const suggestion of suggestions.filter(isRetailerDataStale)) {
-      const jobKey = `retailers:${suggestion.user_id}:${suggestion.id}`;
-      if (this.backgroundGenerationJobs.has(jobKey)) continue;
-      const job = this.refreshRetailerData(suggestion)
-        .catch((error) => {
-          this.logger.warn(
-            `Smart Picks retailer refresh failed: ${
-              error instanceof Error ? error.message : 'unknown error'
-            }`,
-          );
-        })
-        .finally(() => {
-          this.backgroundGenerationJobs.delete(jobKey);
-        });
-      this.backgroundGenerationJobs.set(jobKey, job);
-    }
-  }
-
   private async generateProductPicks(
     context: SmartPicksContext,
     gaps: SmartPicksGapSnapshot[],
@@ -364,43 +344,82 @@ export class SmartPicksOverviewService {
     );
     if (gapsForGeneration.length === 0) return;
 
-    const generationResult = await this.aiGenerator.generateWithDiagnostics(
+    const generatedPicks = new Map<string, GeneratedSmartPick>();
+    let combinedDiagnostics = emptyGenerationDiagnostics(
+      gapsForGeneration.length,
+    );
+    for (const batch of chunkSmartPickGaps(
+      gapsForGeneration,
+      SMART_PICKS_AI_GAP_BATCH_SIZE,
+    )) {
+      const generationResult = await this.aiGenerator.generateWithDiagnostics(
+        context,
+        batch,
+      );
+      for (const [key, pick] of generationResult.picks) {
+        generatedPicks.set(key, pick);
+      }
+      combinedDiagnostics = combineGenerationDiagnostics(
+        gapsForGeneration.length,
+        generatedPicks.size,
+        combinedDiagnostics,
+        generationResult.diagnostics,
+      );
+      const retryGaps = batch.filter(
+        (gap) => !generatedPicks.has(gap.normalizedKey),
+      );
+      if (
+        !generationResult.diagnostics.providerFailed &&
+        retryGaps.length > 0
+      ) {
+        combinedDiagnostics = await this.retryMissingProductPicks(
+          context,
+          combinedDiagnostics,
+          generatedPicks,
+          gapsForGeneration,
+          retryGaps,
+        );
+      }
+    }
+    if (
+      !(await this.hasSmartPicksConsent(context)) ||
+      !(await this.isCurrentSnapshotContext(context))
+    ) {
+      return;
+    }
+    await this.persistGeneratedPicks(
       context,
       gapsForGeneration,
+      generatedPicks,
     );
-    const verifiedPicks = await this.verifyGeneratedPicks(
-      generationResult.picks,
-    );
-    await this.persistGeneratedPicks(context, gapsForGeneration, verifiedPicks);
     await this.recordGenerationMetrics(
       context,
       gapsForGeneration,
-      verifiedPicks,
-      generationResult.diagnostics,
+      generatedPicks,
+      combinedDiagnostics,
     );
   }
 
-  private async verifyGeneratedPicks(
+  private async retryMissingProductPicks(
+    context: SmartPicksContext,
+    initialDiagnostics: SmartPicksAiGenerationDiagnostics,
     generatedPicks: Map<string, GeneratedSmartPick>,
-  ): Promise<Map<string, GeneratedSmartPick>> {
-    const verifiedPicks = new Map<string, GeneratedSmartPick>();
-    await Promise.all(
-      Array.from(generatedPicks.entries()).map(async ([key, pick]) => {
-        verifiedPicks.set(
-          key,
-          await this.retailerVerifier.verifyGeneratedPick(pick),
-        );
-      }),
+    allGaps: SmartPicksGapSnapshot[],
+    retryGaps: SmartPicksGapSnapshot[],
+  ): Promise<SmartPicksAiGenerationDiagnostics> {
+    const retryResult = await this.aiGenerator.generateWithDiagnostics(
+      context,
+      retryGaps,
     );
-    return verifiedPicks;
-  }
-
-  private async refreshRetailerData(
-    suggestion: SmartPickProductSuggestion,
-  ): Promise<void> {
-    const verified =
-      await this.retailerVerifier.verifyStoredSuggestion(suggestion);
-    await this.productSuggestionRepo.save(verified);
+    for (const [key, pick] of retryResult.picks) {
+      generatedPicks.set(key, pick);
+    }
+    return combineGenerationDiagnostics(
+      allGaps.length,
+      generatedPicks.size,
+      initialDiagnostics,
+      retryResult.diagnostics,
+    );
   }
 
   private async persistGeneratedPicks(
@@ -408,15 +427,15 @@ export class SmartPicksOverviewService {
     gaps: SmartPicksGapSnapshot[],
     generatedPicks: Map<string, GeneratedSmartPick>,
   ): Promise<void> {
-    const now = new Date();
-    const retailerDataExpiresAt = new Date(
-      now.getTime() + RETAILER_DATA_FRESHNESS_MS,
-    );
     for (const gap of gaps) {
       const pick = generatedPicks.get(gap.normalizedKey);
       if (!pick) continue;
       const existing = await this.productSuggestionRepo.findOne({
-        where: { user_id: context.user.id, normalized_key: gap.normalizedKey },
+        where: {
+          user_id: context.user.id,
+          normalized_key: gap.normalizedKey,
+          inputs_hash: context.inputsHash,
+        },
       });
       await this.productSuggestionRepo.save(
         this.productSuggestionRepo.create({
@@ -427,9 +446,7 @@ export class SmartPicksOverviewService {
           brand: pick.brand,
           product_name: pick.productName,
           budget_tier: pick.budgetTier,
-          price_cents: pick.priceCents,
-          currency: pick.currency,
-          retailers_json: pick.retailers,
+          seller_names_json: sanitizeSellerNames(pick.sellerNames),
           reasoning_chips_json: pick.reasoningChips,
           reasoning_facts_json: pick.reasoningFacts,
           ruled_out_json: pick.ruledOut,
@@ -437,26 +454,17 @@ export class SmartPicksOverviewService {
             brand: alternative.brand,
             productName: alternative.productName,
             budgetTier: alternative.budgetTier,
-            priceCents: alternative.priceCents,
-            currency: alternative.currency,
-            retailers: alternative.retailers,
+            sellerNames: sanitizeSellerNames(alternative.sellerNames),
             reasoningChips: alternative.reasoningChips,
             reasoningFacts: alternative.reasoningFacts,
             ruledOut: alternative.ruledOut,
             sourceIds: alternative.sourceIds,
-            availabilityStatus: alternative.availabilityStatus,
             recommendationRankReason: alternative.recommendationRankReason,
-            localAlternativeReason: alternative.localAlternativeReason,
           })),
           source_ids: pick.sourceIds,
-          verification_status: pick.verificationStatus,
-          availability_status: pick.availabilityStatus,
           recommendation_rank_reason: pick.recommendationRankReason,
-          local_alternative_reason: pick.localAlternativeReason,
-          retailer_data_checked_at: now,
-          retailer_data_expires_at: retailerDataExpiresAt,
           inputs_hash: context.inputsHash,
-          gap_reason: gap.reason,
+          gap_reason: gap.shortReason,
           goal_alignment: gap.goalAlignment,
         }),
       );
@@ -482,17 +490,10 @@ export class SmartPicksOverviewService {
         requestedGapCount: gaps.length,
         generatedPickCount: generatedPicks.size,
         missingPickCount,
-        importOnlyPickCount: picks.filter(
-          (pick) => pick.availabilityStatus === 'import_only',
-        ).length,
-        unavailablePickCount: picks.filter(
-          (pick) => pick.availabilityStatus === 'unavailable',
-        ).length,
-        localAlternativeCount: picks.filter((pick) =>
-          pick.alternatives.some(
-            (alternative) => alternative.availabilityStatus === 'local',
-          ),
-        ).length,
+        alternativePickCount: picks.reduce(
+          (count, pick) => count + pick.alternatives.length,
+          0,
+        ),
         mode: context.mode,
         rawGapCount: diagnostics.rawGapCount,
         blockedSafetyCount: diagnostics.blockedSafetyCount,
@@ -557,37 +558,6 @@ export class SmartPicksOverviewService {
         },
       });
     }
-
-    const unavailablePickCount = picks.filter(
-      (pick) => pick.availabilityStatus === 'unavailable',
-    ).length;
-    const unknownAvailabilityCount = picks.filter(
-      (pick) => pick.availabilityStatus === 'unknown',
-    ).length;
-    const nonLocalWithoutLocalAlternativeCount = picks.filter(
-      (pick) =>
-        pick.availabilityStatus !== 'local' &&
-        !pick.alternatives.some(
-          (alternative) => alternative.availabilityStatus === 'local',
-        ),
-    ).length;
-    if (
-      unavailablePickCount > 0 ||
-      unknownAvailabilityCount > 0 ||
-      nonLocalWithoutLocalAlternativeCount > 0
-    ) {
-      await this.observability.record({
-        kind: 'smart_pick_quality_drift',
-        severity: 'warning',
-        userId: context.user.id,
-        metadata: {
-          ...privacySafeBase,
-          unavailablePickCount,
-          unknownAvailabilityCount,
-          nonLocalWithoutLocalAlternativeCount,
-        },
-      });
-    }
   }
 
   private async loadActionSummary(
@@ -602,7 +572,11 @@ export class SmartPicksOverviewService {
     });
     const keySet = new Set(normalizedKeys);
     const latestByKey = new Map<string, SuggestionGapAction>();
+    const savedSuggestionIds = new Set<string>();
     for (const row of rows) {
+      if (row.action === 'saved' && row.smart_pick_product_suggestion_id) {
+        savedSuggestionIds.add(row.smart_pick_product_suggestion_id);
+      }
       if (!keySet.has(row.normalized_key)) continue;
       const existing = latestByKey.get(row.normalized_key);
       if (
@@ -613,27 +587,59 @@ export class SmartPicksOverviewService {
       }
     }
 
-    const actionByKey = new Map<string, SuggestionGapActionKind>();
+    const dismissedKeys = new Set<string>();
     let dismissedGapCount = 0;
     let nextEligibleAt: Date | null = null;
     const cutoff = Date.now() - DISMISSAL_LOOKBACK_MS;
     for (const row of latestByKey.values()) {
-      if (row.action !== 'dismissed') {
-        actionByKey.set(row.normalized_key, row.action);
-        continue;
-      }
+      if (row.action !== 'dismissed') continue;
       if (row.updated_at.getTime() <= cutoff) continue;
       const eligibleAt = new Date(
         row.updated_at.getTime() + DISMISSAL_LOOKBACK_MS,
       );
       dismissedGapCount += 1;
-      actionByKey.set(row.normalized_key, row.action);
+      dismissedKeys.add(row.normalized_key);
       if (!nextEligibleAt || eligibleAt.getTime() < nextEligibleAt.getTime()) {
         nextEligibleAt = eligibleAt;
       }
     }
 
-    return { actionByKey, dismissedGapCount, nextEligibleAt };
+    return {
+      dismissedKeys,
+      savedSuggestionIds,
+      dismissedGapCount,
+      nextEligibleAt,
+    };
+  }
+
+  private async pruneStaleProductSuggestions(
+    context: SmartPicksContext,
+  ): Promise<void> {
+    const suggestions = await this.productSuggestionRepo.find({
+      where: {
+        user_id: context.user.id,
+        inputs_hash: Not(context.inputsHash),
+      },
+    });
+    if (suggestions.length === 0) return;
+
+    const protectedIds = protectedSmartPickSuggestionIds(
+      await this.gapActionRepo.find({
+        where: {
+          user_id: context.user.id,
+          source_type: 'smart_pick',
+        },
+      }),
+    );
+    const staleIds = suggestions
+      .filter((suggestion) => !protectedIds.has(suggestion.id))
+      .map((suggestion) => suggestion.id);
+    if (staleIds.length === 0) return;
+
+    await this.productSuggestionRepo.delete({
+      user_id: context.user.id,
+      id: In(staleIds),
+    });
   }
 
   private async loadRecentlyDismissedKeys(
@@ -670,6 +676,109 @@ export class SmartPicksOverviewService {
       dedupeKey: `smart_pick_ready:${context.inputsHash.slice(0, 16)}`,
     });
   }
+
+  private async hasSmartPicksConsent(
+    context: SmartPicksContext,
+  ): Promise<boolean> {
+    const profile = await this.skinProfileRepo.findOne({
+      where: { user_id: context.user.id },
+    });
+    return (
+      profile?.allow_smart_picks ??
+      context.skinProfile?.allow_smart_picks ??
+      false
+    );
+  }
+
+  private async isCurrentSnapshotContext(
+    context: SmartPicksContext,
+  ): Promise<boolean> {
+    const snapshot = await this.snapshotRepo.findOne({
+      where: { user_id: context.user.id },
+    });
+    if (!snapshot) return true;
+    return (
+      snapshot.mode === context.mode &&
+      snapshot.inputs_hash === context.inputsHash
+    );
+  }
+}
+
+function protectedSmartPickSuggestionIds(
+  actions: SuggestionGapAction[],
+): Set<string> {
+  const protectedIds = new Set<string>();
+  const dismissalCutoff = Date.now() - DISMISSAL_LOOKBACK_MS;
+  for (const action of actions) {
+    const suggestionId = action.smart_pick_product_suggestion_id;
+    if (!suggestionId) continue;
+    if (action.action === 'saved') {
+      protectedIds.add(suggestionId);
+      continue;
+    }
+    if (
+      action.action === 'dismissed' &&
+      action.updated_at.getTime() > dismissalCutoff
+    ) {
+      protectedIds.add(suggestionId);
+    }
+  }
+  return protectedIds;
+}
+
+function considerGapLimit(context: SmartPicksContext): number {
+  return context.budgetTier === 'premium' || context.budgetTier === 'luxury'
+    ? 4
+    : 2;
+}
+
+function combineGenerationDiagnostics(
+  requestedGapCount: number,
+  acceptedPickCount: number,
+  initial: SmartPicksAiGenerationDiagnostics,
+  retry: SmartPicksAiGenerationDiagnostics,
+): SmartPicksAiGenerationDiagnostics {
+  return {
+    requestedGapCount,
+    rawGapCount: initial.rawGapCount + retry.rawGapCount,
+    acceptedPickCount,
+    blockedOwnedCount: initial.blockedOwnedCount + retry.blockedOwnedCount,
+    blockedBudgetCount: initial.blockedBudgetCount + retry.blockedBudgetCount,
+    blockedSafetyCount: initial.blockedSafetyCount + retry.blockedSafetyCount,
+    invalidPickCount: initial.invalidPickCount + retry.invalidPickCount,
+    missingPickCount: Math.max(0, requestedGapCount - acceptedPickCount),
+    providerFailed: initial.providerFailed || retry.providerFailed,
+    providerSkippedReason:
+      initial.providerSkippedReason ?? retry.providerSkippedReason,
+  };
+}
+
+function emptyGenerationDiagnostics(
+  requestedGapCount: number,
+): SmartPicksAiGenerationDiagnostics {
+  return {
+    requestedGapCount,
+    rawGapCount: 0,
+    acceptedPickCount: 0,
+    blockedOwnedCount: 0,
+    blockedBudgetCount: 0,
+    blockedSafetyCount: 0,
+    invalidPickCount: 0,
+    missingPickCount: requestedGapCount,
+    providerFailed: false,
+    providerSkippedReason: null,
+  };
+}
+
+function chunkSmartPickGaps(
+  gaps: SmartPicksGapSnapshot[],
+  batchSize: number,
+): SmartPicksGapSnapshot[][] {
+  const chunks: SmartPicksGapSnapshot[][] = [];
+  for (let index = 0; index < gaps.length; index += batchSize) {
+    chunks.push(gaps.slice(index, index + batchSize));
+  }
+  return chunks;
 }
 
 function isFreshSnapshot(
@@ -679,8 +788,7 @@ function isFreshSnapshot(
   return Boolean(
     snapshot &&
     snapshot.mode === context.mode &&
-    snapshot.inputs_hash === context.inputsHash &&
-    snapshot.expires_at.getTime() > Date.now(),
+    snapshot.inputs_hash === context.inputsHash,
   );
 }
 
@@ -689,9 +797,57 @@ function normalizeGapSnapshot(
 ): SmartPicksGapSnapshot {
   return {
     ...gap,
+    shortReason: gap.shortReason ?? buildShortGapReason(gap.reason),
     gapKind: gap.gapKind ?? SmartPicksGapKind.Missing,
     replacementFor: gap.replacementFor ?? null,
   };
+}
+
+export function buildShortGapReason(reason: string): string {
+  const legacySkinProfileBudgetPrefix =
+    /^Because\s+your\s+Skin\s+Profile\s+uses\s+an?\s+[a-z-]+\s+budget,\s*/i;
+  const legacyBudgetPlanPrefix =
+    /^because\s+your\s+budget\s+allows\s+a\s+more\s+complete\s+plan,\s*/i;
+  const compact = normalizeReasonWhitespace(reason)
+    .replace(legacySkinProfileBudgetPrefix, '')
+    .replace(
+      /^Best fit because (?:the )?profile is filtered to [a-z-]+ budget,\s*(?:and\s*)?/i,
+      '',
+    )
+    .replace(legacyBudgetPlanPrefix, '')
+    .replace(
+      /\s+when\s+[a-z]+\s+and\s+safety\s+context\s+allow\s+it/gi,
+      ' when the safety context allows it',
+    )
+    .replace(/^For\s+a\s+higher\s+[a-z]+,\s*/i, '')
+    .replace(/^With\s+a\s+higher\s+[a-z]+,\s*/i, '')
+    .replace(/^this is\s+/i, '');
+  const firstSentence = firstReasonSentence(compact);
+  return capitalizeFirst(trimReasonLength(firstSentence, 120));
+}
+
+function normalizeReasonWhitespace(reason: string): string {
+  return reason.replace(/\s+/g, ' ').trim();
+}
+
+function firstReasonSentence(reason: string): string {
+  const match = /^.*?[.!?](?:\s|$)/.exec(reason);
+  return (match?.[0] ?? reason).trim();
+}
+
+function trimReasonLength(reason: string, maxLength: number): string {
+  if (reason.length <= maxLength) return reason;
+  const candidate = reason.slice(0, maxLength).trimEnd();
+  const lastSpace = candidate.lastIndexOf(' ');
+  const trimmed =
+    lastSpace > Math.floor(maxLength * 0.6)
+      ? candidate.slice(0, lastSpace)
+      : candidate;
+  return `${trimmed.replace(/[,.!?;:]+$/, '')}...`;
+}
+
+function capitalizeFirst(reason: string): string {
+  return reason.charAt(0).toUpperCase() + reason.slice(1);
 }
 
 function buildRecap(context: SmartPicksContext): SmartPicksRecap {
@@ -706,6 +862,18 @@ function buildRecap(context: SmartPicksContext): SmartPicksRecap {
     budgetTier: context.budgetTier,
     ethnicity: profile?.ethnicity ?? null,
   };
+}
+
+function coverageGoalText(context: SmartPicksContext): string | null {
+  const profile = context.skinProfile;
+  const values = [
+    profile?.primary_goal,
+    ...(profile?.current_concerns ?? []),
+    ...(profile?.concern_details?.per_concern ?? []).map(
+      (entry) => `${entry.concern} ${entry.severity ?? ''}`,
+    ),
+  ].filter(Boolean);
+  return values.length > 0 ? values.join(' ') : null;
 }
 
 function buildEmptyState(
@@ -956,6 +1124,11 @@ export function buildGapSnapshots(
       .filter((slot) => slot.state !== 'filled')
       .map((slot) => slot.role),
   );
+  const missingPriority = new Set(
+    coverage.slots
+      .filter((slot) => slot.state === 'missing-priority')
+      .map((slot) => slot.role),
+  );
   const goal = context.skinProfile?.primary_goal ?? null;
   const add = (
     ingredientOrCategory: string,
@@ -973,6 +1146,7 @@ export function buildGapSnapshots(
       normalizedKey,
       priority,
       reason,
+      shortReason: buildShortGapReason(reason),
       goalAlignment,
       sourceIds: mergeEvidenceSourceIds(sourceIds),
       gapKind,
@@ -1031,7 +1205,7 @@ export function buildGapSnapshots(
     return gaps;
   }
 
-  if (missing.has('spf')) {
+  if (missingPriority.has('spf')) {
     add(
       'Broad-spectrum sunscreen SPF 30+',
       'priority',
@@ -1044,17 +1218,6 @@ export function buildGapSnapshots(
       SmartPicksGapKind.Missing,
     );
   }
-  if (missing.has('moisturise')) {
-    add(
-      'Barrier-support moisturizer',
-      'priority',
-      'Your shelf is missing the product that seals hydration and buffers active use.',
-      [SuggestionEvidenceSourceId.MayoDrySkinCare],
-      'barrier support',
-      SmartPicksGapKind.Missing,
-    );
-  }
-
   for (const replacement of context.productPerformance
     .filter((summary) => summary.replacementCandidate)
     .slice(0, 2)) {
@@ -1070,7 +1233,29 @@ export function buildGapSnapshots(
     );
   }
 
-  if (missing.has('cleanse')) {
+  for (const candidate of buildGoalGapCandidates(context, coverage)) {
+    add(
+      candidate.ingredientOrCategory,
+      candidate.priority,
+      candidate.reason,
+      candidate.sourceIds,
+      candidate.goalAlignment,
+      candidate.gapKind,
+    );
+  }
+
+  if (missingPriority.has('moisturise')) {
+    add(
+      'Barrier-support moisturizer',
+      'priority',
+      'Your shelf is missing the product that seals hydration and buffers active use.',
+      [SuggestionEvidenceSourceId.MayoDrySkinCare],
+      'barrier support',
+      SmartPicksGapKind.Missing,
+    );
+  }
+
+  if (missingPriority.has('cleanse')) {
     add(
       'Gentle cleanser',
       'priority',
@@ -1080,7 +1265,10 @@ export function buildGapSnapshots(
       SmartPicksGapKind.Missing,
     );
   }
-  if (missing.has('treat')) {
+  if (
+    missingPriority.has('treat') &&
+    !gaps.some((gap) => gap.gapKind === SmartPicksGapKind.GoalSupport)
+  ) {
     add(
       treatmentGapForGoal(goal),
       'priority',
@@ -1118,7 +1306,22 @@ export function buildGapSnapshots(
     }
   }
 
-  return gaps.slice(0, 5);
+  return limitGapSnapshots(context, gaps);
+}
+
+function limitGapSnapshots(
+  context: SmartPicksContext,
+  gaps: SmartPicksGapSnapshot[],
+): SmartPicksGapSnapshot[] {
+  const priorityLimit = context.mode === 'starter' ? 4 : 3;
+  return [
+    ...gaps
+      .filter((gap) => gap.priority === 'priority')
+      .slice(0, priorityLimit),
+    ...gaps
+      .filter((gap) => gap.priority === 'consider')
+      .slice(0, considerGapLimit(context)),
+  ];
 }
 
 function replacementSourceIds(
@@ -1412,9 +1615,7 @@ export function toProductPick(
     brand: entity.brand,
     productName: entity.product_name,
     budgetTier: entity.budget_tier,
-    priceCents: entity.price_cents,
-    currency: entity.currency,
-    retailers: entity.retailers_json ?? [],
+    sellerNames: sanitizeSellerNames(entity.seller_names_json ?? []),
     reasoningChips: entity.reasoning_chips_json ?? [],
     reasoningFacts: entity.reasoning_facts_json ?? {},
     ruledOut: entity.ruled_out_json ?? [],
@@ -1425,44 +1626,37 @@ export function toProductPick(
         brand: alternative.brand,
         productName: alternative.productName,
         budgetTier: alternative.budgetTier,
-        priceCents: alternative.priceCents,
-        currency: alternative.currency,
-        retailers: alternative.retailers ?? [],
+        sellerNames: sanitizeSellerNames(alternative.sellerNames ?? []),
         reasoningChips: alternative.reasoningChips ?? [],
         reasoningFacts: alternative.reasoningFacts ?? {},
         ruledOut: alternative.ruledOut ?? [],
         sourceIds: alternative.sourceIds ?? [],
         alternatives: [],
-        verificationStatus: entity.verification_status,
-        availabilityStatus: alternative.availabilityStatus ?? 'unknown',
         recommendationRankReason: alternative.recommendationRankReason ?? null,
-        localAlternativeReason: alternative.localAlternativeReason ?? null,
-        retailerDataCheckedAt: toIsoStringOrNull(
-          entity.retailer_data_checked_at,
-        ),
-        retailerDataStale: isRetailerDataStale(entity),
         userAction: null,
         createdAt: toIsoString(entity.created_at),
       }),
     ),
-    verificationStatus: entity.verification_status,
-    availabilityStatus: entity.availability_status,
     recommendationRankReason: entity.recommendation_rank_reason,
-    localAlternativeReason: entity.local_alternative_reason,
-    retailerDataCheckedAt: toIsoStringOrNull(entity.retailer_data_checked_at),
-    retailerDataStale: isRetailerDataStale(entity),
     userAction: action,
     createdAt: toIsoString(entity.created_at),
   };
 }
 
-function toIsoStringOrNull(value: Date | null): string | null {
-  return value ? toIsoString(value) : null;
+function sanitizeSellerNames(sellerNames: readonly string[]): string[] {
+  const seenNames = new Set<string>();
+  const guidance: string[] = [];
+  for (const sellerName of sellerNames) {
+    const name = sellerName.replace(/\s+/g, ' ').trim();
+    const key = name?.toLowerCase() ?? null;
+    if (!name || !key || seenNames.has(key)) continue;
+    seenNames.add(key);
+    guidance.push(name.slice(0, 80));
+    if (guidance.length >= 3) break;
+  }
+  return guidance;
 }
 
-function isRetailerDataStale(entity: SmartPickProductSuggestion): boolean {
-  return Boolean(
-    entity.retailer_data_expires_at &&
-    entity.retailer_data_expires_at.getTime() <= Date.now(),
-  );
+function toIsoStringOrNull(value: Date | null): string | null {
+  return value ? toIsoString(value) : null;
 }

@@ -47,7 +47,6 @@ const encryptedRecapTransformer =
 
 @Entity('smart_pick_snapshots')
 @Index('UQ_smart_pick_snapshots_user', ['user_id'], { unique: true })
-@Index('IDX_smart_pick_snapshots_expires_at', ['expires_at'])
 export class SmartPickSnapshot {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;
@@ -78,9 +77,6 @@ export class SmartPickSnapshot {
 
   @Column({ type: 'timestamptz' })
   generated_at: Date;
-
-  @Column({ type: 'timestamptz' })
-  expires_at: Date;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })

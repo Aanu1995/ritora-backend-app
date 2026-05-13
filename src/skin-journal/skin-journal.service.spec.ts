@@ -11,6 +11,7 @@ import { UserConsent } from '../users/entities/user-consent.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { UserConsentType } from '../users/user-consent.constants';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import {
   SkinProfileWaterHardness,
   SkinProfileWaterSensitivity,
@@ -337,6 +338,9 @@ describe('SkinJournalService', () => {
       ai_polished_insights_enabled: true,
     }),
   };
+  const smartPicksPreparation = {
+    scheduleForUser: jest.fn(),
+  } as unknown as jest.Mocked<SmartPicksPreparationService>;
   const insightPolish = {
     polish: jest.fn(async (candidates) => candidates),
   };
@@ -424,6 +428,7 @@ describe('SkinJournalService', () => {
     insightQueue.nextRetryAt.mockClear();
     mediaRetention.enqueueDeletionVerification.mockClear();
     config.get.mockClear();
+    smartPicksPreparation.scheduleForUser.mockClear();
 
     const module = await Test.createTestingModule({
       providers: [
@@ -464,6 +469,10 @@ describe('SkinJournalService', () => {
         { provide: ConfigService, useValue: config },
         { provide: UserDataAccessLogService, useValue: dataAccess },
         { provide: NotificationsService, useValue: notifications },
+        {
+          provide: SmartPicksPreparationService,
+          useValue: smartPicksPreparation,
+        },
       ],
     }).compile();
 
@@ -668,6 +677,9 @@ describe('SkinJournalService', () => {
         cycle_marker: COMPLETE_CHECK_IN_BODY.cycle_marker,
       }),
     );
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('allows partial check-in edits only when the stored entry is already complete', async () => {
@@ -758,6 +770,9 @@ describe('SkinJournalService', () => {
       }),
     );
     expect(analysis.analyze).not.toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('keeps upload successful when durable queue creation is temporarily unavailable', async () => {
@@ -1185,6 +1200,9 @@ describe('SkinJournalService', () => {
       }),
     );
     expect(insights.save).not.toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('queues scheduled insight generation only after dirty inputs meet cadence', async () => {
@@ -1670,6 +1688,9 @@ describe('SkinJournalService', () => {
     expect(analysisQueue.cancelActiveJobsForEntry).toHaveBeenCalledWith(
       'entry-current',
       'Journal entry was deleted.',
+    );
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
     );
   });
 

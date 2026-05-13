@@ -1,8 +1,10 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { RoutineSimplificationEvent } from '../../skin-journal/entities/routine-simplification-event.entity';
+import { SmartPickSnapshot } from '../../smart-picks/entities/smart-pick-snapshot.entity';
 import { SmartPickProductSuggestion } from '../../smart-picks/entities/smart-pick-product-suggestion.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
+import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionGapAction } from '../entities/suggestion-gap-action.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
@@ -16,6 +18,8 @@ describe('SuggestionTodayActionService', () => {
   const reminderSnoozeRepo = repo<SuggestionRecordingReminderSnooze>();
   const suggestionRepo = repo<SuggestionInstance>();
   const productSuggestionRepo = repo<SmartPickProductSuggestion>();
+  const smartPickSnapshotRepo = repo<SmartPickSnapshot>();
+  const skinProfileRepo = repo<SkinProfile>();
   const entryRepo = repo<SkinJournalEntry>();
   const simplificationRepo = repo<RoutineSimplificationEvent>();
   const service = new SuggestionTodayActionService(
@@ -24,12 +28,14 @@ describe('SuggestionTodayActionService', () => {
     reminderSnoozeRepo,
     suggestionRepo,
     productSuggestionRepo,
+    smartPickSnapshotRepo,
+    skinProfileRepo,
     entryRepo,
     simplificationRepo,
   );
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     jest.useFakeTimers().setSystemTime(new Date('2026-05-04T10:00:00.000Z'));
     overrideRepo.create.mockImplementation(
       (value) => value as SuggestionReactionOverride,
@@ -137,6 +143,12 @@ describe('SuggestionTodayActionService', () => {
   });
 
   it('persists smart pick actions only for owned product suggestions', async () => {
+    skinProfileRepo.findOne.mockResolvedValue({
+      allow_smart_picks: true,
+    } as SkinProfile);
+    smartPickSnapshotRepo.findOne.mockResolvedValue({
+      inputs_hash: 'hash-1',
+    } as SmartPickSnapshot);
     productSuggestionRepo.findOne.mockResolvedValue(
       smartPickProductSuggestion(),
     );
@@ -170,6 +182,43 @@ describe('SuggestionTodayActionService', () => {
     );
   });
 
+  it('rejects smart pick actions when Smart Picks consent is off', async () => {
+    skinProfileRepo.findOne.mockResolvedValue({
+      allow_smart_picks: false,
+    } as SkinProfile);
+
+    await expect(
+      service.recordGapAction(user(), {
+        sourceType: 'smart_pick',
+        smartPickProductSuggestionId: 'pick-1',
+        action: 'saved',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(productSuggestionRepo.findOne).not.toHaveBeenCalled();
+    expect(gapActionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects smart pick actions for stale product suggestions', async () => {
+    skinProfileRepo.findOne.mockResolvedValue({
+      allow_smart_picks: true,
+    } as SkinProfile);
+    smartPickSnapshotRepo.findOne.mockResolvedValue({
+      inputs_hash: 'new-hash',
+    } as SmartPickSnapshot);
+    productSuggestionRepo.findOne.mockResolvedValue(
+      smartPickProductSuggestion({ inputs_hash: 'old-hash' }),
+    );
+
+    await expect(
+      service.recordGapAction(user(), {
+        sourceType: 'smart_pick',
+        smartPickProductSuggestionId: 'pick-1',
+        action: 'saved',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(gapActionRepo.save).not.toHaveBeenCalled();
+  });
+
   it('rejects spoofed gap actions', async () => {
     suggestionRepo.findOne.mockResolvedValueOnce({
       ...suggestion(),
@@ -194,6 +243,12 @@ describe('SuggestionTodayActionService', () => {
   });
 
   it('rejects smart pick actions for another user', async () => {
+    skinProfileRepo.findOne.mockResolvedValue({
+      allow_smart_picks: true,
+    } as SkinProfile);
+    smartPickSnapshotRepo.findOne.mockResolvedValue({
+      inputs_hash: 'hash-1',
+    } as SmartPickSnapshot);
     const spoofed = smartPickProductSuggestion();
     spoofed.user_id = 'user-2';
     productSuggestionRepo.findOne.mockResolvedValue(spoofed);
@@ -306,7 +361,9 @@ function suggestion(): SuggestionInstance {
   } as unknown as SuggestionInstance;
 }
 
-function smartPickProductSuggestion(): SmartPickProductSuggestion {
+function smartPickProductSuggestion(
+  overrides: Partial<SmartPickProductSuggestion> = {},
+): SmartPickProductSuggestion {
   return {
     id: 'pick-1',
     user_id: 'user-1',
@@ -315,20 +372,13 @@ function smartPickProductSuggestion(): SmartPickProductSuggestion {
     brand: 'La Roche-Posay',
     product_name: 'Anthelios Mineral SPF 50',
     budget_tier: 'mid',
-    price_cents: 2499,
-    currency: 'USD',
-    retailers_json: [],
+    seller_names_json: [],
     reasoning_chips_json: [],
     reasoning_facts_json: {},
     ruled_out_json: [],
     alternatives_json: [],
     source_ids: [],
-    verification_status: 'ai_named',
-    availability_status: 'local',
     recommendation_rank_reason: 'Best local SPF fit.',
-    local_alternative_reason: null,
-    retailer_data_checked_at: new Date('2026-05-04T10:00:00.000Z'),
-    retailer_data_expires_at: new Date('2026-05-11T10:00:00.000Z'),
     inputs_hash: 'hash-1',
     gap_reason: 'No SPF on shelf.',
     goal_alignment: 'sun protection',
@@ -336,5 +386,6 @@ function smartPickProductSuggestion(): SmartPickProductSuggestion {
     updated_at: new Date('2026-05-04T10:00:00.000Z'),
     user: undefined as never,
     generateId: jest.fn(),
+    ...overrides,
   };
 }

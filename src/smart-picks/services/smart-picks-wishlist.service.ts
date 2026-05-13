@@ -2,10 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { SuggestionGapAction } from '../../suggestions/entities/suggestion-gap-action.entity';
+import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { SmartPickProductSuggestion } from '../entities/smart-pick-product-suggestion.entity';
 import { SmartPicksWishlistItem } from '../smart-picks.types';
-import { toProductPick } from './smart-picks-overview.service';
+import {
+  buildShortGapReason,
+  toProductPick,
+} from './smart-picks-overview.service';
 
 @Injectable()
 export class SmartPicksWishlistService {
@@ -14,9 +18,14 @@ export class SmartPicksWishlistService {
     private readonly gapActionRepo: Repository<SuggestionGapAction>,
     @InjectRepository(SmartPickProductSuggestion)
     private readonly productSuggestionRepo: Repository<SmartPickProductSuggestion>,
+    @InjectRepository(SkinProfile)
+    private readonly skinProfileRepo: Repository<SkinProfile>,
   ) {}
 
   async list(user: User): Promise<SmartPicksWishlistItem[]> {
+    if (!(await this.hasSmartPicksConsent(user.id))) {
+      return [];
+    }
     const actions = await this.gapActionRepo.find({
       where: {
         user_id: user.id,
@@ -46,7 +55,9 @@ export class SmartPicksWishlistService {
           savedAt: action.updated_at.toISOString(),
           ingredientOrCategory: action.ingredient_or_category,
           normalizedKey: action.normalized_key,
-          reason: suggestion.gap_reason,
+          reason: suggestion.gap_reason
+            ? buildShortGapReason(suggestion.gap_reason)
+            : null,
           goalAlignment: suggestion.goal_alignment,
           pick: toProductPick(suggestion, 'saved'),
         },
@@ -67,5 +78,12 @@ export class SmartPicksWishlistService {
       throw new NotFoundException('Wishlist item not found.');
     }
     await this.gapActionRepo.remove(action);
+  }
+
+  private async hasSmartPicksConsent(userId: string): Promise<boolean> {
+    const profile = await this.skinProfileRepo.findOne({
+      where: { user_id: userId },
+    });
+    return profile?.allow_smart_picks === true;
   }
 }

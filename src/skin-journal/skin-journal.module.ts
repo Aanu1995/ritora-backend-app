@@ -14,6 +14,7 @@ import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity'
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SmartPicksModule } from '../smart-picks/smart-picks.module';
 import { UsersModule } from '../users/users.module';
 import { SkinJournalController } from './skin-journal.controller';
 import { SkinJournalService } from './skin-journal.service';
@@ -30,6 +31,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
 @Module({
   imports: [
     NotificationsModule,
+    SmartPicksModule,
     UsersModule,
     TypeOrmModule.forFeature([
       SkinJournalEntry,

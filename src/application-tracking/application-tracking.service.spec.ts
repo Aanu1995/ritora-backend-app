@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { DataSource, ObjectLiteral, Repository } from 'typeorm';
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import { User } from '../users/entities/user.entity';
 import { ApplicationReactiveRegenerationService } from './application-reactive-regeneration.service';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
@@ -26,6 +27,9 @@ describe('ApplicationTrackingService', () => {
   const cataloguePhotoStorageService = {
     resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
   } as unknown as jest.Mocked<CataloguePhotoStorageService>;
+  const smartPicksPreparation = {
+    scheduleForUser: jest.fn(),
+  } as unknown as jest.Mocked<SmartPicksPreparationService>;
 
   let txLogRepo: jest.Mocked<Repository<ApplicationLog>>;
   let txItemRepo: jest.Mocked<Repository<ApplicationLogItem>>;
@@ -46,6 +50,7 @@ describe('ApplicationTrackingService', () => {
       validation,
       reactiveRegeneration,
       cataloguePhotoStorageService,
+      smartPicksPreparation,
     );
   });
 
@@ -104,6 +109,9 @@ describe('ApplicationTrackingService', () => {
       }),
     );
     expect(reactiveRegeneration.queueAfterApplicationChange).toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('rejects duplicate records for the same suggestion', async () => {
@@ -119,6 +127,7 @@ describe('ApplicationTrackingService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
   });
 
   it('edits a record, replaces items, increments edit metadata, and versions the change', async () => {
@@ -170,6 +179,9 @@ describe('ApplicationTrackingService', () => {
       }),
     );
     expect(reactiveRegeneration.queueAfterApplicationChange).toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('protects records from cross-user reads and summarizes tracking analytics', async () => {

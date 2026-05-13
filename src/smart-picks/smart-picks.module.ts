@@ -20,7 +20,6 @@ import { SmartPicksOverviewService } from './services/smart-picks-overview.servi
 import { SmartPicksPreparationService } from './services/smart-picks-preparation.service';
 import { SmartPicksProductPerformanceService } from './services/smart-picks-product-performance.service';
 import { SmartPicksRedundancyService } from './services/smart-picks-redundancy.service';
-import { SmartPicksRetailerVerifierService } from './services/smart-picks-retailer-verifier.service';
 import { SmartPicksWishlistService } from './services/smart-picks-wishlist.service';
 import { SmartPicksController } from './smart-picks.controller';
 
@@ -49,7 +48,6 @@ import { SmartPicksController } from './smart-picks.controller';
     SmartPicksPreparationService,
     SmartPicksProductPerformanceService,
     SmartPicksRedundancyService,
-    SmartPicksRetailerVerifierService,
     SmartPicksWishlistService,
     SuggestionObservabilityService,
   ],

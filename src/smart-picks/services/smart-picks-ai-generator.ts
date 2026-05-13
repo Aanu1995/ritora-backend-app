@@ -1,26 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
-import { isSafeExternalHttpUrl } from '../../common/utils/url-security';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { SuggestionEvidenceSourceId } from '../../suggestions/suggestions.constants';
 import { mergeEvidenceSourceIds } from '../../suggestions/services/suggestion-evidence-sources';
+import { normalizeSuggestionGapKey } from '../../suggestions/services/suggestion-gap-actions';
 import {
-  SMART_PICKS_AVAILABILITY_STATUSES,
-  SmartPicksAvailabilityStatus,
   SmartPicksBudgetTier,
   SmartPicksGapSnapshot,
   SmartPicksProductPerformanceSignal,
   SmartPicksProductPick,
   SmartPicksReasoningChip,
-  SmartPicksRetailer,
   SmartPicksRuledOutProduct,
 } from '../smart-picks.types';
 import { SmartPicksContext } from './smart-picks-context-builder';
 
 export const SMART_PICKS_AI_MODEL_ENV_KEY = 'SMART_PICKS_AI_MODEL';
-const SMART_PICKS_AI_TIMEOUT_MS = 45_000;
-const SMART_PICKS_AI_MAX_OUTPUT_TOKENS = 2200;
+const SMART_PICKS_AI_TIMEOUT_MS = 120_000;
+const SMART_PICKS_AI_MAX_OUTPUT_TOKENS = 6000;
 const SOURCE_ID_ENUM = Object.values(SuggestionEvidenceSourceId);
 const SMART_PICKS_STARTER_TREATMENT_CONFIDENCES = [
   'low',
@@ -58,20 +55,20 @@ type RawSmartPickGap = {
   brand?: string;
   productName?: string;
   budgetTier?: SmartPicksBudgetTier | null;
-  priceCents?: number | null;
-  currency?: string | null;
-  availabilityStatus?: string | null;
   recommendationRankReason?: string | null;
-  localAlternativeReason?: string | null;
-  retailers?: SmartPicksRetailer[];
+  sellerNames?: string[];
   reasoningChips?: SmartPicksReasoningChip[];
-  reasoningFacts?: Record<string, string>;
+  reasoningFacts?: RawReasoningFacts;
   ruledOut?: SmartPicksRuledOutProduct[];
   alternatives?: RawSmartPickAlternative[];
   sourceIds?: SuggestionEvidenceSourceId[];
 };
 
 type RawSmartPickAlternative = Omit<RawSmartPickGap, 'normalizedKey'>;
+
+type RawReasoningFacts =
+  | Record<string, string>
+  | { label?: string; value?: string }[];
 
 type RawStarterTreatmentAssessment = {
   shouldRecommend?: boolean;
@@ -84,24 +81,14 @@ type RawStarterTreatmentAssessment = {
 
 export type GeneratedSmartPick = Omit<
   SmartPicksProductPick,
-  | 'id'
-  | 'userAction'
-  | 'createdAt'
-  | 'alternatives'
-  | 'retailerDataCheckedAt'
-  | 'retailerDataStale'
+  'id' | 'userAction' | 'createdAt' | 'alternatives'
 > & {
   alternatives: GeneratedSmartPickAlternative[];
 };
 
 type GeneratedSmartPickAlternative = Omit<
   SmartPicksProductPick,
-  | 'id'
-  | 'userAction'
-  | 'createdAt'
-  | 'alternatives'
-  | 'retailerDataCheckedAt'
-  | 'retailerDataStale'
+  'id' | 'userAction' | 'createdAt' | 'alternatives'
 > & {
   alternatives: GeneratedSmartPickAlternative[];
 };
@@ -190,7 +177,7 @@ export class SmartPicksAiGenerator {
       });
       if (!response.ok) {
         throw new Error(
-          `OpenAI starter treatment call failed (${response.status}).`,
+          await openAiErrorMessage(response, 'starter treatment'),
         );
       }
 
@@ -276,7 +263,7 @@ export class SmartPicksAiGenerator {
         signal: AbortSignal.timeout(SMART_PICKS_AI_TIMEOUT_MS),
       });
       if (!response.ok) {
-        throw new Error(`OpenAI Smart Picks call failed (${response.status}).`);
+        throw new Error(await openAiErrorMessage(response, 'product picks'));
       }
 
       const payload = (await response.json()) as {
@@ -298,37 +285,43 @@ export class SmartPicksAiGenerator {
 }
 
 const STARTER_TREATMENT_SYSTEM_PROMPT = [
-  'You decide whether Ritora Starter Kit should include one beginner treatment step now.',
+  "You are Ritora's dermatologist-informed starter-kit treatment assessor.",
   'The starter essentials are cleanser, moisturizer, and sunscreen. A treatment belongs only when the profile goal, concern details, tolerance, history, and safety context justify it.',
-  'Use AI judgment, but be conservative: recommend treatment only when it is clearly tied to the user goal, and wait when the user only wants a basic routine.',
+  'Use conservative, evidence-aware skincare reasoning, but do not claim to diagnose, prescribe, or replace a licensed dermatologist.',
+  'Recommend treatment only when it is clearly tied to the user goal, and wait when the user only wants a basic routine.',
   'Return a product type or key ingredient category, not a brand or exact product.',
   'Never diagnose, treat, cure, or prescribe. Photo and journal trends are only decision support.',
-  'Respect disliked ingredients, known reaction triggers, active tolerances, pregnancy status, and dermatologist-care context.',
+  'Respect disliked ingredients, known reaction triggers, active tolerances, pregnancy status, prescribed-active overlap, and dermatologist-care context.',
   'Reasoning about skin tone must be concrete and cautious: use phrases such as PIH-aware, white-cast checked, low-irritation intro, or tint/finish checked. Do not say trusted on an ethnicity or suited to a race.',
   'Return strictly valid JSON matching the schema.',
 ].join(' ');
 
 const SYSTEM_PROMPT = [
-  'You are the Smart Picks product suggestion engine for Ritora.',
-  'Ritora is inventory-first: recommend a purchase only when a real shelf gap exists.',
-  'Return external product suggestions only. Do not claim Ritora has verified stock, efficacy, reviews, or local availability unless the retailer URL supports it.',
-  'Rank product fit before local availability. The best pick can be import-only or locally unavailable when it better fits the user goal, budget, skin profile, and shelf compatibility.',
-  'If the best product is not locally available in the user country, set availabilityStatus accordingly, include at least one local alternative when possible, and explain why the local alternative may be less ideal.',
+  "You are Ritora's dermatologist-informed skincare product suggestion engine.",
+  'Ritora helps users buy smarter, not more: recommend a product only when a real shelf gap, justified replacement need, or worth-considering support lane exists.',
+  'Use conservative, evidence-aware skincare reasoning similar to how a careful skincare professional would evaluate a routine, but do not claim to diagnose, prescribe, or replace a licensed dermatologist.',
+  'Return product names and fit reasoning only. Do not return purchase links, live prices, affiliate information, or seller verification claims.',
+  'You may include up to three reputable seller names to check, but they are only starting points for the user to compare themselves.',
+  'Best-fit-first: rank product fit by the user goal, budget, skin profile, history, safety context, and shelf compatibility.',
+  'Do not choose a weaker product only because it is local, and do not choose or reject a product because of country of origin alone.',
+  'Korean, Japanese, Canadian, Australian, European, American, and local products are all valid when the formulation is the best fit.',
+  'You may use broad product reputation, repeated user reports, independent reviews, and well-known category performance as weak supporting signals.',
+  'Do not invent review counts, clinical claims, or guaranteed results, and never let reputation override safety, pregnancy context, reaction history, dermatologist care, or the user-specific gap.',
   'Never diagnose, treat, cure, or prescribe. Use cautious skincare-app wording.',
+  'If the user is under dermatologist care, do not replace or contradict that care; prefer supportive over-the-counter products and flag possible overlap with prescribed actives cautiously.',
   'Reasoning about skin tone must be concrete and cautious: use phrases such as PIH-aware, white-cast checked, low-irritation intro, or tint/finish checked. Do not say trusted on an ethnicity or suited to a race.',
   'Never recommend products matching owned products, disliked ingredients, disliked brands, or known reaction triggers supplied by the user.',
-  'Affiliate eligibility must not affect ranking. Retailer links may be affiliate eligible, but disclosures are handled by the app.',
   'Return strictly valid JSON matching the schema.',
 ].join(' ');
 
-const GOAL_SPECIFIC_STARTER_PICK_GUIDANCE = [
-  'Goal-specific starter pick guidance:',
-  '- dark marks or hyperpigmentation: prioritize pigment-supporting products such as azelaic acid, tranexamic acid, vitamin C/ascorbic derivatives, kojic acid, alpha arbutin, or a beginner retinoid when the safety context allows; do not satisfy this gap with a generic glow moisturizer.',
-  '- acne or breakouts: prioritize one low-irritation acne treatment such as azelaic acid, salicylic acid/BHA, benzoyl peroxide, or an appropriate retinoid.',
-  '- rough texture or clogged pores: prioritize gentle AHA/PHA/BHA texture support and explain sunscreen sensitivity when relevant.',
-  '- redness, sensitivity, or barrier repair: prioritize calming barrier support such as niacinamide, panthenol, centella, or bland barrier-support products; avoid exfoliating acids unless the profile clearly tolerates them.',
-  '- hydration: prioritize humectant or barrier-hydration support such as glycerin, hyaluronic acid, beta-glucan, panthenol, or urea.',
-  '- fine lines or firmness: prioritize a gentle retinoid/retinal night product when safe; use a peptide or bakuchiol-style option when retinoids are not suitable.',
+const GOAL_SPECIFIC_PICK_GUIDANCE = [
+  'Goal-specific pick guidance:',
+  '- dark marks or hyperpigmentation: prioritize pigment-supporting products such as azelaic acid, tranexamic acid, vitamin C/ascorbic derivatives, kojic acid, alpha arbutin, a gentle pigment-supporting mask/peel, or a beginner retinoid when the safety context allows; do not satisfy this gap with a generic glow moisturizer.',
+  '- breakouts or clogged pores: choose the concrete lane requested by the gap, such as adapalene/benzoyl peroxide, azelaic acid, salicylic acid/BHA, barrier support, or a clay/sulfur mask; do not collapse every gap into one generic treatment.',
+  '- rough texture or clogged pores: choose the requested lane, such as gentle AHA/PHA/BHA support, a retinoid when safe, barrier support, or an occasional smoothing mask/peel.',
+  '- redness, sensitivity, or barrier repair: prioritize the requested calming lane, such as niacinamide, panthenol, centella, bland barrier-support products, recovery balm/mask, or sensitive-skin sunscreen; avoid exfoliating acids unless the profile clearly tolerates them.',
+  '- hydration: choose the requested lane, such as humectant serum, barrier-support moisturizer, or occasional overnight hydration mask.',
+  '- fine lines or firmness: choose the requested lane, such as a gentle retinoid/retinal night product when safe, peptide support, antioxidant support, or barrier support for active nights.',
 ].join('\n');
 
 const RESPONSE_FORMAT = {
@@ -351,12 +344,8 @@ const RESPONSE_FORMAT = {
             'brand',
             'productName',
             'budgetTier',
-            'priceCents',
-            'currency',
-            'availabilityStatus',
             'recommendationRankReason',
-            'localAlternativeReason',
-            'retailers',
+            'sellerNames',
             'reasoningChips',
             'reasoningFacts',
             'ruledOut',
@@ -371,19 +360,13 @@ const RESPONSE_FORMAT = {
               type: ['string', 'null'],
               enum: ['drugstore', 'mid', 'premium', 'luxury', null],
             },
-            priceCents: { type: ['integer', 'null'] },
-            currency: { type: ['string', 'null'] },
-            availabilityStatus: {
-              type: 'string',
-              enum: SMART_PICKS_AVAILABILITY_STATUSES,
-            },
             recommendationRankReason: { type: ['string', 'null'] },
-            localAlternativeReason: { type: ['string', 'null'] },
-            retailers: retailerArraySchema(),
+            sellerNames: sellerNameArraySchema(),
             reasoningChips: reasoningChipArraySchema(),
             reasoningFacts: {
-              type: 'object',
-              additionalProperties: { type: 'string' },
+              type: 'array',
+              maxItems: 8,
+              items: reasoningFactSchema(),
             },
             ruledOut: ruledOutArraySchema(),
             alternatives: {
@@ -396,12 +379,8 @@ const RESPONSE_FORMAT = {
                   'brand',
                   'productName',
                   'budgetTier',
-                  'priceCents',
-                  'currency',
-                  'availabilityStatus',
                   'recommendationRankReason',
-                  'localAlternativeReason',
-                  'retailers',
+                  'sellerNames',
                   'reasoningChips',
                   'reasoningFacts',
                   'ruledOut',
@@ -414,19 +393,13 @@ const RESPONSE_FORMAT = {
                     type: ['string', 'null'],
                     enum: ['drugstore', 'mid', 'premium', 'luxury', null],
                   },
-                  priceCents: { type: ['integer', 'null'] },
-                  currency: { type: ['string', 'null'] },
-                  availabilityStatus: {
-                    type: 'string',
-                    enum: SMART_PICKS_AVAILABILITY_STATUSES,
-                  },
                   recommendationRankReason: { type: ['string', 'null'] },
-                  localAlternativeReason: { type: ['string', 'null'] },
-                  retailers: retailerArraySchema(),
+                  sellerNames: sellerNameArraySchema(),
                   reasoningChips: reasoningChipArraySchema(),
                   reasoningFacts: {
-                    type: 'object',
-                    additionalProperties: { type: 'string' },
+                    type: 'array',
+                    maxItems: 8,
+                    items: reasoningFactSchema(),
                   },
                   ruledOut: ruledOutArraySchema(),
                   sourceIds: sourceIdArraySchema(),
@@ -470,30 +443,11 @@ const STARTER_TREATMENT_RESPONSE_FORMAT = {
   },
 } as const;
 
-function retailerArraySchema() {
+function sellerNameArraySchema() {
   return {
     type: 'array',
-    maxItems: 4,
-    items: {
-      type: 'object',
-      additionalProperties: false,
-      required: [
-        'name',
-        'url',
-        'priceCents',
-        'currency',
-        'inStock',
-        'isAffiliate',
-      ],
-      properties: {
-        name: { type: 'string' },
-        url: { type: 'string' },
-        priceCents: { type: ['integer', 'null'] },
-        currency: { type: ['string', 'null'] },
-        inStock: { type: 'boolean' },
-        isAffiliate: { type: 'boolean' },
-      },
-    },
+    maxItems: 3,
+    items: { type: 'string' },
   } as const;
 }
 
@@ -527,18 +481,28 @@ function reasoningChipArraySchema() {
 function ruledOutArraySchema() {
   return {
     type: 'array',
-    maxItems: 8,
+    maxItems: 4,
     items: {
       type: 'object',
       additionalProperties: false,
-      required: ['brand', 'productName', 'priceCents', 'currency', 'reason'],
+      required: ['brand', 'productName', 'reason'],
       properties: {
         brand: { type: 'string' },
         productName: { type: 'string' },
-        priceCents: { type: ['integer', 'null'] },
-        currency: { type: ['string', 'null'] },
         reason: { type: 'string' },
       },
+    },
+  } as const;
+}
+
+function reasoningFactSchema() {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['label', 'value'],
+    properties: {
+      label: { type: 'string' },
+      value: { type: 'string' },
     },
   } as const;
 }
@@ -557,18 +521,29 @@ function buildPrompt(
   const profile = context.skinProfile;
   return [
     `Mode: ${context.mode}. Budget tier: ${context.budgetTier ?? 'unset'}.`,
+    'Use the budget tier to choose product fit only. Do not mention budget in gap reasons, recommendationRankReason, reasoning chips, or reasoning facts.',
     `Location: city=${profile?.city ?? '?'}, country=${profile?.country_code ?? '?'}.`,
     `Skin profile: type=${profile?.skin_type ?? '?'}, tone=${profile?.skin_tone ?? '?'}, ethnicity=${profile?.ethnicity ?? '?'}, primaryGoal=${profile?.primary_goal ?? '?'}, concerns=${(profile?.current_concerns ?? []).join(', ') || 'none'}.`,
     `Safety and preferences: ${JSON.stringify(buildSafetyAndPreferenceSummary(context))}`,
     `Shelf products to avoid recommending again:\n${context.allProducts.map(formatProduct).join('\n') || '(none)'}`,
     `Product performance summary:\n${formatProductPerformance(context)}`,
     `Gaps needing product picks:\n${gaps.map((gap) => `- key=${gap.normalizedKey}; kind=${gap.gapKind}; priority=${gap.priority}; category=${gap.ingredientOrCategory}; reason=${gap.reason}; replacementFor=${gap.replacementFor ? `${gap.replacementFor.productName}; usageDaysLast90=${gap.replacementFor.usageDaysLast90}; photoCheckpoints=${gap.replacementFor.photoCheckpoints}; reactionSignalCount=${gap.replacementFor.reactionSignalCount}` : 'none'}; sourceIds=${gap.sourceIds.join(',')}`).join('\n')}`,
-    'Rank product fit before local availability. Use availabilityStatus=local only when the product has a plausible retailer in the user country. Use import_only when it ships internationally, unavailable when no purchase path is known for the user country, and unknown when availability is unclear.',
-    'If the best product is not locally available, put the strongest locally available fallback first in alternatives and fill localAlternativeReason with a cautious reason it may not match the top pick as closely.',
-    GOAL_SPECIFIC_STARTER_PICK_GUIDANCE,
+    'Return one concrete product pick for every listed gap, including priority=consider gaps. The only difference is where Ritora displays the card.',
+    'Rank product fit by the user goal, budget, skin profile, history, safety context, and shelf compatibility.',
+    'For premium or luxury budgets, do not default to the cheapest basic option; choose the strongest compatible product fit and use alternatives for lower-cost tradeoffs.',
+    "Choose globally by product fit first. Do not limit recommendations to the user's country.",
+    'Local access is secondary to product fit. If the strongest product may be harder to find near the user, still name it and provide easier-to-find alternatives.',
+    'Use broad product reputation, repeated public user-review patterns, and well-known category performance as secondary tie-breakers only.',
+    'Do not assume South Korean, Canadian, Australian, American, European, or any country-specific products work better as a category.',
+    'If the user is under dermatologist care, do not replace or contradict that care. Avoid products that duplicate or conflict with common prescribed actives unless the gap clearly asks for a compatible support step.',
+    'For priority gaps, explain why this product matters now.',
+    'For worth-considering gaps, explain why it may help but is not essential.',
+    'For goal-focused gaps, infer the most specific evidence-aligned product category from the goal wording instead of recommending a generic product. Example: do not return "goal-focused serum"; return the concrete type and product that best fits the stated goal.',
+    GOAL_SPECIFIC_PICK_GUIDANCE,
     'For replacement gaps, recommend a true replacement, not an add-on and not the same product. Explain in recommendationRankReason that the reason is logged use plus stalled photo/history signals, while avoiding diagnostic certainty.',
     'Photo and journal trends are decision support, not clinical proof. Never imply a product caused a reaction or failed; say the history suggests it may be time to consider a better-fitting replacement.',
-    'For each gap, return one best product, up to two alternatives, retailer URLs if known, and 5-8 ruled-out products when possible.',
+    'For each gap, return one best product, up to two alternatives, optional reputable seller names only, and up to four ruled-out products when useful.',
+    'Do not return purchase URLs, prices, affiliate flags, or seller verification claims. Put seller guidance in sellerNames as plain names only.',
     'Keep copy short. Reasoning chips should be under 42 characters.',
   ].join('\n\n');
 }
@@ -646,6 +621,37 @@ function extractOutputText(payload: {
   return null;
 }
 
+async function openAiErrorMessage(
+  response: Response,
+  operation: string,
+): Promise<string> {
+  const details = await readOpenAiErrorDetails(response);
+  return `OpenAI Smart Picks ${operation} call failed (${response.status})${details ? `: ${details}` : ''}.`;
+}
+
+async function readOpenAiErrorDetails(response: Response): Promise<string> {
+  try {
+    const payload = (await response.clone().json()) as {
+      error?: { message?: unknown; code?: unknown; param?: unknown };
+    };
+    const message = sanitizeString(
+      typeof payload.error?.message === 'string' ? payload.error.message : null,
+      260,
+    );
+    const code = sanitizeString(
+      typeof payload.error?.code === 'string' ? payload.error.code : null,
+      80,
+    );
+    const param = sanitizeString(
+      typeof payload.error?.param === 'string' ? payload.error.param : null,
+      120,
+    );
+    return [code, param, message].filter(Boolean).join(' | ');
+  } catch {
+    return '';
+  }
+}
+
 function sanitizeGeneratedPicks(
   context: SmartPicksContext,
   gaps: SmartPicksGapSnapshot[],
@@ -662,8 +668,11 @@ function sanitizeGeneratedPicks(
   const diagnostics = baseDiagnostics(gaps.length);
   diagnostics.rawGapCount = parsed.gaps?.length ?? 0;
   for (const rawGap of parsed.gaps ?? []) {
-    const normalizedKey = sanitizeString(rawGap.normalizedKey, 180);
-    if (!normalizedKey || !gapsByKey.has(normalizedKey)) {
+    const normalizedKey = resolveGeneratedGapKey(
+      rawGap.normalizedKey,
+      gapsByKey,
+    );
+    if (!normalizedKey) {
       diagnostics.invalidPickCount += 1;
       continue;
     }
@@ -682,6 +691,18 @@ function sanitizeGeneratedPicks(
   diagnostics.acceptedPickCount = picks.size;
   diagnostics.missingPickCount = Math.max(0, gaps.length - picks.size);
   return { picks, diagnostics };
+}
+
+function resolveGeneratedGapKey(
+  rawKey: string | null | undefined,
+  gapsByKey: ReadonlyMap<string, SmartPicksGapSnapshot>,
+): string | null {
+  const sanitized = sanitizeString(rawKey, 180);
+  if (!sanitized) return null;
+  if (gapsByKey.has(sanitized)) return sanitized;
+
+  const normalized = normalizeSuggestionGapKey(sanitized);
+  return gapsByKey.has(normalized) ? normalized : null;
 }
 
 function sanitizePick(
@@ -704,6 +725,9 @@ function sanitizePick(
   }
 
   const budgetTier = sanitizeBudget(raw.budgetTier);
+  if (options.context.budgetTier && !budgetTier) {
+    return blockedPick('budget');
+  }
   if (
     options.context.budgetTier &&
     budgetTier &&
@@ -712,17 +736,9 @@ function sanitizePick(
     return blockedPick('budget');
   }
 
-  const retailers = sanitizeRetailers(raw.retailers ?? []);
-  const availabilityStatus = normalizeAvailabilityWithRetailers(
-    sanitizeAvailabilityStatus(raw.availabilityStatus),
-    retailers,
-  );
-  const recommendationRankReason = sanitizeString(
+  const sellerNames = sanitizeSellerNames(raw.sellerNames ?? []);
+  const recommendationRankReason = sanitizeUserFacingReason(
     raw.recommendationRankReason,
-    260,
-  );
-  const localAlternativeReason = sanitizeString(
-    raw.localAlternativeReason,
     260,
   );
   const alternatives = (raw.alternatives ?? [])
@@ -739,17 +755,12 @@ function sanitizePick(
       brand: pick.brand,
       productName: pick.productName,
       budgetTier: pick.budgetTier,
-      priceCents: pick.priceCents,
-      currency: pick.currency,
-      retailers: pick.retailers,
+      sellerNames: pick.sellerNames,
       reasoningChips: pick.reasoningChips,
       reasoningFacts: pick.reasoningFacts,
       ruledOut: pick.ruledOut,
       sourceIds: pick.sourceIds,
-      verificationStatus: pick.verificationStatus,
-      availabilityStatus: pick.availabilityStatus,
       recommendationRankReason: pick.recommendationRankReason,
-      localAlternativeReason: pick.localAlternativeReason,
       alternatives: [],
     }));
 
@@ -758,9 +769,7 @@ function sanitizePick(
       brand,
       productName,
       budgetTier,
-      priceCents: sanitizePrice(raw.priceCents),
-      currency: sanitizeCurrency(raw.currency),
-      retailers,
+      sellerNames,
       reasoningChips: sanitizeReasoningChips(raw.reasoningChips ?? []),
       reasoningFacts: sanitizeReasoningFacts(raw.reasoningFacts ?? {}),
       ruledOut: sanitizeRuledOut(raw.ruledOut ?? []),
@@ -769,10 +778,7 @@ function sanitizePick(
         options.fallbackSourceIds,
       ),
       alternatives,
-      verificationStatus: 'ai_named',
-      availabilityStatus,
       recommendationRankReason,
-      localAlternativeReason,
     },
     blockReason: null,
   };
@@ -907,25 +913,18 @@ function sanitizeStarterTreatmentAssessment(
   };
 }
 
-function sanitizeRetailers(
-  retailers: SmartPicksRetailer[],
-): SmartPicksRetailer[] {
-  return retailers
-    .map((retailer) => {
-      const url = sanitizeUrl(retailer.url);
-      const name = sanitizeString(retailer.name, 80);
-      if (!url || !name) return null;
-      return {
-        name,
-        url,
-        priceCents: sanitizePrice(retailer.priceCents),
-        currency: sanitizeCurrency(retailer.currency),
-        inStock: Boolean(retailer.inStock),
-        isAffiliate: Boolean(retailer.isAffiliate),
-      };
-    })
-    .filter((retailer): retailer is SmartPicksRetailer => Boolean(retailer))
-    .slice(0, 4);
+function sanitizeSellerNames(sellerNames: string[]): string[] {
+  const seenNames = new Set<string>();
+  const sanitized: string[] = [];
+  for (const sellerName of sellerNames) {
+    const name = sanitizeString(sellerName, 80);
+    const dedupeKey = name?.toLowerCase() ?? null;
+    if (!name || !dedupeKey || seenNames.has(dedupeKey)) continue;
+    seenNames.add(dedupeKey);
+    sanitized.push(name);
+    if (sanitized.length >= 3) break;
+  }
+  return sanitized;
 }
 
 function sanitizeReasoningChips(
@@ -933,7 +932,6 @@ function sanitizeReasoningChips(
 ): SmartPicksReasoningChip[] {
   const allowedTones = new Set([
     'goal',
-    'budget',
     'ethnicity',
     'compatibility',
     'location',
@@ -942,7 +940,13 @@ function sanitizeReasoningChips(
   return chips
     .map((chip) => {
       const text = sanitizeString(chip.text, 70);
-      if (!text || !allowedTones.has(chip.tone)) return null;
+      if (
+        !text ||
+        !allowedTones.has(chip.tone) ||
+        containsBudgetRationale(text)
+      ) {
+        return null;
+      }
       return {
         tone: chip.tone,
         text: sanitizeSkinToneCopy(text),
@@ -964,18 +968,33 @@ function sanitizeSkinToneCopy(value: string): string {
 }
 
 function sanitizeReasoningFacts(
-  facts: Record<string, string>,
+  facts: RawReasoningFacts,
 ): Record<string, string> {
+  const entries = Array.isArray(facts)
+    ? facts.map((fact) => [fact.label, fact.value])
+    : Object.entries(facts);
   return Object.fromEntries(
-    Object.entries(facts)
+    entries
       .map(([key, value]) => [
         sanitizeString(key, 40),
-        sanitizeString(sanitizeSkinToneCopy(value), 220),
+        sanitizeString(sanitizeSkinToneCopy(value ?? ''), 220),
       ])
-      .filter((entry): entry is [string, string] =>
-        Boolean(entry[0] && entry[1]),
-      )
+      .filter((entry): entry is [string, string] => {
+        const [key, value] = entry;
+        return Boolean(
+          key &&
+          value &&
+          !isCommerceReasoningFact([key, value]) &&
+          !containsBudgetRationale(`${key} ${value}`),
+        );
+      })
       .slice(0, 8),
+  );
+}
+
+function isCommerceReasoningFact([key, value]: [string, string]): boolean {
+  return /\b(available|availability|stock|shipping|ships|delivery|price|prices|cost|currency|affiliate|purchase url|link|retailer)\b/i.test(
+    `${key} ${value}`,
   );
 }
 
@@ -983,7 +1002,7 @@ function sanitizeRuledOut(
   ruledOut: SmartPicksRuledOutProduct[],
 ): SmartPicksRuledOutProduct[] {
   return ruledOut
-    .map((item) => {
+    .map((item): SmartPicksRuledOutProduct | null => {
       const brand = sanitizeString(item.brand, 120);
       const productName = sanitizeString(item.productName, 200);
       const reason = sanitizeString(item.reason, 240);
@@ -991,9 +1010,11 @@ function sanitizeRuledOut(
       return {
         brand,
         productName,
-        priceCents: sanitizePrice(item.priceCents),
-        currency: sanitizeCurrency(item.currency),
-        reason: sanitizeSkinToneCopy(reason),
+        reason: sanitizeSkinToneCopy(
+          containsBudgetRationale(reason)
+            ? 'Not the strongest fit for this profile.'
+            : reason,
+        ),
       };
     })
     .filter((item): item is SmartPicksRuledOutProduct => Boolean(item))
@@ -1014,29 +1035,6 @@ function sanitizeBudget(
   return ['drugstore', 'mid', 'premium', 'luxury'].includes(value ?? '')
     ? (value as SmartPicksBudgetTier)
     : null;
-}
-
-function sanitizeAvailabilityStatus(
-  value: string | null | undefined,
-): (typeof SMART_PICKS_AVAILABILITY_STATUSES)[number] {
-  return SMART_PICKS_AVAILABILITY_STATUSES.includes(
-    value as (typeof SMART_PICKS_AVAILABILITY_STATUSES)[number],
-  )
-    ? (value as (typeof SMART_PICKS_AVAILABILITY_STATUSES)[number])
-    : 'unknown';
-}
-
-function normalizeAvailabilityWithRetailers(
-  availabilityStatus: SmartPicksAvailabilityStatus,
-  retailers: readonly SmartPicksRetailer[],
-): SmartPicksAvailabilityStatus {
-  if (availabilityStatus === 'local' && retailers.length === 0) {
-    return 'unknown';
-  }
-  if (availabilityStatus === 'unavailable' && retailers.length > 0) {
-    return 'unknown';
-  }
-  return availabilityStatus;
 }
 
 function sanitizeStarterTreatmentConfidence(
@@ -1062,16 +1060,6 @@ function budgetAllowed(
   return order.indexOf(pickBudget) <= order.indexOf(activeBudget);
 }
 
-function sanitizePrice(value: number | null | undefined): number | null {
-  if (typeof value !== 'number' || !Number.isInteger(value)) return null;
-  return value >= 0 && value <= 1_000_000 ? value : null;
-}
-
-function sanitizeCurrency(value: string | null | undefined): string | null {
-  const normalized = sanitizeString(value, 3)?.toUpperCase() ?? null;
-  return normalized && /^[A-Z]{3}$/.test(normalized) ? normalized : null;
-}
-
 function sanitizeString(
   value: string | null | undefined,
   maxLength: number,
@@ -1080,14 +1068,50 @@ function sanitizeString(
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
-function sanitizeUrl(value: string | null | undefined): string | null {
-  if (!value || value.length > 2048) return null;
-  try {
-    const parsed = new URL(value);
-    return isSafeExternalHttpUrl(parsed.toString()) ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
+function sanitizeUserFacingReason(
+  value: string | null | undefined,
+  maxLength: number,
+): string | null {
+  const reason = sanitizeString(value, maxLength);
+  if (!reason) return null;
+  const withoutLeadIn = stripBudgetLeadIn(reason);
+  if (containsBudgetRationale(withoutLeadIn)) return null;
+  return withoutLeadIn;
+}
+
+function stripBudgetLeadIn(value: string): string {
+  return capitalizeFirst(
+    value
+      .replace(
+        /^Because\s+your\s+Skin\s+Profile\s+uses\s+an?\s+[a-z-]+\s+budget,\s*/i,
+        '',
+      )
+      .replace(
+        /^Best fit because (?:the )?profile is filtered to [a-z-]+ budget,\s*(?:and\s*)?/i,
+        '',
+      )
+      .replace(
+        /^because\s+your\s+budget\s+allows\s+a\s+more\s+complete\s+plan,\s*/i,
+        '',
+      )
+      .replace(
+        /\s+when\s+[a-z]+\s+and\s+safety\s+context\s+allow\s+it/gi,
+        ' when the safety context allows it',
+      )
+      .replace(/^For\s+a\s+higher\s+[a-z]+,\s*/i, '')
+      .replace(/^With\s+a\s+higher\s+[a-z]+,\s*/i, '')
+      .trim(),
+  );
+}
+
+function containsBudgetRationale(value: string): boolean {
+  return /\b(budget|cheapest|price|cost|premium|luxury|drugstore)\b/i.test(
+    value,
+  );
+}
+
+function capitalizeFirst(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
 function productIdentityKey(brand: string, name: string): string {

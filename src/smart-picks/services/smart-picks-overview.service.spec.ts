@@ -24,22 +24,23 @@ import {
   SmartPicksOverviewService,
   toProductPick,
 } from './smart-picks-overview.service';
-import { SmartPicksRetailerVerifierService } from './smart-picks-retailer-verifier.service';
 
 describe('SmartPicksOverviewService', () => {
-  it('marks retailer data as stale after the freshness window expires', () => {
+  it('returns seller names without legacy shopping fields', () => {
     const pick = toProductPick(
       productSuggestion({
-        retailer_data_checked_at: new Date('2026-05-01T08:00:00.000Z'),
-        retailer_data_expires_at: new Date('2026-05-02T08:00:00.000Z'),
+        seller_names_json: ['Derm Store', 'Derm Store', '  Stylevana  '],
       }),
     );
 
-    expect(pick.retailerDataCheckedAt).toBe('2026-05-01T08:00:00.000Z');
-    expect(pick.retailerDataStale).toBe(true);
+    expect(pick.sellerNames).toEqual(['Derm Store', 'Stylevana']);
+    expect(pick).not.toHaveProperty('priceCents');
+    expect(pick).not.toHaveProperty('currency');
+    expect(pick).not.toHaveProperty('retailers');
+    expect(pick).not.toHaveProperty('verificationStatus');
   });
 
-  it('records Smart Picks generation metrics without product or retailer identifiers', async () => {
+  it('records Smart Picks generation metrics without product or seller identifiers', async () => {
     const repos = {
       snapshots: repo<SmartPickSnapshot>(),
       suggestions: repo<SmartPickProductSuggestion>(),
@@ -78,7 +79,6 @@ describe('SmartPicksOverviewService', () => {
         ({
           id: 'snapshot-1',
           generated_at: new Date('2026-05-12T09:00:00.000Z'),
-          expires_at: new Date('2026-05-13T09:00:00.000Z'),
           user: undefined as never,
           generateId: jest.fn(),
           ...value,
@@ -97,7 +97,6 @@ describe('SmartPicksOverviewService', () => {
       coverageService,
       { detect: jest.fn().mockReturnValue([]) },
       aiGenerator as never,
-      retailerVerifier() as never,
       { dispatch: jest.fn().mockResolvedValue(null) } as never,
       observability,
       repos.snapshots,
@@ -115,10 +114,9 @@ describe('SmartPicksOverviewService', () => {
         severity: 'warning',
         userId: 'user-1',
         metadata: expect.objectContaining({
-          requestedGapCount: 4,
+          requestedGapCount: 5,
           generatedPickCount: 1,
-          importOnlyPickCount: 1,
-          localAlternativeCount: 1,
+          alternativePickCount: 1,
           mode: 'refine',
         }),
       }),
@@ -126,6 +124,113 @@ describe('SmartPicksOverviewService', () => {
     const metadata = observability.record.mock.calls[0]?.[0].metadata ?? {};
     expect(JSON.stringify(metadata)).not.toContain('Good Brand');
     expect(JSON.stringify(metadata)).not.toContain('https://example.com');
+  });
+
+  it('does not persist late AI picks after Smart Picks consent is revoked', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    repos.snapshots.findOne.mockResolvedValue(null);
+    repos.snapshots.create.mockImplementation(
+      (value) => value as SmartPickSnapshot,
+    );
+    repos.snapshots.save.mockImplementation(async (value) =>
+      snapshot({
+        ...(value as Partial<SmartPickSnapshot>),
+        generated_at: new Date('2026-05-12T09:00:00.000Z'),
+      }),
+    );
+    repos.suggestions.find.mockResolvedValue([]);
+    repos.suggestions.findOne.mockResolvedValue(null);
+    repos.suggestions.create.mockImplementation(
+      (value) => value as SmartPickProductSuggestion,
+    );
+    repos.actions.find.mockResolvedValue([]);
+    repos.profiles.findOne.mockResolvedValue({
+      allow_smart_picks: false,
+    } as SkinProfile);
+    const aiGenerator = {
+      assessStarterTreatment: jest.fn().mockResolvedValue(null),
+      generateWithDiagnostics: jest
+        .fn()
+        .mockResolvedValue(
+          aiGenerationResult(
+            new Map<string, GeneratedSmartPick>([
+              ['broad-spectrum-sunscreen-spf-30', generatedPick()],
+            ]),
+          ),
+        ),
+    };
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(context()) },
+      aiGenerator,
+      repos,
+    });
+
+    await service.getOverview(user());
+    await service.waitForBackgroundGeneration();
+
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenCalled();
+    expect(repos.suggestions.save).not.toHaveBeenCalled();
+  });
+
+  it('does not persist late AI picks when a newer snapshot hash exists', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    repos.snapshots.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(
+      snapshot({
+        inputs_hash: 'newer-hash',
+        generated_at: new Date('2026-05-12T09:01:00.000Z'),
+      }),
+    );
+    repos.snapshots.create.mockImplementation(
+      (value) => value as SmartPickSnapshot,
+    );
+    repos.snapshots.save.mockImplementation(async (value) =>
+      snapshot({
+        ...(value as Partial<SmartPickSnapshot>),
+        generated_at: new Date('2026-05-12T09:00:00.000Z'),
+      }),
+    );
+    repos.suggestions.find.mockResolvedValue([]);
+    repos.suggestions.findOne.mockResolvedValue(null);
+    repos.suggestions.create.mockImplementation(
+      (value) => value as SmartPickProductSuggestion,
+    );
+    repos.actions.find.mockResolvedValue([]);
+    repos.profiles.findOne.mockResolvedValue({
+      allow_smart_picks: true,
+    } as SkinProfile);
+    const aiGenerator = {
+      assessStarterTreatment: jest.fn().mockResolvedValue(null),
+      generateWithDiagnostics: jest
+        .fn()
+        .mockResolvedValue(
+          aiGenerationResult(
+            new Map<string, GeneratedSmartPick>([
+              ['broad-spectrum-sunscreen-spf-30', generatedPick()],
+            ]),
+          ),
+        ),
+    };
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(context()) },
+      aiGenerator,
+      repos,
+    });
+
+    await service.getOverview(user());
+    await service.waitForBackgroundGeneration();
+
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenCalled();
+    expect(repos.suggestions.save).not.toHaveBeenCalled();
   });
 
   it('returns a profile-required empty state without calling product generation', async () => {
@@ -185,7 +290,7 @@ describe('SmartPicksOverviewService', () => {
     expect(repos.snapshots.delete).not.toHaveBeenCalled();
   });
 
-  it('uses a fresh snapshot without regenerating product picks', async () => {
+  it('uses a matching input snapshot without time-based expiry', async () => {
     const repos = {
       snapshots: repo<SmartPickSnapshot>(),
       suggestions: repo<SmartPickProductSuggestion>(),
@@ -198,7 +303,6 @@ describe('SmartPicksOverviewService', () => {
         inputs_hash: activeContext.inputsHash,
         gaps_json: [],
         coverage_json: filledCoverage(),
-        expires_at: new Date('2099-05-12T09:00:00.000Z'),
       }),
     );
     repos.suggestions.find.mockResolvedValue([]);
@@ -224,6 +328,247 @@ describe('SmartPicksOverviewService', () => {
     expect(repos.snapshots.save).not.toHaveBeenCalled();
   });
 
+  it('does not mark a new product version as saved because an older pick for the same gap was saved', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    const activeContext = context({ inputsHash: 'hash-2' });
+    const currentGap = gapSnapshot({
+      normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+    });
+    repos.snapshots.findOne.mockResolvedValue(
+      snapshot({
+        inputs_hash: activeContext.inputsHash,
+        gaps_json: [currentGap],
+        coverage_json: filledCoverage(),
+      }),
+    );
+    repos.suggestions.find.mockResolvedValue([
+      productSuggestion({
+        id: 'new-pick',
+        inputs_hash: activeContext.inputsHash,
+        product_name: 'New SPF',
+      }),
+    ]);
+    repos.actions.find.mockResolvedValue([
+      gapAction({
+        id: 'saved-old-pick',
+        smart_pick_product_suggestion_id: 'old-pick',
+        normalized_key: currentGap.normalizedKey,
+        action: 'saved',
+      }),
+    ]);
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(activeContext) },
+      repos,
+    });
+
+    const overview = await service.getOverview(user());
+
+    expect(overview.priorityGaps[0]?.pick?.id).toBe('new-pick');
+    expect(overview.priorityGaps[0]?.pick?.userAction).toBeNull();
+  });
+
+  it('keeps the saved state only when the current product version was saved', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    const activeContext = context({ inputsHash: 'hash-2' });
+    const currentGap = gapSnapshot({
+      normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+    });
+    repos.snapshots.findOne.mockResolvedValue(
+      snapshot({
+        inputs_hash: activeContext.inputsHash,
+        gaps_json: [currentGap],
+        coverage_json: filledCoverage(),
+      }),
+    );
+    repos.suggestions.find.mockResolvedValue([
+      productSuggestion({
+        id: 'new-pick',
+        inputs_hash: activeContext.inputsHash,
+        product_name: 'New SPF',
+      }),
+    ]);
+    repos.actions.find.mockResolvedValue([
+      gapAction({
+        id: 'saved-current-pick',
+        smart_pick_product_suggestion_id: 'new-pick',
+        normalized_key: currentGap.normalizedKey,
+        action: 'saved',
+      }),
+    ]);
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(activeContext) },
+      repos,
+    });
+
+    const overview = await service.getOverview(user());
+
+    expect(overview.priorityGaps[0]?.pick?.id).toBe('new-pick');
+    expect(overview.priorityGaps[0]?.pick?.userAction).toBe('saved');
+  });
+
+  it('creates a new product suggestion version when the same gap is regenerated for a new input hash', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    const activeContext = context({ inputsHash: 'hash-2' });
+    const currentGap = gapSnapshot({
+      normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+    });
+    repos.snapshots.findOne.mockResolvedValue(
+      snapshot({
+        inputs_hash: activeContext.inputsHash,
+        gaps_json: [currentGap],
+        coverage_json: filledCoverage(),
+      }),
+    );
+    repos.suggestions.find.mockResolvedValue([]);
+    repos.suggestions.findOne.mockImplementation(async ({ where }) => {
+      const criteria = where as Partial<SmartPickProductSuggestion>;
+      return criteria.inputs_hash === activeContext.inputsHash
+        ? null
+        : productSuggestion({ id: 'saved-old-pick', inputs_hash: 'hash-1' });
+    });
+    repos.suggestions.create.mockImplementation(
+      (value) => value as SmartPickProductSuggestion,
+    );
+    repos.suggestions.save.mockImplementation(
+      async (value) => value as SmartPickProductSuggestion,
+    );
+    repos.actions.find.mockImplementation(async (options) => {
+      const criteria = options?.where as Partial<SuggestionGapAction>;
+      if (criteria.action === 'dismissed') return [];
+      return [
+        gapAction({
+          smart_pick_product_suggestion_id: 'saved-old-pick',
+          normalized_key: currentGap.normalizedKey,
+          action: 'saved',
+        }),
+      ];
+    });
+    const aiGenerator = {
+      assessStarterTreatment: jest.fn().mockResolvedValue(null),
+      generateWithDiagnostics: jest.fn().mockResolvedValue(
+        aiGenerationResult(
+          new Map<string, GeneratedSmartPick>([
+            [
+              currentGap.normalizedKey,
+              generatedPick({
+                brand: 'New Brand',
+                productName: 'New SPF',
+              }),
+            ],
+          ]),
+        ),
+      ),
+    };
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(activeContext) },
+      aiGenerator,
+      repos,
+    });
+
+    await service.getOverview(user());
+    await service.waitForBackgroundGeneration();
+
+    expect(repos.suggestions.findOne).toHaveBeenCalledWith({
+      where: {
+        user_id: 'user-1',
+        normalized_key: currentGap.normalizedKey,
+        inputs_hash: activeContext.inputsHash,
+      },
+    });
+    expect(repos.suggestions.save).toHaveBeenCalledWith(
+      expect.not.objectContaining({ id: 'saved-old-pick' }),
+    );
+  });
+
+  it('prunes stale unsaved product suggestion versions while keeping saved and recently dismissed picks', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    const activeContext = context({ inputsHash: 'hash-2' });
+    repos.snapshots.findOne.mockResolvedValue(
+      snapshot({ inputs_hash: 'hash-1' }),
+    );
+    repos.snapshots.create.mockImplementation(
+      (value) => value as SmartPickSnapshot,
+    );
+    repos.snapshots.save.mockImplementation(async (value) =>
+      snapshot({
+        ...(value as Partial<SmartPickSnapshot>),
+        inputs_hash: activeContext.inputsHash,
+      }),
+    );
+    repos.suggestions.find
+      .mockResolvedValueOnce([
+        productSuggestion({ id: 'old-unsaved', inputs_hash: 'hash-1' }),
+        productSuggestion({ id: 'old-saved', inputs_hash: 'hash-1' }),
+        productSuggestion({
+          id: 'old-recent-dismissed',
+          inputs_hash: 'hash-1',
+        }),
+        productSuggestion({
+          id: 'old-expired-dismissed',
+          inputs_hash: 'hash-1',
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+    repos.actions.find.mockImplementation(async (options) => {
+      const criteria = options?.where as Partial<SuggestionGapAction>;
+      if (criteria.action === 'dismissed') return [];
+      return [
+        gapAction({
+          smart_pick_product_suggestion_id: 'old-saved',
+          action: 'saved',
+        }),
+        gapAction({
+          id: 'recent-dismissed-action',
+          smart_pick_product_suggestion_id: 'old-recent-dismissed',
+          action: 'dismissed',
+          updated_at: new Date(),
+        }),
+        gapAction({
+          id: 'expired-dismissed-action',
+          smart_pick_product_suggestion_id: 'old-expired-dismissed',
+          action: 'dismissed',
+          updated_at: new Date('2020-05-12T09:00:00.000Z'),
+        }),
+      ];
+    });
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(activeContext) },
+      repos,
+    });
+
+    await service.getOverview(user());
+
+    expect(repos.suggestions.delete).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: 'user-1' }),
+    );
+    const deleteCriteria = repos.suggestions.delete.mock.calls[0]?.[0];
+    const serializedCriteria = JSON.stringify(deleteCriteria);
+    expect(serializedCriteria).toContain('old-unsaved');
+    expect(serializedCriteria).toContain('old-expired-dismissed');
+    expect(serializedCriteria).not.toContain('old-saved');
+    expect(serializedCriteria).not.toContain('old-recent-dismissed');
+  });
+
   it('returns a cold overview before background product generation resolves', async () => {
     const repos = {
       snapshots: repo<SmartPickSnapshot>(),
@@ -240,10 +585,7 @@ describe('SmartPicksOverviewService', () => {
     const deferred = deferredValue(
       aiGenerationResult(
         new Map<string, GeneratedSmartPick>([
-          [
-            'broad-spectrum-sunscreen-spf-30',
-            generatedPick({ verificationStatus: 'retailer_verified' }),
-          ],
+          ['broad-spectrum-sunscreen-spf-30', generatedPick()],
         ]),
         { requestedGapCount: 4 },
       ),
@@ -252,14 +594,6 @@ describe('SmartPicksOverviewService', () => {
       assessStarterTreatment: jest.fn().mockResolvedValue(null),
       generateWithDiagnostics: jest.fn().mockReturnValue(deferred.promise),
     };
-    const retailerVerifier = {
-      verifyGeneratedPick: jest
-        .fn()
-        .mockImplementation(async (pick: GeneratedSmartPick) => ({
-          ...pick,
-          verificationStatus: 'retailer_verified',
-        })),
-    } as unknown as jest.Mocked<SmartPicksRetailerVerifierService>;
     repos.snapshots.findOne.mockResolvedValue(null);
     repos.snapshots.create.mockImplementation(
       (value) => value as SmartPickSnapshot,
@@ -268,7 +602,6 @@ describe('SmartPicksOverviewService', () => {
       snapshot({
         ...(value as Partial<SmartPickSnapshot>),
         generated_at: new Date('2026-05-12T09:00:00.000Z'),
-        expires_at: new Date('2099-05-12T09:00:00.000Z'),
       }),
     );
     repos.suggestions.findOne.mockResolvedValue(null);
@@ -283,7 +616,6 @@ describe('SmartPicksOverviewService', () => {
     const service = serviceWith({
       contextBuilder: { build: jest.fn().mockResolvedValue(activeContext) },
       aiGenerator,
-      retailerVerifier,
       repos,
     });
 
@@ -303,84 +635,202 @@ describe('SmartPicksOverviewService', () => {
     deferred.resolve();
     await service.waitForBackgroundGeneration();
 
-    expect(retailerVerifier.verifyGeneratedPick).toHaveBeenCalled();
     expect(repos.suggestions.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        verification_status: 'retailer_verified',
+        seller_names_json: ['Derm Store'],
         inputs_hash: activeContext.inputsHash,
       }),
     );
   });
 
-  it('refreshes stale retailer data in the background for cached picks', async () => {
+  it('retries missing worth-considering gaps so they get concrete product picks too', async () => {
     const repos = {
       snapshots: repo<SmartPickSnapshot>(),
       suggestions: repo<SmartPickProductSuggestion>(),
       actions: repo<SuggestionGapAction>(),
       profiles: repo<SkinProfile>(),
     };
-    const staleSuggestion = productSuggestion({
-      retailer_data_checked_at: new Date('2026-05-01T08:00:00.000Z'),
-      retailer_data_expires_at: new Date('2026-05-02T08:00:00.000Z'),
-      retailers_json: [
-        {
-          name: 'Derm Store',
-          url: 'https://example.com/spf',
-          priceCents: 2200,
-          currency: 'USD',
-          inStock: true,
-          isAffiliate: false,
-        },
-      ],
+    const priorityGap = gapSnapshot({
+      ingredientOrCategory: 'Broad-spectrum sunscreen SPF 30+',
+      normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+      priority: 'priority',
     });
-    const retailerVerifier = {
-      verifyStoredSuggestion: jest.fn().mockResolvedValue(
-        productSuggestion({
-          ...staleSuggestion,
-          verification_status: 'retailer_verified',
-          retailer_data_checked_at: new Date('2026-05-12T10:00:00.000Z'),
-          retailer_data_expires_at: new Date('2026-05-19T10:00:00.000Z'),
-        }),
-      ),
-    } as unknown as jest.Mocked<SmartPicksRetailerVerifierService>;
+    const considerGap = gapSnapshot({
+      ingredientOrCategory: 'Vitamin C antioxidant serum',
+      normalizedKey: 'vitamin-c-antioxidant-serum',
+      priority: 'consider',
+      reason:
+        'Vitamin C can support uneven-tone goals when sunscreen and a pigment serum are already planned. Extra detail stays out of saved product records.',
+      shortReason:
+        'Vitamin C can support uneven-tone goals when sunscreen and a pigment serum are already planned.',
+      goalAlignment: 'dark spot support',
+    });
+    const aiGenerator = {
+      assessStarterTreatment: jest.fn().mockResolvedValue(null),
+      generateWithDiagnostics: jest
+        .fn()
+        .mockResolvedValueOnce(
+          aiGenerationResult(
+            new Map<string, GeneratedSmartPick>([
+              ['broad-spectrum-sunscreen-spf-30', generatedPick()],
+            ]),
+            { requestedGapCount: 2, missingPickCount: 1 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          aiGenerationResult(
+            new Map<string, GeneratedSmartPick>([
+              [
+                'vitamin-c-antioxidant-serum',
+                generatedPick({
+                  brand: 'Consider Brand',
+                  productName: 'Vitamin C Serum',
+                }),
+              ],
+            ]),
+            { requestedGapCount: 1 },
+          ),
+        ),
+    };
     repos.snapshots.findOne.mockResolvedValue(
       snapshot({
-        gaps_json: [
-          {
-            ingredientOrCategory: staleSuggestion.ingredient_or_category,
-            normalizedKey: staleSuggestion.normalized_key,
-            priority: 'priority',
-            reason: 'No SPF on shelf.',
-            goalAlignment: 'sun protection',
-            sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
-            gapKind: SmartPicksGapKind.Missing,
-            replacementFor: null,
-          },
-        ],
+        gaps_json: [priorityGap, considerGap],
+        coverage_json: filledCoverage(),
       }),
     );
-    repos.suggestions.find.mockResolvedValue([staleSuggestion]);
+    repos.suggestions.find.mockResolvedValue([]);
+    repos.suggestions.findOne.mockResolvedValue(null);
+    repos.suggestions.create.mockImplementation(
+      (value) => value as SmartPickProductSuggestion,
+    );
     repos.suggestions.save.mockImplementation(
       async (value) => value as SmartPickProductSuggestion,
     );
     repos.actions.find.mockResolvedValue([]);
     const service = serviceWith({
       contextBuilder: { build: jest.fn().mockResolvedValue(context()) },
-      retailerVerifier,
+      aiGenerator,
       repos,
     });
 
     const overview = await service.getOverview(user());
-
-    expect(overview.priorityGaps[0]?.pick?.retailerDataStale).toBe(true);
     await service.waitForBackgroundGeneration();
-    expect(retailerVerifier.verifyStoredSuggestion).toHaveBeenCalledWith(
-      staleSuggestion,
+
+    expect(overview.considerGaps).toContainEqual(
+      expect.objectContaining({
+        normalizedKey: 'vitamin-c-antioxidant-serum',
+        pick: null,
+      }),
+    );
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Object),
+      [priorityGap, considerGap],
+    );
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      [considerGap],
     );
     expect(repos.suggestions.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        verification_status: 'retailer_verified',
-        retailer_data_checked_at: new Date('2026-05-12T10:00:00.000Z'),
+        normalized_key: 'vitamin-c-antioxidant-serum',
+        brand: 'Consider Brand',
+        product_name: 'Vitamin C Serum',
+        gap_reason:
+          'Vitamin C can support uneven-tone goals when sunscreen and a pigment serum are already planned.',
+      }),
+    );
+  });
+
+  it('batches 20 product-pick gaps and preserves partial success when one batch fails', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    const gaps = Array.from({ length: 20 }, (_, index) =>
+      gapSnapshot({
+        ingredientOrCategory: `Smart lane ${index + 1}`,
+        normalizedKey: `smart-lane-${index + 1}`,
+        priority: index < 3 ? 'priority' : 'consider',
+      }),
+    );
+    const aiGenerator = {
+      assessStarterTreatment: jest.fn().mockResolvedValue(null),
+      generateWithDiagnostics: jest
+        .fn()
+        .mockResolvedValueOnce(
+          aiGenerationResult(new Map<string, GeneratedSmartPick>(), {
+            requestedGapCount: 2,
+            providerFailed: true,
+          }),
+        )
+        .mockImplementation((_, batch: typeof gaps) =>
+          Promise.resolve(
+            aiGenerationResult(
+              new Map<string, GeneratedSmartPick>(
+                batch.map((gap) => [
+                  gap.normalizedKey,
+                  generatedPick({
+                    productName: `Pick ${gap.normalizedKey}`,
+                  }),
+                ]),
+              ),
+              { requestedGapCount: batch.length },
+            ),
+          ),
+        ),
+    };
+    repos.snapshots.findOne.mockResolvedValue(
+      snapshot({
+        gaps_json: gaps,
+        coverage_json: filledCoverage(),
+      }),
+    );
+    repos.suggestions.find.mockResolvedValue([]);
+    repos.suggestions.findOne.mockResolvedValue(null);
+    repos.suggestions.create.mockImplementation(
+      (value) => value as SmartPickProductSuggestion,
+    );
+    repos.suggestions.save.mockImplementation(
+      async (value) => value as SmartPickProductSuggestion,
+    );
+    repos.actions.find.mockResolvedValue([]);
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(context()) },
+      aiGenerator,
+      repos,
+    });
+
+    await service.getOverview(user());
+    await service.waitForBackgroundGeneration();
+
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Object),
+      [gaps[0], gaps[1]],
+    );
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      [gaps[2], gaps[3]],
+    );
+    for (let callIndex = 3; callIndex <= 10; callIndex += 1) {
+      const gapStartIndex = (callIndex - 1) * 2;
+      expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
+        callIndex,
+        expect.any(Object),
+        [gaps[gapStartIndex], gaps[gapStartIndex + 1]],
+      );
+    }
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenCalledTimes(10);
+    expect(repos.suggestions.save).toHaveBeenCalledTimes(18);
+    expect(repos.suggestions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        normalized_key: 'smart-lane-20',
+        product_name: 'Pick smart-lane-20',
       }),
     );
   });
@@ -403,7 +853,6 @@ describe('SmartPicksOverviewService', () => {
       snapshot({
         ...(value as Partial<SmartPickSnapshot>),
         generated_at: new Date('2026-05-12T09:00:00.000Z'),
-        expires_at: new Date('2026-05-13T09:00:00.000Z'),
       }),
     );
     repos.suggestions.findOne.mockResolvedValue(null);
@@ -420,10 +869,7 @@ describe('SmartPicksOverviewService', () => {
           new Map<string, GeneratedSmartPick>([
             [
               'broad-spectrum-sunscreen-spf-30',
-              generatedPick({
-                availabilityStatus: 'unknown',
-                alternatives: [],
-              }),
+              generatedPick({ alternatives: [] }),
             ],
           ]),
           {
@@ -440,7 +886,6 @@ describe('SmartPicksOverviewService', () => {
       { compute: jest.fn().mockReturnValue(coverage()) },
       { detect: jest.fn().mockReturnValue([]) },
       aiGenerator as never,
-      retailerVerifier() as never,
       { dispatch: jest.fn().mockResolvedValue(null) } as never,
       observability,
       repos.snapshots,
@@ -455,22 +900,13 @@ describe('SmartPicksOverviewService', () => {
     expect(observability.record).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'smart_pick_unsafe_output_blocked',
-        metadata: expect.objectContaining({ blockedSafetyCount: 1 }),
+        metadata: expect.objectContaining({ blockedSafetyCount: 6 }),
       }),
     );
     expect(observability.record).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'smart_pick_no_pick',
-        metadata: expect.objectContaining({ missingPickCount: 3 }),
-      }),
-    );
-    expect(observability.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'smart_pick_quality_drift',
-        metadata: expect.objectContaining({
-          unknownAvailabilityCount: 1,
-          nonLocalWithoutLocalAlternativeCount: 1,
-        }),
+        metadata: expect.objectContaining({ missingPickCount: 4 }),
       }),
     );
     const allMetadata = JSON.stringify(
@@ -498,7 +934,6 @@ describe('SmartPicksOverviewService', () => {
       snapshot({
         ...(value as Partial<SmartPickSnapshot>),
         generated_at: new Date('2026-05-12T09:00:00.000Z'),
-        expires_at: new Date('2026-05-13T09:00:00.000Z'),
       }),
     );
     repos.suggestions.find.mockResolvedValue([]);
@@ -517,7 +952,6 @@ describe('SmartPicksOverviewService', () => {
           }),
         ),
       } as never,
-      retailerVerifier() as never,
       { dispatch: jest.fn().mockResolvedValue(null) } as never,
       observability,
       repos.snapshots,
@@ -556,6 +990,230 @@ describe('SmartPicksOverviewService', () => {
     );
     expect(gaps[0].reason).toContain('42 logged use days');
     expect(gaps[0].reason).toContain('photo history still shows');
+  });
+
+  it('adds worth-considering dark-spot supports when the user has a ready-to-spend budget', () => {
+    const azelaicSerum = ownedProduct({
+      id: 'azelaic-serum',
+      name: 'Azelaic Tone Serum',
+      category: ProductCategory.Serum,
+      identity: {
+        inciIngredients: ['azelaic acid'],
+      } as InventoryProduct['identity'],
+    });
+    const gaps = buildGapSnapshots(
+      context({
+        budgetTier: 'premium',
+        activeProducts: [azelaicSerum],
+        allProducts: [azelaicSerum],
+        skinProfile: profile({
+          budget_tier: 'premium',
+          primary_goal: 'remove dark spots',
+          current_concerns: ['dark spots', 'post-acne marks'],
+        }),
+      }),
+      filledCoverage(),
+    );
+
+    expect(gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          priority: 'consider',
+          ingredientOrCategory: 'Vitamin C antioxidant serum',
+          goalAlignment: 'dark spot support',
+        }),
+        expect.objectContaining({
+          priority: 'consider',
+          ingredientOrCategory: 'Gentle pigment-supporting mask or peel',
+          goalAlignment: 'dark spot support',
+        }),
+        expect.objectContaining({
+          priority: 'consider',
+          ingredientOrCategory: 'Beginner retinoid night treatment',
+          goalAlignment: 'dark spot support',
+        }),
+      ]),
+    );
+    expect(gaps.map((gap) => gap.ingredientOrCategory)).not.toContain(
+      'PIH-focused serum with azelaic acid or tranexamic acid',
+    );
+    expect(gaps.map((gap) => gap.reason).join(' ')).not.toMatch(
+      /Skin\s+Profile\s+uses|[a-z]+\s+budget|budget\s+allows/i,
+    );
+    const vitaminCGap = gaps.find(
+      (gap) => gap.ingredientOrCategory === 'Vitamin C antioxidant serum',
+    );
+    expect(vitaminCGap?.shortReason).toBe(
+      'Vitamin C can support uneven-tone goals when sunscreen and a pigment serum are already planned.',
+    );
+    expect(vitaminCGap?.shortReason).not.toContain('Skin Profile');
+    expect(vitaminCGap?.shortReason.length).toBeLessThanOrEqual(120);
+  });
+
+  it('keeps ready-to-spend optional supports when replacement gaps already fill the top of the list', () => {
+    const azelaicSerum = ownedProduct({
+      id: 'azelaic-serum',
+      name: 'Azelaic Tone Serum',
+      category: ProductCategory.Serum,
+      identity: {
+        inciIngredients: ['azelaic acid'],
+      } as InventoryProduct['identity'],
+    });
+    const replacementSignal = replacementContext().productPerformance[0];
+    const gaps = buildGapSnapshots(
+      context({
+        budgetTier: 'premium',
+        activeProducts: [azelaicSerum],
+        allProducts: [azelaicSerum],
+        productPerformance: [
+          replacementSignal,
+          {
+            ...replacementSignal,
+            productId: 'owned-2',
+            productName: 'Current Vitamin C Serum',
+          },
+        ],
+        skinProfile: profile({
+          budget_tier: 'premium',
+          primary_goal: 'remove dark spots',
+          current_concerns: ['dark spots', 'post-acne marks'],
+        }),
+      }),
+      coverageWithMissingSpf(),
+    );
+
+    expect(gaps.length).toBeGreaterThan(5);
+    expect(
+      gaps.filter((gap) => gap.priority === 'consider').length,
+    ).toBeGreaterThanOrEqual(3);
+    expect(gaps.map((gap) => gap.ingredientOrCategory)).toEqual(
+      expect.arrayContaining([
+        'Vitamin C antioxidant serum',
+        'Gentle pigment-supporting mask or peel',
+        'Beginner retinoid night treatment',
+      ]),
+    );
+  });
+
+  it('adds a goal-specific priority gap when a generic treatment fills the slot but not the dark-spot goal', () => {
+    const hydratingSerum = ownedProduct({
+      id: 'hydrating-serum',
+      name: 'Hydrating Serum',
+      category: ProductCategory.Serum,
+      identity: {
+        inciIngredients: ['hyaluronic acid', 'glycerin'],
+      } as InventoryProduct['identity'],
+    });
+    const gaps = buildGapSnapshots(
+      context({
+        budgetTier: 'luxury',
+        activeProducts: [hydratingSerum],
+        allProducts: [hydratingSerum],
+        skinProfile: profile({
+          budget_tier: 'luxury',
+          primary_goal: 'remove dark spots',
+          current_concerns: ['hyperpigmentation'],
+        }),
+      }),
+      filledCoverage(),
+    );
+
+    expect(gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          priority: 'priority',
+          ingredientOrCategory:
+            'PIH-focused serum with azelaic acid or tranexamic acid',
+          goalAlignment: 'dark spot support',
+        }),
+      ]),
+    );
+  });
+
+  it('keeps expanded optional products out of basic-budget dark-spot plans', () => {
+    const azelaicSerum = ownedProduct({
+      id: 'azelaic-serum',
+      name: 'Azelaic Tone Serum',
+      category: ProductCategory.Serum,
+      identity: {
+        inciIngredients: ['azelaic acid'],
+      } as InventoryProduct['identity'],
+    });
+    const gaps = buildGapSnapshots(
+      context({
+        budgetTier: 'drugstore',
+        activeProducts: [azelaicSerum],
+        allProducts: [azelaicSerum],
+        skinProfile: profile({
+          budget_tier: 'drugstore',
+          primary_goal: 'remove dark spots',
+          current_concerns: ['dark spots'],
+        }),
+      }),
+      filledCoverage(),
+    );
+
+    expect(gaps.map((gap) => gap.ingredientOrCategory)).toContain(
+      'Vitamin C antioxidant serum',
+    );
+    expect(gaps.map((gap) => gap.ingredientOrCategory)).not.toContain(
+      'Gentle pigment-supporting mask or peel',
+    );
+  });
+
+  it('creates AI-directed gaps for custom goals that are not in the built-in policies', () => {
+    const gaps = buildGapSnapshots(
+      context({
+        budgetTier: 'premium',
+        skinProfile: profile({
+          budget_tier: 'premium',
+          primary_goal: 'look less tired after long workdays',
+          current_concerns: ['tired-looking skin'],
+        }),
+      }),
+      {
+        filled: 0,
+        total: 5,
+        slots: [
+          {
+            role: 'goal-primary',
+            state: 'missing-priority',
+            filledByProductId: null,
+            filledByName: null,
+            goalRelevance: 'essential',
+          },
+          {
+            role: 'goal-support',
+            state: 'missing',
+            filledByProductId: null,
+            filledByName: null,
+            goalRelevance: 'supportive',
+          },
+        ],
+      },
+    );
+
+    expect(gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          priority: 'priority',
+          ingredientOrCategory:
+            'Goal-focused product for look less tired after long workdays',
+          goalAlignment: 'look less tired after long workdays',
+          gapKind: SmartPicksGapKind.GoalSupport,
+        }),
+        expect.objectContaining({
+          priority: 'consider',
+          ingredientOrCategory:
+            'Supporting product for look less tired after long workdays',
+          goalAlignment: 'look less tired after long workdays',
+          gapKind: SmartPicksGapKind.GoalSupport,
+        }),
+      ]),
+    );
+    expect(gaps.map((gap) => gap.reason).join(' ')).not.toMatch(
+      /Skin\s+Profile\s+uses|[a-z]+\s+budget|budget\s+allows/i,
+    );
   });
 
   it('does not call the shelf complete when every current gap is paused by dismissal', async () => {
@@ -685,7 +1343,6 @@ describe('SmartPicksOverviewService', () => {
         ...(value as Partial<SmartPickSnapshot>),
         id: 'starter-snapshot',
         generated_at: new Date('2026-05-12T09:00:00.000Z'),
-        expires_at: new Date('2099-05-12T09:00:00.000Z'),
       }),
     );
     repos.suggestions.findOne.mockResolvedValue(null);
@@ -1012,7 +1669,6 @@ describe('SmartPicksOverviewService', () => {
         ...(value as Partial<SmartPickSnapshot>),
         id: 'starter-ai-snapshot',
         generated_at: new Date('2026-05-12T09:00:00.000Z'),
-        expires_at: new Date('2099-05-12T09:00:00.000Z'),
       }),
     );
     repos.suggestions.findOne.mockResolvedValue(null);
@@ -1091,7 +1747,7 @@ describe('SmartPicksOverviewService', () => {
         'Low-irritation acne treatment with azelaic acid or BHA',
     },
     {
-      label: 'aging in South Korea on premium budget',
+      label: 'aging in South Korea with higher spend preference',
       countryCode: 'KR',
       city: 'Seoul',
       ethnicity: 'Black British',
@@ -1190,16 +1846,6 @@ function serviceWith({
       .fn()
       .mockResolvedValue(aiGenerationResult(new Map())),
   },
-  retailerVerifier = {
-    verifyGeneratedPick: jest
-      .fn()
-      .mockImplementation(async (pick: GeneratedSmartPick) => pick),
-    verifyStoredSuggestion: jest
-      .fn()
-      .mockImplementation(
-        async (suggestion: SmartPickProductSuggestion) => suggestion,
-      ),
-  },
   repos,
 }: {
   contextBuilder: Pick<SmartPicksOverviewService, never> & {
@@ -1210,10 +1856,6 @@ function serviceWith({
     assessStarterTreatment: jest.Mock;
     generateWithDiagnostics: jest.Mock;
   };
-  retailerVerifier?: Pick<
-    SmartPicksRetailerVerifierService,
-    'verifyGeneratedPick' | 'verifyStoredSuggestion'
-  >;
   repos: {
     snapshots: jest.Mocked<Repository<SmartPickSnapshot>>;
     suggestions: jest.Mocked<Repository<SmartPickProductSuggestion>>;
@@ -1226,7 +1868,6 @@ function serviceWith({
     coverageService,
     { detect: jest.fn().mockReturnValue([]) },
     aiGenerator as never,
-    retailerVerifier as never,
     { dispatch: jest.fn().mockResolvedValue(null) } as never,
     { record: jest.fn().mockResolvedValue(undefined) } as never,
     repos.snapshots,
@@ -1244,19 +1885,6 @@ function repo<T extends object>() {
     findOne: jest.fn(),
     save: jest.fn(),
   } as unknown as jest.Mocked<Repository<T>>;
-}
-
-function retailerVerifier() {
-  return {
-    verifyGeneratedPick: jest
-      .fn()
-      .mockImplementation(async (pick: GeneratedSmartPick) => pick),
-    verifyStoredSuggestion: jest
-      .fn()
-      .mockImplementation(
-        async (suggestion: SmartPickProductSuggestion) => suggestion,
-      ),
-  };
 }
 
 function user(): User {
@@ -1389,6 +2017,40 @@ function filledCoverage(): SmartPicksCoverage {
   };
 }
 
+function coverageWithMissingSpf(): SmartPicksCoverage {
+  return {
+    ...filledCoverage(),
+    filled: 4,
+    slots: [
+      {
+        role: 'spf',
+        state: 'missing-priority',
+        filledByProductId: null,
+        filledByName: null,
+        goalRelevance: 'essential',
+      },
+      ...filledCoverage().slots.filter((slot) => slot.role !== 'spf'),
+    ],
+  };
+}
+
+function gapSnapshot(
+  overrides: Partial<ReturnType<typeof buildGapSnapshots>[number]> = {},
+): ReturnType<typeof buildGapSnapshots>[number] {
+  return {
+    ingredientOrCategory: 'Broad-spectrum sunscreen SPF 30+',
+    normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+    priority: 'priority',
+    reason: 'No SPF on shelf.',
+    shortReason: 'No SPF on shelf.',
+    goalAlignment: 'sun protection',
+    sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+    gapKind: SmartPicksGapKind.Missing,
+    replacementFor: null,
+    ...overrides,
+  };
+}
+
 function slot(role: 'spf' | 'moisturise' | 'cleanse' | 'treat') {
   return {
     role,
@@ -1406,18 +2068,7 @@ function generatedPick(
     brand: 'Good Brand',
     productName: 'Mineral SPF 50',
     budgetTier: 'mid',
-    priceCents: 2200,
-    currency: 'USD',
-    retailers: [
-      {
-        name: 'Derm Store',
-        url: 'https://example.com/spf',
-        priceCents: 2200,
-        currency: 'USD',
-        inStock: true,
-        isAffiliate: false,
-      },
-    ],
+    sellerNames: ['Derm Store'],
     reasoningChips: [],
     reasoningFacts: {},
     ruledOut: [],
@@ -1427,24 +2078,16 @@ function generatedPick(
         brand: 'Local Brand',
         productName: 'Local SPF',
         budgetTier: 'mid',
-        priceCents: 1800,
-        currency: 'USD',
-        retailers: [],
+        sellerNames: [],
         reasoningChips: [],
         reasoningFacts: {},
         ruledOut: [],
         sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
         alternatives: [],
-        verificationStatus: 'ai_named',
-        availabilityStatus: 'local',
-        recommendationRankReason: 'Available nearby.',
-        localAlternativeReason: null,
+        recommendationRankReason: 'Alternative match for the goal.',
       },
     ],
-    verificationStatus: 'ai_named',
-    availabilityStatus: 'import_only',
     recommendationRankReason: 'Best match for the goal.',
-    localAlternativeReason: 'Local fallback may not match as closely.',
     ...overrides,
   };
 }
@@ -1511,20 +2154,13 @@ function productSuggestion(
     brand: 'Good Brand',
     product_name: 'Mineral SPF 50',
     budget_tier: 'mid',
-    price_cents: 2200,
-    currency: 'USD',
-    retailers_json: [],
+    seller_names_json: [],
     reasoning_chips_json: [],
     reasoning_facts_json: {},
     ruled_out_json: [],
     alternatives_json: [],
     source_ids: [SuggestionEvidenceSourceId.AadSunscreenSelection],
-    verification_status: 'ai_named',
-    availability_status: 'local',
     recommendation_rank_reason: 'Best local SPF fit.',
-    local_alternative_reason: null,
-    retailer_data_checked_at: new Date('2099-05-12T09:00:00.000Z'),
-    retailer_data_expires_at: new Date('2099-05-19T09:00:00.000Z'),
     inputs_hash: 'hash-1',
     gap_reason: 'No SPF on shelf.',
     goal_alignment: 'sun protection',
@@ -1554,7 +2190,6 @@ function snapshot(overrides: Partial<SmartPickSnapshot>): SmartPickSnapshot {
     },
     inputs_hash: 'hash-1',
     generated_at: new Date('2026-05-12T09:00:00.000Z'),
-    expires_at: new Date('2099-05-12T09:00:00.000Z'),
     created_at: new Date('2026-05-12T09:00:00.000Z'),
     updated_at: new Date('2026-05-12T09:00:00.000Z'),
     user: null as never,

@@ -14,11 +14,8 @@ import { encryptedJsonFieldTransformer } from '../../skin-profile/skin-profile-f
 import { SuggestionEvidenceSourceId } from '../../suggestions/suggestions.constants';
 import { User } from '../../users/entities/user.entity';
 import {
-  SmartPicksAvailabilityStatus,
   SmartPicksBudgetTier,
-  SmartPicksProductVerificationStatus,
   SmartPicksReasoningChip,
-  SmartPicksRetailer,
   SmartPicksRuledOutProduct,
 } from '../smart-picks.types';
 
@@ -26,21 +23,18 @@ export interface SmartPicksStoredAlternative {
   brand: string;
   productName: string;
   budgetTier: SmartPicksBudgetTier | null;
-  priceCents: number | null;
-  currency: string | null;
-  retailers: SmartPicksRetailer[];
+  sellerNames: string[];
   reasoningChips: SmartPicksReasoningChip[];
   reasoningFacts: Record<string, string>;
   ruledOut: SmartPicksRuledOutProduct[];
   sourceIds: SuggestionEvidenceSourceId[];
-  availabilityStatus: SmartPicksAvailabilityStatus;
   recommendationRankReason: string | null;
-  localAlternativeReason: string | null;
 }
 
-const encryptedRetailersTransformer = encryptedJsonFieldTransformer<
-  SmartPicksRetailer[]
->('smart_pick_product_suggestions.retailers_json', []);
+const encryptedSellerNamesTransformer = encryptedJsonFieldTransformer<string[]>(
+  'smart_pick_product_suggestions.seller_names_json',
+  [],
+);
 const encryptedReasoningChipsTransformer = encryptedJsonFieldTransformer<
   SmartPicksReasoningChip[]
 >('smart_pick_product_suggestions.reasoning_chips_json', []);
@@ -56,8 +50,8 @@ const encryptedAlternativesTransformer = encryptedJsonFieldTransformer<
 
 @Entity('smart_pick_product_suggestions')
 @Index(
-  'UQ_smart_pick_product_suggestions_user_key',
-  ['user_id', 'normalized_key'],
+  'UQ_smart_pick_product_suggestions_user_key_hash',
+  ['user_id', 'normalized_key', 'inputs_hash'],
   { unique: true },
 )
 @Index('IDX_smart_pick_product_suggestions_user_created', [
@@ -86,14 +80,8 @@ export class SmartPickProductSuggestion {
   @Column({ type: 'varchar', length: 20, nullable: true })
   budget_tier: SmartPicksBudgetTier | null;
 
-  @Column({ type: 'integer', nullable: true })
-  price_cents: number | null;
-
-  @Column({ type: 'varchar', length: 3, nullable: true })
-  currency: string | null;
-
-  @Column({ type: 'jsonb', transformer: encryptedRetailersTransformer })
-  retailers_json: SmartPicksRetailer[];
+  @Column({ type: 'jsonb', transformer: encryptedSellerNamesTransformer })
+  seller_names_json: string[];
 
   @Column({ type: 'jsonb', transformer: encryptedReasoningChipsTransformer })
   reasoning_chips_json: SmartPicksReasoningChip[];
@@ -110,23 +98,8 @@ export class SmartPickProductSuggestion {
   @Column({ type: 'text', array: true, default: () => "'{}'::text[]" })
   source_ids: SuggestionEvidenceSourceId[];
 
-  @Column({ type: 'varchar', length: 20, default: 'ai_named' })
-  verification_status: SmartPicksProductVerificationStatus;
-
-  @Column({ type: 'varchar', length: 24, default: 'unknown' })
-  availability_status: SmartPicksAvailabilityStatus;
-
   @Column({ type: 'text', nullable: true })
   recommendation_rank_reason: string | null;
-
-  @Column({ type: 'text', nullable: true })
-  local_alternative_reason: string | null;
-
-  @Column({ type: 'timestamptz', nullable: true })
-  retailer_data_checked_at: Date | null;
-
-  @Column({ type: 'timestamptz', nullable: true })
-  retailer_data_expires_at: Date | null;
 
   @Column({ type: 'varchar', length: 64 })
   inputs_hash: string;

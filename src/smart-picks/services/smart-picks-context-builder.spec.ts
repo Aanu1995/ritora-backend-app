@@ -72,7 +72,44 @@ describe('SmartPicksContextBuilder', () => {
       expect.objectContaining({ userId: 'user-1' }),
     );
   });
+
+  it('changes the inputs hash when safety-critical profile fields change', async () => {
+    const baselineProfile = profile({
+      pregnancy_status: 'not_pregnant',
+      under_dermatologist_care: 'no',
+    });
+    const safetyChangedProfile = profile({
+      pregnancy_status: 'pregnant',
+      under_dermatologist_care: 'yes',
+    });
+    const baseline = await buildContextWithProfile(baselineProfile);
+    const safetyChanged = await buildContextWithProfile(safetyChangedProfile);
+
+    expect(safetyChanged.inputsHash).not.toBe(baseline.inputsHash);
+  });
 });
+
+async function buildContextWithProfile(profileFixture: SkinProfile) {
+  const skinProfileRepo = repo<SkinProfile>();
+  const inventoryRepo = repo<InventoryProduct>();
+  const environmentContext = {
+    buildContext: jest.fn().mockResolvedValue({ summary: null }),
+  } as unknown as EnvironmentContextService;
+  const productPerformance = {
+    summarizeForUser: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
+  skinProfileRepo.findOne.mockResolvedValue(profileFixture);
+  inventoryRepo.find.mockResolvedValue([
+    product('cleanser-1', ProductCategory.Cleanser),
+  ]);
+  const builder = new SmartPicksContextBuilder(
+    skinProfileRepo,
+    inventoryRepo,
+    environmentContext,
+    productPerformance,
+  );
+  return builder.build(user(), null);
+}
 
 function repo<T extends ObjectLiteral>() {
   return {
@@ -85,7 +122,7 @@ function user(): User {
   return { id: 'user-1', time_zone: 'Europe/Stockholm' } as User;
 }
 
-function profile(): SkinProfile {
+function profile(overrides: Partial<SkinProfile> = {}): SkinProfile {
   return {
     user_id: 'user-1',
     user: {
@@ -124,6 +161,7 @@ function profile(): SkinProfile {
     country_code: 'SE',
     city: 'Stockholm',
     updated_at: new Date('2026-05-10T08:00:00.000Z'),
+    ...overrides,
   } as unknown as SkinProfile;
 }
 

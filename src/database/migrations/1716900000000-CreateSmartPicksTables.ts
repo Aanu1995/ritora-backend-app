@@ -30,7 +30,6 @@ export class CreateSmartPicksTables1716900000000 implements MigrationInterface {
         "recap_json" jsonb NOT NULL,
         "inputs_hash" varchar(64) NOT NULL,
         "generated_at" timestamptz NOT NULL,
-        "expires_at" timestamptz NOT NULL,
         CONSTRAINT "PK_smart_pick_snapshots" PRIMARY KEY ("id"),
         CONSTRAINT "FK_smart_pick_snapshots_user" FOREIGN KEY ("user_id")
           REFERENCES "users" ("id") ON DELETE CASCADE,
@@ -43,10 +42,6 @@ export class CreateSmartPicksTables1716900000000 implements MigrationInterface {
       CREATE UNIQUE INDEX "UQ_smart_pick_snapshots_user"
         ON "smart_pick_snapshots" ("user_id")
     `);
-    await queryRunner.query(`
-      CREATE INDEX "IDX_smart_pick_snapshots_expires_at"
-        ON "smart_pick_snapshots" ("expires_at")
-    `);
 
     await queryRunner.query(`
       CREATE TABLE "smart_pick_product_suggestions" (
@@ -57,15 +52,13 @@ export class CreateSmartPicksTables1716900000000 implements MigrationInterface {
         "brand" varchar(120) NOT NULL,
         "product_name" varchar(200) NOT NULL,
         "budget_tier" varchar(20),
-        "price_cents" integer,
-        "currency" varchar(3),
-        "retailers_json" jsonb NOT NULL,
+        "seller_names_json" jsonb NOT NULL,
         "reasoning_chips_json" jsonb NOT NULL,
         "reasoning_facts_json" jsonb NOT NULL,
         "ruled_out_json" jsonb NOT NULL,
         "alternatives_json" jsonb NOT NULL,
         "source_ids" text[] NOT NULL DEFAULT '{}',
-        "verification_status" varchar(20) NOT NULL DEFAULT 'ai_named',
+        "recommendation_rank_reason" text,
         "inputs_hash" varchar(64) NOT NULL,
         "gap_reason" text,
         "goal_alignment" text,
@@ -76,15 +69,14 @@ export class CreateSmartPicksTables1716900000000 implements MigrationInterface {
           REFERENCES "users" ("id") ON DELETE CASCADE,
         CONSTRAINT "CK_smart_pick_product_suggestions_budget_tier" CHECK (
           "budget_tier" IS NULL OR "budget_tier" IN ('drugstore','mid','premium','luxury')
-        ),
-        CONSTRAINT "CK_smart_pick_product_suggestions_verification" CHECK (
-          "verification_status" IN ('ai_named','unavailable')
         )
       )
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "UQ_smart_pick_product_suggestions_user_key"
-        ON "smart_pick_product_suggestions" ("user_id", "normalized_key")
+      CREATE UNIQUE INDEX "UQ_smart_pick_product_suggestions_user_key_hash"
+        ON "smart_pick_product_suggestions" (
+          "user_id", "normalized_key", "inputs_hash"
+        )
     `);
     await queryRunner.query(`
       CREATE INDEX "IDX_smart_pick_product_suggestions_user_created"

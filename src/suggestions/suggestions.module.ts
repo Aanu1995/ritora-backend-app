@@ -20,6 +20,7 @@ import { User } from '../users/entities/user.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
 import { RoutineBreak } from './entities/routine-break.entity';
+import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.entity';
 import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
 import { SuggestionInstance } from './entities/suggestion-instance.entity';
 import { SuggestionStep } from './entities/suggestion-step.entity';
@@ -66,6 +67,7 @@ import { SuggestionsController } from './suggestions.controller';
       EnvironmentLocationCache,
       EnvironmentSnapshot,
       RoutineBreak,
+      SmartPickSnapshot,
       ScheduleSlot,
       RoutineStep,
       InventoryProduct,

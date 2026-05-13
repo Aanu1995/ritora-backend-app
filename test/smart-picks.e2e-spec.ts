@@ -7,7 +7,9 @@ import {
   GeneratedSmartPick,
   SmartPicksAiGenerator,
 } from '../src/smart-picks/services/smart-picks-ai-generator';
+import { SmartPicksOverviewService } from '../src/smart-picks/services/smart-picks-overview.service';
 import { SmartPicksPreparationService } from '../src/smart-picks/services/smart-picks-preparation.service';
+import type { SmartPicksGapSnapshot } from '../src/smart-picks/smart-picks.types';
 import {
   createCompletedSkinProfile,
   createTestApp,
@@ -54,27 +56,38 @@ describe('Smart Picks (e2e)', () => {
   let mockMail: MockMailService;
   let accessToken: string;
   let smartPicksPreparation: SmartPicksPreparationService;
+  let smartPicksOverview: SmartPicksOverviewService;
 
   const aiGenerator = {
-    generateWithDiagnostics: jest.fn(async () => {
-      const picks = new Map<string, GeneratedSmartPick>();
-      picks.set('broad-spectrum-sunscreen-spf-30', generatedPick());
-      return {
-        picks,
-        diagnostics: {
-          requestedGapCount: 1,
-          rawGapCount: 1,
-          acceptedPickCount: 1,
-          blockedOwnedCount: 0,
-          blockedBudgetCount: 0,
-          blockedSafetyCount: 0,
-          invalidPickCount: 0,
-          missingPickCount: 0,
-          providerFailed: false,
-          providerSkippedReason: null,
-        },
-      };
-    }),
+    generateWithDiagnostics: jest.fn(
+      async (_context: unknown, gaps: SmartPicksGapSnapshot[]) => {
+        const picks = new Map<string, GeneratedSmartPick>();
+        const targetGap = gaps[0];
+        if (targetGap) {
+          picks.set(
+            targetGap.normalizedKey,
+            generatedPick({
+              productName: `${targetGap.ingredientOrCategory} Pick`,
+            }),
+          );
+        }
+        return {
+          picks,
+          diagnostics: {
+            requestedGapCount: gaps.length,
+            rawGapCount: picks.size,
+            acceptedPickCount: picks.size,
+            blockedOwnedCount: 0,
+            blockedBudgetCount: 0,
+            blockedSafetyCount: 0,
+            invalidPickCount: 0,
+            missingPickCount: Math.max(0, gaps.length - picks.size),
+            providerFailed: false,
+            providerSkippedReason: null,
+          },
+        };
+      },
+    ),
     assessStarterTreatment: jest.fn().mockResolvedValue(null),
   };
   const environmentProvider = {
@@ -112,6 +125,7 @@ describe('Smart Picks (e2e)', () => {
       { provider: ENVIRONMENT_PROVIDER, useValue: environmentProvider },
     ]);
     smartPicksPreparation = app.get(SmartPicksPreparationService);
+    smartPicksOverview = app.get(SmartPicksOverviewService);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -168,20 +182,27 @@ describe('Smart Picks (e2e)', () => {
   });
 
   it('generates overview picks, saves them through gap actions, and removes them from wishlist', async () => {
-    await authGet('/smart-picks/overview?mode=refine').expect(200);
-    const overview = await readOverviewWithPick(
-      'broad-spectrum-sunscreen-spf-30',
+    const firstOverview = (
+      await authGet('/smart-picks/overview?mode=refine').expect(200)
+    ).body as SmartPicksOverviewResponse;
+    const targetGapKey = firstOverview.priorityGaps[0]?.normalizedKey;
+    if (!targetGapKey) {
+      throw new Error('Expected at least one Smart Picks priority gap.');
+    }
+    await smartPicksOverview.waitForBackgroundGeneration();
+    const overview = await readOverviewWithPick(targetGapKey);
+    const pickedGap = overview.priorityGaps.find(
+      (gap) => gap.normalizedKey === targetGapKey,
     );
-    const sunscreenGap = overview.priorityGaps.find(
-      (gap) => gap.normalizedKey === 'broad-spectrum-sunscreen-spf-30',
-    );
-    expect(sunscreenGap?.pick).toEqual(
-      expect.objectContaining({ productName: 'Mineral SPF 50' }),
-    );
+    const productName = pickedGap?.pick?.productName;
+    if (!productName) {
+      throw new Error('Expected the Smart Picks gap to have a product pick.');
+    }
+    expect(pickedGap?.pick).toEqual(expect.objectContaining({ productName }));
 
     await authPost('/suggestions/gap-actions', {
       sourceType: 'smart_pick',
-      smartPickProductSuggestionId: sunscreenGap?.pick?.id,
+      smartPickProductSuggestionId: pickedGap?.pick?.id,
       action: 'saved',
     }).expect(200);
 
@@ -189,9 +210,9 @@ describe('Smart Picks (e2e)', () => {
     const wishlist = wishlistResponse.body as SmartPicksWishlistResponse;
     expect(wishlist.items[0]).toEqual(
       expect.objectContaining({
-        normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+        normalizedKey: targetGapKey,
         pick: expect.objectContaining({
-          productName: 'Mineral SPF 50',
+          productName,
           userAction: 'saved',
         }),
       }),
@@ -269,23 +290,14 @@ function delay(milliseconds: number): Promise<void> {
   });
 }
 
-function generatedPick(): GeneratedSmartPick {
+function generatedPick(
+  overrides: Partial<GeneratedSmartPick> = {},
+): GeneratedSmartPick {
   return {
     brand: 'Good Brand',
     productName: 'Mineral SPF 50',
     budgetTier: 'mid',
-    priceCents: 2200,
-    currency: 'USD',
-    retailers: [
-      {
-        name: 'Derm Store',
-        url: 'https://example.com/spf',
-        priceCents: 2200,
-        currency: 'USD',
-        inStock: true,
-        isAffiliate: true,
-      },
-    ],
+    sellerNames: ['Derm Store'],
     reasoningChips: [
       { tone: 'ethnicity', text: 'white-cast checked', icon: 'check' },
     ],
@@ -294,16 +306,12 @@ function generatedPick(): GeneratedSmartPick {
       {
         brand: 'Too Much',
         productName: 'Luxury SPF',
-        priceCents: 9000,
-        currency: 'USD',
         reason: 'Outside budget.',
       },
     ],
     sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
     alternatives: [],
-    verificationStatus: 'ai_named',
-    availabilityStatus: 'local',
     recommendationRankReason: 'Best budget-matched daily SPF fit.',
-    localAlternativeReason: null,
+    ...overrides,
   };
 }

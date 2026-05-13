@@ -24,21 +24,25 @@ describe('SmartPicksPreparationService', () => {
     expect(overview.getOverview).toHaveBeenCalledWith(changedUser, null);
   });
 
-  it('deduplicates repeated preparation requests for the same user', async () => {
+  it('coalesces repeated preparation requests into one rerun after the current job', async () => {
     const users = repo<User>();
     const deferred = deferredValue<void>();
     users.findOne.mockResolvedValue(user());
     const overview = {
-      getOverview: jest.fn().mockReturnValue(deferred.promise),
+      getOverview: jest
+        .fn()
+        .mockReturnValueOnce(deferred.promise)
+        .mockResolvedValueOnce({}),
     };
     const service = await buildService(users, overview);
 
     service.scheduleForUser('user-1');
     service.scheduleForUser('user-1');
+    service.scheduleForUser('user-1');
     deferred.resolve();
     await service.waitForIdle();
 
-    expect(overview.getOverview).toHaveBeenCalledTimes(1);
+    expect(overview.getOverview).toHaveBeenCalledTimes(2);
   });
 
   it('does not call overview generation after the user is gone', async () => {

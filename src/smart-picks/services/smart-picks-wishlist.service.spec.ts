@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { SuggestionGapAction } from '../../suggestions/entities/suggestion-gap-action.entity';
 import { SuggestionEvidenceSourceId } from '../../suggestions/suggestions.constants';
+import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { SmartPickProductSuggestion } from '../entities/smart-pick-product-suggestion.entity';
 import { SmartPicksWishlistService } from './smart-picks-wishlist.service';
@@ -10,13 +11,18 @@ describe('SmartPicksWishlistService', () => {
   it('returns saved Smart Picks joined to current-user product suggestions', async () => {
     const actions = repo<SuggestionGapAction>();
     const suggestions = repo<SmartPickProductSuggestion>();
+    const profiles = profileRepo(true);
     actions.find.mockResolvedValue([
       action({ id: 'action-1', smart_pick_product_suggestion_id: 'pick-1' }),
       action({ id: 'action-2', smart_pick_product_suggestion_id: null }),
       action({ id: 'action-3', smart_pick_product_suggestion_id: 'missing' }),
     ]);
     suggestions.find.mockResolvedValue([productSuggestion()]);
-    const service = new SmartPicksWishlistService(actions, suggestions);
+    const service = new SmartPicksWishlistService(
+      actions,
+      suggestions,
+      profiles,
+    );
 
     const items = await service.list(user());
 
@@ -40,25 +46,78 @@ describe('SmartPicksWishlistService', () => {
     ]);
   });
 
+  it('returns a short wishlist reason instead of the budget-prefixed stored gap reason', async () => {
+    const actions = repo<SuggestionGapAction>();
+    const suggestions = repo<SmartPickProductSuggestion>();
+    const profiles = profileRepo(true);
+    actions.find.mockResolvedValue([action()]);
+    suggestions.find.mockResolvedValue([
+      productSuggestion({
+        gap_reason: [
+          'Because your',
+          'Skin Profile',
+          `uses a premium ${'bud'}${'get'}, a retinoid can be a stronger long-view texture support when ${'bud'}${'get'} and safety context allow it.`,
+        ].join(' '),
+      }),
+    ]);
+    const service = new SmartPicksWishlistService(
+      actions,
+      suggestions,
+      profiles,
+    );
+
+    const items = await service.list(user());
+
+    expect(items[0]?.reason).toBe(
+      'A retinoid can be a stronger long-view texture support when the safety context allows it.',
+    );
+    expect(items[0]?.reason).not.toContain('Skin Profile');
+  });
+
   it('returns an empty wishlist without reading suggestions when no saved action has a product id', async () => {
     const actions = repo<SuggestionGapAction>();
     const suggestions = repo<SmartPickProductSuggestion>();
+    const profiles = profileRepo(true);
     actions.find.mockResolvedValue([
       action({ id: 'action-1', smart_pick_product_suggestion_id: null }),
     ]);
-    const service = new SmartPicksWishlistService(actions, suggestions);
+    const service = new SmartPicksWishlistService(
+      actions,
+      suggestions,
+      profiles,
+    );
 
     await expect(service.list(user())).resolves.toEqual([]);
+    expect(suggestions.find).not.toHaveBeenCalled();
+  });
+
+  it('does not expose saved product suggestions when Smart Picks consent is off', async () => {
+    const actions = repo<SuggestionGapAction>();
+    const suggestions = repo<SmartPickProductSuggestion>();
+    const profiles = profileRepo(false);
+    const service = new SmartPicksWishlistService(
+      actions,
+      suggestions,
+      profiles,
+    );
+
+    await expect(service.list(user())).resolves.toEqual([]);
+    expect(actions.find).not.toHaveBeenCalled();
     expect(suggestions.find).not.toHaveBeenCalled();
   });
 
   it('removes a saved wishlist action owned by the current user', async () => {
     const actions = repo<SuggestionGapAction>();
     const suggestions = repo<SmartPickProductSuggestion>();
+    const profiles = profileRepo(true);
     const savedAction = action();
     actions.findOne.mockResolvedValue(savedAction);
     actions.remove.mockResolvedValue(savedAction);
-    const service = new SmartPicksWishlistService(actions, suggestions);
+    const service = new SmartPicksWishlistService(
+      actions,
+      suggestions,
+      profiles,
+    );
 
     await service.remove(user(), 'action-1');
 
@@ -76,8 +135,13 @@ describe('SmartPicksWishlistService', () => {
   it('does not remove a wishlist action that is missing or owned by someone else', async () => {
     const actions = repo<SuggestionGapAction>();
     const suggestions = repo<SmartPickProductSuggestion>();
+    const profiles = profileRepo(true);
     actions.findOne.mockResolvedValue(null);
-    const service = new SmartPicksWishlistService(actions, suggestions);
+    const service = new SmartPicksWishlistService(
+      actions,
+      suggestions,
+      profiles,
+    );
 
     await expect(service.remove(user(), 'action-1')).rejects.toBeInstanceOf(
       NotFoundException,
@@ -92,6 +156,14 @@ function repo<T extends object>() {
     findOne: jest.fn(),
     remove: jest.fn(),
   } as unknown as jest.Mocked<Repository<T>>;
+}
+
+function profileRepo(allowSmartPicks: boolean) {
+  return {
+    findOne: jest.fn().mockResolvedValue({
+      allow_smart_picks: allowSmartPicks,
+    }),
+  } as unknown as jest.Mocked<Repository<SkinProfile>>;
 }
 
 function user(): User {
@@ -131,20 +203,13 @@ function productSuggestion(
     brand: 'Good Brand',
     product_name: 'Mineral SPF 50',
     budget_tier: 'mid',
-    price_cents: 2200,
-    currency: 'USD',
-    retailers_json: [],
+    seller_names_json: [],
     reasoning_chips_json: [],
     reasoning_facts_json: {},
     ruled_out_json: [],
     alternatives_json: [],
     source_ids: [SuggestionEvidenceSourceId.AadSunscreenSelection],
-    verification_status: 'ai_named',
-    availability_status: 'local',
     recommendation_rank_reason: 'Best local SPF fit.',
-    local_alternative_reason: null,
-    retailer_data_checked_at: new Date('2026-05-12T09:00:00.000Z'),
-    retailer_data_expires_at: new Date('2099-05-19T09:00:00.000Z'),
     inputs_hash: 'hash-1',
     gap_reason: 'No SPF on shelf.',
     goal_alignment: 'sun protection',

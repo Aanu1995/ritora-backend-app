@@ -8,6 +8,7 @@ import { SmartPicksOverviewService } from './smart-picks-overview.service';
 export class SmartPicksPreparationService {
   private readonly logger = new Logger(SmartPicksPreparationService.name);
   private readonly jobs = new Map<string, Promise<void>>();
+  private readonly pendingReruns = new Set<string>();
 
   constructor(
     @InjectRepository(User)
@@ -16,9 +17,12 @@ export class SmartPicksPreparationService {
   ) {}
 
   scheduleForUser(userId: string): void {
-    if (this.jobs.has(userId)) return;
+    if (this.jobs.has(userId)) {
+      this.pendingReruns.add(userId);
+      return;
+    }
 
-    const job = this.prepareForUser(userId)
+    const job = this.prepareUntilSettled(userId)
       .catch((error) => {
         this.logger.warn(
           `Smart Picks background preparation failed: ${
@@ -28,6 +32,7 @@ export class SmartPicksPreparationService {
       })
       .finally(() => {
         this.jobs.delete(userId);
+        this.pendingReruns.delete(userId);
       });
 
     this.jobs.set(userId, job);
@@ -44,5 +49,12 @@ export class SmartPicksPreparationService {
     if (!user) return;
 
     await this.overviewService.getOverview(user, null);
+  }
+
+  private async prepareUntilSettled(userId: string): Promise<void> {
+    do {
+      this.pendingReruns.delete(userId);
+      await this.prepareForUser(userId);
+    } while (this.pendingReruns.has(userId));
   }
 }

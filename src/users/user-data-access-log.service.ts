@@ -6,7 +6,6 @@ import { UserConsent } from './entities/user-consent.entity';
 import { UserDataAccessLog } from './entities/user-data-access-log.entity';
 import {
   SENSITIVE_SKIN_PROFILE_CONSENT_TYPES,
-  type SensitiveSkinProfileConsentType,
   UserDataAccessActorType,
   UserDataAccessEventType,
   UserDataAccessPurpose,
@@ -30,7 +29,7 @@ export class UserDataAccessLogService {
 
   async recordDataAccess(
     userId: string,
-    consentTypes: SensitiveSkinProfileConsentType[],
+    consentTypes: readonly UserConsentType[],
     purpose: UserDataAccessPurpose,
     actorType: UserDataAccessActorType = UserDataAccessActorType.User,
   ): Promise<void> {
@@ -100,8 +99,8 @@ export class UserDataAccessLogService {
 
   private async findActiveConsentTypes(
     userId: string,
-    consentTypes: SensitiveSkinProfileConsentType[],
-  ): Promise<Set<SensitiveSkinProfileConsentType>> {
+    consentTypes: readonly UserConsentType[],
+  ): Promise<Set<UserConsentType>> {
     const consents = await this.consentsRepository.find({
       where: {
         user_id: userId,
@@ -111,10 +110,6 @@ export class UserDataAccessLogService {
       },
     });
 
-    return new Set(
-      consents.map(
-        (consent) => consent.consent_type as SensitiveSkinProfileConsentType,
-      ),
-    );
+    return new Set(consents.map((consent) => consent.consent_type));
   }
 }

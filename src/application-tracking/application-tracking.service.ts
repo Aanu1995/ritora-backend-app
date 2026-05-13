@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, Repository } from 'typeorm';
@@ -30,6 +31,7 @@ import {
 } from './application-tracking.helpers';
 import { ApplicationReactiveRegenerationService } from './application-reactive-regeneration.service';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 
 @Injectable()
 export class ApplicationTrackingService {
@@ -42,6 +44,8 @@ export class ApplicationTrackingService {
     private readonly validation: ApplicationTrackingValidationService,
     private readonly reactiveRegeneration: ApplicationReactiveRegenerationService,
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
+    @Optional()
+    private readonly smartPicksPreparation?: SmartPicksPreparationService,
   ) {}
 
   async record(
@@ -84,6 +88,7 @@ export class ApplicationTrackingService {
       itemDrafts,
     );
     await this.reactiveRegeneration.queueAfterApplicationChange(user, response);
+    this.scheduleSmartPicksPreparation(user.id);
     return response;
   }
 
@@ -189,7 +194,12 @@ export class ApplicationTrackingService {
       );
     });
     await this.reactiveRegeneration.queueAfterApplicationChange(user, response);
+    this.scheduleSmartPicksPreparation(user.id);
     return response;
+  }
+
+  private scheduleSmartPicksPreparation(userId: string): void {
+    this.smartPicksPreparation?.scheduleForUser(userId);
   }
 
   async getOne(user: User, logId: string): Promise<ApplicationLogResponseDto> {

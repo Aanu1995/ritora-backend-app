@@ -1,4 +1,4 @@
-import { SmartPicksBudgetTier, SmartPicksOverview } from './smart-picks.types';
+import { SmartPicksOverview } from './smart-picks.types';
 import { SmartPicksOverviewService } from './services/smart-picks-overview.service';
 import { SmartPicksWishlistService } from './services/smart-picks-wishlist.service';
 import { SmartPicksController } from './smart-picks.controller';

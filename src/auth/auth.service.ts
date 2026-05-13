@@ -88,7 +88,6 @@ type AccountExportSmartPicks = {
     recap: unknown;
     inputsHash: string;
     generatedAt: string;
-    expiresAt: string;
   }>;
   productSuggestions: Array<{
     ingredientOrCategory: string;
@@ -96,14 +95,8 @@ type AccountExportSmartPicks = {
     brand: string;
     productName: string;
     budgetTier: string | null;
-    priceCents: number | null;
-    currency: string | null;
-    availabilityStatus: string;
-    verificationStatus: string;
+    sellerNames: string[];
     recommendationRankReason: string | null;
-    localAlternativeReason: string | null;
-    retailerDataCheckedAt: string | null;
-    retailerDataExpiresAt: string | null;
     sourceIds: string[];
     gapReason: string | null;
     goalAlignment: string | null;
@@ -684,6 +677,13 @@ export class AuthService {
     const skinJournal =
       await this.skinJournalService.exportAllDataForAccount(userId);
     const smartPicks = await this.exportSmartPicksData(userId);
+    if (hasSmartPicksExportData(smartPicks)) {
+      await this.dataAccessLogService.recordDataAccess(
+        userId,
+        [UserConsentType.AiSuggestionProcessing],
+        UserDataAccessPurpose.AccountExport,
+      );
+    }
 
     return {
       user: UserResponseDto.fromEntity(user),
@@ -731,7 +731,7 @@ export class AuthService {
         order: { created_at: 'DESC' },
       }),
       this.suggestionGapActionRepository.find({
-        where: { user_id: userId },
+        where: { user_id: userId, source_type: 'smart_pick' },
         order: { created_at: 'DESC' },
       }),
     ]);
@@ -746,7 +746,6 @@ export class AuthService {
         recap: snapshot.recap_json,
         inputsHash: snapshot.inputs_hash,
         generatedAt: toIsoString(snapshot.generated_at),
-        expiresAt: toIsoString(snapshot.expires_at),
       })),
       productSuggestions: productSuggestions.map((suggestion) => ({
         ingredientOrCategory: suggestion.ingredient_or_category,
@@ -754,18 +753,8 @@ export class AuthService {
         brand: suggestion.brand,
         productName: suggestion.product_name,
         budgetTier: suggestion.budget_tier,
-        priceCents: suggestion.price_cents,
-        currency: suggestion.currency,
-        availabilityStatus: suggestion.availability_status,
-        verificationStatus: suggestion.verification_status,
+        sellerNames: suggestion.seller_names_json,
         recommendationRankReason: suggestion.recommendation_rank_reason,
-        localAlternativeReason: suggestion.local_alternative_reason,
-        retailerDataCheckedAt: toNullableIsoString(
-          suggestion.retailer_data_checked_at,
-        ),
-        retailerDataExpiresAt: toNullableIsoString(
-          suggestion.retailer_data_expires_at,
-        ),
         sourceIds: suggestion.source_ids,
         gapReason: suggestion.gap_reason,
         goalAlignment: suggestion.goal_alignment,
@@ -1136,4 +1125,12 @@ export class AuthService {
 
     return cookieOptions;
   }
+}
+
+function hasSmartPicksExportData(data: AccountExportSmartPicks): boolean {
+  return (
+    data.snapshots.length > 0 ||
+    data.productSuggestions.length > 0 ||
+    data.actions.length > 0
+  );
 }

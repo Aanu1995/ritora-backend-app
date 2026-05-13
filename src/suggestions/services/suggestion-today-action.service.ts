@@ -8,9 +8,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, IsNull, MoreThan, Repository } from 'typeorm';
 import { toIsoString } from '../../common/utils/date';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
+import { SmartPickSnapshot } from '../../smart-picks/entities/smart-pick-snapshot.entity';
 import { SmartPickProductSuggestion } from '../../smart-picks/entities/smart-pick-product-suggestion.entity';
 import { RoutineSimplificationEvent } from '../../skin-journal/entities/routine-simplification-event.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
+import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import {
   NormalRoutineOverrideResponseDto,
@@ -47,6 +49,10 @@ export class SuggestionTodayActionService {
     private readonly suggestionRepo: Repository<SuggestionInstance>,
     @InjectRepository(SmartPickProductSuggestion)
     private readonly smartPickProductSuggestionRepo: Repository<SmartPickProductSuggestion>,
+    @InjectRepository(SmartPickSnapshot)
+    private readonly smartPickSnapshotRepo: Repository<SmartPickSnapshot>,
+    @InjectRepository(SkinProfile)
+    private readonly skinProfileRepo: Repository<SkinProfile>,
     @InjectRepository(SkinJournalEntry)
     private readonly entryRepo: Repository<SkinJournalEntry>,
     @InjectRepository(RoutineSimplificationEvent)
@@ -168,6 +174,12 @@ export class SuggestionTodayActionService {
         'smartPickProductSuggestionId is required for Smart Picks actions.',
       );
     }
+    const profile = await this.skinProfileRepo.findOne({
+      where: { user_id: user.id },
+    });
+    if (!profile?.allow_smart_picks) {
+      throw new ForbiddenException('Smart Picks consent is required.');
+    }
     const suggestion = await this.smartPickProductSuggestionRepo.findOne({
       where: { id: payload.smartPickProductSuggestionId },
     });
@@ -178,6 +190,15 @@ export class SuggestionTodayActionService {
       throw new ForbiddenException(
         'Smart Pick product suggestion belongs to another user.',
       );
+    }
+    const currentSnapshot = await this.smartPickSnapshotRepo.findOne({
+      where: { user_id: user.id },
+    });
+    if (
+      currentSnapshot &&
+      currentSnapshot.inputs_hash !== suggestion.inputs_hash
+    ) {
+      throw new BadRequestException('Smart Pick product suggestion is stale.');
     }
     const existing = await this.gapActionRepo.findOne({
       where: {

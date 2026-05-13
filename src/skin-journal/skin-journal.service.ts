@@ -7,6 +7,7 @@ import {
   NotImplementedException,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -154,6 +155,7 @@ import { normalizeUpsertEntryBody } from './skin-journal-multipart.parser';
 import { InsightPolishService } from './insights/insight-polish.service';
 import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.service';
 import type { InsightBlock, InsightCandidate } from './insights/insight-types';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 
 interface InsightEntryPreview {
   entry_id: string;
@@ -265,6 +267,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly dataAccessLog: UserDataAccessLogService,
     private readonly notifications: NotificationsService,
+    @Optional()
+    private readonly smartPicksPreparation?: SmartPicksPreparationService,
   ) {}
 
   onModuleInit(): void {
@@ -282,6 +286,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(this.analysisRecoveryTimer);
       this.analysisRecoveryTimer = null;
     }
+  }
+
+  private scheduleSmartPicksPreparation(userId: string): void {
+    this.smartPicksPreparation?.scheduleForUser(userId);
   }
 
   async upsertEntryForResolvedDate(params: {
@@ -433,6 +441,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         'check_in_updated',
       );
     }
+    this.scheduleSmartPicksPreparation(params.userId);
 
     return JournalEntryResponseDto.fromEntity(
       saved,
@@ -948,6 +957,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       );
     }
     await this.markInsightsAfterJournalChange(userId, 'entry_deleted');
+    this.scheduleSmartPicksPreparation(userId);
   }
 
   async updateEntryById(
@@ -1099,6 +1109,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       current.analysis_completed_at = new Date();
       current.analysis_error = null;
       await this.entries.save(current);
+      this.scheduleSmartPicksPreparation(userId);
 
       await this.evaluateCompletedAnalysis(userId, current, obs);
       if (job) {
@@ -1145,6 +1156,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       current.analysis_duration_ms = Date.now() - fallbackStartedAt;
       current.analysis_input_image_count = plannedInputImageCount;
       await this.entries.save(current);
+      this.scheduleSmartPicksPreparation(userId);
       if (job) {
         await this.analysisQueue.failJob(job, errorMessage);
       }

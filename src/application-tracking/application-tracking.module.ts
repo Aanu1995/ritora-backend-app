@@ -5,6 +5,7 @@ import { InventoryProduct } from '../inventory/entities/inventory-product.entity
 import { ScheduledNotification } from '../notifications/entities/scheduled-notification.entity';
 import { UserNotificationPreference } from '../notifications/entities/user-notification-preference.entity';
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
+import { SmartPicksModule } from '../smart-picks/smart-picks.module';
 import { RoutineBreak } from '../suggestions/entities/routine-break.entity';
 import { SuggestionGenerationJob } from '../suggestions/entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
@@ -21,6 +22,7 @@ import { ApplicationTrackingValidationService } from './application-tracking-val
 @Module({
   imports: [
     CatalogueModule,
+    SmartPicksModule,
     TypeOrmModule.forFeature([
       ApplicationLog,
       ApplicationLogItem,

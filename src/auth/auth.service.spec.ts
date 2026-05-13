@@ -980,7 +980,6 @@ describe('AuthService', () => {
           },
           inputs_hash: 'hash-1',
           generated_at: new Date('2026-05-12T09:00:00.000Z'),
-          expires_at: new Date('2026-05-13T09:00:00.000Z'),
         },
       ]);
       smartPickSuggestionsRepo.find.mockResolvedValue([
@@ -990,14 +989,8 @@ describe('AuthService', () => {
           brand: 'Better Brand',
           product_name: 'Gentle Serum',
           budget_tier: 'mid',
-          price_cents: 2100,
-          currency: 'USD',
-          availability_status: 'import_only',
-          verification_status: 'ai_named',
+          seller_names_json: ['Stylevana', 'Derm Store'],
           recommendation_rank_reason: 'Better fit for the goal.',
-          local_alternative_reason: 'Local option may be less targeted.',
-          retailer_data_checked_at: new Date('2026-05-12T09:00:00.000Z'),
-          retailer_data_expires_at: new Date('2026-05-19T09:00:00.000Z'),
           source_ids: [],
           gap_reason: 'History suggests a replacement.',
           goal_alignment: 'acne',
@@ -1033,15 +1026,25 @@ describe('AuthService', () => {
       expect(result.smartPicks.productSuggestions[0]).toMatchObject({
         ingredientOrCategory: 'Replacement for Serum',
         productName: 'Gentle Serum',
-        availabilityStatus: 'import_only',
+        sellerNames: ['Stylevana', 'Derm Store'],
       });
       expect(result.smartPicks.actions[0]).toMatchObject({
+        sourceType: 'smart_pick',
         normalizedKey: 'replacement-for-serum',
         action: 'saved',
+      });
+      expect(suggestionGapActionsRepo.find).toHaveBeenCalledWith({
+        where: { user_id: user.id, source_type: 'smart_pick' },
+        order: { created_at: 'DESC' },
       });
       expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
         user.id,
         [UserConsentType.LocationProcessing],
+        UserDataAccessPurpose.AccountExport,
+      );
+      expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
+        user.id,
+        [UserConsentType.AiSuggestionProcessing],
         UserDataAccessPurpose.AccountExport,
       );
     });
