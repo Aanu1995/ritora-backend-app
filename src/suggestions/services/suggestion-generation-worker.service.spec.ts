@@ -267,6 +267,36 @@ describe('SuggestionGenerationWorker', () => {
     );
     jest.useRealTimers();
   });
+
+  it('keeps the standalone worker process alive with a referenced poll timer', () => {
+    const unref = jest.fn();
+    const fakeTimer = { unref } as unknown as ReturnType<typeof setTimeout>;
+    const setTimeoutMock = ((..._args: Parameters<typeof setTimeout>) =>
+      fakeTimer) as unknown as typeof setTimeout;
+    const setTimeoutSpy = jest
+      .spyOn(global, 'setTimeout')
+      .mockImplementation(setTimeoutMock);
+    const workerWithTimer = new SuggestionGenerationWorker(
+      {
+        get: jest.fn().mockReturnValue('development'),
+      } as unknown as ConfigService,
+      generationService,
+      jobRepo,
+      suggestionRepo,
+      observability,
+      routineBreakService,
+    );
+
+    try {
+      workerWithTimer.onModuleInit();
+
+      expect(setTimeoutSpy).toHaveBeenCalled();
+      expect(unref).not.toHaveBeenCalled();
+    } finally {
+      workerWithTimer.onModuleDestroy();
+      setTimeoutSpy.mockRestore();
+    }
+  });
 });
 
 function repo<T extends ObjectLiteral>() {

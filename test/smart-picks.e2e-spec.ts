@@ -1,12 +1,16 @@
 import { INestApplication } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { ENVIRONMENT_PROVIDER } from '../src/environment-intelligence/environment-provider.interface';
 import { EnvironmentProviderName } from '../src/environment-intelligence/environment-intelligence.constants';
+import { MailService } from '../src/mail/mail.service';
 import { SuggestionEvidenceSourceId } from '../src/suggestions/suggestions.constants';
 import {
   GeneratedSmartPick,
   SmartPicksAiGenerator,
 } from '../src/smart-picks/services/smart-picks-ai-generator';
+import { SmartPicksGenerationWorkerModule } from '../src/smart-picks/smart-picks-generation-worker.module';
+import { SmartPicksGenerationWorker } from '../src/smart-picks/services/smart-picks-generation-worker.service';
 import { SmartPicksOverviewService } from '../src/smart-picks/services/smart-picks-overview.service';
 import { SmartPicksPreparationService } from '../src/smart-picks/services/smart-picks-preparation.service';
 import type { SmartPicksGapSnapshot } from '../src/smart-picks/smart-picks.types';
@@ -35,6 +39,14 @@ type SmartPicksOverviewResponse = {
   consentRequired: boolean;
   skinProfileRequired: boolean;
   productSuggestionsUnavailable: boolean;
+  productGeneration: {
+    status: 'ready' | 'pending' | 'failed' | 'skipped';
+    reason: 'provider_failed' | 'missing_api_key' | 'no_pick' | null;
+    missingPickCount: number;
+    isProcessing: boolean;
+    attemptedAt: string | null;
+    retryAfter: string | null;
+  };
   priorityGaps: Array<{
     normalizedKey: string;
     ingredientOrCategory: string;
@@ -53,10 +65,12 @@ type SmartPicksWishlistResponse = {
 
 describe('Smart Picks (e2e)', () => {
   let app: INestApplication;
+  let workerModule: TestingModule;
   let mockMail: MockMailService;
   let accessToken: string;
   let smartPicksPreparation: SmartPicksPreparationService;
   let smartPicksOverview: SmartPicksOverviewService;
+  let smartPicksGenerationWorker: SmartPicksGenerationWorker;
 
   const aiGenerator = {
     generateWithDiagnostics: jest.fn(
@@ -126,6 +140,18 @@ describe('Smart Picks (e2e)', () => {
     ]);
     smartPicksPreparation = app.get(SmartPicksPreparationService);
     smartPicksOverview = app.get(SmartPicksOverviewService);
+    workerModule = await Test.createTestingModule({
+      imports: [SmartPicksGenerationWorkerModule],
+    })
+      .overrideProvider(SmartPicksAiGenerator)
+      .useValue(aiGenerator)
+      .overrideProvider(ENVIRONMENT_PROVIDER)
+      .useValue(environmentProvider)
+      .overrideProvider(MailService)
+      .useValue(mockMail)
+      .compile();
+    await workerModule.init();
+    smartPicksGenerationWorker = workerModule.get(SmartPicksGenerationWorker);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -154,6 +180,7 @@ describe('Smart Picks (e2e)', () => {
   });
 
   afterAll(async () => {
+    await workerModule.close();
     await truncateTables(app);
     await app.close();
   });
@@ -189,6 +216,9 @@ describe('Smart Picks (e2e)', () => {
     if (!targetGapKey) {
       throw new Error('Expected at least one Smart Picks priority gap.');
     }
+    expect(firstOverview.productGeneration.status).toBe('pending');
+    expect(firstOverview.productGeneration.isProcessing).toBe(true);
+    await smartPicksGenerationWorker.pollOnce();
     await smartPicksOverview.waitForBackgroundGeneration();
     const overview = await readOverviewWithPick(targetGapKey);
     const pickedGap = overview.priorityGaps.find(
@@ -274,6 +304,9 @@ describe('Smart Picks (e2e)', () => {
         (gap) => gap.normalizedKey === normalizedKey,
       );
       if (matchingGap?.pick) return overview;
+      if (overview.productGeneration.status === 'pending') {
+        await smartPicksGenerationWorker.pollOnce();
+      }
       await delay(SMART_PICK_POLL_DELAY_MS);
     }
 

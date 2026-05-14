@@ -58,6 +58,9 @@ export class SmartPicksOverviewResponseDto {
   productSuggestionsUnavailable: boolean;
 
   @ApiProperty()
+  productGeneration: SmartPicksOverview['productGeneration'];
+
+  @ApiProperty()
   emptyState: SmartPicksOverview['emptyState'];
 
   @ApiProperty()

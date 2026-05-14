@@ -129,6 +129,5 @@ export class SkinJournalInsightWorkerService
           }
         });
     }, delayMs);
-    this.pollTimer.unref?.();
   }
 }

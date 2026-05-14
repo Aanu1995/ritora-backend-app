@@ -97,7 +97,6 @@ export class SmartPicksContextBuilder {
       budgetTier,
       profile: profile
         ? {
-            updatedAt: profile.updated_at?.toISOString(),
             skinType: profile.skin_type,
             skinTone: profile.skin_tone,
             fitzpatrickPhototype: profile.fitzpatrick_phototype,
@@ -122,7 +121,6 @@ export class SmartPicksContextBuilder {
         : null,
       products: allProducts.map((product) => ({
         id: product.id,
-        updatedAt: product.updated_at?.toISOString(),
         brand: product.brand,
         name: product.name,
         category: product.category,
@@ -130,7 +128,7 @@ export class SmartPicksContextBuilder {
         ingredients: product.identity?.inciIngredients ?? [],
         benefits: product.identity?.benefits ?? [],
       })),
-      environment,
+      environment: stableSmartPicksEnvironment(environment),
       productPerformance,
     });
 
@@ -292,6 +290,27 @@ function hashInputs(value: unknown): string {
   return createHash('sha256')
     .update(JSON.stringify(value, stableJsonReplacer))
     .digest('hex');
+}
+
+function stableSmartPicksEnvironment(
+  environment: EnvironmentContextSummary | null,
+) {
+  if (!environment) return null;
+  return {
+    status: environment.status,
+    locationPersonalized: environment.locationPersonalized,
+    season: environment.season,
+    temperatureBand: environment.temperatureBand,
+    humidityBand: environment.humidityBand,
+    uvRisk: environment.uvRisk,
+    airQualityRisk: environment.airQualityRisk,
+    pollenRisk: environment.pollenRisk,
+    waterHardness: environment.waterHardness,
+    waterSensitivity: environment.waterSensitivity,
+    climateSensitivities: [...environment.climateSensitivities].sort(),
+    transitionSignals: [...environment.transitionSignals].sort(),
+    confidence: environment.confidence,
+  };
 }
 
 function stableJsonReplacer(_key: string, value: unknown): unknown {

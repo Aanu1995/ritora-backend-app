@@ -191,6 +191,38 @@ describe('SuggestionReminderWorker', () => {
     expect(applicationLogRepo.find).not.toHaveBeenCalled();
     expect(notifications.dispatch).not.toHaveBeenCalled();
   });
+
+  it('keeps the worker scheduler alive with a referenced timer', () => {
+    jest.useRealTimers();
+    const unref = jest.fn();
+    const fakeTimer = { unref } as unknown as ReturnType<typeof setTimeout>;
+    const setTimeoutMock = ((..._args: Parameters<typeof setTimeout>) =>
+      fakeTimer) as unknown as typeof setTimeout;
+    const setTimeoutSpy = jest
+      .spyOn(global, 'setTimeout')
+      .mockImplementation(setTimeoutMock);
+    const workerWithTimer = new SuggestionReminderWorker(
+      {
+        get: jest.fn().mockReturnValue('development'),
+      } as unknown as ConfigService,
+      notifications,
+      suggestionRepo,
+      applicationLogRepo,
+      userRepo,
+      slotRepo,
+      routineBreakService,
+    );
+
+    try {
+      workerWithTimer.onModuleInit();
+
+      expect(setTimeoutSpy).toHaveBeenCalled();
+      expect(unref).not.toHaveBeenCalled();
+    } finally {
+      workerWithTimer.onModuleDestroy();
+      setTimeoutSpy.mockRestore();
+    }
+  });
 });
 
 function repo<T extends ObjectLiteral>() {

@@ -1,5 +1,19 @@
 import { ObjectLiteral, Repository } from 'typeorm';
 import { EnvironmentContextService } from '../../environment-intelligence/environment-context.service';
+import {
+  EnvironmentAirQualityRisk,
+  EnvironmentConfidence,
+  EnvironmentHumidityBand,
+  EnvironmentProviderName,
+  EnvironmentSeason,
+  EnvironmentSignalKind,
+  EnvironmentStatus,
+  EnvironmentTemperatureBand,
+  EnvironmentUvRisk,
+  EnvironmentWaterHardness,
+  EnvironmentWaterSensitivity,
+} from '../../environment-intelligence/environment-intelligence.constants';
+import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ProductCategory, ShelfStatus } from '../../shelf/shelf.types';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
@@ -87,6 +101,90 @@ describe('SmartPicksContextBuilder', () => {
 
     expect(safetyChanged.inputsHash).not.toBe(baseline.inputsHash);
   });
+
+  it('keeps the inputs hash stable when only profile metadata timestamps change', async () => {
+    const baseline = await buildContextWithProfile(
+      profile({ updated_at: new Date('2026-05-10T08:00:00.000Z') }),
+    );
+    const metadataOnly = await buildContextWithProfile(
+      profile({ updated_at: new Date('2026-05-10T09:30:00.000Z') }),
+    );
+
+    expect(metadataOnly.inputsHash).toBe(baseline.inputsHash);
+  });
+
+  it('keeps the inputs hash stable when only shelf metadata timestamps change', async () => {
+    const baseline = await buildContextWithProducts([
+      product('cleanser-1', ProductCategory.Cleanser, {
+        updated_at: new Date('2026-05-10T08:00:00.000Z'),
+      }),
+    ]);
+    const metadataOnly = await buildContextWithProducts([
+      product('cleanser-1', ProductCategory.Cleanser, {
+        updated_at: new Date('2026-05-10T09:30:00.000Z'),
+      }),
+    ]);
+
+    expect(metadataOnly.inputsHash).toBe(baseline.inputsHash);
+  });
+
+  it('keeps the inputs hash stable when only environment timestamps and exact readings change', async () => {
+    const baseline = await buildContextWithEnvironment(
+      environmentSummary({
+        generatedAt: '2026-05-10T08:00:00.000Z',
+        humidity: 41,
+        uvIndex: 6,
+      }),
+    );
+    const refreshed = await buildContextWithEnvironment(
+      environmentSummary({
+        generatedAt: '2026-05-10T09:00:00.000Z',
+        humidity: 43,
+        uvIndex: 6.4,
+        stale: true,
+      }),
+    );
+
+    expect(refreshed.inputsHash).toBe(baseline.inputsHash);
+  });
+
+  it('keeps the inputs hash stable when equivalent environment signals arrive in a different order', async () => {
+    const baseline = await buildContextWithEnvironment(
+      environmentSummary({
+        climateSensitivities: ['dry_air', 'pollution'],
+        transitionSignals: [
+          EnvironmentSignalKind.HighUv,
+          EnvironmentSignalKind.LowHumidity,
+        ],
+      }),
+    );
+    const reordered = await buildContextWithEnvironment(
+      environmentSummary({
+        climateSensitivities: ['pollution', 'dry_air'],
+        transitionSignals: [
+          EnvironmentSignalKind.LowHumidity,
+          EnvironmentSignalKind.HighUv,
+        ],
+      }),
+    );
+
+    expect(reordered.inputsHash).toBe(baseline.inputsHash);
+  });
+
+  it('changes the inputs hash when recommendation-relevant environment bands change', async () => {
+    const balanced = await buildContextWithEnvironment(
+      environmentSummary({
+        humidityBand: EnvironmentHumidityBand.Balanced,
+      }),
+    );
+    const dry = await buildContextWithEnvironment(
+      environmentSummary({
+        humidityBand: EnvironmentHumidityBand.Dry,
+      }),
+    );
+
+    expect(dry.inputsHash).not.toBe(balanced.inputsHash);
+  });
 });
 
 async function buildContextWithProfile(profileFixture: SkinProfile) {
@@ -102,6 +200,48 @@ async function buildContextWithProfile(profileFixture: SkinProfile) {
   inventoryRepo.find.mockResolvedValue([
     product('cleanser-1', ProductCategory.Cleanser),
   ]);
+  const builder = new SmartPicksContextBuilder(
+    skinProfileRepo,
+    inventoryRepo,
+    environmentContext,
+    productPerformance,
+  );
+  return builder.build(user(), null);
+}
+
+async function buildContextWithEnvironment(summary: EnvironmentContextSummary) {
+  const skinProfileRepo = repo<SkinProfile>();
+  const inventoryRepo = repo<InventoryProduct>();
+  const environmentContext = {
+    buildContext: jest.fn().mockResolvedValue({ summary }),
+  } as unknown as EnvironmentContextService;
+  const productPerformance = {
+    summarizeForUser: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
+  skinProfileRepo.findOne.mockResolvedValue(profile());
+  inventoryRepo.find.mockResolvedValue([
+    product('cleanser-1', ProductCategory.Cleanser),
+  ]);
+  const builder = new SmartPicksContextBuilder(
+    skinProfileRepo,
+    inventoryRepo,
+    environmentContext,
+    productPerformance,
+  );
+  return builder.build(user(), null);
+}
+
+async function buildContextWithProducts(products: InventoryProduct[]) {
+  const skinProfileRepo = repo<SkinProfile>();
+  const inventoryRepo = repo<InventoryProduct>();
+  const environmentContext = {
+    buildContext: jest.fn().mockResolvedValue({ summary: null }),
+  } as unknown as EnvironmentContextService;
+  const productPerformance = {
+    summarizeForUser: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
+  skinProfileRepo.findOne.mockResolvedValue(profile());
+  inventoryRepo.find.mockResolvedValue(products);
   const builder = new SmartPicksContextBuilder(
     skinProfileRepo,
     inventoryRepo,
@@ -165,7 +305,11 @@ function profile(overrides: Partial<SkinProfile> = {}): SkinProfile {
   } as unknown as SkinProfile;
 }
 
-function product(id: string, category: ProductCategory): InventoryProduct {
+function product(
+  id: string,
+  category: ProductCategory,
+  overrides: Partial<InventoryProduct> = {},
+): InventoryProduct {
   return {
     id,
     user_id: 'user-1',
@@ -176,5 +320,38 @@ function product(id: string, category: ProductCategory): InventoryProduct {
     identity: { inciIngredients: ['Water'], benefits: [] },
     created_at: new Date('2026-05-10T08:00:00.000Z'),
     updated_at: new Date('2026-05-10T08:00:00.000Z'),
+    ...overrides,
   } as unknown as InventoryProduct;
+}
+
+function environmentSummary(
+  overrides: Partial<EnvironmentContextSummary> = {},
+): EnvironmentContextSummary {
+  return {
+    status: EnvironmentStatus.Available,
+    provider: EnvironmentProviderName.OpenMeteo,
+    generatedAt: '2026-05-10T08:00:00.000Z',
+    locationPersonalized: true,
+    season: EnvironmentSeason.Spring,
+    temperatureCelsius: 17,
+    temperatureBand: EnvironmentTemperatureBand.Mild,
+    humidity: 41,
+    humidityBand: EnvironmentHumidityBand.Balanced,
+    uvIndex: 6,
+    uvRisk: EnvironmentUvRisk.High,
+    airQualityIndex: 24,
+    airQualityRisk: EnvironmentAirQualityRisk.Good,
+    pm25: 4,
+    pm10: 8,
+    pollenRisk: 'moderate',
+    conditionLabel: 'Clear',
+    waterHardness: EnvironmentWaterHardness.Soft,
+    waterSensitivity: EnvironmentWaterSensitivity.None,
+    climateSensitivities: [],
+    transitionSignals: [],
+    confidence: EnvironmentConfidence.Provider,
+    stale: false,
+    sourceIds: [],
+    ...overrides,
+  };
 }

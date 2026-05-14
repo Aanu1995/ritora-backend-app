@@ -31,3 +31,5 @@ openapi.json
 coverage/
 
 .claude
+
+src/scripts

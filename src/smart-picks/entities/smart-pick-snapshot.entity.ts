@@ -46,7 +46,9 @@ const encryptedRecapTransformer =
   );
 
 @Entity('smart_pick_snapshots')
-@Index('UQ_smart_pick_snapshots_user', ['user_id'], { unique: true })
+@Index('UQ_smart_pick_snapshots_user_mode', ['user_id', 'mode'], {
+  unique: true,
+})
 export class SmartPickSnapshot {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;

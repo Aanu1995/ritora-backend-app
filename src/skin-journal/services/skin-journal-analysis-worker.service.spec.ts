@@ -141,4 +141,31 @@ describe('SkinJournalAnalysisWorkerService', () => {
       process.env.NODE_ENV = previousNodeEnv;
     }
   });
+
+  it('keeps the standalone worker process alive with a referenced poll timer', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    const unref = jest.fn();
+    const fakeTimer = { unref } as unknown as ReturnType<typeof setTimeout>;
+    const setTimeoutMock = ((..._args: Parameters<typeof setTimeout>) =>
+      fakeTimer) as unknown as typeof setTimeout;
+    const setTimeoutSpy = jest
+      .spyOn(global, 'setTimeout')
+      .mockImplementation(setTimeoutMock);
+    const worker = new SkinJournalAnalysisWorkerService(
+      queue as unknown as SkinJournalAnalysisQueueService,
+      journal as unknown as SkinJournalService,
+    );
+
+    try {
+      worker.onModuleInit();
+
+      expect(setTimeoutSpy).toHaveBeenCalled();
+      expect(unref).not.toHaveBeenCalled();
+    } finally {
+      worker.onModuleDestroy();
+      setTimeoutSpy.mockRestore();
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
 });

@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, MoreThan, Not, Repository } from 'typeorm';
 import { toIsoString } from '../../common/utils/date';
@@ -25,6 +30,7 @@ import {
   SmartPicksEmptyReason,
   SmartPicksEmptyState,
   SmartPicksGap,
+  SmartPicksGenerationJobStatus,
   SmartPicksGapKind,
   SmartPicksGapSnapshot,
   SmartPicksHistoryReadiness,
@@ -32,6 +38,9 @@ import {
   SmartPicksMode,
   SmartPicksOverview,
   SmartPicksProductPerformanceSignal,
+  SmartPicksProductGenerationReason,
+  SmartPicksProductGenerationState,
+  SmartPicksProductGenerationStatus,
   SmartPicksProductPerformanceSummary,
   SmartPicksProductPick,
   SmartPicksRecap,
@@ -45,12 +54,14 @@ import {
   SmartPicksAiGenerationDiagnostics,
   GeneratedSmartPick,
   SmartPicksAiGenerator,
+  SmartPicksAiProviderSkippedReason,
 } from './smart-picks-ai-generator';
 import {
   SmartPicksContext,
   SmartPicksContextBuilder,
 } from './smart-picks-context-builder';
 import { SmartPicksCoverageService } from './smart-picks-coverage.service';
+import { SmartPicksGenerationQueueService } from './smart-picks-generation-queue.service';
 import { buildGoalGapCandidates } from './smart-picks-goal-gap-policy';
 import { SmartPicksRedundancyService } from './smart-picks-redundancy.service';
 
@@ -58,6 +69,7 @@ const DISMISSAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 const MIN_REPLACEMENT_USAGE_DAYS = 20;
 const MIN_REPLACEMENT_PHOTO_CHECKPOINTS = 2;
 const SMART_PICKS_AI_GAP_BATCH_SIZE = 2;
+const PRODUCT_GENERATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const STARTER_KIT_ROLES: readonly SmartPicksCoverage['slots'][number]['role'][] =
   ['cleanse', 'moisturise', 'spf', 'treat'];
 const STARTER_TREATMENT_WAIT_REASON =
@@ -85,10 +97,26 @@ type SmartPickActionSummary = {
   nextEligibleAt: Date | null;
 };
 
+type ProductGenerationIssue = {
+  status:
+    | typeof SmartPicksProductGenerationStatus.Failed
+    | typeof SmartPicksProductGenerationStatus.Skipped;
+  reason: SmartPicksProductGenerationReason;
+  attemptedAt: Date;
+  missingPickCount: number;
+};
+
 @Injectable()
 export class SmartPicksOverviewService {
   private readonly logger = new Logger(SmartPicksOverviewService.name);
-  private readonly backgroundGenerationJobs = new Map<string, Promise<void>>();
+  private readonly backgroundGenerationJobs = new Map<
+    string,
+    Promise<SmartPicksProductGenerationState>
+  >();
+  private readonly productGenerationIssues = new Map<
+    string,
+    ProductGenerationIssue
+  >();
 
   constructor(
     private readonly contextBuilder: SmartPicksContextBuilder,
@@ -105,6 +133,8 @@ export class SmartPicksOverviewService {
     private readonly gapActionRepo: Repository<SuggestionGapAction>,
     @InjectRepository(SkinProfile)
     private readonly skinProfileRepo: Repository<SkinProfile>,
+    @Optional()
+    private readonly generationQueue?: SmartPicksGenerationQueueService,
   ) {}
 
   async getOverview(
@@ -117,7 +147,7 @@ export class SmartPicksOverviewService {
     }
 
     const cached = await this.snapshotRepo.findOne({
-      where: { user_id: user.id },
+      where: { user_id: user.id, mode: context.mode },
     });
     if (cached && isFreshSnapshot(cached, context)) {
       return this.hydrateOverview(context, cached);
@@ -143,6 +173,52 @@ export class SmartPicksOverviewService {
     while (this.backgroundGenerationJobs.size > 0) {
       await Promise.allSettled(this.backgroundGenerationJobs.values());
     }
+  }
+
+  async generateProductPicksForJob(
+    user: User,
+    mode: SmartPicksMode,
+    inputsHash: string,
+  ): Promise<SmartPicksProductGenerationState> {
+    const context = await this.contextBuilder.build(user, mode);
+    if (
+      context.skinProfileRequired ||
+      context.consentRequired ||
+      context.inputsHash !== inputsHash
+    ) {
+      return readyProductGenerationState();
+    }
+
+    const cached = await this.snapshotRepo.findOne({
+      where: { user_id: user.id, mode: context.mode },
+    });
+    const snapshot =
+      cached && isFreshSnapshot(cached, context)
+        ? cached
+        : await this.saveSnapshot(
+            context,
+            this.buildSnapshotPayload(context),
+            cached,
+          );
+
+    const gaps = (snapshot.gaps_json ?? []).map(normalizeGapSnapshot);
+    const suggestions = await this.productSuggestionRepo.find({
+      where: { user_id: context.user.id, inputs_hash: context.inputsHash },
+    });
+    const generatedKeys = new Set(
+      suggestions.map((suggestion) => suggestion.normalized_key),
+    );
+    const actionSummary = await this.loadActionSummary(
+      context.user.id,
+      gaps.map((gap) => gap.normalizedKey),
+    );
+    const missingGenerationGaps = gaps.filter(
+      (gap) =>
+        !generatedKeys.has(gap.normalizedKey) &&
+        !actionSummary.dismissedKeys.has(gap.normalizedKey),
+    );
+
+    return this.generateProductPicks(context, missingGenerationGaps);
   }
 
   async updateBudget(
@@ -254,7 +330,30 @@ export class SmartPicksOverviewService {
         !suggestionsByKey.has(gap.normalizedKey) &&
         !actionSummary.dismissedKeys.has(gap.normalizedKey),
     );
-    this.enqueueProductPickGeneration(context, missingGenerationGaps);
+    let productGeneration = await this.resolveProductGenerationState(
+      context,
+      missingGenerationGaps.length,
+    );
+    if (
+      productGeneration.status === SmartPicksProductGenerationStatus.Pending
+    ) {
+      if (this.generationQueue) {
+        const generationJob = await this.generationQueue.enqueueForContext(
+          context,
+          missingGenerationGaps.length,
+        );
+        productGeneration = {
+          ...productGeneration,
+          isProcessing: Boolean(generationJob),
+        };
+      } else {
+        this.enqueueProductPickGeneration(context, missingGenerationGaps);
+        productGeneration = {
+          ...productGeneration,
+          isProcessing: missingGenerationGaps.length > 0,
+        };
+      }
+    }
     const starterKit =
       context.mode === 'starter'
         ? buildStarterKit(context, snapshot.coverage_json, visibleGaps)
@@ -273,6 +372,7 @@ export class SmartPicksOverviewService {
       consentRequired: false,
       skinProfileRequired: false,
       productSuggestionsUnavailable,
+      productGeneration,
       emptyState: buildEmptyState(context, {
         visibleGapCount: visibleGaps.length,
         snapshotGapCount: gaps.length,
@@ -300,6 +400,7 @@ export class SmartPicksOverviewService {
       consentRequired: context.consentRequired,
       skinProfileRequired: context.skinProfileRequired,
       productSuggestionsUnavailable: false,
+      productGeneration: readyProductGenerationState(),
       emptyState: buildEmptyState(context, {
         visibleGapCount: 0,
         snapshotGapCount: 0,
@@ -317,7 +418,7 @@ export class SmartPicksOverviewService {
     gaps: SmartPicksGapSnapshot[],
   ): void {
     if (gaps.length === 0) return;
-    const jobKey = `picks:${context.user.id}:${context.mode}:${context.inputsHash}`;
+    const jobKey = this.productGenerationJobKey(context);
     if (this.backgroundGenerationJobs.has(jobKey)) return;
 
     const job = this.generateProductPicks(context, gaps)
@@ -327,6 +428,14 @@ export class SmartPicksOverviewService {
             error instanceof Error ? error.message : 'unknown error'
           }`,
         );
+        return {
+          status: SmartPicksProductGenerationStatus.Failed,
+          reason: SmartPicksProductGenerationReason.ProviderFailed,
+          missingPickCount: gaps.length,
+          isProcessing: false,
+          attemptedAt: new Date().toISOString(),
+          retryAfter: null,
+        };
       })
       .finally(() => {
         this.backgroundGenerationJobs.delete(jobKey);
@@ -337,12 +446,12 @@ export class SmartPicksOverviewService {
   private async generateProductPicks(
     context: SmartPicksContext,
     gaps: SmartPicksGapSnapshot[],
-  ): Promise<void> {
+  ): Promise<SmartPicksProductGenerationState> {
     const dismissedKeys = await this.loadRecentlyDismissedKeys(context.user.id);
     const gapsForGeneration = gaps.filter(
       (gap) => !dismissedKeys.has(gap.normalizedKey),
     );
-    if (gapsForGeneration.length === 0) return;
+    if (gapsForGeneration.length === 0) return readyProductGenerationState();
 
     const generatedPicks = new Map<string, GeneratedSmartPick>();
     let combinedDiagnostics = emptyGenerationDiagnostics(
@@ -385,12 +494,18 @@ export class SmartPicksOverviewService {
       !(await this.hasSmartPicksConsent(context)) ||
       !(await this.isCurrentSnapshotContext(context))
     ) {
-      return;
+      return readyProductGenerationState();
     }
     await this.persistGeneratedPicks(
       context,
       gapsForGeneration,
       generatedPicks,
+    );
+    const outcome = this.rememberProductGenerationOutcome(
+      context,
+      gapsForGeneration.length,
+      generatedPicks.size,
+      combinedDiagnostics,
     );
     await this.recordGenerationMetrics(
       context,
@@ -398,6 +513,7 @@ export class SmartPicksOverviewService {
       generatedPicks,
       combinedDiagnostics,
     );
+    return outcome;
   }
 
   private async retryMissingProductPicks(
@@ -420,6 +536,128 @@ export class SmartPicksOverviewService {
       initialDiagnostics,
       retryResult.diagnostics,
     );
+  }
+
+  private async resolveProductGenerationState(
+    context: SmartPicksContext,
+    missingPickCount: number,
+  ): Promise<SmartPicksProductGenerationState> {
+    const jobKey = this.productGenerationJobKey(context);
+    if (missingPickCount === 0) {
+      this.productGenerationIssues.delete(jobKey);
+      return readyProductGenerationState();
+    }
+
+    if (this.generationQueue) {
+      const durableJob = await this.generationQueue.latestForContext(context);
+      if (
+        durableJob?.status === SmartPicksGenerationJobStatus.Queued ||
+        durableJob?.status === SmartPicksGenerationJobStatus.Sent ||
+        durableJob?.status === SmartPicksGenerationJobStatus.Running
+      ) {
+        return {
+          ...pendingProductGenerationState(missingPickCount),
+          isProcessing: true,
+          attemptedAt: durableJob.locked_at
+            ? toIsoString(durableJob.locked_at)
+            : null,
+        };
+      }
+      if (durableJob?.status === SmartPicksGenerationJobStatus.Failed) {
+        const attemptedAt = durableJob.updated_at ?? durableJob.created_at;
+        const retryAfter = new Date(
+          attemptedAt.getTime() + PRODUCT_GENERATION_RETRY_COOLDOWN_MS,
+        );
+        if (retryAfter.getTime() <= Date.now()) {
+          return pendingProductGenerationState(missingPickCount);
+        }
+        return {
+          status: SmartPicksProductGenerationStatus.Failed,
+          reason: productGenerationReasonFromJob(durableJob.last_error),
+          missingPickCount,
+          isProcessing: false,
+          attemptedAt: toIsoString(attemptedAt),
+          retryAfter: toIsoString(retryAfter),
+        };
+      }
+      return pendingProductGenerationState(missingPickCount);
+    }
+
+    if (this.backgroundGenerationJobs.has(jobKey)) {
+      return {
+        ...pendingProductGenerationState(missingPickCount),
+        isProcessing: true,
+      };
+    }
+
+    const issue = this.productGenerationIssues.get(jobKey);
+    if (!issue) return pendingProductGenerationState(missingPickCount);
+
+    const retryAfter = new Date(
+      issue.attemptedAt.getTime() + PRODUCT_GENERATION_RETRY_COOLDOWN_MS,
+    );
+    if (retryAfter.getTime() <= Date.now()) {
+      this.productGenerationIssues.delete(jobKey);
+      return pendingProductGenerationState(missingPickCount);
+    }
+
+    return {
+      status: issue.status,
+      reason: issue.reason,
+      missingPickCount: Math.max(missingPickCount, issue.missingPickCount),
+      isProcessing: false,
+      attemptedAt: toIsoString(issue.attemptedAt),
+      retryAfter: toIsoString(retryAfter),
+    };
+  }
+
+  private rememberProductGenerationOutcome(
+    context: SmartPicksContext,
+    requestedGapCount: number,
+    generatedPickCount: number,
+    diagnostics: SmartPicksAiGenerationDiagnostics,
+  ): SmartPicksProductGenerationState {
+    const jobKey = this.productGenerationJobKey(context);
+    const missingPickCount = Math.max(
+      0,
+      requestedGapCount - generatedPickCount,
+    );
+    if (
+      missingPickCount === 0 &&
+      !diagnostics.providerFailed &&
+      !diagnostics.providerSkippedReason
+    ) {
+      this.productGenerationIssues.delete(jobKey);
+      return readyProductGenerationState();
+    }
+
+    const attemptedAt = new Date();
+    this.productGenerationIssues.set(jobKey, {
+      status: diagnostics.providerSkippedReason
+        ? SmartPicksProductGenerationStatus.Skipped
+        : SmartPicksProductGenerationStatus.Failed,
+      reason: productGenerationReason(diagnostics),
+      attemptedAt,
+      missingPickCount:
+        missingPickCount > 0 ? missingPickCount : diagnostics.missingPickCount,
+    });
+    return {
+      status: diagnostics.providerSkippedReason
+        ? SmartPicksProductGenerationStatus.Skipped
+        : SmartPicksProductGenerationStatus.Failed,
+      reason: productGenerationReason(diagnostics),
+      missingPickCount:
+        missingPickCount > 0 ? missingPickCount : diagnostics.missingPickCount,
+      isProcessing: false,
+      attemptedAt: toIsoString(attemptedAt),
+      retryAfter: toIsoString(
+        new Date(attemptedAt.getTime() + PRODUCT_GENERATION_RETRY_COOLDOWN_MS),
+      ),
+    };
+  }
+
+  private productGenerationJobKey(context: SmartPicksContext): string {
+    return `picks:${context.user.id}:${context.mode}:${context.inputsHash}`;
   }
 
   private async persistGeneratedPicks(
@@ -615,10 +853,18 @@ export class SmartPicksOverviewService {
   private async pruneStaleProductSuggestions(
     context: SmartPicksContext,
   ): Promise<void> {
+    const activeSnapshots =
+      (await this.snapshotRepo.find({
+        where: { user_id: context.user.id },
+      })) ?? [];
+    const retainedInputHashes = new Set([
+      context.inputsHash,
+      ...activeSnapshots.map((snapshot) => snapshot.inputs_hash),
+    ]);
     const suggestions = await this.productSuggestionRepo.find({
       where: {
         user_id: context.user.id,
-        inputs_hash: Not(context.inputsHash),
+        inputs_hash: Not(In([...retainedInputHashes])),
       },
     });
     if (suggestions.length === 0) return;
@@ -694,7 +940,7 @@ export class SmartPicksOverviewService {
     context: SmartPicksContext,
   ): Promise<boolean> {
     const snapshot = await this.snapshotRepo.findOne({
-      where: { user_id: context.user.id },
+      where: { user_id: context.user.id, mode: context.mode },
     });
     if (!snapshot) return true;
     return (
@@ -768,6 +1014,57 @@ function emptyGenerationDiagnostics(
     providerFailed: false,
     providerSkippedReason: null,
   };
+}
+
+function readyProductGenerationState(): SmartPicksProductGenerationState {
+  return {
+    status: SmartPicksProductGenerationStatus.Ready,
+    reason: null,
+    missingPickCount: 0,
+    isProcessing: false,
+    attemptedAt: null,
+    retryAfter: null,
+  };
+}
+
+function pendingProductGenerationState(
+  missingPickCount: number,
+): SmartPicksProductGenerationState {
+  return {
+    status: SmartPicksProductGenerationStatus.Pending,
+    reason: null,
+    missingPickCount,
+    isProcessing: false,
+    attemptedAt: null,
+    retryAfter: null,
+  };
+}
+
+function productGenerationReason(
+  diagnostics: SmartPicksAiGenerationDiagnostics,
+): SmartPicksProductGenerationReason {
+  if (
+    diagnostics.providerSkippedReason ===
+    SmartPicksAiProviderSkippedReason.MissingApiKey
+  ) {
+    return SmartPicksProductGenerationReason.MissingApiKey;
+  }
+  if (diagnostics.providerFailed) {
+    return SmartPicksProductGenerationReason.ProviderFailed;
+  }
+  return SmartPicksProductGenerationReason.NoPick;
+}
+
+function productGenerationReasonFromJob(
+  lastError: string | null,
+): SmartPicksProductGenerationReason {
+  if (lastError === SmartPicksProductGenerationReason.MissingApiKey) {
+    return SmartPicksProductGenerationReason.MissingApiKey;
+  }
+  if (lastError === SmartPicksProductGenerationReason.NoPick) {
+    return SmartPicksProductGenerationReason.NoPick;
+  }
+  return SmartPicksProductGenerationReason.ProviderFailed;
 }
 
 function chunkSmartPickGaps(
@@ -1632,12 +1929,16 @@ export function toProductPick(
         ruledOut: alternative.ruledOut ?? [],
         sourceIds: alternative.sourceIds ?? [],
         alternatives: [],
-        recommendationRankReason: alternative.recommendationRankReason ?? null,
+        recommendationRankReason: alternative.recommendationRankReason
+          ? buildShortGapReason(alternative.recommendationRankReason)
+          : null,
         userAction: null,
         createdAt: toIsoString(entity.created_at),
       }),
     ),
-    recommendationRankReason: entity.recommendation_rank_reason,
+    recommendationRankReason: entity.recommendation_rank_reason
+      ? buildShortGapReason(entity.recommendation_rank_reason)
+      : null,
     userAction: action,
     createdAt: toIsoString(entity.created_at),
   };

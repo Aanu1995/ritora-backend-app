@@ -131,6 +131,5 @@ export class SkinJournalAnalysisWorkerService
           }
         });
     }, delayMs);
-    this.pollTimer.unref?.();
   }
 }

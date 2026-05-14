@@ -897,8 +897,8 @@ function sanitizeStarterTreatmentAssessment(
     return null;
   }
   if (
-    context.skinProfile?.pregnancy_status &&
-    /(retinol|retinoid|tretinoin|adapalene)/i.test(combinedText)
+    isPregnancyCautionActive(context.skinProfile?.pregnancy_status ?? null) &&
+    /(retinol|retinal|retinoid|tretinoin|adapalene)/i.test(combinedText)
   ) {
     return null;
   }
@@ -1045,6 +1045,19 @@ function sanitizeStarterTreatmentConfidence(
   )
     ? (value as SmartPicksStarterTreatmentConfidence)
     : 'low';
+}
+
+function isPregnancyCautionActive(status: string | null): boolean {
+  const normalized = status?.trim().toLowerCase();
+  if (!normalized) return false;
+  return ![
+    'not_pregnant',
+    'not pregnant',
+    'none',
+    'no',
+    'unknown',
+    'prefer_not_to_say',
+  ].includes(normalized);
 }
 
 function budgetAllowed(

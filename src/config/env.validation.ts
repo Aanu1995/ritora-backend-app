@@ -307,6 +307,24 @@ export const envValidationSchema = Joi.object({
   SKIN_JOURNAL_ANALYSIS_AI_MODEL: Joi.string().trim().allow('').required(),
   SUGGESTION_AI_MODEL: Joi.string().trim().allow('').required(),
   SMART_PICKS_AI_MODEL: Joi.string().trim().allow('').required(),
+  SMART_PICKS_QUEUE_DRIVER: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().valid('sqs').required(),
+    otherwise: Joi.string().valid('sqs', 'database').required(),
+  }),
+  SMART_PICKS_SQS_QUEUE_URL: Joi.when('SMART_PICKS_QUEUE_DRIVER', {
+    is: 'sqs',
+    then: Joi.string()
+      .trim()
+      .uri({ scheme: ['https'] })
+      .required(),
+    otherwise: Joi.string().trim().allow('').required(),
+  }),
+  SMART_PICKS_SQS_DLQ_URL: Joi.string()
+    .trim()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .required(),
   OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
     .trim()
     .allow('')

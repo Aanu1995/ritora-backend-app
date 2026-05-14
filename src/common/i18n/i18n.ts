@@ -8,6 +8,12 @@ export const DEFAULT_LANGUAGE: AppLanguage = 'en';
 
 type TranslationDictionary = Record<string, string>;
 
+type RequestWithLanguageUser = Request & {
+  user?: {
+    language?: unknown;
+  };
+};
+
 const translations: Record<AppLanguage, TranslationDictionary> = {
   en: {
     'messages.auth.register.verifyEmail':
@@ -634,9 +640,10 @@ function readHeaderValue(header: string | string[] | undefined): string | null {
 }
 
 export function resolveRequestLanguage(request: Request): AppLanguage {
+  const requestWithUser = request as RequestWithLanguageUser;
   const requestUser =
-    typeof request.user === 'object' && request.user !== null
-      ? (request.user as { language?: unknown })
+    typeof requestWithUser.user === 'object' && requestWithUser.user !== null
+      ? requestWithUser.user
       : null;
   const requestBody = request.body as Record<string, unknown> | undefined;
   const requestQuery = request.query as Record<string, unknown> | undefined;

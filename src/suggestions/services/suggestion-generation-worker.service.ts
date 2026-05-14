@@ -344,7 +344,6 @@ export class SuggestionGenerationWorker
           }
         });
     }, delayMs);
-    this.pollTimer.unref?.();
   }
 }
 

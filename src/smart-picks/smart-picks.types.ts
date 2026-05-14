@@ -116,6 +116,47 @@ export const SmartPicksMissingProfileField = {
 export type SmartPicksMissingProfileField =
   (typeof SmartPicksMissingProfileField)[keyof typeof SmartPicksMissingProfileField];
 
+export const SmartPicksProductGenerationStatus = {
+  Ready: 'ready',
+  Pending: 'pending',
+  Failed: 'failed',
+  Skipped: 'skipped',
+} as const;
+
+export type SmartPicksProductGenerationStatus =
+  (typeof SmartPicksProductGenerationStatus)[keyof typeof SmartPicksProductGenerationStatus];
+
+export const SmartPicksProductGenerationReason = {
+  ProviderFailed: 'provider_failed',
+  MissingApiKey: 'missing_api_key',
+  NoPick: 'no_pick',
+} as const;
+
+export type SmartPicksProductGenerationReason =
+  (typeof SmartPicksProductGenerationReason)[keyof typeof SmartPicksProductGenerationReason];
+
+export interface SmartPicksProductGenerationState {
+  status: SmartPicksProductGenerationStatus;
+  reason: SmartPicksProductGenerationReason | null;
+  missingPickCount: number;
+  isProcessing: boolean;
+  attemptedAt: string | null;
+  retryAfter: string | null;
+}
+
+export const SmartPicksGenerationJobStatus = {
+  Queued: 'queued',
+  Sent: 'sent',
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+} as const;
+
+export type SmartPicksGenerationJobStatus =
+  (typeof SmartPicksGenerationJobStatus)[keyof typeof SmartPicksGenerationJobStatus];
+
+export type SmartPicksQueueDriver = 'sqs' | 'database';
+
 export interface SmartPicksHistoryReadiness {
   usablePhotoCheckpoints: number;
   loggedUseDaysLast90: number;
@@ -299,6 +340,7 @@ export interface SmartPicksOverview {
   consentRequired: boolean;
   skinProfileRequired: boolean;
   productSuggestionsUnavailable: boolean;
+  productGeneration: SmartPicksProductGenerationState;
   emptyState: SmartPicksEmptyState;
   starterKit: SmartPicksStarterKit;
 }

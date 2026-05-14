@@ -64,6 +64,9 @@ function developmentEnv(
     SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'gpt-5.5',
     SUGGESTION_AI_MODEL: 'gpt-5.5',
     SMART_PICKS_AI_MODEL: 'gpt-5.5',
+    SMART_PICKS_QUEUE_DRIVER: 'database',
+    SMART_PICKS_SQS_QUEUE_URL: '',
+    SMART_PICKS_SQS_DLQ_URL: '',
     OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
     OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: '',
     INSIGHTS_AI_MODEL: 'gpt-5.5',
@@ -156,6 +159,10 @@ function productionEnv(
     SKIN_JOURNAL_INSIGHT_SQS_QUEUE_URL:
       'https://sqs.eu-west-1.amazonaws.com/123/skin-journal-insights',
     SKIN_JOURNAL_INSIGHT_SQS_DLQ_URL: '',
+    SMART_PICKS_QUEUE_DRIVER: 'sqs',
+    SMART_PICKS_SQS_QUEUE_URL:
+      'https://sqs.eu-west-1.amazonaws.com/123/smart-picks',
+    SMART_PICKS_SQS_DLQ_URL: '',
     SKIN_JOURNAL_OPERATIONS_TOKEN: 'o'.repeat(32),
     SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-prod-skin-journal',
     SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: 'https://media.ritora.com',
@@ -465,6 +472,17 @@ describe('envValidationSchema', () => {
     );
   });
 
+  it('requires an explicit Smart Picks queue driver outside production', () => {
+    const result = validateEnv(
+      developmentEnv({
+        SMART_PICKS_QUEUE_DRIVER: undefined,
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('SMART_PICKS_QUEUE_DRIVER');
+  });
+
   it('requires an SQS queue URL in production when the insight queue driver is SQS', () => {
     const result = validateEnv(
       productionEnv({ SKIN_JOURNAL_INSIGHT_SQS_QUEUE_URL: '' }),
@@ -474,6 +492,30 @@ describe('envValidationSchema', () => {
     expect(result.error?.message).toContain(
       'SKIN_JOURNAL_INSIGHT_SQS_QUEUE_URL',
     );
+  });
+
+  it('requires an SQS queue URL when the Smart Picks queue driver is SQS', () => {
+    const result = validateEnv(
+      productionEnv({
+        SMART_PICKS_QUEUE_DRIVER: 'sqs',
+        SMART_PICKS_SQS_QUEUE_URL: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('SMART_PICKS_SQS_QUEUE_URL');
+  });
+
+  it('requires the Smart Picks queue driver to be SQS in production', () => {
+    const result = validateEnv(
+      productionEnv({
+        SMART_PICKS_QUEUE_DRIVER: 'database',
+        SMART_PICKS_SQS_QUEUE_URL: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('SMART_PICKS_QUEUE_DRIVER');
   });
 
   it('strips Skin Journal queue policy values even when provided', () => {

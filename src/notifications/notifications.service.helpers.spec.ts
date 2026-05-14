@@ -7,10 +7,7 @@ import {
 } from '../shelf/shelf.types';
 import { User } from '../users/entities/user.entity';
 import { UpdatePreferencesDto } from './dto/notification-preference.dto';
-import {
-  InAppNotification,
-  NotificationKind,
-} from './entities/in-app-notification.entity';
+import { InAppNotification } from './entities/in-app-notification.entity';
 import { ScheduledNotification } from './entities/scheduled-notification.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
 import {

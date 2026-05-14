@@ -111,6 +111,14 @@ function overview(
     consentRequired: false,
     skinProfileRequired: false,
     productSuggestionsUnavailable: false,
+    productGeneration: {
+      status: 'ready',
+      reason: null,
+      missingPickCount: 0,
+      isProcessing: false,
+      attemptedAt: null,
+      retryAfter: null,
+    },
     emptyState: {
       reason: null,
       dismissedGapCount: 0,

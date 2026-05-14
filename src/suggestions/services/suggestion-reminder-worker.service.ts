@@ -215,7 +215,6 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
           }
         });
     }, delayMs);
-    this.timer.unref?.();
   }
 
   private async loadActiveSlotKeys(

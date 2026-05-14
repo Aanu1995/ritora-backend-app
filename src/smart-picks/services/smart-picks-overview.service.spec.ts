@@ -13,6 +13,8 @@ import {
   SmartPicksCoverage,
   SmartPicksEmptyReason,
   SmartPicksGapKind,
+  SmartPicksProductGenerationReason,
+  SmartPicksProductGenerationStatus,
   SmartPicksStarterKitStepStatus,
   SmartPicksProductAdherence,
   SmartPicksProductPerformanceSignal,
@@ -24,6 +26,7 @@ import {
   SmartPicksOverviewService,
   toProductPick,
 } from './smart-picks-overview.service';
+import { SmartPicksGenerationQueueService } from './smart-picks-generation-queue.service';
 
 describe('SmartPicksOverviewService', () => {
   it('returns seller names without legacy shopping fields', () => {
@@ -38,6 +41,36 @@ describe('SmartPicksOverviewService', () => {
     expect(pick).not.toHaveProperty('currency');
     expect(pick).not.toHaveProperty('retailers');
     expect(pick).not.toHaveProperty('verificationStatus');
+  });
+
+  it('strips budget-prefixed rank reasons from persisted Smart Pick suggestions', () => {
+    const pick = toProductPick(
+      productSuggestion({
+        recommendation_rank_reason:
+          'Because your Skin Profile uses a premium budget, this is a steady pigment-support pick when budget and safety context allow it.',
+        alternatives_json: [
+          {
+            brand: 'Alt Brand',
+            productName: 'Alt Serum',
+            budgetTier: 'mid',
+            sellerNames: [],
+            reasoningChips: [],
+            reasoningFacts: {},
+            ruledOut: [],
+            sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+            recommendationRankReason:
+              'Best fit because the profile is filtered to premium budget, and this is a gentler support option.',
+          },
+        ],
+      }),
+    );
+
+    expect(pick.recommendationRankReason).toBe(
+      'A steady pigment-support pick when the safety context allows it.',
+    );
+    expect(pick.alternatives[0]?.recommendationRankReason).toBe(
+      'A gentler support option.',
+    );
   });
 
   it('records Smart Picks generation metrics without product or seller identifiers', async () => {
@@ -231,6 +264,56 @@ describe('SmartPicksOverviewService', () => {
 
     expect(aiGenerator.generateWithDiagnostics).toHaveBeenCalled();
     expect(repos.suggestions.save).not.toHaveBeenCalled();
+  });
+
+  it('enqueues durable product generation when a queue is available', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    repos.snapshots.findOne.mockResolvedValue(null);
+    repos.snapshots.create.mockImplementation(
+      (value) => value as SmartPickSnapshot,
+    );
+    repos.snapshots.save.mockImplementation(async (value) =>
+      snapshot({
+        ...(value as Partial<SmartPickSnapshot>),
+        generated_at: new Date('2026-05-12T09:00:00.000Z'),
+      }),
+    );
+    repos.suggestions.find.mockResolvedValue([]);
+    repos.actions.find.mockResolvedValue([]);
+    const aiGenerator = {
+      assessStarterTreatment: jest.fn().mockResolvedValue(null),
+      generateWithDiagnostics: jest.fn(),
+    };
+    const generationQueue = {
+      latestForContext: jest.fn().mockResolvedValue(null),
+      enqueueForContext: jest.fn().mockResolvedValue({ id: 'job-1' }),
+    };
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(context()) },
+      aiGenerator,
+      generationQueue,
+      repos,
+    });
+
+    const overview = await service.getOverview(user());
+
+    expect(overview.productGeneration.status).toBe(
+      SmartPicksProductGenerationStatus.Pending,
+    );
+    expect(overview.productGeneration.isProcessing).toBe(true);
+    expect(generationQueue.enqueueForContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: expect.objectContaining({ id: 'user-1' }),
+        inputsHash: 'hash-1',
+      }),
+      expect.any(Number),
+    );
+    expect(aiGenerator.generateWithDiagnostics).not.toHaveBeenCalled();
   });
 
   it('returns a profile-required empty state without calling product generation', async () => {
@@ -567,6 +650,47 @@ describe('SmartPicksOverviewService', () => {
     expect(serializedCriteria).toContain('old-expired-dismissed');
     expect(serializedCriteria).not.toContain('old-saved');
     expect(serializedCriteria).not.toContain('old-recent-dismissed');
+  });
+
+  it('keeps unsaved product suggestions for another current Smart Picks mode', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    const activeContext = context({
+      mode: 'refine',
+      inputsHash: 'refine-hash',
+    });
+    repos.snapshots.findOne.mockResolvedValue(null);
+    repos.snapshots.find.mockResolvedValue([
+      snapshot({ mode: 'starter', inputs_hash: 'starter-hash' }),
+      snapshot({ mode: 'refine', inputs_hash: 'refine-hash' }),
+    ]);
+    repos.snapshots.create.mockImplementation(
+      (value) => value as SmartPickSnapshot,
+    );
+    repos.snapshots.save.mockImplementation(async (value) =>
+      snapshot({
+        ...(value as Partial<SmartPickSnapshot>),
+        inputs_hash: activeContext.inputsHash,
+      }),
+    );
+    repos.suggestions.find.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    repos.actions.find.mockResolvedValue([]);
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(activeContext) },
+      repos,
+    });
+
+    await service.getOverview(user());
+
+    const staleSuggestionQuery = repos.suggestions.find.mock.calls[0]?.[0];
+    const serializedQuery = JSON.stringify(staleSuggestionQuery);
+    expect(serializedQuery).toContain('refine-hash');
+    expect(serializedQuery).toContain('starter-hash');
+    expect(repos.suggestions.delete).not.toHaveBeenCalled();
   });
 
   it('returns a cold overview before background product generation resolves', async () => {
@@ -969,6 +1093,71 @@ describe('SmartPicksOverviewService', () => {
         severity: 'warning',
         metadata: expect.objectContaining({ providerFailed: true }),
       }),
+    );
+  });
+
+  it('returns failed product generation state after a background AI failure', async () => {
+    const repos = {
+      snapshots: repo<SmartPickSnapshot>(),
+      suggestions: repo<SmartPickProductSuggestion>(),
+      actions: repo<SuggestionGapAction>(),
+      profiles: repo<SkinProfile>(),
+    };
+    let savedSnapshot: SmartPickSnapshot | null = null;
+    repos.snapshots.findOne.mockImplementation(async () => savedSnapshot);
+    repos.snapshots.create.mockImplementation(
+      (value) => value as SmartPickSnapshot,
+    );
+    repos.snapshots.save.mockImplementation(async (value) => {
+      savedSnapshot = snapshot({
+        ...(value as Partial<SmartPickSnapshot>),
+        generated_at: new Date('2026-05-12T09:00:00.000Z'),
+      });
+      return savedSnapshot;
+    });
+    repos.suggestions.find.mockResolvedValue([]);
+    repos.actions.find.mockResolvedValue([]);
+    const service = serviceWith({
+      contextBuilder: { build: jest.fn().mockResolvedValue(context()) },
+      aiGenerator: {
+        assessStarterTreatment: jest.fn().mockResolvedValue(null),
+        generateWithDiagnostics: jest.fn().mockResolvedValue(
+          aiGenerationResult(new Map<string, GeneratedSmartPick>(), {
+            requestedGapCount: 5,
+            providerFailed: true,
+            missingPickCount: 5,
+          }),
+        ),
+      },
+      repos,
+    });
+
+    const initial = await service.getOverview(user());
+
+    expect(initial.productGeneration).toEqual(
+      expect.objectContaining({
+        status: SmartPicksProductGenerationStatus.Pending,
+        missingPickCount: 5,
+        isProcessing: true,
+      }),
+    );
+    await service.waitForBackgroundGeneration();
+
+    const afterFailure = await service.getOverview(user());
+
+    expect(afterFailure.productGeneration).toEqual(
+      expect.objectContaining({
+        status: SmartPicksProductGenerationStatus.Failed,
+        reason: SmartPicksProductGenerationReason.ProviderFailed,
+        missingPickCount: 5,
+        isProcessing: false,
+      }),
+    );
+    expect(afterFailure.productGeneration.attemptedAt).toEqual(
+      expect.any(String),
+    );
+    expect(afterFailure.productGeneration.retryAfter).toEqual(
+      expect.any(String),
     );
   });
 
@@ -1847,6 +2036,7 @@ function serviceWith({
       .mockResolvedValue(aiGenerationResult(new Map())),
   },
   repos,
+  generationQueue,
 }: {
   contextBuilder: Pick<SmartPicksOverviewService, never> & {
     build: jest.Mock;
@@ -1862,6 +2052,12 @@ function serviceWith({
     actions: jest.Mocked<Repository<SuggestionGapAction>>;
     profiles: jest.Mocked<Repository<SkinProfile>>;
   };
+  generationQueue?: jest.Mocked<
+    Pick<
+      SmartPicksGenerationQueueService,
+      'enqueueForContext' | 'latestForContext'
+    >
+  >;
 }) {
   return new SmartPicksOverviewService(
     contextBuilder as never,
@@ -1874,6 +2070,7 @@ function serviceWith({
     repos.suggestions,
     repos.actions,
     repos.profiles,
+    generationQueue as never,
   );
 }
 

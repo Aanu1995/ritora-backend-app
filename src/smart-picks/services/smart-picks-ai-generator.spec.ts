@@ -651,6 +651,72 @@ describe('SmartPicksAiGenerator', () => {
     ).resolves.toBeNull();
   });
 
+  it('allows retinoid starter treatment assessments when pregnancy caution is inactive', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock.mockResolvedValue(
+      openAiResponse({
+        shouldRecommend: true,
+        ingredientOrCategory: 'Beginner retinol night treatment',
+        goalAlignment: 'texture support',
+        reason: 'A slow-introduction retinal can support the stated goal.',
+        sourceIds: [SuggestionEvidenceSourceId.AadRetinoidRetinol],
+        confidence: 'medium',
+      }),
+    );
+    const generator = new SmartPicksAiGenerator(configService());
+    const safeContext = context();
+    const currentProfile = safeContext.skinProfile;
+    if (!currentProfile) throw new Error('Expected skin profile fixture.');
+    safeContext.skinProfile = {
+      ...currentProfile,
+      pregnancy_status: 'not_pregnant',
+    } as unknown as SkinProfile;
+
+    const assessment = await generator.assessStarterTreatment({
+      ...safeContext,
+      mode: 'starter',
+      activeProducts: [],
+      allProducts: [],
+    });
+
+    expect(assessment?.ingredientOrCategory).toBe(
+      'Beginner retinol night treatment',
+    );
+  });
+
+  it('blocks retinoid starter treatment assessments when pregnancy caution is active', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock.mockResolvedValue(
+      openAiResponse({
+        shouldRecommend: true,
+        ingredientOrCategory: 'Beginner retinol serum',
+        goalAlignment: 'fine line support',
+        reason: 'Retinol may support the stated goal.',
+        sourceIds: [SuggestionEvidenceSourceId.AadRetinoidRetinol],
+        confidence: 'medium',
+      }),
+    );
+    const generator = new SmartPicksAiGenerator(configService());
+    const unsafeContext = context();
+    const currentProfile = unsafeContext.skinProfile;
+    if (!currentProfile) throw new Error('Expected skin profile fixture.');
+    unsafeContext.skinProfile = {
+      ...currentProfile,
+      pregnancy_status: 'pregnant',
+    } as unknown as SkinProfile;
+
+    await expect(
+      generator.assessStarterTreatment({
+        ...unsafeContext,
+        mode: 'starter',
+        activeProducts: [],
+        allProducts: [],
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('deduplicates seller names and ignores legacy commerce fields', async () => {
     const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
     global.fetch = fetchMock;
