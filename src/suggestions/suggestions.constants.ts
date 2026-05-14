@@ -183,6 +183,7 @@ export type SuggestionObservabilityEventKind =
   | 'smart_pick_no_pick'
   | 'smart_pick_quality_drift'
   | 'smart_pick_unsafe_output_blocked'
+  | 'smart_pick_user_feedback'
   | 'retention_purged';
 
 export type SuggestionObservabilitySeverity = 'info' | 'warning' | 'critical';

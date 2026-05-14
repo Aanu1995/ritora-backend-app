@@ -117,6 +117,8 @@ describe('OpenAiExtractorProvider', () => {
     expect(result?.data.identity?.name).toBe('Glycolic Acid Daily Toner');
     const body = lastRequestBody();
     expect(body.model).toBe('catalogue-model');
+    expect(body.store).toBe(false);
+    expect(body.temperature).toBe(0);
     expect(body.text).toMatchObject({
       verbosity: 'low',
       format: {

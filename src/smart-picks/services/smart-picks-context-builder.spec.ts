@@ -21,6 +21,7 @@ import { User } from '../../users/entities/user.entity';
 import {
   SmartPicksProductAdherence,
   SmartPicksProductPerformanceSignal,
+  SmartPicksProductPerformanceSummary,
 } from '../smart-picks.types';
 import { SmartPicksContextBuilder } from './smart-picks-context-builder';
 import { SmartPicksProductPerformanceService } from './smart-picks-product-performance.service';
@@ -126,6 +127,38 @@ describe('SmartPicksContextBuilder', () => {
     ]);
 
     expect(metadataOnly.inputsHash).toBe(baseline.inputsHash);
+  });
+
+  it('keeps the inputs hash stable when the same shelf rows arrive in a different order', async () => {
+    const cleanser = product('cleanser-1', ProductCategory.Cleanser);
+    const serum = product('serum-1', ProductCategory.Serum);
+    const baseline = await buildContextWithProducts([cleanser, serum]);
+    const reordered = await buildContextWithProducts([serum, cleanser]);
+
+    expect(reordered.inputsHash).toBe(baseline.inputsHash);
+    expect(reordered.allProducts.map((item) => item.id)).toEqual([
+      'cleanser-1',
+      'serum-1',
+    ]);
+  });
+
+  it('keeps the inputs hash stable when performance summaries arrive in a different order', async () => {
+    const creamPerformance = productPerformanceSummary('cream-1');
+    const serumPerformance = productPerformanceSummary('serum-1');
+    const baseline = await buildContextWithPerformance([
+      creamPerformance,
+      serumPerformance,
+    ]);
+    const reordered = await buildContextWithPerformance([
+      serumPerformance,
+      creamPerformance,
+    ]);
+
+    expect(reordered.inputsHash).toBe(baseline.inputsHash);
+    expect(reordered.productPerformance.map((item) => item.productId)).toEqual([
+      'cream-1',
+      'serum-1',
+    ]);
   });
 
   it('keeps the inputs hash stable when only environment timestamps and exact readings change', async () => {
@@ -251,6 +284,31 @@ async function buildContextWithProducts(products: InventoryProduct[]) {
   return builder.build(user(), null);
 }
 
+async function buildContextWithPerformance(
+  summaries: SmartPicksProductPerformanceSummary[],
+) {
+  const skinProfileRepo = repo<SkinProfile>();
+  const inventoryRepo = repo<InventoryProduct>();
+  const environmentContext = {
+    buildContext: jest.fn().mockResolvedValue({ summary: null }),
+  } as unknown as EnvironmentContextService;
+  const productPerformance = {
+    summarizeForUser: jest.fn().mockResolvedValue(summaries),
+  } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
+  skinProfileRepo.findOne.mockResolvedValue(profile());
+  inventoryRepo.find.mockResolvedValue([
+    product('serum-1', ProductCategory.Serum),
+    product('cream-1', ProductCategory.Moisturizer),
+  ]);
+  const builder = new SmartPicksContextBuilder(
+    skinProfileRepo,
+    inventoryRepo,
+    environmentContext,
+    productPerformance,
+  );
+  return builder.build(user(), null);
+}
+
 function repo<T extends ObjectLiteral>() {
   return {
     find: jest.fn(),
@@ -322,6 +380,31 @@ function product(
     updated_at: new Date('2026-05-10T08:00:00.000Z'),
     ...overrides,
   } as unknown as InventoryProduct;
+}
+
+function productPerformanceSummary(
+  productId: string,
+): SmartPicksProductPerformanceSummary {
+  return {
+    productId,
+    brand: 'Test Brand',
+    productName: productId,
+    category:
+      productId === 'cream-1'
+        ? ProductCategory.Moisturizer
+        : ProductCategory.Serum,
+    usageDaysLast30: 12,
+    usageDaysLast90: 30,
+    firstUsedAt: '2026-03-01',
+    lastUsedAt: '2026-05-10',
+    adherence: SmartPicksProductAdherence.Consistent,
+    goalTrend: SmartPicksProductPerformanceSignal.NotImproving,
+    concernTrend: 'dark_marks',
+    photoCheckpoints: 2,
+    reactionSignalCount: 0,
+    replacementCandidate: false,
+    replacementReason: null,
+  };
 }
 
 function environmentSummary(

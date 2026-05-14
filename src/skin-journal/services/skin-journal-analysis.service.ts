@@ -4,6 +4,7 @@ import {
   readFeatureOpenAiModel,
   SKIN_JOURNAL_ANALYSIS_AI_MODEL_ENV_KEY,
 } from '../../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
 import {
   extractJsonObject,
   extractOutputText,
@@ -416,6 +417,7 @@ export class SkinJournalAnalysisService {
           },
         ],
         max_output_tokens: 1200,
+        ...openAiRepeatabilityRequestOptions(params.model),
         text: {
           verbosity: 'low',
           format: RESPONSE_FORMAT,

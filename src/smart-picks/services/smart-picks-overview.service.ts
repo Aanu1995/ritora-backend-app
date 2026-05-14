@@ -6,6 +6,11 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, MoreThan, Not, Repository } from 'typeorm';
+import {
+  AppLanguage,
+  DEFAULT_LANGUAGE,
+  normalizeLanguage,
+} from '../../common/i18n/i18n';
 import { toIsoString } from '../../common/utils/date';
 import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
 import type { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
@@ -52,6 +57,7 @@ import {
 } from '../smart-picks.types';
 import {
   SmartPicksAiGenerationDiagnostics,
+  SmartPicksAiPlanDiagnostics,
   GeneratedSmartPick,
   SmartPicksAiGenerator,
   SmartPicksAiProviderSkippedReason,
@@ -60,9 +66,18 @@ import {
   SmartPicksContext,
   SmartPicksContextBuilder,
 } from './smart-picks-context-builder';
-import { SmartPicksCoverageService } from './smart-picks-coverage.service';
 import { SmartPicksGenerationQueueService } from './smart-picks-generation-queue.service';
 import { buildGoalGapCandidates } from './smart-picks-goal-gap-policy';
+import {
+  buildSmartPicksCoveredItems,
+  localizeSmartPicksGapText,
+  localizeSmartPicksCoveredItems,
+  localizeSmartPicksRedundancyGroups,
+  smartPicksStarterCoveredReason,
+  smartPicksStarterKitSummary,
+  smartPicksStarterStepTitle,
+  smartPicksStarterWaitReason,
+} from './smart-picks-localization';
 import { SmartPicksRedundancyService } from './smart-picks-redundancy.service';
 
 const DISMISSAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -70,11 +85,6 @@ const MIN_REPLACEMENT_USAGE_DAYS = 20;
 const MIN_REPLACEMENT_PHOTO_CHECKPOINTS = 2;
 const SMART_PICKS_AI_GAP_BATCH_SIZE = 2;
 const PRODUCT_GENERATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
-const STARTER_KIT_ROLES: readonly SmartPicksCoverage['slots'][number]['role'][] =
-  ['cleanse', 'moisturise', 'spf', 'treat'];
-const STARTER_TREATMENT_WAIT_REASON =
-  'Your current goal does not need a treatment product yet. Build cleanser, moisturizer, and sunscreen first.';
-
 type StarterTreatmentDecision = {
   ingredientOrCategory: string;
   goalAlignment: string;
@@ -120,7 +130,6 @@ export class SmartPicksOverviewService {
 
   constructor(
     private readonly contextBuilder: SmartPicksContextBuilder,
-    private readonly coverageService: SmartPicksCoverageService,
     private readonly redundancyService: SmartPicksRedundancyService,
     private readonly aiGenerator: SmartPicksAiGenerator,
     private readonly notifications: NotificationsService,
@@ -140,6 +149,7 @@ export class SmartPicksOverviewService {
   async getOverview(
     user: User,
     requestedMode: SmartPicksMode | null = null,
+    language: AppLanguage = normalizeLanguage(user.preferred_language),
   ): Promise<SmartPicksOverview> {
     const context = await this.contextBuilder.build(user, requestedMode);
     if (context.skinProfileRequired || context.consentRequired) {
@@ -150,7 +160,7 @@ export class SmartPicksOverviewService {
       where: { user_id: user.id, mode: context.mode },
     });
     if (cached && isFreshSnapshot(cached, context)) {
-      return this.hydrateOverview(context, cached);
+      return this.hydrateOverview(context, cached, language);
     }
 
     const previousPriorityKeys = new Set(
@@ -158,7 +168,10 @@ export class SmartPicksOverviewService {
         .filter((gap) => gap.priority === 'priority')
         .map((gap) => gap.normalizedKey),
     );
-    const snapshotPayload = this.buildSnapshotPayload(context);
+    const snapshotPayload = await this.buildSnapshotPayload(context);
+    if (!snapshotPayload) {
+      return this.aiPlanUnavailableOverview(context);
+    }
     const snapshot = await this.saveSnapshot(context, snapshotPayload, cached);
     await this.pruneStaleProductSuggestions(context);
     await this.maybeDispatchReadyNotification(
@@ -166,7 +179,7 @@ export class SmartPicksOverviewService {
       previousPriorityKeys,
       snapshotPayload.priorityGaps,
     );
-    return this.hydrateOverview(context, snapshot);
+    return this.hydrateOverview(context, snapshot, language);
   }
 
   async waitForBackgroundGeneration(): Promise<void> {
@@ -192,14 +205,16 @@ export class SmartPicksOverviewService {
     const cached = await this.snapshotRepo.findOne({
       where: { user_id: user.id, mode: context.mode },
     });
-    const snapshot =
-      cached && isFreshSnapshot(cached, context)
-        ? cached
-        : await this.saveSnapshot(
-            context,
-            this.buildSnapshotPayload(context),
-            cached,
-          );
+    let snapshot: SmartPickSnapshot;
+    if (cached && isFreshSnapshot(cached, context)) {
+      snapshot = cached;
+    } else {
+      const snapshotPayload = await this.buildSnapshotPayload(context);
+      if (!snapshotPayload) {
+        return failedAiPlanningGenerationState();
+      }
+      snapshot = await this.saveSnapshot(context, snapshotPayload, cached);
+    }
 
     const gaps = (snapshot.gaps_json ?? []).map(normalizeGapSnapshot);
     const suggestions = await this.productSuggestionRepo.find({
@@ -224,6 +239,7 @@ export class SmartPicksOverviewService {
   async updateBudget(
     user: User,
     budgetTier: SmartPicksBudgetTier,
+    language: AppLanguage = normalizeLanguage(user.preferred_language),
   ): Promise<SmartPicksOverview> {
     const profile = await this.skinProfileRepo.findOne({
       where: { user_id: user.id },
@@ -234,37 +250,118 @@ export class SmartPicksOverviewService {
     profile.budget_tier = budgetTier;
     await this.skinProfileRepo.save(profile);
     await this.snapshotRepo.delete({ user_id: user.id });
-    return this.getOverview(user, null);
+    return this.getOverview(user, null, language);
   }
 
-  private buildSnapshotPayload(
+  private async buildSnapshotPayload(
     context: SmartPicksContext,
-  ): SmartPicksSnapshotPayload {
-    const coverage = this.coverageService.compute(
-      context.activeProducts,
-      coverageGoalText(context),
-    );
-    const gaps = buildGapSnapshots(context, coverage);
+  ): Promise<SmartPicksSnapshotPayload | null> {
+    const { plan, diagnostics } =
+      await this.aiGenerator.generatePlanWithDiagnostics(context);
+    await this.recordPlanDiagnostics(context, diagnostics);
+    if (!plan) return null;
+
     const recap = buildRecap(context);
 
     return {
       recap,
-      coverage,
-      priorityGaps: gaps
-        .filter((gap) => gap.priority === 'priority')
-        .slice(0, context.mode === 'starter' ? 4 : 3),
-      considerGaps: gaps
-        .filter((gap) => gap.priority === 'consider')
-        .slice(0, considerGapLimit(context)),
-      covered: coverage.slots
-        .filter((slot) => slot.state === 'filled' && slot.filledByName)
-        .map((slot) => ({
-          role: slot.role,
-          productName: slot.filledByName as string,
-          reason: `Covers your ${slot.role.replace('-', ' ')} role.`,
-        })),
-      redundancy: this.redundancyService.detect(context.activeProducts),
+      coverage: plan.coverage,
+      priorityGaps: plan.priorityGaps,
+      considerGaps: plan.considerGaps,
+      covered: buildSmartPicksCoveredItems(plan.coverage, DEFAULT_LANGUAGE),
+      redundancy: this.redundancyService.detect(
+        context.activeProducts,
+        DEFAULT_LANGUAGE,
+      ),
     };
+  }
+
+  private async recordPlanDiagnostics(
+    context: SmartPicksContext,
+    diagnostics: SmartPicksAiPlanDiagnostics,
+  ): Promise<void> {
+    const privacySafeBase = {
+      mode: context.mode,
+      rawCoverageSlotCount: diagnostics.rawCoverageSlotCount,
+      acceptedCoverageSlotCount: diagnostics.acceptedCoverageSlotCount,
+      rawGapCount: diagnostics.rawGapCount,
+      acceptedGapCount: diagnostics.acceptedGapCount,
+    };
+
+    if (
+      diagnostics.providerFailed ||
+      diagnostics.providerSkippedReason ||
+      diagnostics.missingPlan
+    ) {
+      await this.observability.record({
+        kind: 'smart_pick_ai_failed',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          providerFailed: diagnostics.providerFailed,
+          providerSkippedReason: diagnostics.providerSkippedReason,
+          missingPlan: diagnostics.missingPlan,
+          stage: 'plan',
+        },
+      });
+    }
+
+    if (
+      diagnostics.blockedSafetyGapCount > 0 ||
+      diagnostics.blockedPregnancySafetyGapCount > 0
+    ) {
+      await this.observability.record({
+        kind: 'smart_pick_unsafe_output_blocked',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          blockedSafetyGapCount: diagnostics.blockedSafetyGapCount,
+          blockedPregnancySafetyGapCount:
+            diagnostics.blockedPregnancySafetyGapCount,
+          stage: 'plan',
+        },
+      });
+    }
+
+    const blockedOrInvalidCount =
+      diagnostics.invalidCoverageSlotCount +
+      diagnostics.invalidGapCount +
+      diagnostics.blockedOwnedGapCount +
+      diagnostics.blockedReplacementEvidenceGapCount;
+    if (blockedOrInvalidCount > 0) {
+      await this.observability.record({
+        kind: 'smart_pick_quality_drift',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          invalidCoverageSlotCount: diagnostics.invalidCoverageSlotCount,
+          invalidGapCount: diagnostics.invalidGapCount,
+          blockedOwnedGapCount: diagnostics.blockedOwnedGapCount,
+          blockedReplacementEvidenceGapCount:
+            diagnostics.blockedReplacementEvidenceGapCount,
+          stage: 'plan',
+        },
+      });
+    }
+
+    if (
+      diagnostics.missingPlan ||
+      (diagnostics.rawGapCount > 0 && diagnostics.acceptedGapCount === 0)
+    ) {
+      await this.observability.record({
+        kind: 'smart_pick_no_pick',
+        severity: 'warning',
+        userId: context.user.id,
+        metadata: {
+          ...privacySafeBase,
+          missingPlan: diagnostics.missingPlan,
+          stage: 'plan',
+        },
+      });
+    }
   }
 
   private async saveSnapshot(
@@ -291,6 +388,7 @@ export class SmartPicksOverviewService {
   private async hydrateOverview(
     context: SmartPicksContext,
     snapshot: SmartPickSnapshot,
+    language: AppLanguage,
   ): Promise<SmartPicksOverview> {
     const gaps = (snapshot.gaps_json ?? []).map(normalizeGapSnapshot);
     const suggestions = await this.productSuggestionRepo.find({
@@ -310,8 +408,9 @@ export class SmartPicksOverviewService {
         suggestion && actionSummary.savedSuggestionIds.has(suggestion.id)
           ? 'saved'
           : null;
+      const localizedGap = localizeSmartPicksGapText(gap, language);
       return {
-        ...gap,
+        ...localizedGap,
         pick: suggestion ? toProductPick(suggestion, action) : null,
       };
     };
@@ -356,8 +455,21 @@ export class SmartPicksOverviewService {
     }
     const starterKit =
       context.mode === 'starter'
-        ? buildStarterKit(context, snapshot.coverage_json, visibleGaps)
+        ? buildStarterKit(
+            context,
+            snapshot.coverage_json,
+            visibleGaps,
+            language,
+          )
         : emptyStarterKit();
+    const covered = localizeSmartPicksCoveredItems(
+      snapshot.covered_json ?? [],
+      language,
+    );
+    const redundancy = localizeSmartPicksRedundancyGroups(
+      snapshot.redundancy_json ?? [],
+      language,
+    );
 
     return {
       mode: snapshot.mode,
@@ -367,8 +479,8 @@ export class SmartPicksOverviewService {
       coverage: snapshot.coverage_json,
       priorityGaps,
       considerGaps,
-      covered: snapshot.covered_json ?? [],
-      redundancy: snapshot.redundancy_json ?? [],
+      covered,
+      redundancy,
       consentRequired: false,
       skinProfileRequired: false,
       productSuggestionsUnavailable,
@@ -378,7 +490,7 @@ export class SmartPicksOverviewService {
         snapshotGapCount: gaps.length,
         dismissedGapCount: actionSummary.dismissedGapCount,
         nextEligibleAt: actionSummary.nextEligibleAt,
-        redundancy: snapshot.redundancy_json ?? [],
+        redundancy,
         productSuggestionsUnavailable,
       }),
       starterKit,
@@ -408,6 +520,36 @@ export class SmartPicksOverviewService {
         nextEligibleAt: null,
         redundancy: [],
         productSuggestionsUnavailable: false,
+      }),
+      starterKit: emptyStarterKit(),
+    };
+  }
+
+  private aiPlanUnavailableOverview(
+    context: SmartPicksContext,
+  ): SmartPicksOverview {
+    const recap = buildRecap(context);
+    return {
+      mode: context.mode,
+      generatedAt: new Date().toISOString(),
+      inputsHash: context.inputsHash,
+      recap,
+      coverage: { slots: [], filled: 0, total: 0 },
+      priorityGaps: [],
+      considerGaps: [],
+      covered: [],
+      redundancy: [],
+      consentRequired: false,
+      skinProfileRequired: false,
+      productSuggestionsUnavailable: true,
+      productGeneration: failedAiPlanningGenerationState(),
+      emptyState: buildEmptyState(context, {
+        visibleGapCount: 0,
+        snapshotGapCount: 0,
+        dismissedGapCount: 0,
+        nextEligibleAt: null,
+        redundancy: [],
+        productSuggestionsUnavailable: true,
       }),
       starterKit: emptyStarterKit(),
     };
@@ -465,14 +607,18 @@ export class SmartPicksOverviewService {
         context,
         batch,
       );
-      for (const [key, pick] of generationResult.picks) {
-        generatedPicks.set(key, pick);
-      }
+      const duplicatePickCount = mergeUniqueGeneratedPicks(
+        generatedPicks,
+        generationResult.picks,
+      );
       combinedDiagnostics = combineGenerationDiagnostics(
         gapsForGeneration.length,
         generatedPicks.size,
         combinedDiagnostics,
-        generationResult.diagnostics,
+        withDuplicatePickDiagnostics(
+          generationResult.diagnostics,
+          duplicatePickCount,
+        ),
       );
       const retryGaps = batch.filter(
         (gap) => !generatedPicks.has(gap.normalizedKey),
@@ -527,14 +673,15 @@ export class SmartPicksOverviewService {
       context,
       retryGaps,
     );
-    for (const [key, pick] of retryResult.picks) {
-      generatedPicks.set(key, pick);
-    }
+    const duplicatePickCount = mergeUniqueGeneratedPicks(
+      generatedPicks,
+      retryResult.picks,
+    );
     return combineGenerationDiagnostics(
       allGaps.length,
       generatedPicks.size,
       initialDiagnostics,
-      retryResult.diagnostics,
+      withDuplicatePickDiagnostics(retryResult.diagnostics, duplicatePickCount),
     );
   }
 
@@ -1040,6 +1187,17 @@ function pendingProductGenerationState(
   };
 }
 
+function failedAiPlanningGenerationState(): SmartPicksProductGenerationState {
+  return {
+    status: SmartPicksProductGenerationStatus.Failed,
+    reason: SmartPicksProductGenerationReason.ProviderFailed,
+    missingPickCount: 0,
+    isProcessing: false,
+    attemptedAt: new Date().toISOString(),
+    retryAfter: null,
+  };
+}
+
 function productGenerationReason(
   diagnostics: SmartPicksAiGenerationDiagnostics,
 ): SmartPicksProductGenerationReason {
@@ -1161,18 +1319,6 @@ function buildRecap(context: SmartPicksContext): SmartPicksRecap {
   };
 }
 
-function coverageGoalText(context: SmartPicksContext): string | null {
-  const profile = context.skinProfile;
-  const values = [
-    profile?.primary_goal,
-    ...(profile?.current_concerns ?? []),
-    ...(profile?.concern_details?.per_concern ?? []).map(
-      (entry) => `${entry.concern} ${entry.severity ?? ''}`,
-    ),
-  ].filter(Boolean);
-  return values.length > 0 ? values.join(' ') : null;
-}
-
 function buildEmptyState(
   context: SmartPicksContext,
   input: {
@@ -1206,49 +1352,97 @@ function buildStarterKit(
   context: SmartPicksContext,
   coverage: SmartPicksCoverage,
   visibleGaps: SmartPicksGap[],
+  language: AppLanguage,
 ): SmartPicksStarterKit {
-  const slotsByRole = new Map(coverage.slots.map((slot) => [slot.role, slot]));
-  const gapsByRole = new Map(
-    visibleGaps
-      .filter((gap) => gap.gapKind === SmartPicksGapKind.Starter)
-      .map((gap) => [starterRoleForGap(gap), gap]),
+  const starterGaps = visibleGaps.filter(
+    (gap) => gap.gapKind === SmartPicksGapKind.Starter,
   );
-  const steps = STARTER_KIT_ROLES.map((role, index) => {
-    const slot = slotsByRole.get(role) ?? null;
-    const gap = gapsByRole.get(role) ?? null;
+  const usedGapKeys = new Set<string>();
+  const steps: SmartPicksStarterKitStep[] = [];
+
+  for (const slot of coverage.slots) {
+    const gap =
+      findStarterGapForRole(starterGaps, usedGapKeys, slot.role) ??
+      (slot.state !== 'filled'
+        ? findNextStarterGap(starterGaps, usedGapKeys)
+        : null);
     if (gap) {
-      return starterRecommendedStep(role, index + 1, gap);
+      usedGapKeys.add(gap.normalizedKey);
+      steps.push(
+        starterRecommendedStep(slot.role, steps.length + 1, gap, language),
+      );
+      continue;
     }
-    if (slot?.state === 'filled') {
-      return starterCoveredStep(role, index + 1, slot);
+    if (slot.state === 'filled') {
+      steps.push(
+        starterCoveredStep(slot.role, steps.length + 1, slot, language),
+      );
+      continue;
     }
-    return starterWaitStep(role, index + 1);
-  });
+    if (slot.state === 'missing-priority') {
+      steps.push(starterWaitStep(slot.role, steps.length + 1, language));
+    }
+  }
+
+  for (const gap of starterGaps) {
+    if (usedGapKeys.has(gap.normalizedKey)) continue;
+    usedGapKeys.add(gap.normalizedKey);
+    steps.push(
+      starterRecommendedStep(
+        starterRoleForGap(gap),
+        steps.length + 1,
+        gap,
+        language,
+      ),
+    );
+  }
 
   return {
-    summary:
-      context.activeProducts.length === 0
-        ? 'Start with the essentials. Add treatment last.'
-        : 'Complete the missing starter steps before adding extra products.',
+    summary: smartPicksStarterKitSummary(
+      context.activeProducts.length,
+      language,
+    ),
     steps,
   };
+}
+
+function findStarterGapForRole(
+  gaps: SmartPicksGap[],
+  usedGapKeys: ReadonlySet<string>,
+  role: SmartPicksCoverage['slots'][number]['role'],
+): SmartPicksGap | null {
+  return (
+    gaps.find(
+      (gap) =>
+        !usedGapKeys.has(gap.normalizedKey) && starterRoleForGap(gap) === role,
+    ) ?? null
+  );
+}
+
+function findNextStarterGap(
+  gaps: SmartPicksGap[],
+  usedGapKeys: ReadonlySet<string>,
+): SmartPicksGap | null {
+  return gaps.find((gap) => !usedGapKeys.has(gap.normalizedKey)) ?? null;
 }
 
 function starterCoveredStep(
   role: SmartPicksCoverage['slots'][number]['role'],
   order: number,
   slot: SmartPicksCoverage['slots'][number],
+  language: AppLanguage,
 ): SmartPicksStarterKitStep {
+  const title = smartPicksStarterStepTitle(role, language);
   return {
     order,
     role,
-    title: starterStepTitle(role),
-    ingredientOrCategory: starterStepTitle(role),
-    normalizedKey: normalizeSuggestionGapKey(starterStepTitle(role)),
+    title,
+    ingredientOrCategory: title,
+    normalizedKey: normalizeSuggestionGapKey(title),
     status: SmartPicksStarterKitStepStatus.Covered,
     ownedProductId: slot.filledByProductId,
     ownedProductName: slot.filledByName,
-    reason: `You already have this starter step covered by ${slot.filledByName}.`,
+    reason: smartPicksStarterCoveredReason(slot.filledByName, language),
     pick: null,
     sourceIds: [],
   };
@@ -1258,11 +1452,12 @@ function starterRecommendedStep(
   role: SmartPicksCoverage['slots'][number]['role'],
   order: number,
   gap: SmartPicksGap,
+  language: AppLanguage,
 ): SmartPicksStarterKitStep {
   return {
     order,
     role,
-    title: starterStepTitle(role),
+    title: smartPicksStarterStepTitle(role, language),
     ingredientOrCategory: gap.ingredientOrCategory,
     normalizedKey: gap.normalizedKey,
     status: SmartPicksStarterKitStepStatus.Recommended,
@@ -1277,40 +1472,22 @@ function starterRecommendedStep(
 function starterWaitStep(
   role: SmartPicksCoverage['slots'][number]['role'],
   order: number,
+  language: AppLanguage,
 ): SmartPicksStarterKitStep {
+  const title = smartPicksStarterStepTitle(role, language);
   return {
     order,
     role,
-    title: starterStepTitle(role),
-    ingredientOrCategory: starterStepTitle(role),
-    normalizedKey: normalizeSuggestionGapKey(starterStepTitle(role)),
+    title,
+    ingredientOrCategory: title,
+    normalizedKey: normalizeSuggestionGapKey(title),
     status: SmartPicksStarterKitStepStatus.Wait,
     ownedProductId: null,
     ownedProductName: null,
-    reason:
-      role === 'treat'
-        ? STARTER_TREATMENT_WAIT_REASON
-        : 'Wait on this step until your starter routine has the basics covered.',
+    reason: smartPicksStarterWaitReason(role, language),
     pick: null,
     sourceIds: [],
   };
-}
-
-function starterStepTitle(
-  role: SmartPicksCoverage['slots'][number]['role'],
-): string {
-  switch (role) {
-    case 'cleanse':
-      return 'Cleanse';
-    case 'moisturise':
-      return 'Moisturise';
-    case 'spf':
-      return 'Protect';
-    case 'treat':
-      return 'Treat';
-    default:
-      return role;
-  }
 }
 
 function starterRoleForGap(
@@ -1619,6 +1796,49 @@ function limitGapSnapshots(
       .filter((gap) => gap.priority === 'consider')
       .slice(0, considerGapLimit(context)),
   ];
+}
+
+function mergeUniqueGeneratedPicks(
+  target: Map<string, GeneratedSmartPick>,
+  incoming: ReadonlyMap<string, GeneratedSmartPick>,
+): number {
+  const existingProductKeys = new Set(
+    [...target.values()].map(generatedPickIdentityKey),
+  );
+  let duplicatePickCount = 0;
+  for (const [key, pick] of incoming) {
+    const productKey = generatedPickIdentityKey(pick);
+    if (existingProductKeys.has(productKey)) {
+      duplicatePickCount += 1;
+      continue;
+    }
+    target.set(key, pick);
+    existingProductKeys.add(productKey);
+  }
+  return duplicatePickCount;
+}
+
+function generatedPickIdentityKey(pick: GeneratedSmartPick): string {
+  return `${pick.brand} ${pick.productName}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function withDuplicatePickDiagnostics(
+  diagnostics: SmartPicksAiGenerationDiagnostics,
+  duplicatePickCount: number,
+): SmartPicksAiGenerationDiagnostics {
+  if (duplicatePickCount === 0) return diagnostics;
+  return {
+    ...diagnostics,
+    acceptedPickCount: Math.max(
+      0,
+      diagnostics.acceptedPickCount - duplicatePickCount,
+    ),
+    invalidPickCount: diagnostics.invalidPickCount + duplicatePickCount,
+    missingPickCount: diagnostics.missingPickCount + duplicatePickCount,
+  };
 }
 
 function replacementSourceIds(

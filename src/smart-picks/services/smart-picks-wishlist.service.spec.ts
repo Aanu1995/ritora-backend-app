@@ -74,6 +74,44 @@ describe('SmartPicksWishlistService', () => {
     expect(items[0]?.reason).not.toContain('Skin Profile');
   });
 
+  it('localizes saved deterministic gap copy for the request language', async () => {
+    const actions = repo<SuggestionGapAction>();
+    const suggestions = repo<SmartPickProductSuggestion>();
+    const profiles = profileRepo(true);
+    actions.find.mockResolvedValue([
+      action({
+        ingredient_or_category: 'Adapalene or benzoyl peroxide acne treatment',
+        normalized_key: 'adapalene-or-benzoyl-peroxide-acne-treatment',
+      }),
+    ]);
+    suggestions.find.mockResolvedValue([
+      productSuggestion({
+        ingredient_or_category: 'Adapalene or benzoyl peroxide acne treatment',
+        normalized_key: 'adapalene-or-benzoyl-peroxide-acne-treatment',
+        gap_reason:
+          'Your goal points to breakouts, and the shelf does not yet show a clear leave-on breakout treatment lane.',
+        goal_alignment: 'breakout control',
+      }),
+    ]);
+    const service = new SmartPicksWishlistService(
+      actions,
+      suggestions,
+      profiles,
+    );
+
+    const items = await service.list(user(), 'sv');
+
+    expect(items[0]).toEqual(
+      expect.objectContaining({
+        ingredientOrCategory:
+          'Aknebehandling med adapalen eller bensoylperoxid',
+        reason:
+          'Ditt mål pekar på finnar och utbrott, och hyllan visar ännu ingen tydlig behandling som lämnas kvar på huden.',
+        goalAlignment: 'utbrottskontroll',
+      }),
+    );
+  });
+
   it('returns an empty wishlist without reading suggestions when no saved action has a product id', async () => {
     const actions = repo<SuggestionGapAction>();
     const suggestions = repo<SmartPickProductSuggestion>();

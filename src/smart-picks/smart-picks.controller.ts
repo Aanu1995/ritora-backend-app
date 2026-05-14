@@ -8,9 +8,17 @@ import {
   Param,
   Patch,
   Query,
+  Req,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import {
+  AppLanguage,
+  DEFAULT_LANGUAGE,
+  normalizeLanguage,
+  resolveRequestLanguage,
+} from '../common/i18n/i18n';
 import { User } from '../users/entities/user.entity';
 import {
   SmartPicksOverviewQueryDto,
@@ -35,9 +43,14 @@ export class SmartPicksController {
   async getOverview(
     @CurrentUser() user: User,
     @Query() query: SmartPicksOverviewQueryDto,
+    @Req() request: Request,
   ): Promise<SmartPicksOverviewResponseDto> {
     return new SmartPicksOverviewResponseDto(
-      await this.overviewService.getOverview(user, query.mode ?? null),
+      await this.overviewService.getOverview(
+        user,
+        query.mode ?? null,
+        resolveSmartPicksLanguage(request, user),
+      ),
     );
   }
 
@@ -45,9 +58,13 @@ export class SmartPicksController {
   @ApiOperation({ summary: 'Saved Smart Picks product suggestions' })
   async getWishlist(
     @CurrentUser() user: User,
+    @Req() request: Request,
   ): Promise<SmartPicksWishlistResponseDto> {
     return new SmartPicksWishlistResponseDto(
-      await this.wishlistService.list(user),
+      await this.wishlistService.list(
+        user,
+        resolveSmartPicksLanguage(request, user),
+      ),
     );
   }
 
@@ -66,9 +83,23 @@ export class SmartPicksController {
   async updateBudget(
     @CurrentUser() user: User,
     @Body() body: UpdateSmartPicksBudgetDto,
+    @Req() request: Request,
   ): Promise<SmartPicksOverviewResponseDto> {
     return new SmartPicksOverviewResponseDto(
-      await this.overviewService.updateBudget(user, body.budgetTier),
+      await this.overviewService.updateBudget(
+        user,
+        body.budgetTier,
+        resolveSmartPicksLanguage(request, user),
+      ),
     );
   }
+}
+
+function resolveSmartPicksLanguage(request: Request, user: User): AppLanguage {
+  const requestLanguage = resolveRequestLanguage(request);
+  if (requestLanguage !== DEFAULT_LANGUAGE) {
+    return requestLanguage;
+  }
+
+  return normalizeLanguage(user.preferred_language);
 }

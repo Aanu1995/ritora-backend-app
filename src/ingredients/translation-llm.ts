@@ -8,6 +8,7 @@ import {
   INGREDIENT_TRANSLATION_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
 
 const DEFAULT_MODEL = 'gpt-5-mini';
 const REQUEST_TIMEOUT_MS = 15000;
@@ -58,9 +59,11 @@ export async function translateWithOpenAi(
       },
       body: JSON.stringify({
         model,
+        store: false,
         reasoning: { effort: 'low' },
         text: { verbosity: 'low' },
         max_output_tokens: maxOutputTokens,
+        ...openAiRepeatabilityRequestOptions(model),
         input: buildTranslationInput(sourceTexts, targetLanguage),
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

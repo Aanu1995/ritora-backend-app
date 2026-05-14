@@ -1,11 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { AppLanguage, normalizeLanguage } from '../../common/i18n/i18n';
 import { SuggestionGapAction } from '../../suggestions/entities/suggestion-gap-action.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { SmartPickProductSuggestion } from '../entities/smart-pick-product-suggestion.entity';
 import { SmartPicksWishlistItem } from '../smart-picks.types';
+import { localizeSmartPicksGapText } from './smart-picks-localization';
 import {
   buildShortGapReason,
   toProductPick,
@@ -22,7 +24,10 @@ export class SmartPicksWishlistService {
     private readonly skinProfileRepo: Repository<SkinProfile>,
   ) {}
 
-  async list(user: User): Promise<SmartPicksWishlistItem[]> {
+  async list(
+    user: User,
+    language: AppLanguage = normalizeLanguage(user.preferred_language),
+  ): Promise<SmartPicksWishlistItem[]> {
     if (!(await this.hasSmartPicksConsent(user.id))) {
       return [];
     }
@@ -49,16 +54,27 @@ export class SmartPicksWishlistService {
       const suggestionId = action.smart_pick_product_suggestion_id;
       const suggestion = suggestionId ? byId.get(suggestionId) : null;
       if (!suggestion) return [];
+      const reason = suggestion.gap_reason
+        ? buildShortGapReason(suggestion.gap_reason)
+        : null;
+      const localizedGap = localizeSmartPicksGapText(
+        {
+          normalizedKey: action.normalized_key,
+          ingredientOrCategory: action.ingredient_or_category,
+          reason: reason ?? '',
+          shortReason: reason ?? '',
+          goalAlignment: suggestion.goal_alignment,
+        },
+        language,
+      );
       return [
         {
           actionId: action.id,
           savedAt: action.updated_at.toISOString(),
-          ingredientOrCategory: action.ingredient_or_category,
+          ingredientOrCategory: localizedGap.ingredientOrCategory,
           normalizedKey: action.normalized_key,
-          reason: suggestion.gap_reason
-            ? buildShortGapReason(suggestion.gap_reason)
-            : null,
-          goalAlignment: suggestion.goal_alignment,
+          reason: reason ? localizedGap.shortReason : null,
+          goalAlignment: localizedGap.goalAlignment,
           pick: toProductPick(suggestion, 'saved'),
         },
       ];

@@ -10,6 +10,7 @@ import { SuggestionGapAction } from '../entities/suggestion-gap-action.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionRecordingReminderSnooze } from '../entities/suggestion-recording-reminder-snooze.entity';
 import { SuggestionReactionOverride } from '../entities/suggestion-reaction-override.entity';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
 
 describe('SuggestionTodayActionService', () => {
@@ -22,6 +23,9 @@ describe('SuggestionTodayActionService', () => {
   const skinProfileRepo = repo<SkinProfile>();
   const entryRepo = repo<SkinJournalEntry>();
   const simplificationRepo = repo<RoutineSimplificationEvent>();
+  const observability = {
+    record: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionObservabilityService>;
   const service = new SuggestionTodayActionService(
     overrideRepo,
     gapActionRepo,
@@ -32,6 +36,7 @@ describe('SuggestionTodayActionService', () => {
     skinProfileRepo,
     entryRepo,
     simplificationRepo,
+    observability,
   );
 
   beforeEach(() => {
@@ -179,6 +184,21 @@ describe('SuggestionTodayActionService', () => {
         normalized_key: 'broad-spectrum-sunscreen-spf-30',
         action: 'saved',
       }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'smart_pick_user_feedback',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          action: 'saved',
+          normalizedKeyHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          sellerNameCount: 0,
+          sourceIdCount: 0,
+        }),
+      }),
+    );
+    expect(JSON.stringify(observability.record.mock.calls)).not.toContain(
+      'broad-spectrum-sunscreen-spf-30',
     );
   });
 

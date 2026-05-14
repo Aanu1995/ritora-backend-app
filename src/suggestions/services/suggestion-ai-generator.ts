@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { StepLabel } from '../../schedule/dto/schedule.constants';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
@@ -163,6 +164,7 @@ export class SuggestionAiGenerator {
             },
           ],
           max_output_tokens: SUGGESTION_AI_MAX_OUTPUT_TOKENS,
+          ...openAiRepeatabilityRequestOptions(model),
           text: {
             verbosity: 'low',
             format: RESPONSE_FORMAT,

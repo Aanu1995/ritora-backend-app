@@ -70,6 +70,7 @@ function openAiPayload(overrides: Record<string, unknown> = {}) {
 type OpenAiRequestBody = {
   model: string;
   store: boolean;
+  temperature: number;
   input: Array<{
     role: string;
     content: Array<{
@@ -150,6 +151,7 @@ describe('SkinJournalAnalysisService', () => {
     expect(result.metadata.estimated_cost_usd).toBeCloseTo(0.0065, 6);
     expect(body.model).toBe('skin-photo-model');
     expect(body.store).toBe(false);
+    expect(body.temperature).toBe(0);
     expect(body.text.format.strict).toBe(true);
   });
 

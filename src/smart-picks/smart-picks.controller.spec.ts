@@ -1,3 +1,4 @@
+import type { Request } from 'express';
 import { SmartPicksOverview } from './smart-picks.types';
 import { SmartPicksOverviewService } from './services/smart-picks-overview.service';
 import { SmartPicksWishlistService } from './services/smart-picks-wishlist.service';
@@ -25,9 +26,17 @@ describe('SmartPicksController', () => {
   it('returns overview data including starter kit state', async () => {
     overviewService.getOverview.mockResolvedValue(overview());
 
-    const response = await controller.getOverview(user(), { mode: 'starter' });
+    const response = await controller.getOverview(
+      user(),
+      { mode: 'starter' },
+      request(),
+    );
 
-    expect(overviewService.getOverview).toHaveBeenCalledWith(user(), 'starter');
+    expect(overviewService.getOverview).toHaveBeenCalledWith(
+      user(),
+      'starter',
+      'sv',
+    );
     expect(response).toEqual(
       expect.objectContaining({
         mode: 'starter',
@@ -36,6 +45,22 @@ describe('SmartPicksController', () => {
           steps: [],
         }),
       }),
+    );
+  });
+
+  it('falls back to the persisted user language when no request language is present', async () => {
+    overviewService.getOverview.mockResolvedValue(overview());
+
+    await controller.getOverview(
+      user({ preferred_language: 'sv' }),
+      { mode: 'starter' },
+      request({ headers: {} }),
+    );
+
+    expect(overviewService.getOverview).toHaveBeenCalledWith(
+      user({ preferred_language: 'sv' }),
+      'starter',
+      'sv',
     );
   });
 
@@ -52,9 +77,9 @@ describe('SmartPicksController', () => {
       },
     ]);
 
-    const response = await controller.getWishlist(user());
+    const response = await controller.getWishlist(user(), request());
 
-    expect(wishlistService.list).toHaveBeenCalledWith(user());
+    expect(wishlistService.list).toHaveBeenCalledWith(user(), 'sv');
     expect(response.items).toEqual([
       expect.objectContaining({
         normalizedKey: 'broad-spectrum-sunscreen-spf-30',
@@ -73,20 +98,38 @@ describe('SmartPicksController', () => {
       overview({ recap: { ...overview().recap, budgetTier: 'premium' } }),
     );
 
-    const response = await controller.updateBudget(user(), {
-      budgetTier: 'premium',
-    });
+    const response = await controller.updateBudget(
+      user(),
+      {
+        budgetTier: 'premium',
+      },
+      request(),
+    );
 
     expect(overviewService.updateBudget).toHaveBeenCalledWith(
       user(),
       'premium',
+      'sv',
     );
     expect(response.recap.budgetTier).toBe('premium');
   });
 });
 
-function user(): User {
-  return { id: 'user-1', time_zone: 'Europe/Stockholm' } as User;
+function user(overrides: Partial<User> = {}): User {
+  return {
+    id: 'user-1',
+    time_zone: 'Europe/Stockholm',
+    ...overrides,
+  } as User;
+}
+
+function request(overrides: Partial<Request> = {}): Request {
+  return {
+    headers: { 'accept-language': 'sv' },
+    body: {},
+    query: {},
+    ...overrides,
+  } as Request;
 }
 
 function overview(

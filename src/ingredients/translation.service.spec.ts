@@ -122,8 +122,14 @@ describe('TranslationService', () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(3);
     const [, firstInit] = (global.fetch as jest.Mock).mock.calls[0];
-    const firstBody = JSON.parse(String(firstInit.body)) as { model?: string };
+    const firstBody = JSON.parse(String(firstInit.body)) as {
+      model?: string;
+      store?: boolean;
+      temperature?: number;
+    };
     expect(firstBody.model).toBe('ingredient-translation-model');
+    expect(firstBody.store).toBe(false);
+    expect(firstBody.temperature).toBe(0);
     expect(maxActiveRequests).toBeLessThanOrEqual(2);
     expect(result[0]).toBe('sv:Text 0');
     expect(result[1]).toBe('sv:Text 1');

@@ -152,6 +152,7 @@ describe('InsightPolishService', () => {
         }),
       },
     });
+    expect(body.temperature).toBeUndefined();
     expect(serializedBody).not.toContain('user-1');
     expect(serializedBody).not.toContain('ada@example.com');
     expect(serializedBody).not.toContain('photo_object_key');

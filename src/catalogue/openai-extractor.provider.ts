@@ -4,6 +4,7 @@ import {
   CATALOGUE_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
 import { isSafeExternalHttpUrl } from '../common/utils/url-security';
 import { hashBuffer, hashStableValue } from './catalogue-cache-key.utils';
 import { TimedMemoryCache } from './catalogue-memory-cache';
@@ -246,11 +247,15 @@ export class OpenAiExtractorProvider {
         },
         body: JSON.stringify({
           model: options.model ?? this.getModel(),
+          store: false,
           ...(options.useWebSearch
             ? { tools: [{ type: 'web_search' }], tool_choice: 'auto' }
             : {}),
           input,
           max_output_tokens: options.maxOutputTokens ?? 1200,
+          ...openAiRepeatabilityRequestOptions(
+            options.model ?? this.getModel(),
+          ),
           ...(options.reasoningEffort
             ? { reasoning: { effort: options.reasoningEffort } }
             : {}),

@@ -310,8 +310,8 @@ describe('summarizeSmartPicksProductPerformance', () => {
 
 describe('SmartPicksProductPerformanceService', () => {
   it('does not read history repositories when there are no products', async () => {
-    const applicationLogs = { find: jest.fn() };
-    const journalEntries = { find: jest.fn() };
+    const applicationLogs = { find: jest.fn(), findOne: jest.fn() };
+    const journalEntries = { find: jest.fn(), findOne: jest.fn() };
     const service = new SmartPicksProductPerformanceService(
       applicationLogs as unknown as ConstructorParameters<
         typeof SmartPicksProductPerformanceService
@@ -330,17 +330,82 @@ describe('SmartPicksProductPerformanceService', () => {
     ).resolves.toEqual([]);
     expect(applicationLogs.find).not.toHaveBeenCalled();
     expect(journalEntries.find).not.toHaveBeenCalled();
+    expect(applicationLogs.findOne).not.toHaveBeenCalled();
+    expect(journalEntries.findOne).not.toHaveBeenCalled();
+  });
+
+  it('anchors relative history windows to the latest user log or photo event', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-30T09:00:00.000Z'));
+    const applicationLogs = {
+      findOne: jest.fn().mockResolvedValue({
+        target_date: '2026-05-10',
+      }),
+      find: jest
+        .fn()
+        .mockResolvedValue(
+          logsForProduct('serum-1', ['2026-04-10', '2026-05-10']),
+        ),
+    };
+    const journalEntries = {
+      findOne: jest.fn().mockResolvedValue({
+        entry_date: '2026-05-08',
+      }),
+      find: jest.fn().mockResolvedValue([]),
+    };
+    const service = new SmartPicksProductPerformanceService(
+      applicationLogs as unknown as ConstructorParameters<
+        typeof SmartPicksProductPerformanceService
+      >[0],
+      journalEntries as unknown as ConstructorParameters<
+        typeof SmartPicksProductPerformanceService
+      >[1],
+    );
+
+    const summary = await service.summarizeForUser({
+      userId: 'user-1',
+      products: [product('serum-1', ProductCategory.Serum)],
+      primaryGoal: 'fade dark marks',
+    });
+
+    expect(summary[0]).toEqual(
+      expect.objectContaining({
+        usageDaysLast30: 2,
+        usageDaysLast90: 2,
+        firstUsedAt: '2026-04-10',
+        lastUsedAt: '2026-05-10',
+      }),
+    );
+    expect(applicationLogs.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { user_id: 'user-1' },
+        order: { target_date: 'DESC' },
+      }),
+    );
+    expect(journalEntries.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          user_id: 'user-1',
+          analysis_status: AnalysisStatusValue.Completed,
+        },
+        order: { entry_date: 'DESC' },
+      }),
+    );
+    jest.useRealTimers();
   });
 
   it('fails closed when history repositories are unavailable', async () => {
     const service = new SmartPicksProductPerformanceService(
       {
         find: jest.fn().mockRejectedValue(new Error('history table missing')),
+        findOne: jest
+          .fn()
+          .mockRejectedValue(new Error('history table missing')),
       } as unknown as ConstructorParameters<
         typeof SmartPicksProductPerformanceService
       >[0],
       {
-        find: jest.fn(),
+        find: jest.fn().mockResolvedValue([]),
+        findOne: jest.fn().mockResolvedValue(null),
       } as unknown as ConstructorParameters<
         typeof SmartPicksProductPerformanceService
       >[1],

@@ -12,4 +12,15 @@ describe('resolveRequestLanguage', () => {
 
     expect(resolveRequestLanguage(request)).toBe('sv');
   });
+
+  it('reads the persisted preferred language from the authenticated user', () => {
+    const request = {
+      headers: {},
+      body: {},
+      query: {},
+      user: { preferred_language: 'sv' },
+    } as Request & { user: { preferred_language: string } };
+
+    expect(resolveRequestLanguage(request)).toBe('sv');
+  });
 });

@@ -51,16 +51,17 @@ export class SmartPicksContextBuilder {
     user: User,
     requestedMode: SmartPicksMode | null,
   ): Promise<SmartPicksContext> {
-    const [profile, allProducts] = await Promise.all([
+    const [profile, loadedProducts] = await Promise.all([
       this.skinProfileRepo.findOne({
         where: { user_id: user.id },
         relations: ['user'],
       }),
       this.inventoryRepo.find({
         where: { user_id: user.id },
-        order: { created_at: 'ASC' },
+        order: { created_at: 'ASC', id: 'ASC' },
       }),
     ]);
+    const allProducts = sortInventoryProducts(loadedProducts);
     const activeProducts = allProducts.filter(
       (product) => product.status === ShelfStatus.Active,
     );
@@ -84,14 +85,15 @@ export class SmartPicksContextBuilder {
         : null;
 
     const budgetTier = toSmartPicksBudget(profile?.budget_tier ?? null);
-    const productPerformance =
+    const productPerformance = sortProductPerformance(
       profile && !skinProfileRequired && !consentRequired
         ? await this.productPerformanceService.summarizeForUser({
             userId: user.id,
             products: allProducts,
             primaryGoal: profile.primary_goal ?? null,
           })
-        : [];
+        : [],
+    );
     const inputsHash = hashInputs({
       mode,
       budgetTier,
@@ -147,6 +149,32 @@ export class SmartPicksContextBuilder {
       inputsHash,
     };
   }
+}
+
+function sortInventoryProducts(
+  products: InventoryProduct[],
+): InventoryProduct[] {
+  return [...products].sort((left, right) => {
+    const createdDiff =
+      dateTime(left.created_at).getTime() -
+      dateTime(right.created_at).getTime();
+    if (createdDiff !== 0) return createdDiff;
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function sortProductPerformance(
+  summaries: SmartPicksProductPerformanceSummary[],
+): SmartPicksProductPerformanceSummary[] {
+  return [...summaries].sort((left, right) =>
+    left.productId.localeCompare(right.productId),
+  );
+}
+
+function dateTime(value: Date | string | null | undefined): Date {
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') return new Date(value);
+  return new Date(0);
 }
 
 const REQUIRED_SMART_PICK_PROFILE_FIELDS = [

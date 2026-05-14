@@ -11,6 +11,7 @@ type TranslationDictionary = Record<string, string>;
 type RequestWithLanguageUser = Request & {
   user?: {
     language?: unknown;
+    preferred_language?: unknown;
   };
 };
 
@@ -655,6 +656,9 @@ export function resolveRequestLanguage(request: Request): AppLanguage {
 
   const preferredLanguage =
     (typeof requestUser?.language === 'string' ? requestUser.language : null) ??
+    (typeof requestUser?.preferred_language === 'string'
+      ? requestUser.preferred_language
+      : null) ??
     (typeof requestBody?.preferredLanguage === 'string'
       ? requestBody.preferredLanguage
       : null) ??

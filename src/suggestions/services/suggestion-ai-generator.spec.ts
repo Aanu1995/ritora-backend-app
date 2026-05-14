@@ -15,6 +15,66 @@ import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import { getSuggestionEvidenceSources } from './suggestion-evidence-sources';
 
 describe('SuggestionAiGenerator', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('calls OpenAI with low-temperature structured output for repeatable suggestions', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: '',
+                    body: [],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    const body = JSON.parse(
+      fetchMock.mock.calls[0]?.[1]?.body as string,
+    ) as Record<string, unknown>;
+    expect(body).toEqual(
+      expect.objectContaining({
+        model: 'gpt-4.1-mini',
+        store: false,
+        temperature: 0,
+      }),
+    );
+  });
+
   it('uses the structured reaction context even when the journal flag has not been backfilled', async () => {
     const generator = new SuggestionAiGenerator({
       get: jest.fn().mockReturnValue(null),

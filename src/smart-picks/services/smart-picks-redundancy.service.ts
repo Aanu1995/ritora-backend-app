@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
+import { AppLanguage, DEFAULT_LANGUAGE } from '../../common/i18n/i18n';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { detectActiveTags } from '../../suggestions/services/suggestion-product-intelligence';
 import { SmartPicksRedundancyGroup } from '../smart-picks.types';
+import { smartPicksRedundancyHint } from './smart-picks-localization';
 
 @Injectable()
 export class SmartPicksRedundancyService {
-  detect(activeProducts: InventoryProduct[]): SmartPicksRedundancyGroup[] {
+  detect(
+    activeProducts: InventoryProduct[],
+    language: AppLanguage = DEFAULT_LANGUAGE,
+  ): SmartPicksRedundancyGroup[] {
     const productsByTag = new Map<string, InventoryProduct[]>();
     for (const product of activeProducts) {
       for (const tag of detectActiveTags(product)) {
@@ -30,7 +35,7 @@ export class SmartPicksRedundancyService {
             recommendation:
               index === 0 ? 'keep' : index === 1 ? 'finish-first' : 'redundant',
           })),
-        hint: `You have ${products.length} products with ${activeTag.replace(/_/g, ' ')} signals. Finish one before adding another.`,
+        hint: smartPicksRedundancyHint(activeTag, products.length, language),
       }));
   }
 }

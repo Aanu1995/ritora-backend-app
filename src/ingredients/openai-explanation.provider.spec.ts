@@ -166,6 +166,44 @@ describe('OpenAiExplanationProvider', () => {
     );
   });
 
+  it('requests no-storage, low-temperature output for repeatable explanations', async () => {
+    const input = buildInput();
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_EXPLANATION_AI_MODEL: 'ingredient-explanation-model',
+        OPENAI_MODEL: 'fallback-model',
+      }),
+    );
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output_text: JSON.stringify({
+          conflicts: [
+            {
+              id: input.conflicts[0]?.id,
+              explanation: 'Use these on different nights.',
+            },
+          ],
+          overlaps: [],
+        }),
+      }),
+    });
+
+    const result = await provider.explainFindings(input);
+
+    expect(result?.conflicts[input.conflicts[0]?.id ?? '']).toBe(
+      'Use these on different nights.',
+    );
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(String(init.body)) as {
+      store?: boolean;
+      temperature?: number;
+    };
+    expect(body.store).toBe(false);
+    expect(body.temperature).toBe(0);
+  });
+
   it('short-circuits with null when there are no findings', async () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({

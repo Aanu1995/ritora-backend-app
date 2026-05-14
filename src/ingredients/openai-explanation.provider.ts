@@ -10,6 +10,7 @@ import {
   OPENAI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
 import type {
   ExplanationInput,
   ExplanationOutput,
@@ -80,9 +81,11 @@ export class OpenAiExplanationProvider implements ExplanationPort {
         },
         body: JSON.stringify({
           model,
+          store: false,
           reasoning: { effort: 'low' },
           text: { verbosity: 'low' },
           max_output_tokens: 700,
+          ...openAiRepeatabilityRequestOptions(model),
           input: [
             {
               role: 'system',

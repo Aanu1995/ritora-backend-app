@@ -33,6 +33,23 @@ describe('SmartPicksRedundancyService', () => {
       },
     ]);
   });
+
+  it('localizes redundancy hints without changing the stable active tag code', () => {
+    const groups = service.detect(
+      [
+        product('cream-1', 'Barrier Cream', 'squalane', '2026-05-01'),
+        product('balm-1', 'Repair Balm', 'cholesterol', '2026-05-02'),
+      ],
+      'sv',
+    );
+
+    expect(groups).toEqual([
+      expect.objectContaining({
+        activeTag: 'barrier_support',
+        hint: 'Du har 2 produkter med signaler för barriärstöd. Använd upp en innan du lägger till en till.',
+      }),
+    ]);
+  });
 });
 
 function product(

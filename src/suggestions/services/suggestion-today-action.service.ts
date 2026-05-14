@@ -3,7 +3,9 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, IsNull, MoreThan, Repository } from 'typeorm';
 import { toIsoString } from '../../common/utils/date';
@@ -26,6 +28,7 @@ import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionRecordingReminderSnooze } from '../entities/suggestion-recording-reminder-snooze.entity';
 import { SuggestionReactionOverride } from '../entities/suggestion-reaction-override.entity';
 import { SuggestionGapActionKind } from '../suggestions.constants';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
 import {
   endOfLocalDateInstant,
   formatDateInTimeZone,
@@ -57,6 +60,8 @@ export class SuggestionTodayActionService {
     private readonly entryRepo: Repository<SkinJournalEntry>,
     @InjectRepository(RoutineSimplificationEvent)
     private readonly simplificationRepo: Repository<RoutineSimplificationEvent>,
+    @Optional()
+    private readonly observability?: SuggestionObservabilityService,
   ) {}
 
   async useNormalRoutineForToday(
@@ -165,6 +170,26 @@ export class SuggestionTodayActionService {
     return toGapActionResponse(action);
   }
 
+  private async recordSmartPickFeedback(
+    suggestion: SmartPickProductSuggestion,
+    action: SuggestionGapActionKind,
+  ): Promise<void> {
+    await this.observability?.record({
+      kind: 'smart_pick_user_feedback',
+      severity: 'info',
+      userId: suggestion.user_id,
+      metadata: {
+        action,
+        normalizedKeyHash: hashSmartPickFeedbackValue(
+          suggestion.normalized_key,
+        ),
+        hasAlternatives: suggestion.alternatives_json.length > 0,
+        sellerNameCount: suggestion.seller_names_json.length,
+        sourceIdCount: suggestion.source_ids.length,
+      },
+    });
+  }
+
   private async recordSmartPickGapAction(
     user: User,
     payload: RecordSuggestionGapActionDto,
@@ -220,6 +245,7 @@ export class SuggestionTodayActionService {
         action: payload.action,
       }),
     );
+    await this.recordSmartPickFeedback(suggestion, payload.action);
     return toGapActionResponse(action);
   }
 
@@ -360,4 +386,8 @@ function toGapActionResponse(
     normalizedKey: action.normalized_key,
     action: action.action,
   };
+}
+
+function hashSmartPickFeedbackValue(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

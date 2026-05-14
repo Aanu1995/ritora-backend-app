@@ -9,6 +9,7 @@ import {
   INSIGHTS_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
 import {
   SKIN_JOURNAL_INSIGHT_PROMPT_VERSION,
   SKIN_JOURNAL_INSIGHT_POLISH_TIMEOUT_MS,
@@ -224,6 +225,7 @@ export class InsightPolishService {
             },
           ],
           max_output_tokens: 1200,
+          ...openAiRepeatabilityRequestOptions(model),
           text: {
             verbosity: 'low',
             format: OPENAI_RESPONSE_FORMAT,

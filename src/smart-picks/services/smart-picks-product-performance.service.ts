@@ -70,7 +70,8 @@ export class SmartPicksProductPerformanceService {
     params: SmartPicksProductPerformanceParams,
   ): Promise<SmartPicksProductPerformanceSummary[]> {
     if (params.products.length === 0) return [];
-    const referenceDate = params.referenceDate ?? new Date();
+    const referenceDate =
+      params.referenceDate ?? (await this.latestUserHistoryDate(params.userId));
     const fromDate = shiftIsoDate(referenceDate, -HISTORY_WINDOW_DAYS);
     const toDate = toIsoDate(referenceDate);
     let applicationLogs: ApplicationLog[];
@@ -110,6 +111,50 @@ export class SmartPicksProductPerformanceService {
       primaryGoal: params.primaryGoal,
       referenceDate,
     });
+  }
+
+  private async latestUserHistoryDate(userId: string): Promise<Date> {
+    try {
+      const [latestApplicationLog, latestJournalEntry] = await Promise.all([
+        this.latestApplicationLogDate(userId),
+        this.latestJournalEntryDate(userId),
+      ]);
+      const latestDate = latestIsoDate(
+        latestApplicationLog,
+        latestJournalEntry,
+      );
+      return latestDate ? isoDateToUtc(latestDate) : new Date();
+    } catch (error) {
+      this.logger.warn(
+        `Smart Picks history anchor unavailable; using current date: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      return new Date();
+    }
+  }
+
+  private async latestApplicationLogDate(
+    userId: string,
+  ): Promise<string | null> {
+    const latestApplicationLog = await this.applicationLogRepo.findOne({
+      where: { user_id: userId },
+      order: { target_date: 'DESC' },
+      select: ['target_date'],
+    });
+    return latestApplicationLog?.target_date ?? null;
+  }
+
+  private async latestJournalEntryDate(userId: string): Promise<string | null> {
+    const latestJournalEntry = await this.journalEntryRepo.findOne({
+      where: {
+        user_id: userId,
+        analysis_status: AnalysisStatusValue.Completed,
+      },
+      order: { entry_date: 'DESC' },
+      select: ['entry_date'],
+    });
+    return latestJournalEntry?.entry_date ?? null;
   }
 }
 
@@ -523,4 +568,10 @@ function toIsoDate(date: Date): string {
 
 function isoDateToUtc(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`);
+}
+
+function latestIsoDate(...dates: Array<string | null>): string | null {
+  const values = dates.filter((date): date is string => Boolean(date));
+  if (values.length === 0) return null;
+  return values.sort().at(-1) ?? null;
 }
