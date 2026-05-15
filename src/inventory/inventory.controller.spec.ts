@@ -133,7 +133,10 @@ describe('InventoryController', () => {
     await expect(controller.uploadImage('user-1', undefined)).rejects.toThrow(
       BadRequestException,
     );
-    expect(inventoryService.uploadProductImage).toHaveBeenCalledWith(file);
+    expect(inventoryService.uploadProductImage).toHaveBeenCalledWith(
+      'user-1',
+      file,
+    );
   });
 
   it('creates products with a draft-local image only after final save', async () => {

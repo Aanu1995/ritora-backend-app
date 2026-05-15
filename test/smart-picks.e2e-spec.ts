@@ -6,14 +6,18 @@ import { EnvironmentProviderName } from '../src/environment-intelligence/environ
 import { MailService } from '../src/mail/mail.service';
 import { SuggestionEvidenceSourceId } from '../src/suggestions/suggestions.constants';
 import {
-  GeneratedSmartPick,
   SmartPicksAiGenerator,
+  type GeneratedSmartPick,
+  type SmartPicksAiPlanGenerationResult,
 } from '../src/smart-picks/services/smart-picks-ai-generator';
 import { SmartPicksGenerationWorkerModule } from '../src/smart-picks/smart-picks-generation-worker.module';
 import { SmartPicksGenerationWorker } from '../src/smart-picks/services/smart-picks-generation-worker.service';
 import { SmartPicksOverviewService } from '../src/smart-picks/services/smart-picks-overview.service';
 import { SmartPicksPreparationService } from '../src/smart-picks/services/smart-picks-preparation.service';
-import type { SmartPicksGapSnapshot } from '../src/smart-picks/smart-picks.types';
+import {
+  SmartPicksGapKind,
+  type SmartPicksGapSnapshot,
+} from '../src/smart-picks/smart-picks.types';
 import {
   createCompletedSkinProfile,
   createTestApp,
@@ -73,6 +77,8 @@ describe('Smart Picks (e2e)', () => {
   let smartPicksGenerationWorker: SmartPicksGenerationWorker;
 
   const aiGenerator = {
+    generatePlanWithDiagnostics: jest.fn(async () => generatedPlan()),
+    generatePlan: jest.fn(async () => generatedPlan().plan),
     generateWithDiagnostics: jest.fn(
       async (_context: unknown, gaps: SmartPicksGapSnapshot[]) => {
         const picks = new Map<string, GeneratedSmartPick>();
@@ -194,6 +200,7 @@ describe('Smart Picks (e2e)', () => {
   it('returns a consent-gated overview without calling the AI generator', async () => {
     await authPatch('/skin-profile', { allowSmartPicks: false }).expect(200);
     await smartPicksPreparation.waitForIdle();
+    aiGenerator.generatePlanWithDiagnostics.mockClear();
     aiGenerator.generateWithDiagnostics.mockClear();
 
     const response = await authGet('/smart-picks/overview').expect(200);
@@ -201,10 +208,12 @@ describe('Smart Picks (e2e)', () => {
 
     expect(overview.consentRequired).toBe(true);
     expect(overview.priorityGaps).toEqual([]);
+    expect(aiGenerator.generatePlanWithDiagnostics).not.toHaveBeenCalled();
     expect(aiGenerator.generateWithDiagnostics).not.toHaveBeenCalled();
 
     await authPatch('/skin-profile', { allowSmartPicks: true }).expect(200);
     await smartPicksPreparation.waitForIdle();
+    aiGenerator.generatePlanWithDiagnostics.mockClear();
     aiGenerator.generateWithDiagnostics.mockClear();
   });
 
@@ -346,5 +355,58 @@ function generatedPick(
     alternatives: [],
     recommendationRankReason: 'Best budget-matched daily SPF fit.',
     ...overrides,
+  };
+}
+
+function generatedPlan(): SmartPicksAiPlanGenerationResult {
+  const priorityGap: SmartPicksGapSnapshot = {
+    ingredientOrCategory: 'Daily broad-spectrum sunscreen',
+    normalizedKey: 'daily-broad-spectrum-sunscreen',
+    priority: 'priority',
+    reason:
+      'The routine needs daily UV protection before adding stronger goal-focused products.',
+    shortReason: 'Daily UV protection is missing.',
+    goalAlignment:
+      'Protects progress and reduces avoidable UV-triggered setbacks.',
+    sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+    gapKind: SmartPicksGapKind.GoalSupport,
+    replacementFor: null,
+  };
+
+  return {
+    plan: {
+      coverage: {
+        slots: [
+          {
+            role: 'spf',
+            state: 'missing-priority',
+            filledByProductId: null,
+            filledByName: null,
+            goalRelevance: 'essential',
+          },
+        ],
+        filled: 0,
+        total: 1,
+      },
+      priorityGaps: [priorityGap],
+      considerGaps: [],
+    },
+    diagnostics: {
+      rawCoverageSlotCount: 1,
+      acceptedCoverageSlotCount: 1,
+      invalidCoverageSlotCount: 0,
+      rawGapCount: 1,
+      acceptedGapCount: 1,
+      acceptedPriorityGapCount: 1,
+      acceptedConsiderGapCount: 0,
+      invalidGapCount: 0,
+      blockedOwnedGapCount: 0,
+      blockedSafetyGapCount: 0,
+      blockedPregnancySafetyGapCount: 0,
+      blockedReplacementEvidenceGapCount: 0,
+      providerFailed: false,
+      providerSkippedReason: null,
+      missingPlan: false,
+    },
   };
 }

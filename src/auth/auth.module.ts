@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CatalogueModule } from '../catalogue/catalogue.module';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { SkinJournalModule } from '../skin-journal/skin-journal.module';
 import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
@@ -12,6 +14,7 @@ import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
 import { AuthController } from './auth.controller';
+import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
 import { AuthService } from './auth.service';
 import { AuthSession } from './entities/auth-session.entity';
 import { AppleOAuthCallbackGuard } from './guards/apple-oauth-callback.guard';
@@ -42,13 +45,16 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       SmartPickSnapshot,
       SmartPickProductSuggestion,
       SuggestionGapAction,
+      InventoryProduct,
     ]),
+    CatalogueModule,
     UsersModule,
     MailModule,
     SkinJournalModule,
   ],
   controllers: [AuthController],
   providers: [
+    AccountDeletionSchedulerService,
     AuthService,
     AppleOAuthGuard,
     AppleOAuthCallbackGuard,
@@ -58,5 +64,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     GoogleStrategy,
     JwtStrategy,
   ],
+  exports: [AuthService, AccountDeletionSchedulerService],
 })
 export class AuthModule {}

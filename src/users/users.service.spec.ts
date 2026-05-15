@@ -15,7 +15,21 @@ const mockRepository = () => ({
   createQueryBuilder: jest.fn(),
   save: jest.fn(),
   remove: jest.fn(),
+  manager: createMockEntityManager(),
 });
+
+function createMockEntityManager() {
+  const manager = {
+    delete: jest.fn(),
+    remove: jest.fn(),
+    transaction: jest.fn(),
+  };
+  manager.transaction.mockImplementation(
+    async (work: (transactionManager: typeof manager) => Promise<void>) =>
+      work(manager),
+  );
+  return manager;
+}
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -99,7 +113,10 @@ describe('UsersService', () => {
       );
 
       expect(repo.createQueryBuilder).toHaveBeenCalledWith('user');
-      expect(addSelect).toHaveBeenCalledWith('user.password_hash');
+      expect(addSelect).toHaveBeenCalledWith([
+        'user.password_hash',
+        'user.account_deletion_confirm_token_hash',
+      ]);
       expect(where).toHaveBeenCalledWith(
         'user.canonical_email = :canonicalEmail',
         {
@@ -121,7 +138,10 @@ describe('UsersService', () => {
       const result = await service.findByIdForAuth('01');
 
       expect(repo.createQueryBuilder).toHaveBeenCalledWith('user');
-      expect(addSelect).toHaveBeenCalledWith('user.password_hash');
+      expect(addSelect).toHaveBeenCalledWith([
+        'user.password_hash',
+        'user.account_deletion_confirm_token_hash',
+      ]);
       expect(where).toHaveBeenCalledWith('user.id = :id', { id: '01' });
       expect(result).toEqual(user);
     });
@@ -521,14 +541,26 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    it('deletes a user by entity', async () => {
+    it('deletes explicit user-owned rows before deleting the user entity', async () => {
       const user = { id: '01' } as User;
+      const manager = repo.manager as unknown as {
+        delete: jest.Mock;
+        remove: jest.Mock;
+      };
       repo.findOne.mockResolvedValue(user);
-      repo.remove.mockResolvedValue(user);
+      manager.remove.mockResolvedValue(user);
 
       await service.remove('01');
 
-      expect(repo.remove).toHaveBeenCalledWith(user);
+      expect(manager.delete).toHaveBeenCalledWith(
+        'push_notification_deliveries',
+        { user_id: '01' },
+      );
+      expect(manager.delete).toHaveBeenCalledWith(
+        'skin_journal_media_deletion_jobs',
+        { user_id: '01' },
+      );
+      expect(manager.remove).toHaveBeenCalledWith(User, user);
     });
 
     it('throws when removing a missing user', async () => {

@@ -50,6 +50,30 @@ type PasswordResetTemplateContext = {
   footerLine: string;
 };
 
+type AccountDeletionTimelineStep = {
+  marker: string;
+  title: string;
+  body: string;
+};
+
+type AccountDeletionActionTemplateContext = {
+  firstName: string;
+  actionUrl: string;
+  logoUrl: string;
+  previewText: string;
+  badgeLabel: string;
+  title: string;
+  intro: string;
+  ctaLabel: string;
+  sectionTitle: string;
+  sectionItems: AccountDeletionTimelineStep[];
+  sectionStyle: 'timeline' | 'checklist';
+  note: string;
+  fallbackIntro: string;
+  ignoreNote?: string;
+  footerLine: string;
+};
+
 type NotificationBaseContext = {
   firstName: string;
   logoUrl: string;
@@ -156,6 +180,9 @@ type NotificationWrappedReadyContext = NotificationBaseContext & {
 type MailTemplateContextMap = {
   [MailTemplateName.Verification]: VerificationTemplateContext;
   [MailTemplateName.PasswordReset]: PasswordResetTemplateContext;
+  [MailTemplateName.AccountDeletionConfirm]: AccountDeletionActionTemplateContext;
+  [MailTemplateName.AccountDeletionScheduled]: AccountDeletionActionTemplateContext;
+  [MailTemplateName.AccountDeletionCancelled]: AccountDeletionActionTemplateContext;
   [MailTemplateName.NotificationPhotoReminder]: NotificationPhotoReminderContext;
   [MailTemplateName.NotificationSuggestionReady]: NotificationSuggestionReadyContext;
   [MailTemplateName.NotificationSlotStart]: NotificationSlotStartContext;
@@ -283,6 +310,100 @@ export class MailService {
       to: email,
       subject: translate(language, 'mail.subject.passwordReset'),
       html,
+    });
+  }
+
+  async sendAccountDeletionConfirmationEmail(
+    email: string,
+    token: string,
+    firstName: string,
+    language: AppLanguage,
+  ): Promise<void> {
+    const safeFirstName = safeHtmlText(firstName);
+    const actionUrl = this.buildFrontendPathActionUrl(
+      'confirm-account-deletion',
+      token,
+    );
+    const values = { firstName: safeFirstName };
+
+    await this.sendAccountDeletionEmail({
+      email,
+      language,
+      templateName: MailTemplateName.AccountDeletionConfirm,
+      subjectKey: 'mail.subject.accountDeletionConfirm',
+      actionUrl,
+      firstName: safeFirstName,
+      values,
+      translationBase: 'mail.accountDeletion.confirm',
+      sectionStyle: 'timeline',
+      sectionTitleKey: 'mail.accountDeletion.confirm.timelineTitle',
+      sectionItemKeys: [
+        ['mail.accountDeletion.confirm.timeline1Title', 'mail.accountDeletion.confirm.timeline1Body'],
+        ['mail.accountDeletion.confirm.timeline2Title', 'mail.accountDeletion.confirm.timeline2Body'],
+        ['mail.accountDeletion.confirm.timeline3Title', 'mail.accountDeletion.confirm.timeline3Body'],
+      ],
+      ignoreNoteKey: 'mail.accountDeletion.confirm.ignoreNote',
+    });
+  }
+
+  async sendAccountDeletionScheduledEmail(
+    email: string,
+    token: string,
+    firstName: string,
+    language: AppLanguage,
+    scheduledFor: string,
+  ): Promise<void> {
+    const safeFirstName = safeHtmlText(firstName);
+    const actionUrl = this.buildFrontendPathActionUrl(
+      'cancel-account-deletion',
+      token,
+    );
+    const values = { firstName: safeFirstName, scheduledFor };
+
+    await this.sendAccountDeletionEmail({
+      email,
+      language,
+      templateName: MailTemplateName.AccountDeletionScheduled,
+      subjectKey: 'mail.subject.accountDeletionScheduled',
+      actionUrl,
+      firstName: safeFirstName,
+      values,
+      translationBase: 'mail.accountDeletion.scheduled',
+      sectionStyle: 'timeline',
+      sectionTitleKey: 'mail.accountDeletion.scheduled.timelineTitle',
+      sectionItemKeys: [
+        ['mail.accountDeletion.scheduled.timeline1Title', 'mail.accountDeletion.scheduled.timeline1Body'],
+        ['mail.accountDeletion.scheduled.timeline2Title', 'mail.accountDeletion.scheduled.timeline2Body'],
+        ['mail.accountDeletion.scheduled.timeline3Title', 'mail.accountDeletion.scheduled.timeline3Body'],
+      ],
+    });
+  }
+
+  async sendAccountDeletionCancelledEmail(
+    email: string,
+    firstName: string,
+    language: AppLanguage,
+  ): Promise<void> {
+    const safeFirstName = safeHtmlText(firstName);
+    const actionUrl = this.buildAppUrl('/');
+    const values = { firstName: safeFirstName };
+
+    await this.sendAccountDeletionEmail({
+      email,
+      language,
+      templateName: MailTemplateName.AccountDeletionCancelled,
+      subjectKey: 'mail.subject.accountDeletionCancelled',
+      actionUrl,
+      firstName: safeFirstName,
+      values,
+      translationBase: 'mail.accountDeletion.cancelled',
+      sectionStyle: 'checklist',
+      sectionTitleKey: 'mail.accountDeletion.cancelled.recapTitle',
+      sectionItemKeys: [
+        ['mail.accountDeletion.cancelled.recapItem1', null],
+        ['mail.accountDeletion.cancelled.recapItem2', null],
+        ['mail.accountDeletion.cancelled.recapItem3', null],
+      ],
     });
   }
 
@@ -653,6 +774,98 @@ export class MailService {
       'List-Unsubscribe': `<${unsubscribeUrl}>, <mailto:${NOTIFICATION_SUPPORT_EMAIL}?subject=unsubscribe>`,
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
     };
+  }
+
+  private async sendAccountDeletionEmail(input: {
+    email: string;
+    language: AppLanguage;
+    templateName:
+      | MailTemplateName.AccountDeletionConfirm
+      | MailTemplateName.AccountDeletionScheduled
+      | MailTemplateName.AccountDeletionCancelled;
+    subjectKey:
+      | 'mail.subject.accountDeletionConfirm'
+      | 'mail.subject.accountDeletionScheduled'
+      | 'mail.subject.accountDeletionCancelled';
+    actionUrl: string;
+    firstName: string;
+    values: Record<string, string | number>;
+    translationBase:
+      | 'mail.accountDeletion.confirm'
+      | 'mail.accountDeletion.scheduled'
+      | 'mail.accountDeletion.cancelled';
+    sectionStyle: 'timeline' | 'checklist';
+    sectionTitleKey: string;
+    sectionItemKeys: Array<[string, string | null]>;
+    ignoreNoteKey?: string;
+  }): Promise<void> {
+    const sectionItems: AccountDeletionTimelineStep[] = input.sectionItemKeys.map(
+      ([titleKey, bodyKey], index) => ({
+        marker:
+          input.sectionStyle === 'timeline' ? String(index + 1) : '&#10003;',
+        title: translate(input.language, titleKey, input.values),
+        body: bodyKey ? translate(input.language, bodyKey, input.values) : '',
+      }),
+    );
+
+    const html = await this.renderTemplate(input.templateName, {
+      firstName: input.firstName,
+      actionUrl: escapeExpression(input.actionUrl),
+      logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      previewText: translate(
+        input.language,
+        `${input.translationBase}.previewText`,
+        input.values,
+      ),
+      badgeLabel: translate(
+        input.language,
+        `${input.translationBase}.badgeLabel`,
+        input.values,
+      ),
+      title: translate(
+        input.language,
+        `${input.translationBase}.title`,
+        input.values,
+      ),
+      intro: translate(
+        input.language,
+        `${input.translationBase}.intro`,
+        input.values,
+      ),
+      ctaLabel: translate(
+        input.language,
+        `${input.translationBase}.ctaLabel`,
+        input.values,
+      ),
+      sectionTitle: translate(input.language, input.sectionTitleKey, input.values),
+      sectionItems,
+      sectionStyle: input.sectionStyle,
+      note: translate(
+        input.language,
+        `${input.translationBase}.note`,
+        input.values,
+      ),
+      fallbackIntro: translate(
+        input.language,
+        `${input.translationBase}.fallbackIntro`,
+        input.values,
+      ),
+      ignoreNote: input.ignoreNoteKey
+        ? translate(input.language, input.ignoreNoteKey, input.values)
+        : undefined,
+      footerLine: translate(
+        input.language,
+        `${input.translationBase}.footerLine`,
+        input.values,
+      ),
+    });
+
+    await this.sendEmail({
+      from: this.authFrom,
+      to: input.email,
+      subject: translate(input.language, input.subjectKey, input.values),
+      html,
+    });
   }
 
   private async sendEmail(payload: {

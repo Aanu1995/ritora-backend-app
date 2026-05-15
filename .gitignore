@@ -32,4 +32,6 @@ coverage/
 
 .claude
 
-src/scripts
+src/scripts/*
+!src/scripts/start-account-deletion-worker.ts
+scripts/

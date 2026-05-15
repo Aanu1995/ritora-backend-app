@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, LessThanOrEqual, Not, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import {
   buildTimeZonePatch,
@@ -30,6 +30,10 @@ const EMAIL_IDENTITY_UNIQUE_CONSTRAINTS = new Set([
   'idx_users_email_lower',
 ]);
 const EMAIL_IN_USE_MESSAGE = 'Email already in use';
+const EXPLICIT_USER_DATA_TABLES = [
+  'push_notification_deliveries',
+  'skin_journal_media_deletion_jobs',
+] as const;
 
 @Injectable()
 export class UsersService {
@@ -80,6 +84,22 @@ export class UsersService {
     return this.findForAuth({
       clause: 'user.id = :id',
       params: { id },
+    });
+  }
+
+  async findByAccountDeletionCancelTokenHash(
+    hash: string,
+  ): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { account_deletion_cancel_token_hash: hash },
+    });
+  }
+
+  async findByAccountDeletionConfirmTokenHash(
+    hash: string,
+  ): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { account_deletion_confirm_token_hash: hash },
     });
   }
 
@@ -241,9 +261,69 @@ export class UsersService {
     });
   }
 
+  async setAccountDeletionState(
+    id: string,
+    data: {
+      requestedAt: Date | null;
+      scheduledFor: Date | null;
+      cancelTokenHash: string | null;
+      confirmTokenHash: string | null;
+      confirmExpires: Date | null;
+    },
+  ): Promise<User> {
+    return this.update(id, {
+      account_deletion_requested_at: data.requestedAt,
+      account_deletion_scheduled_for: data.scheduledFor,
+      account_deletion_cancel_token_hash: data.cancelTokenHash,
+      account_deletion_confirm_token_hash: data.confirmTokenHash,
+      account_deletion_confirm_expires: data.confirmExpires,
+    });
+  }
+
+  async clearAccountDeletionState(id: string): Promise<void> {
+    await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_deletion_requested_at: null,
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_hash: null,
+        account_deletion_confirm_token_hash: null,
+        account_deletion_confirm_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere(
+        [
+          'account_deletion_requested_at IS NOT NULL',
+          'account_deletion_scheduled_for IS NOT NULL',
+          'account_deletion_cancel_token_hash IS NOT NULL',
+          'account_deletion_confirm_token_hash IS NOT NULL',
+          'account_deletion_confirm_expires IS NOT NULL',
+        ].join(' OR '),
+      )
+      .execute();
+  }
+
+  async findDueAccountDeletions(now: Date, take: number): Promise<User[]> {
+    return this.usersRepository.find({
+      where: {
+        account_deletion_scheduled_for: LessThanOrEqual(now),
+        account_deletion_cancel_token_hash: Not(IsNull()),
+      },
+      order: { account_deletion_scheduled_for: 'ASC' },
+      take,
+    });
+  }
+
   async remove(id: string): Promise<void> {
     const user = await this.findByIdOrFail(id);
-    await this.usersRepository.remove(user);
+    await this.usersRepository.manager.transaction(async (manager) => {
+      for (const tableName of EXPLICIT_USER_DATA_TABLES) {
+        await manager.delete(tableName, { user_id: id });
+      }
+
+      await manager.remove(User, user);
+    });
   }
 
   private findForAuth({
@@ -252,7 +332,10 @@ export class UsersService {
   }: AuthUserLookup): Promise<User | null> {
     return this.usersRepository
       .createQueryBuilder('user')
-      .addSelect('user.password_hash')
+      .addSelect([
+        'user.password_hash',
+        'user.account_deletion_confirm_token_hash',
+      ])
       .where(clause, params)
       .getOne();
   }

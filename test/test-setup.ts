@@ -25,6 +25,9 @@ type TestAppProviderOverride = {
 export class MockMailService {
   verificationTokens = new Map<string, string>();
   resetTokens = new Map<string, string>();
+  deletionConfirmTokens = new Map<string, string>();
+  deletionCancelTokens = new Map<string, string>();
+  deletionCancelledCounts = new Map<string, number>();
 
   async sendVerificationEmail(
     email: string,
@@ -42,6 +45,30 @@ export class MockMailService {
     this.resetTokens.set(email, token);
   }
 
+  async sendAccountDeletionConfirmationEmail(
+    email: string,
+    token: string,
+    _firstName: string,
+  ): Promise<void> {
+    this.deletionConfirmTokens.set(email, token);
+  }
+
+  async sendAccountDeletionScheduledEmail(
+    email: string,
+    token: string,
+    _firstName: string,
+  ): Promise<void> {
+    this.deletionCancelTokens.set(email, token);
+  }
+
+  async sendAccountDeletionCancelledEmail(
+    email: string,
+    _firstName: string,
+  ): Promise<void> {
+    const currentCount = this.deletionCancelledCounts.get(email) ?? 0;
+    this.deletionCancelledCounts.set(email, currentCount + 1);
+  }
+
   getVerificationToken(email: string): string | undefined {
     return this.verificationTokens.get(email);
   }
@@ -50,9 +77,24 @@ export class MockMailService {
     return this.resetTokens.get(email);
   }
 
+  getDeletionConfirmToken(email: string): string | undefined {
+    return this.deletionConfirmTokens.get(email);
+  }
+
+  getDeletionCancelToken(email: string): string | undefined {
+    return this.deletionCancelTokens.get(email);
+  }
+
+  getDeletionCancelledCount(email: string): number {
+    return this.deletionCancelledCounts.get(email) ?? 0;
+  }
+
   clear(): void {
     this.verificationTokens.clear();
     this.resetTokens.clear();
+    this.deletionConfirmTokens.clear();
+    this.deletionCancelTokens.clear();
+    this.deletionCancelledCounts.clear();
   }
 }
 

@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
+import { AccountDeletionStatus } from './dto/account-deletion-response.dto';
 
 const mockAuthService = () => ({
   register: jest.fn(),
@@ -21,6 +22,8 @@ const mockAuthService = () => ({
   clearRefreshCookie: jest.fn(),
   exportData: jest.fn(),
   deleteAccount: jest.fn(),
+  confirmAccountDeletion: jest.fn(),
+  cancelAccountDeletion: jest.fn(),
 });
 
 const mockRes = () => ({
@@ -392,7 +395,10 @@ describe('AuthController', () => {
 
   it('delete-account requires password confirmation', async () => {
     const res = mockRes();
-    authService.deleteAccount.mockResolvedValue(undefined);
+    authService.deleteAccount.mockResolvedValue({
+      status: AccountDeletionStatus.Scheduled,
+      scheduledFor: '2026-06-13T12:00:00.000Z',
+    });
 
     const result = await controller.deleteAccount(
       '01',
@@ -401,11 +407,50 @@ describe('AuthController', () => {
       asResponse(res),
     );
 
-    expect(result.message).toBe('Kontot har raderats');
+    expect(result).toEqual({
+      status: AccountDeletionStatus.Scheduled,
+      message: 'Kontot är schemalagt för radering',
+      scheduledFor: '2026-06-13T12:00:00.000Z',
+    });
     expect(authService.deleteAccount).toHaveBeenCalledWith(
       '01',
       'Password1',
       res,
+      'sv',
+    );
+  });
+
+  it('confirms OAuth account deletion from an email token', async () => {
+    authService.confirmAccountDeletion.mockResolvedValue({
+      status: AccountDeletionStatus.Scheduled,
+      scheduledFor: '2026-06-13T12:00:00.000Z',
+    });
+
+    const result = await controller.confirmAccountDeletion({
+      token: 'a'.repeat(64),
+      language: 'en',
+    });
+
+    expect(result.status).toBe(AccountDeletionStatus.Scheduled);
+    expect(result.message).toBe('Account deletion scheduled');
+    expect(authService.confirmAccountDeletion).toHaveBeenCalledWith(
+      'a'.repeat(64),
+      'en',
+    );
+  });
+
+  it('cancels account deletion from an email token', async () => {
+    authService.cancelAccountDeletion.mockResolvedValue(undefined);
+
+    const result = await controller.cancelAccountDeletion({
+      token: 'b'.repeat(64),
+      language: 'sv',
+    });
+
+    expect(result.message).toBe('Kontoraderingen har avbrutits');
+    expect(authService.cancelAccountDeletion).toHaveBeenCalledWith(
+      'b'.repeat(64),
+      'sv',
     );
   });
 });

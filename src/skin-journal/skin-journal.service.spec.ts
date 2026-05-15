@@ -952,7 +952,7 @@ describe('SkinJournalService', () => {
     expect(photoStorage.deletePhoto).not.toHaveBeenCalled();
   });
 
-  it('continues account media cleanup when one object delete fails', async () => {
+  it('fails account media cleanup when one object delete fails', async () => {
     entries.find.mockResolvedValue([
       entry({
         id: 'entry-1',
@@ -972,18 +972,14 @@ describe('SkinJournalService', () => {
       .mockRejectedValueOnce(new Error('s3 unavailable'))
       .mockResolvedValue(undefined);
 
-    await expect(
-      service.deleteAllMediaForUser('user-1'),
-    ).resolves.toBeUndefined();
-
-    expect(photoStorage.deletePhoto).toHaveBeenCalledTimes(3);
-    expect(photoStorage.deletePhoto).toHaveBeenNthCalledWith(
-      2,
-      'skin-journal/user-1/entry-2/photo.webp',
+    await expect(service.deleteAllMediaForUser('user-1')).rejects.toThrow(
+      's3 unavailable',
     );
+
+    expect(photoStorage.deletePhoto).toHaveBeenCalledTimes(1);
     expect(photoStorage.deletePhoto).toHaveBeenNthCalledWith(
-      3,
-      'skin-journal/user-1/wrapped-1/photo.webp',
+      1,
+      'skin-journal/user-1/entry-1/photo.webp',
     );
   });
 

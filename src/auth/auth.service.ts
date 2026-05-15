@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   HttpStatus,
   Injectable,
+  InternalServerErrorException,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import type { SignOptions } from 'jsonwebtoken';
 import { IsNull, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { type AppLanguage, normalizeLanguage } from '../common/i18n/i18n';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import {
   expiresFromDuration,
   isAfterNow,
@@ -25,6 +27,7 @@ import {
   toIsoString,
   toNullableIsoString,
 } from '../common/utils/date';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinProfileResponseDto } from '../skin-profile/dto/skin-profile-response.dto';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
@@ -43,6 +46,8 @@ import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
 import { sanitizeIpAddress, sanitizeUserAgent } from './auth-session.utils';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
+import { AccountDeletionStatus } from './dto/account-deletion-response.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { AuthSession } from './entities/auth-session.entity';
@@ -113,6 +118,25 @@ type AccountExportSmartPicks = {
   }>;
 };
 
+type AccountDeletionResult = {
+  status: AccountDeletionStatus;
+  scheduledFor?: string;
+};
+
+const ACCOUNT_DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+const ACCOUNT_DELETION_CONFIRM_EXPIRY = '1h';
+const ACCOUNT_DELETION_BATCH_SIZE = 100;
+
+function roundUpToWholeSecond(value: Date): Date {
+  const timestamp = value.getTime();
+  const millisecondRemainder = timestamp % 1000;
+  if (millisecondRemainder === 0) {
+    return value;
+  }
+
+  return new Date(timestamp + (1000 - millisecondRemainder));
+}
+
 type OAuthProviderConfig = {
   displayName: string;
   findBySubject: (subject: string) => Promise<User | null>;
@@ -164,8 +188,12 @@ export class AuthService {
     private readonly smartPickProductSuggestionRepository: Repository<SmartPickProductSuggestion>,
     @InjectRepository(SuggestionGapAction)
     private readonly suggestionGapActionRepository: Repository<SuggestionGapAction>,
+    @InjectRepository(InventoryProduct)
+    private readonly inventoryProductRepository: Repository<InventoryProduct>,
     private readonly dataAccessLogService: UserDataAccessLogService,
     private readonly skinJournalService: SkinJournalService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
+    private readonly accountDeletionScheduler: AccountDeletionSchedulerService,
   ) {
     this.jwtAccessExpiry = configService.getOrThrow('JWT_ACCESS_EXPIRY');
     this.jwtRefreshExpiry = configService.getOrThrow('JWT_REFRESH_EXPIRY');
@@ -277,6 +305,8 @@ export class AuthService {
       });
     }
 
+    await this.cancelAccountDeletionOnAccess(user);
+
     const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
     return new AuthResponseDto(accessToken, UserResponseDto.fromEntity(user));
@@ -339,6 +369,10 @@ export class AuthService {
     );
 
     if (existingProviderUser) {
+      await this.cancelAccountDeletionOnAccess(existingProviderUser);
+      const authUser =
+        (await this.usersService.findByIdForAuth(existingProviderUser.id)) ??
+        existingProviderUser;
       const { accessToken } = await this.createSession(
         existingProviderUser,
         res,
@@ -347,7 +381,10 @@ export class AuthService {
       );
       return new AuthResponseDto(
         accessToken,
-        UserResponseDto.fromEntity(existingProviderUser),
+        UserResponseDto.fromEntity(
+          existingProviderUser,
+          Boolean(authUser.password_hash),
+        ),
       );
     }
 
@@ -373,6 +410,9 @@ export class AuthService {
         existingEmailUser.id,
         profile.providerSubject,
       );
+      await this.cancelAccountDeletionOnAccess(linkedUser);
+      const authUser =
+        (await this.usersService.findByIdForAuth(linkedUser.id)) ?? linkedUser;
       const { accessToken } = await this.createSession(
         linkedUser,
         res,
@@ -382,7 +422,7 @@ export class AuthService {
 
       return new AuthResponseDto(
         accessToken,
-        UserResponseDto.fromEntity(linkedUser),
+        UserResponseDto.fromEntity(linkedUser, Boolean(authUser.password_hash)),
       );
     }
 
@@ -616,7 +656,7 @@ export class AuthService {
   }
 
   async getMe(userId: string): Promise<UserResponseDto> {
-    const user = await this.usersService.findById(userId);
+    const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
@@ -776,22 +816,255 @@ export class AuthService {
     userId: string,
     password: string,
     res: Response,
-  ): Promise<void> {
+    language: AppLanguage = 'en',
+  ): Promise<AccountDeletionResult> {
     const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
 
-    const valid = user.password_hash
-      ? await compare(password, user.password_hash)
-      : false;
+    if (!user.password_hash) {
+      const result = await this.requestOAuthAccountDeletionConfirmation(
+        user,
+        language,
+      );
+      await this.revokeAllSessions(user.id);
+      this.clearRefreshCookie(res);
+      return result;
+    }
+
+    const valid = await compare(password, user.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid password');
     }
 
+    const result = await this.scheduleAccountDeletion(user, language);
+    await this.revokeAllSessions(user.id);
+    this.clearRefreshCookie(res);
+    return result;
+  }
+
+  async confirmAccountDeletion(
+    token: string,
+    language?: string,
+  ): Promise<AccountDeletionResult> {
+    const user = await this.usersService.findByAccountDeletionConfirmTokenHash(
+      this.sha256(token),
+    );
+
+    if (!user || !user.account_deletion_confirm_expires) {
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (isBeforeNow(user.account_deletion_confirm_expires)) {
+      await this.usersService.clearAccountDeletionState(user.id);
+      throw new BadRequestException('Account deletion token has expired');
+    }
+
+    const result = await this.scheduleAccountDeletion(
+      user,
+      normalizeLanguage(language),
+    );
+    await this.revokeAllSessions(user.id);
+    return result;
+  }
+
+  async cancelAccountDeletion(token: string, language?: string): Promise<void> {
+    const user = await this.usersService.findByAccountDeletionCancelTokenHash(
+      this.sha256(token),
+    );
+
+    if (!user || !user.account_deletion_scheduled_for) {
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (!isAfterNow(user.account_deletion_scheduled_for)) {
+      throw new BadRequestException('Account deletion token has expired');
+    }
+
+    await this.cancelAccountDeletionForUser(user, normalizeLanguage(language));
+  }
+
+  async processDueAccountDeletions(
+    now: Date = nowDate(),
+    take = ACCOUNT_DELETION_BATCH_SIZE,
+  ): Promise<number> {
+    const users = await this.usersService.findDueAccountDeletions(now, take);
+    let deleted = 0;
+
+    for (const user of users) {
+      try {
+        if (!user.account_deletion_scheduled_for) {
+          continue;
+        }
+        const wasDeleted = await this.processScheduledAccountDeletion(
+          user.id,
+          user.account_deletion_scheduled_for,
+          now,
+        );
+        if (wasDeleted) deleted += 1;
+      } catch (error) {
+        this.logger.error(
+          `Failed to finalize scheduled account deletion for user ${user.id}`,
+          error,
+        );
+      }
+    }
+
+    return deleted;
+  }
+
+  async processScheduledAccountDeletion(
+    userId: string,
+    scheduledFor: Date,
+    now: Date = nowDate(),
+  ): Promise<boolean> {
+    const current = await this.usersService.findById(userId);
+    const currentScheduledFor = current?.account_deletion_scheduled_for;
+    if (!currentScheduledFor) {
+      return false;
+    }
+
+    if (currentScheduledFor.getTime() !== scheduledFor.getTime()) {
+      return false;
+    }
+
+    if (currentScheduledFor.getTime() > now.getTime()) {
+      return false;
+    }
+
+    await this.finalizeAccountDeletion(current.id);
+    return true;
+  }
+
+  private async requestOAuthAccountDeletionConfirmation(
+    user: User,
+    language: AppLanguage,
+  ): Promise<AccountDeletionResult> {
+    const confirmToken = randomBytes(32).toString('hex');
+    const now = nowDate();
+
+    await this.usersService.setAccountDeletionState(user.id, {
+      requestedAt: now,
+      scheduledFor: null,
+      cancelTokenHash: null,
+      confirmTokenHash: this.sha256(confirmToken),
+      confirmExpires: expiresFromDuration(ACCOUNT_DELETION_CONFIRM_EXPIRY),
+    });
+
+    await this.sendAccountDeletionConfirmationEmailOrFail(
+      user,
+      confirmToken,
+      language,
+    );
+
+    return { status: AccountDeletionStatus.ConfirmationRequired };
+  }
+
+  private async scheduleAccountDeletion(
+    user: User,
+    language: AppLanguage,
+  ): Promise<AccountDeletionResult> {
+    const cancelToken = randomBytes(32).toString('hex');
+    const requestedAt = nowDate();
+    const scheduledFor = roundUpToWholeSecond(
+      new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_MS),
+    );
+    const scheduledForIso = toIsoString(scheduledFor);
+
+    await this.usersService.setAccountDeletionState(user.id, {
+      requestedAt,
+      scheduledFor,
+      cancelTokenHash: this.sha256(cancelToken),
+      confirmTokenHash: null,
+      confirmExpires: null,
+    });
+
+    try {
+      await this.accountDeletionScheduler.scheduleFinalization(
+        user.id,
+        scheduledFor,
+      );
+    } catch (error) {
+      await this.usersService.clearAccountDeletionState(user.id);
+      this.logger.error(
+        `Failed to create durable account deletion schedule for user ${user.id}`,
+        error,
+      );
+      throw new InternalServerErrorException(
+        'Account deletion could not be scheduled',
+      );
+    }
+
+    await this.sendAccountDeletionScheduledEmailOrRollback(
+      user,
+      cancelToken,
+      language,
+      scheduledForIso,
+    );
+
+    return {
+      status: AccountDeletionStatus.Scheduled,
+      scheduledFor: scheduledForIso,
+    };
+  }
+
+  private async cancelAccountDeletionOnAccess(user: User): Promise<void> {
+    if (!user.account_deletion_scheduled_for) {
+      await this.usersService.clearAccountDeletionState(user.id);
+      return;
+    }
+
+    if (!isAfterNow(user.account_deletion_scheduled_for)) {
+      await this.finalizeAccountDeletion(user.id);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    await this.cancelAccountDeletionForUser(
+      user,
+      normalizeLanguage(user.preferred_language),
+    );
+  }
+
+  private async cancelAccountDeletionForUser(
+    user: User,
+    language: AppLanguage,
+  ): Promise<void> {
+    await this.usersService.clearAccountDeletionState(user.id);
+    await this.cancelDurableAccountDeletionSchedule(user.id);
+    await this.sendAccountDeletionCancelledEmailOrLogFailure(user, language);
+  }
+
+  private async cancelDurableAccountDeletionSchedule(
+    userId: string,
+  ): Promise<void> {
+    try {
+      await this.accountDeletionScheduler.cancelFinalization(userId);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to cancel durable account deletion schedule for user ${userId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async finalizeAccountDeletion(userId: string): Promise<void> {
+    const products = await this.inventoryProductRepository.find({
+      where: { user_id: userId },
+    });
+    const imageUrls = products.flatMap((product) =>
+      Array.isArray(product.identity.imageUrls)
+        ? product.identity.imageUrls.filter(
+            (imageUrl): imageUrl is string => typeof imageUrl === 'string',
+          )
+        : [],
+    );
+
+    await this.cataloguePhotoStorageService.deleteManagedImageUrls(imageUrls);
+    await this.cataloguePhotoStorageService.deleteManagedImagesForOwner(userId);
     await this.skinJournalService.deleteAllMediaForUser(userId);
     await this.usersService.remove(userId);
-    this.clearRefreshCookie(res);
   }
 
   private async createSession(
@@ -959,10 +1232,102 @@ export class AuthService {
     }
   }
 
-  private logEmailDeliveryFailure(
-    type: 'verification' | 'password reset',
+  private async sendAccountDeletionConfirmationEmailOrFail(
+    user: User,
+    token: string,
+    language: AppLanguage,
+  ): Promise<void> {
+    try {
+      await this.mailService.sendAccountDeletionConfirmationEmail(
+        user.email,
+        token,
+        user.first_name,
+        language,
+      );
+    } catch (error) {
+      this.logAccountDeletionEmailFailure(
+        'account deletion confirmation',
+        user.email,
+        error,
+      );
+      await this.usersService.clearAccountDeletionState(user.id);
+      throw new InternalServerErrorException(
+        'Account deletion email could not be sent',
+      );
+    }
+  }
+
+  private async sendAccountDeletionScheduledEmailOrRollback(
+    user: User,
+    token: string,
+    language: AppLanguage,
+    scheduledFor: string,
+  ): Promise<void> {
+    try {
+      await this.mailService.sendAccountDeletionScheduledEmail(
+        user.email,
+        token,
+        user.first_name,
+        language,
+        scheduledFor,
+      );
+    } catch (error) {
+      this.logAccountDeletionEmailFailure(
+        'account deletion scheduled',
+        user.email,
+        error,
+      );
+      await this.cancelDurableAccountDeletionSchedule(user.id);
+      await this.usersService.clearAccountDeletionState(user.id);
+      throw new InternalServerErrorException(
+        'Account deletion email could not be sent',
+      );
+    }
+  }
+
+  private async sendAccountDeletionCancelledEmailOrLogFailure(
+    user: User,
+    language: AppLanguage,
+  ): Promise<void> {
+    try {
+      await this.mailService.sendAccountDeletionCancelledEmail(
+        user.email,
+        user.first_name,
+        language,
+      );
+    } catch (error) {
+      this.logAccountDeletionEmailFailure(
+        'account deletion cancellation',
+        user.email,
+        error,
+      );
+    }
+  }
+
+  private logAccountDeletionEmailFailure(
+    type:
+      | 'account deletion confirmation'
+      | 'account deletion scheduled'
+      | 'account deletion cancellation',
     email: string,
-    actionUrl: string,
+    error: unknown,
+  ): void {
+    const deliveryError =
+      error instanceof Error
+        ? error
+        : new Error('Email delivery failed with a non-Error value');
+    this.logEmailDeliveryFailure(type, email, null, deliveryError);
+  }
+
+  private logEmailDeliveryFailure(
+    type:
+      | 'verification'
+      | 'password reset'
+      | 'account deletion confirmation'
+      | 'account deletion scheduled'
+      | 'account deletion cancellation',
+    email: string,
+    actionUrl: string | null,
     error: Error,
   ): void {
     const message = error.message;
@@ -977,9 +1342,12 @@ export class AuthService {
       return;
     }
 
+    const actionUrlMessage = actionUrl
+      ? `Temporary ${type} URL for ${email}: ${actionUrl}`
+      : `Temporary ${type} URL for ${email}: account deletion action URL withheld because it contains a one-time token.`;
+
     this.logger.warn(
-      `${MAIL_PROVIDER_LABEL} delivery failed in development. Check your RESEND_API_KEY and verified MAIL_FROM address. ` +
-        `Temporary ${type} URL for ${email}: ${actionUrl}`,
+      `${MAIL_PROVIDER_LABEL} delivery failed in development. Check your RESEND_API_KEY and verified MAIL_FROM address. ${actionUrlMessage}`,
     );
   }
 

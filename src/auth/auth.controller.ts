@@ -21,6 +21,10 @@ import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { OriginCheckGuard } from '../common/guards/origin-check.guard';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import {
+  AccountDeletionResponseDto,
+  AccountDeletionStatus,
+} from './dto/account-deletion-response.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { ConfirmPasswordDto } from './dto/confirm-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -379,13 +383,43 @@ export class AuthController {
     @CurrentUser('language') language: string | undefined,
     @Body() dto: ConfirmPasswordDto,
     @Res({ passthrough: true }) res: Response,
+  ): Promise<AccountDeletionResponseDto> {
+    const normalizedLanguage = normalizeLanguage(language);
+    const result = await this.authService.deleteAccount(
+      userId,
+      dto.password,
+      res,
+      normalizedLanguage,
+    );
+    return this.toAccountDeletionResponse(result, normalizedLanguage);
+  }
+
+  @Post('account/deletion/confirm')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(10))
+  async confirmAccountDeletion(
+    @Body() dto: VerifyEmailDto,
+  ): Promise<AccountDeletionResponseDto> {
+    const language = normalizeLanguage(dto.language);
+    const result = await this.authService.confirmAccountDeletion(
+      dto.token,
+      language,
+    );
+    return this.toAccountDeletionResponse(result, language);
+  }
+
+  @Post('account/deletion/cancel')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(10))
+  async cancelAccountDeletion(
+    @Body() dto: VerifyEmailDto,
   ): Promise<{ message: string }> {
-    await this.authService.deleteAccount(userId, dto.password, res);
+    const language = normalizeLanguage(dto.language);
+    await this.authService.cancelAccountDeletion(dto.token, language);
     return {
-      message: translate(
-        normalizeLanguage(language),
-        'messages.auth.deleteAccount.success',
-      ),
+      message: translate(language, 'messages.auth.deleteAccount.cancelled'),
     };
   }
 
@@ -462,5 +496,21 @@ export class AuthController {
     base.search = '';
     base.hash = '';
     return base.toString();
+  }
+
+  private toAccountDeletionResponse(
+    result: { status: AccountDeletionStatus; scheduledFor?: string },
+    language: ReturnType<typeof normalizeLanguage>,
+  ): AccountDeletionResponseDto {
+    const messageKey =
+      result.status === AccountDeletionStatus.Scheduled
+        ? 'messages.auth.deleteAccount.scheduled'
+        : 'messages.auth.deleteAccount.confirmationRequired';
+
+    return new AccountDeletionResponseDto(
+      result.status,
+      translate(language, messageKey),
+      result.scheduledFor,
+    );
   }
 }

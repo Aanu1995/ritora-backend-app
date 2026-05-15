@@ -165,8 +165,10 @@ export class InventoryService {
       await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
         file,
       );
-    const upload =
-      this.cataloguePhotoStorageService.startHeroImageUpload(processed);
+    const upload = this.cataloguePhotoStorageService.startHeroImageUpload(
+      processed,
+      userId,
+    );
 
     const imageUrl = await this.resolveCreateImageUpload(upload);
 
@@ -242,13 +244,18 @@ export class InventoryService {
     return this.toResponseDto(saved);
   }
 
-  async uploadProductImage(file: UploadedCatalogueImage): Promise<string> {
+  async uploadProductImage(
+    userId: string,
+    file: UploadedCatalogueImage,
+  ): Promise<string> {
     const processed =
       await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
         file,
       );
-    const imageUrl =
-      await this.cataloguePhotoStorageService.saveHeroImage(processed);
+    const imageUrl = await this.cataloguePhotoStorageService.saveHeroImage(
+      processed,
+      userId,
+    );
 
     if (!imageUrl) {
       throw new ServiceUnavailableException(
@@ -265,7 +272,7 @@ export class InventoryService {
     file: UploadedCatalogueImage,
   ): Promise<InventoryProductResponseDto> {
     const product = await this.findByIdOrFail(userId, id);
-    const imageUrl = await this.uploadProductImage(file);
+    const imageUrl = await this.uploadProductImage(userId, file);
     const merged = mergeInventorySnapshot(this.toSnapshot(product), {
       identity: {
         imageUrls: [imageUrl],

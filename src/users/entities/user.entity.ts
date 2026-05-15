@@ -66,6 +66,22 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   password_reset_expires: Date | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_requested_at: Date | null;
+
+  @Index('idx_users_account_deletion_scheduled_for')
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_scheduled_for: Date | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
+  account_deletion_cancel_token_hash: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
+  account_deletion_confirm_token_hash: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_confirm_expires: Date | null;
+
   @Column({ type: 'varchar', length: 5, default: 'en' })
   preferred_language: string;
 

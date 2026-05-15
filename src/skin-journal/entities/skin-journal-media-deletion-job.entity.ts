@@ -4,10 +4,13 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { ulid } from 'ulid';
+import { User } from '../../users/entities/user.entity';
 import {
   MediaDeletionJobStatusValue,
   type MediaDeletionJobStatus,
@@ -59,6 +62,10 @@ export class SkinJournalMediaDeletionJob {
 
   @UpdateDateColumn({ type: 'timestamptz' })
   updated_at: Date;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'user_id' })
+  user: User | null;
 
   @BeforeInsert()
   generateId() {

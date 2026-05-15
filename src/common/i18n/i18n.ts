@@ -28,8 +28,19 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'messages.auth.logout.success': 'Logged out',
     'messages.auth.logoutAll.success': 'All sessions revoked',
     'messages.auth.deleteAccount.success': 'Account deleted',
+    'messages.auth.deleteAccount.scheduled': 'Account deletion scheduled',
+    'messages.auth.deleteAccount.confirmationRequired':
+      'Check your email to confirm account deletion',
+    'messages.auth.deleteAccount.cancelled':
+      'Account deletion has been cancelled',
     'mail.subject.verification': 'Verify your Ritora account',
     'mail.subject.passwordReset': 'Reset your Ritora password',
+    'mail.subject.accountDeletionConfirm':
+      'Confirm deletion of your Ritora account',
+    'mail.subject.accountDeletionScheduled':
+      'Your Ritora account will be deleted on {{scheduledFor}}',
+    'mail.subject.accountDeletionCancelled':
+      'Good news, your Ritora account is staying',
     'mail.verification.previewText':
       'Welcome to Ritora. Tap the button inside to confirm your email and start building a calmer skincare routine.',
     'mail.verification.title': 'Welcome to Ritora, {{firstName}}',
@@ -61,6 +72,77 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'You can ignore this email and your current password will keep working. Ritora will never ask for your password by email.',
     'mail.passwordReset.footerLine':
       'Sent from Ritora. If you ever have questions about your account, the team is at support@getritora.com.',
+    'mail.accountDeletion.confirm.previewText':
+      'Tap to confirm you want to delete your Ritora account. The link expires in one hour.',
+    'mail.accountDeletion.confirm.badgeLabel': 'Action needed',
+    'mail.accountDeletion.confirm.title':
+      'Confirm account deletion, {{firstName}}',
+    'mail.accountDeletion.confirm.intro':
+      'We got a request to delete your Ritora account. Only confirm below if this was you. The link works for the next hour.',
+    'mail.accountDeletion.confirm.ctaLabel': 'Confirm deletion',
+    'mail.accountDeletion.confirm.timelineTitle': 'Here is what happens next',
+    'mail.accountDeletion.confirm.timeline1Title': 'You confirm',
+    'mail.accountDeletion.confirm.timeline1Body':
+      'We sign you out of every device and start your 30-day grace period.',
+    'mail.accountDeletion.confirm.timeline2Title': 'Next 30 days',
+    'mail.accountDeletion.confirm.timeline2Body':
+      'Change your mind any time. Sign in again or use the cancellation link in your inbox.',
+    'mail.accountDeletion.confirm.timeline3Title': 'After day 30',
+    'mail.accountDeletion.confirm.timeline3Body':
+      'Your profile, photos, shelf, and history are permanently deleted.',
+    'mail.accountDeletion.confirm.note':
+      'This link expires in 1 hour and can only be used once.',
+    'mail.accountDeletion.confirm.fallbackIntro':
+      'Button not working? Copy and paste this link into your browser.',
+    'mail.accountDeletion.confirm.ignoreNote':
+      'Did not ask for this? You can ignore this email. Your account stays active and nothing changes.',
+    'mail.accountDeletion.confirm.footerLine':
+      'Sent from Ritora for account safety. Questions? Write to support@getritora.com.',
+    'mail.accountDeletion.scheduled.previewText':
+      'Your Ritora account is scheduled for deletion on {{scheduledFor}}. Cancel anytime before then.',
+    'mail.accountDeletion.scheduled.badgeLabel': 'Scheduled · {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.title':
+      'Your account is scheduled for deletion',
+    'mail.accountDeletion.scheduled.intro':
+      'Hi {{firstName}}, your Ritora account is set to be permanently deleted on {{scheduledFor}}. You have 30 days to change your mind.',
+    'mail.accountDeletion.scheduled.ctaLabel': 'Cancel deletion',
+    'mail.accountDeletion.scheduled.timelineTitle': 'Your 30-day grace period',
+    'mail.accountDeletion.scheduled.timeline1Title': 'Today',
+    'mail.accountDeletion.scheduled.timeline1Body':
+      'All sessions signed out. Your data is held safely and not used.',
+    'mail.accountDeletion.scheduled.timeline2Title': 'Anytime before {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline2Body':
+      'Tap "Cancel deletion" above, or simply sign in again to keep your account.',
+    'mail.accountDeletion.scheduled.timeline3Title': 'On {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline3Body':
+      'Your profile, photos, shelf, and history are permanently erased. This cannot be undone.',
+    'mail.accountDeletion.scheduled.note':
+      'If this was not you, cancel now and reset your password. Ritora will never ask for your password by email.',
+    'mail.accountDeletion.scheduled.fallbackIntro':
+      'Button not working? Copy and paste this link into your browser.',
+    'mail.accountDeletion.scheduled.footerLine':
+      'Sent from Ritora for account safety. Need help? Write to support@getritora.com.',
+    'mail.accountDeletion.cancelled.previewText':
+      'Good news. Your Ritora account is staying and nothing was deleted.',
+    'mail.accountDeletion.cancelled.badgeLabel': 'Cancelled',
+    'mail.accountDeletion.cancelled.title':
+      'Welcome back, {{firstName}}',
+    'mail.accountDeletion.cancelled.intro':
+      'Your deletion request has been cancelled. Your Ritora account is active and everything is exactly where you left it.',
+    'mail.accountDeletion.cancelled.ctaLabel': 'Open Ritora',
+    'mail.accountDeletion.cancelled.recapTitle': 'A quick recap',
+    'mail.accountDeletion.cancelled.recapItem1':
+      'Your profile, photos, and routine history are safe',
+    'mail.accountDeletion.cancelled.recapItem2':
+      'Your shelf, schedule, and suggestions are ready when you are',
+    'mail.accountDeletion.cancelled.recapItem3':
+      'No further action needed. Sign in anytime to pick up where you left off',
+    'mail.accountDeletion.cancelled.note':
+      'Did not cancel this yourself? Reset your password and review your active sessions. We will help — write to support@getritora.com.',
+    'mail.accountDeletion.cancelled.fallbackIntro':
+      'Button not working? Copy and paste this link into your browser.',
+    'mail.accountDeletion.cancelled.footerLine':
+      'Sent from Ritora for account safety. Questions? Write to support@getritora.com.',
     'mail.notification.shared.manageLabel': 'Manage notification preferences',
     'mail.notification.shared.supportLine': 'Need help? Reach us at',
     'mail.subject.photo_reminder': "Add today's skin photo",
@@ -296,8 +378,19 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'messages.auth.logout.success': 'Du har loggats ut',
     'messages.auth.logoutAll.success': 'Alla sessioner har avslutats',
     'messages.auth.deleteAccount.success': 'Kontot har raderats',
+    'messages.auth.deleteAccount.scheduled':
+      'Kontot är schemalagt för radering',
+    'messages.auth.deleteAccount.confirmationRequired':
+      'Kontrollera din e-post för att bekräfta radering av kontot',
+    'messages.auth.deleteAccount.cancelled': 'Kontoraderingen har avbrutits',
     'mail.subject.verification': 'Verifiera ditt Ritora-konto',
     'mail.subject.passwordReset': 'Återställ ditt Ritora-lösenord',
+    'mail.subject.accountDeletionConfirm':
+      'Bekräfta radering av ditt Ritora-konto',
+    'mail.subject.accountDeletionScheduled':
+      'Ditt Ritora-konto raderas {{scheduledFor}}',
+    'mail.subject.accountDeletionCancelled':
+      'Goda nyheter, ditt Ritora-konto är kvar',
     'mail.verification.previewText':
       'Välkommen till Ritora. Tryck på knappen i mejlet för att verifiera din e-post och komma igång.',
     'mail.verification.title': 'Välkommen till Ritora, {{firstName}}',
@@ -329,6 +422,77 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Du kan ignorera det här mejlet så fortsätter ditt nuvarande lösenord att fungera. Ritora kommer aldrig att be om ditt lösenord via e-post.',
     'mail.passwordReset.footerLine':
       'Skickat från Ritora. Om du har frågor om ditt konto finns vi på support@getritora.com.',
+    'mail.accountDeletion.confirm.previewText':
+      'Tryck för att bekräfta att du vill radera ditt Ritora-konto. Länken gäller i en timme.',
+    'mail.accountDeletion.confirm.badgeLabel': 'Åtgärd krävs',
+    'mail.accountDeletion.confirm.title':
+      'Bekräfta kontoradering, {{firstName}}',
+    'mail.accountDeletion.confirm.intro':
+      'Vi har fått en begäran om att radera ditt Ritora-konto. Bekräfta bara om det var du. Länken gäller den närmaste timmen.',
+    'mail.accountDeletion.confirm.ctaLabel': 'Bekräfta radering',
+    'mail.accountDeletion.confirm.timelineTitle': 'Så här går det till',
+    'mail.accountDeletion.confirm.timeline1Title': 'Du bekräftar',
+    'mail.accountDeletion.confirm.timeline1Body':
+      'Vi loggar ut alla enheter och startar din 30-dagarsfrist.',
+    'mail.accountDeletion.confirm.timeline2Title': 'Närmaste 30 dagarna',
+    'mail.accountDeletion.confirm.timeline2Body':
+      'Ångra dig när som helst. Logga in igen eller använd avbryt-länken i mejlet.',
+    'mail.accountDeletion.confirm.timeline3Title': 'Efter dag 30',
+    'mail.accountDeletion.confirm.timeline3Body':
+      'Din profil, dina bilder, hylla och historik raderas permanent.',
+    'mail.accountDeletion.confirm.note':
+      'Länken gäller i 1 timme och kan bara användas en gång.',
+    'mail.accountDeletion.confirm.fallbackIntro':
+      'Fungerar inte knappen? Kopiera och klistra in länken i din webbläsare.',
+    'mail.accountDeletion.confirm.ignoreNote':
+      'Var det inte du? Då kan du ignorera mejlet. Kontot är fortsatt aktivt och ingenting ändras.',
+    'mail.accountDeletion.confirm.footerLine':
+      'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till support@getritora.com.',
+    'mail.accountDeletion.scheduled.previewText':
+      'Ditt Ritora-konto raderas permanent {{scheduledFor}}. Avbryt när som helst innan dess.',
+    'mail.accountDeletion.scheduled.badgeLabel': 'Schemalagd · {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.title':
+      'Ditt konto är schemalagt för radering',
+    'mail.accountDeletion.scheduled.intro':
+      'Hej {{firstName}}, ditt Ritora-konto är schemalagt att raderas permanent {{scheduledFor}}. Du har 30 dagar att ångra dig.',
+    'mail.accountDeletion.scheduled.ctaLabel': 'Avbryt radering',
+    'mail.accountDeletion.scheduled.timelineTitle': 'Din 30-dagarsfrist',
+    'mail.accountDeletion.scheduled.timeline1Title': 'Idag',
+    'mail.accountDeletion.scheduled.timeline1Body':
+      'Alla sessioner är utloggade. Din data sparas säkert och används inte.',
+    'mail.accountDeletion.scheduled.timeline2Title': 'När som helst före {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline2Body':
+      'Tryck på "Avbryt radering" ovan, eller logga in igen för att behålla kontot.',
+    'mail.accountDeletion.scheduled.timeline3Title': '{{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline3Body':
+      'Din profil, dina bilder, hylla och historik raderas permanent. Detta kan inte ångras.',
+    'mail.accountDeletion.scheduled.note':
+      'Var det inte du? Avbryt nu och återställ ditt lösenord. Ritora frågar aldrig efter ditt lösenord via e-post.',
+    'mail.accountDeletion.scheduled.fallbackIntro':
+      'Fungerar inte knappen? Kopiera och klistra in länken i din webbläsare.',
+    'mail.accountDeletion.scheduled.footerLine':
+      'Skickat från Ritora för kontosäkerhet. Behöver du hjälp? Skriv till support@getritora.com.',
+    'mail.accountDeletion.cancelled.previewText':
+      'Goda nyheter. Ditt Ritora-konto är kvar och ingenting har raderats.',
+    'mail.accountDeletion.cancelled.badgeLabel': 'Avbruten',
+    'mail.accountDeletion.cancelled.title':
+      'Välkommen tillbaka, {{firstName}}',
+    'mail.accountDeletion.cancelled.intro':
+      'Din raderingsbegäran är avbruten. Ditt Ritora-konto är aktivt och allting är precis där du lämnade det.',
+    'mail.accountDeletion.cancelled.ctaLabel': 'Öppna Ritora',
+    'mail.accountDeletion.cancelled.recapTitle': 'En snabb sammanfattning',
+    'mail.accountDeletion.cancelled.recapItem1':
+      'Din profil, dina bilder och rutinhistorik är trygga',
+    'mail.accountDeletion.cancelled.recapItem2':
+      'Din hylla, ditt schema och dina förslag är redo när du är',
+    'mail.accountDeletion.cancelled.recapItem3':
+      'Inget mer behöver göras. Logga in när som helst för att fortsätta',
+    'mail.accountDeletion.cancelled.note':
+      'Avbröt du inte själv? Återställ ditt lösenord och granska dina aktiva sessioner. Vi hjälper dig — skriv till support@getritora.com.',
+    'mail.accountDeletion.cancelled.fallbackIntro':
+      'Fungerar inte knappen? Kopiera och klistra in länken i din webbläsare.',
+    'mail.accountDeletion.cancelled.footerLine':
+      'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till support@getritora.com.',
     'mail.notification.shared.manageLabel': 'Hantera aviseringar',
     'mail.notification.shared.supportLine': 'Behöver du hjälp? Skriv till',
     'mail.subject.photo_reminder': 'Lägg till dagens hudbild',

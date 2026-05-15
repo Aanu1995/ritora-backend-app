@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
+import { AuthService } from '../src/auth/auth.service';
 import { createTestApp, MockMailService, truncateTables } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
@@ -476,25 +478,105 @@ describe('Auth (e2e)', () => {
       await request(app.getHttpServer())
         .delete('/api/v1/auth/account')
         .set('Authorization', `Bearer ${accessToken}`)
+        .set('Origin', ORIGIN)
         .send({ password: 'wrong' })
         .expect(401);
     });
 
-    it('should delete account with correct password', async () => {
+    it('should schedule deletion, revoke sessions, and reserve the email', async () => {
       const res = await request(app.getHttpServer())
         .delete('/api/v1/auth/account')
         .set('Authorization', `Bearer ${accessToken}`)
+        .set('Origin', ORIGIN)
         .send({ password: currentPassword })
         .expect(200);
 
-      expect(res.body.message).toBe('Account deleted');
+      expect(res.body.status).toBe('scheduled');
+      expect(res.body.message).toBe('Account deletion scheduled');
+      expect(typeof res.body.scheduledFor).toBe('string');
+      expect(getFirstSetCookieHeader(res)).toContain('ritora_refresh=;');
+      expect(mockMail.getDeletionCancelToken(TEST_USER.email)).toBeDefined();
+
+      await authGet('/auth/me').expect(401);
+      await refreshWithCookie(refreshCookie).expect(401);
+
+      const duplicateRes = await publicPost('/auth/register', {
+        ...TEST_USER,
+        password: currentPassword,
+      }).expect(409);
+
+      expect(duplicateRes.body.message).toBe('Email already in use');
     });
 
-    it('should reject login after deletion', async () => {
+    it('should cancel pending deletion from the email cancellation link', async () => {
+      const token = mockMail.getDeletionCancelToken(TEST_USER.email);
+      expect(token).toBeDefined();
+
+      const res = await publicPost('/auth/account/deletion/cancel', {
+        token,
+      }).expect(200);
+
+      expect(res.body.message).toBe('Account deletion has been cancelled');
+      expect(mockMail.getDeletionCancelledCount(TEST_USER.email)).toBe(1);
+
+      await loginAndStoreSession(currentPassword);
+    });
+
+    it('should cancel pending deletion when the user logs in again', async () => {
+      const cancelledCount = mockMail.getDeletionCancelledCount(
+        TEST_USER.email,
+      );
+
+      await request(app.getHttpServer())
+        .delete('/api/v1/auth/account')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Origin', ORIGIN)
+        .send({ password: currentPassword })
+        .expect(200);
+
+      await refreshWithCookie(refreshCookie).expect(401);
+      await loginAndStoreSession(currentPassword);
+
+      expect(mockMail.getDeletionCancelledCount(TEST_USER.email)).toBe(
+        cancelledCount + 1,
+      );
+    });
+
+    it('should permanently delete due accounts through the worker service', async () => {
+      await request(app.getHttpServer())
+        .delete('/api/v1/auth/account')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Origin', ORIGIN)
+        .send({ password: currentPassword })
+        .expect(200);
+
+      const dataSource = app.get(DataSource);
+      await dataSource.query(
+        `UPDATE users
+         SET account_deletion_scheduled_for = NOW() - INTERVAL '1 second'
+         WHERE email = $1`,
+        [TEST_USER.email],
+      );
+
+      const deletedCount = await app
+        .get(AuthService)
+        .processDueAccountDeletions(new Date());
+
+      expect(deletedCount).toBe(1);
+
       await publicPost('/auth/login', {
         email: TEST_USER.email,
         password: currentPassword,
       }).expect(401);
+
+      const registerRes = await publicPost('/auth/register', {
+        ...TEST_USER,
+        password: currentPassword,
+      }).expect(201);
+
+      expect(registerRes.body.message).toBe(
+        'Verify your email to activate your account',
+      );
     });
   });
 });

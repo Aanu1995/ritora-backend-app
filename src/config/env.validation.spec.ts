@@ -67,6 +67,12 @@ function developmentEnv(
     SMART_PICKS_QUEUE_DRIVER: 'database',
     SMART_PICKS_SQS_QUEUE_URL: '',
     SMART_PICKS_SQS_DLQ_URL: '',
+    ACCOUNT_DELETION_FINALIZATION_DRIVER: 'database',
+    ACCOUNT_DELETION_SQS_QUEUE_URL: '',
+    ACCOUNT_DELETION_SQS_QUEUE_ARN: '',
+    ACCOUNT_DELETION_SCHEDULER_ROLE_ARN: '',
+    ACCOUNT_DELETION_SCHEDULER_GROUP: '',
+    ACCOUNT_DELETION_SCHEDULER_DLQ_ARN: '',
     OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
     OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: '',
     INSIGHTS_AI_MODEL: 'gpt-5.5',
@@ -163,6 +169,15 @@ function productionEnv(
     SMART_PICKS_SQS_QUEUE_URL:
       'https://sqs.eu-west-1.amazonaws.com/123/smart-picks',
     SMART_PICKS_SQS_DLQ_URL: '',
+    ACCOUNT_DELETION_FINALIZATION_DRIVER: 'eventbridge-sqs',
+    ACCOUNT_DELETION_SQS_QUEUE_URL:
+      'https://sqs.eu-west-1.amazonaws.com/123/account-deletions',
+    ACCOUNT_DELETION_SQS_QUEUE_ARN:
+      'arn:aws:sqs:eu-west-1:123:account-deletions',
+    ACCOUNT_DELETION_SCHEDULER_ROLE_ARN:
+      'arn:aws:iam::123:role/account-deletion-scheduler',
+    ACCOUNT_DELETION_SCHEDULER_GROUP: 'account-deletions',
+    ACCOUNT_DELETION_SCHEDULER_DLQ_ARN: '',
     SKIN_JOURNAL_OPERATIONS_TOKEN: 'o'.repeat(32),
     SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-prod-skin-journal',
     SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: 'https://media.ritora.com',
@@ -516,6 +531,35 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error?.message).toContain('SMART_PICKS_QUEUE_DRIVER');
+  });
+
+  it('requires EventBridge Scheduler backed account deletion in production', () => {
+    const result = validateEnv(
+      productionEnv({
+        ACCOUNT_DELETION_FINALIZATION_DRIVER: 'database',
+        ACCOUNT_DELETION_SQS_QUEUE_URL: '',
+        ACCOUNT_DELETION_SQS_QUEUE_ARN: '',
+        ACCOUNT_DELETION_SCHEDULER_ROLE_ARN: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain(
+      'ACCOUNT_DELETION_FINALIZATION_DRIVER',
+    );
+  });
+
+  it('requires account deletion SQS and scheduler targets when EventBridge is enabled', () => {
+    const result = validateEnv(
+      productionEnv({
+        ACCOUNT_DELETION_SQS_QUEUE_URL: '',
+        ACCOUNT_DELETION_SQS_QUEUE_ARN: '',
+        ACCOUNT_DELETION_SCHEDULER_ROLE_ARN: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('ACCOUNT_DELETION_SQS_QUEUE_URL');
   });
 
   it('strips Skin Journal queue policy values even when provided', () => {

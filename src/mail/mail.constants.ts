@@ -7,6 +7,9 @@ export const MAIL_PROVIDER_LABEL = 'Resend API';
 export enum MailTemplateName {
   Verification = 'verification',
   PasswordReset = 'password-reset',
+  AccountDeletionConfirm = 'account-deletion-confirm',
+  AccountDeletionScheduled = 'account-deletion-scheduled',
+  AccountDeletionCancelled = 'account-deletion-cancelled',
   NotificationPhotoReminder = 'notification-photo-reminder',
   NotificationSuggestionReady = 'notification-suggestion-ready',
   NotificationSlotStart = 'notification-slot-start',

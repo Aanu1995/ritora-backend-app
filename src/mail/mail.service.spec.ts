@@ -119,6 +119,77 @@ describe('MailService', () => {
     expect(payload.html).toContain('Jane');
   });
 
+  it('sends account deletion confirmation emails with a confirmation url', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendAccountDeletionConfirmationEmail(
+      'test@example.com',
+      'token-delete-confirm',
+      'Jane',
+      'en',
+    );
+
+    const payload = getSentEmailPayload(sendEmail);
+
+    expect(payload.subject).toBe('Confirm deletion of your Ritora account');
+    expect(payload.html).toContain(
+      'http://localhost:3000/confirm-account-deletion/token-delete-confirm',
+    );
+    expect(payload.html).toContain('Jane');
+  });
+
+  it('sends scheduled deletion emails with a cancellation url', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendAccountDeletionScheduledEmail(
+      'test@example.com',
+      'token-cancel-delete',
+      'Jane',
+      'en',
+      '2026-06-13T12:00:00.000Z',
+    );
+
+    const payload = getSentEmailPayload(sendEmail);
+
+    expect(payload.subject).toBe(
+      'Your Ritora account will be deleted on 2026-06-13T12:00:00.000Z',
+    );
+    expect(payload.html).toContain(
+      'http://localhost:3000/cancel-account-deletion/token-cancel-delete',
+    );
+    expect(payload.html).toContain('2026-06-13T12:00:00.000Z');
+  });
+
+  it('sends account deletion cancellation emails', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendAccountDeletionCancelledEmail(
+      'test@example.com',
+      'Jane',
+      'en',
+    );
+
+    const payload = getSentEmailPayload(sendEmail);
+
+    expect(payload.subject).toBe('Good news, your Ritora account is staying');
+    expect(payload.html).toContain(
+      'Your deletion request has been cancelled',
+    );
+    expect(payload.html).toContain('http://localhost:3000/');
+  });
+
   it('throws when Resend reports an API error', async () => {
     sendEmail.mockResolvedValueOnce({
       data: null,

@@ -25,6 +25,9 @@ export class UserResponseDto {
   timeZone: string | null;
 
   @ApiProperty()
+  hasPassword: boolean;
+
+  @ApiProperty()
   createdAt: string;
 
   constructor(
@@ -35,6 +38,7 @@ export class UserResponseDto {
     emailVerified: boolean,
     preferredLanguage: string,
     timeZone: string | null,
+    hasPassword: boolean,
     createdAt: string,
   ) {
     this.id = id;
@@ -44,10 +48,11 @@ export class UserResponseDto {
     this.emailVerified = emailVerified;
     this.preferredLanguage = preferredLanguage;
     this.timeZone = timeZone;
+    this.hasPassword = hasPassword;
     this.createdAt = createdAt;
   }
 
-  static fromEntity(user: User): UserResponseDto {
+  static fromEntity(user: User, hasPassword?: boolean): UserResponseDto {
     return new UserResponseDto(
       user.id,
       user.email,
@@ -56,6 +61,7 @@ export class UserResponseDto {
       user.email_verified,
       user.preferred_language,
       user.time_zone,
+      hasPassword ?? Boolean(user.password_hash),
       toIsoString(user.created_at),
     );
   }

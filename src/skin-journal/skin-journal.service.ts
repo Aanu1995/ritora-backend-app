@@ -478,6 +478,27 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async deletePhotoForAccountDeletion(
+    objectKey: string,
+    userId: string,
+  ): Promise<void> {
+    await this.photoStorage.deletePhoto(objectKey);
+
+    try {
+      await this.mediaRetention.enqueueDeletionVerification({
+        userId,
+        objectKey,
+        reason: 'account_media_deleted',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to enqueue media deletion verification for ${objectKey}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
   private assertCompleteCheckIn(entry: SkinJournalEntry): void {
     const missingFields = this.getMissingRequiredCheckInFields(entry);
     if (missingFields.length === 0) {
@@ -2356,20 +2377,18 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       this.entries.find({ where: { user_id: userId } }),
       this.wrapped.find({ where: { user_id: userId } }),
     ]);
-    const objectKeys = [
-      ...entries
-        .map((entry) => entry.photo_object_key)
-        .filter((key): key is string => typeof key === 'string' && !!key),
-      ...wrapped
-        .map((wrapped) => wrapped.media_object_key)
-        .filter((key): key is string => typeof key === 'string' && !!key),
-    ];
+    const objectKeys = Array.from(
+      new Set([
+        ...entries
+          .map((entry) => entry.photo_object_key)
+          .filter((key): key is string => typeof key === 'string' && !!key),
+        ...wrapped
+          .map((wrapped) => wrapped.media_object_key)
+          .filter((key): key is string => typeof key === 'string' && !!key),
+      ]),
+    );
     for (const objectKey of objectKeys) {
-      await this.deletePhotoBestEffort(
-        objectKey,
-        userId,
-        'account_media_deleted',
-      );
+      await this.deletePhotoForAccountDeletion(objectKey, userId);
     }
   }
 

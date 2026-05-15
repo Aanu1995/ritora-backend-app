@@ -18,6 +18,7 @@ const deletionJob = (
   updated_at: new Date('2026-04-30T00:00:00.000Z'),
   generateId: jest.fn(),
   ...overrides,
+  user: overrides.user ?? null,
 });
 
 const repo = () => ({

@@ -16,6 +16,7 @@ import {
   NotificationSeverity,
 } from './in-app-notification.entity';
 import { PushNotificationSubscription } from './push-notification-subscription.entity';
+import { User } from '../../users/entities/user.entity';
 
 export const PushDeliveryStatusValue = {
   Sending: 'sending',
@@ -109,6 +110,10 @@ export class PushNotificationDelivery {
   @ManyToOne(() => PushNotificationSubscription, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'subscription_id' })
   subscription: PushNotificationSubscription;
+
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'user_id' })
+  user: User;
 
   @BeforeInsert()
   generateId() {

@@ -348,13 +348,17 @@ describe('InventoryService', () => {
     );
     cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
 
-    const result = await service.uploadProductImage(uploadedImage);
+    const result = await service.uploadProductImage('user-1', uploadedImage);
 
     expect(result).toBe(imageUrl);
     expect(skinProfiles.findOne).not.toHaveBeenCalled();
     expect(
       cataloguePhotoProcessorService.prepareHeroImageForStorage,
     ).toHaveBeenCalledWith(uploadedImage);
+    expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
+      processedImage,
+      'user-1',
+    );
   });
 
   it('creates a product and attaches its image in one save flow', async () => {
@@ -413,7 +417,7 @@ describe('InventoryService', () => {
     ).toHaveBeenCalledWith(uploadedImage);
     expect(
       cataloguePhotoStorageService.startHeroImageUpload,
-    ).toHaveBeenCalledWith(processedImage);
+    ).toHaveBeenCalledWith(processedImage, 'user-1');
     expect(
       cataloguePhotoStorageService.toPersistentImageUrls,
     ).toHaveBeenCalledWith([managedUrl]);
@@ -585,13 +589,14 @@ describe('InventoryService', () => {
     );
     cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
 
-    const result = await service.uploadProductImage(uploadedImage);
+    const result = await service.uploadProductImage('user-1', uploadedImage);
 
     expect(
       cataloguePhotoProcessorService.prepareHeroImageForStorage,
     ).toHaveBeenCalledWith(uploadedImage);
     expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
       processedImage,
+      'user-1',
     );
     expect(result).toBe(imageUrl);
   });

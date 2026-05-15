@@ -8,6 +8,7 @@ import { User } from './entities/user.entity';
 
 const mockUsersService = () => ({
   findByIdOrFail: jest.fn(),
+  findByIdForAuth: jest.fn(),
   updateProfile: jest.fn(),
   updatePreferredLanguage: jest.fn(),
   updateTimeZone: jest.fn(),
@@ -67,17 +68,21 @@ describe('UsersController', () => {
     }) as User;
 
   it('getMe returns the current user DTO', async () => {
-    usersService.findByIdOrFail.mockResolvedValue(fakeUser());
+    usersService.findByIdForAuth.mockResolvedValue(fakeUser());
 
     const result = await controller.getMe('01TESTUSER');
 
-    expect(usersService.findByIdOrFail).toHaveBeenCalledWith('01TESTUSER');
+    expect(usersService.findByIdForAuth).toHaveBeenCalledWith('01TESTUSER');
+    expect(usersService.findByIdOrFail).not.toHaveBeenCalled();
     expect(result).toBeInstanceOf(UserResponseDto);
     expect(result.firstName).toBe('Jane');
   });
 
   it('updateMe trims and returns the updated profile DTO', async () => {
     usersService.updateProfile.mockResolvedValue(
+      fakeUser({ first_name: 'Ada', last_name: 'Lovelace' }),
+    );
+    usersService.findByIdForAuth.mockResolvedValue(
       fakeUser({ first_name: 'Ada', last_name: 'Lovelace' }),
     );
 
@@ -95,6 +100,7 @@ describe('UsersController', () => {
   });
 
   it('surfaces not found errors from the service', async () => {
+    usersService.findByIdForAuth.mockResolvedValue(null);
     usersService.findByIdOrFail.mockRejectedValue(
       new NotFoundException('User not found'),
     );
@@ -107,6 +113,9 @@ describe('UsersController', () => {
   it('updateLanguage returns the updated user DTO', async () => {
     const res = mockRes();
     usersService.updatePreferredLanguage.mockResolvedValue(
+      fakeUser({ preferred_language: 'sv' }),
+    );
+    usersService.findByIdForAuth.mockResolvedValue(
       fakeUser({ preferred_language: 'sv' }),
     );
 
@@ -135,6 +144,9 @@ describe('UsersController', () => {
 
   it('updateTimeZone returns the updated user DTO', async () => {
     usersService.updateTimeZone.mockResolvedValue(
+      fakeUser({ time_zone: 'America/New_York' }),
+    );
+    usersService.findByIdForAuth.mockResolvedValue(
       fakeUser({ time_zone: 'America/New_York' }),
     );
 

@@ -22,8 +22,13 @@ export class UsersController {
   @Get('me')
   @ApiOkResponse({ type: UserResponseDto })
   async getMe(@CurrentUser('id') userId: string): Promise<UserResponseDto> {
-    const user = await this.usersService.findByIdOrFail(userId);
-    return UserResponseDto.fromEntity(user);
+    const user = await this.usersService.findByIdForAuth(userId);
+    if (!user) {
+      return UserResponseDto.fromEntity(
+        await this.usersService.findByIdOrFail(userId),
+      );
+    }
+    return UserResponseDto.fromEntity(user, Boolean(user.password_hash));
   }
 
   @Patch('me')
@@ -37,7 +42,8 @@ export class UsersController {
       lastName: dto.lastName,
     });
 
-    return UserResponseDto.fromEntity(user);
+    const authUser = await this.usersService.findByIdForAuth(userId);
+    return UserResponseDto.fromEntity(user, Boolean(authUser?.password_hash));
   }
 
   @Patch('me/language')
@@ -58,7 +64,8 @@ export class UsersController {
       normalizeLanguage(user.preferred_language),
     );
 
-    return UserResponseDto.fromEntity(user);
+    const authUser = await this.usersService.findByIdForAuth(userId);
+    return UserResponseDto.fromEntity(user, Boolean(authUser?.password_hash));
   }
 
   @Patch('me/time-zone')
@@ -69,6 +76,7 @@ export class UsersController {
   ): Promise<UserResponseDto> {
     const user = await this.usersService.updateTimeZone(userId, dto.timeZone);
 
-    return UserResponseDto.fromEntity(user);
+    const authUser = await this.usersService.findByIdForAuth(userId);
+    return UserResponseDto.fromEntity(user, Boolean(authUser?.password_hash));
   }
 }

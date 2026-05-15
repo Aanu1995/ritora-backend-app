@@ -325,6 +325,44 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .allow('')
     .required(),
+  ACCOUNT_DELETION_FINALIZATION_DRIVER: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().valid('eventbridge-sqs').required(),
+    otherwise: Joi.string().valid('eventbridge-sqs', 'database').required(),
+  }),
+  ACCOUNT_DELETION_SQS_QUEUE_URL: Joi.when(
+    'ACCOUNT_DELETION_FINALIZATION_DRIVER',
+    {
+      is: 'eventbridge-sqs',
+      then: Joi.string()
+        .trim()
+        .uri({ scheme: ['https'] })
+        .required(),
+      otherwise: Joi.string().trim().allow('').required(),
+    },
+  ),
+  ACCOUNT_DELETION_SQS_QUEUE_ARN: Joi.when(
+    'ACCOUNT_DELETION_FINALIZATION_DRIVER',
+    {
+      is: 'eventbridge-sqs',
+      then: Joi.string().trim().min(1).required(),
+      otherwise: Joi.string().trim().allow('').required(),
+    },
+  ),
+  ACCOUNT_DELETION_SCHEDULER_ROLE_ARN: Joi.when(
+    'ACCOUNT_DELETION_FINALIZATION_DRIVER',
+    {
+      is: 'eventbridge-sqs',
+      then: Joi.string().trim().min(1).required(),
+      otherwise: Joi.string().trim().allow('').required(),
+    },
+  ),
+  ACCOUNT_DELETION_SCHEDULER_GROUP: Joi.string()
+    .trim()
+    .max(64)
+    .allow('')
+    .required(),
+  ACCOUNT_DELETION_SCHEDULER_DLQ_ARN: Joi.string().trim().allow('').required(),
   OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
     .trim()
     .allow('')
