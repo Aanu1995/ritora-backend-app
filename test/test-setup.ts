@@ -150,6 +150,33 @@ const INGREDIENT_REFERENCE_TABLES = new Set([
   'ingredient_conflict_rules',
 ]);
 
+const TRUNCATE_TABLES_LOCK_KEY = 'ritora:e2e:truncate-tables';
+const TRUNCATE_LOCK_TIMEOUT_MS = 5000;
+const TRUNCATE_MAX_ATTEMPTS = 3;
+const TRUNCATE_RETRY_DELAY_MS = 100;
+const TRUNCATE_RETRYABLE_ERROR_CODES = new Set([
+  '40P01', // deadlock_detected
+  '55P03', // lock_not_available
+]);
+
+type PostgresError = {
+  code?: string;
+};
+
+function isPostgresError(error: unknown): error is PostgresError {
+  return typeof error === 'object' && error !== null && 'code' in error;
+}
+
+function getPostgresErrorCode(error: unknown): string | undefined {
+  return isPostgresError(error) ? error.code : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 export async function truncateTables(app: INestApplication): Promise<void> {
   const dataSource = app.get(DataSource);
   const entities = dataSource.entityMetadatas;
@@ -160,10 +187,55 @@ export async function truncateTables(app: INestApplication): Promise<void> {
   const tableNames = entities
     .filter((e) => !INGREDIENT_REFERENCE_TABLES.has(e.tableName))
     .map((e) => `"${e.tableName}"`)
+    .sort()
     .join(', ');
 
-  if (tableNames.length > 0) {
-    await dataSource.query(`TRUNCATE TABLE ${tableNames} CASCADE`);
+  if (tableNames.length === 0) {
+    return;
+  }
+
+  for (let attempt = 1; attempt <= TRUNCATE_MAX_ATTEMPTS; attempt += 1) {
+    const queryRunner = dataSource.createQueryRunner();
+
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+      await queryRunner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        TRUNCATE_TABLES_LOCK_KEY,
+      ]);
+      await queryRunner.query(
+        `SET LOCAL lock_timeout = '${TRUNCATE_LOCK_TIMEOUT_MS}ms'`,
+      );
+      await queryRunner.query(
+        `TRUNCATE TABLE ${tableNames} RESTART IDENTITY CASCADE`,
+      );
+      await queryRunner.commitTransaction();
+      return;
+    } catch (error) {
+      if (queryRunner.isTransactionActive) {
+        try {
+          await queryRunner.rollbackTransaction();
+        } catch {
+          // Keep the original truncate error so the failing lock/query is visible.
+        }
+      }
+
+      const errorCode = getPostgresErrorCode(error);
+      const shouldRetry =
+        attempt < TRUNCATE_MAX_ATTEMPTS &&
+        errorCode !== undefined &&
+        TRUNCATE_RETRYABLE_ERROR_CODES.has(errorCode);
+
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      await delay(TRUNCATE_RETRY_DELAY_MS * attempt);
+    } finally {
+      if (!queryRunner.isReleased) {
+        await queryRunner.release();
+      }
+    }
   }
 }
 
