@@ -24,6 +24,9 @@ describe('AccountDeletionWorkerService', () => {
     const authService = {
       processDueAccountDeletions: jest.fn().mockResolvedValue(0),
       processScheduledAccountDeletion: jest.fn().mockResolvedValue(false),
+      clearExpiredAccountDeletionCancellationReceipts: jest
+        .fn()
+        .mockResolvedValue(0),
       ...authOverrides,
     };
     const scheduler = {
@@ -80,6 +83,9 @@ describe('AccountDeletionWorkerService', () => {
     );
     expect(scheduler.deleteMessage).toHaveBeenCalledWith('receipt-1');
     expect(authService.processDueAccountDeletions).not.toHaveBeenCalled();
+    expect(
+      authService.clearExpiredAccountDeletionCancellationReceipts,
+    ).toHaveBeenCalled();
   });
 
   it('keeps early SQS messages for retry instead of deleting them', async () => {
@@ -202,7 +208,50 @@ describe('AccountDeletionWorkerService', () => {
     await worker.pollOnce();
 
     expect(authService.processDueAccountDeletions).toHaveBeenCalled();
+    expect(
+      authService.clearExpiredAccountDeletionCancellationReceipts,
+    ).toHaveBeenCalled();
     expect(scheduler.receiveMessages).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the poll when cancellation receipt cleanup fails', async () => {
+    const { worker, authService } = makeWorker(
+      AccountDeletionFinalizationDriver.Database,
+      {
+        clearExpiredAccountDeletionCancellationReceipts: jest
+          .fn()
+          .mockRejectedValue(new Error('database unavailable')),
+      },
+    );
+
+    await expect(worker.pollOnce()).resolves.toBeUndefined();
+
+    expect(authService.processDueAccountDeletions).toHaveBeenCalled();
+    expect(
+      authService.clearExpiredAccountDeletionCancellationReceipts,
+    ).toHaveBeenCalled();
+  });
+
+  it('throttles cancellation receipt cleanup between frequent polls', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-05-15T12:00:00.000Z'));
+    const { worker, authService } = makeWorker(
+      AccountDeletionFinalizationDriver.EventBridgeSqs,
+    );
+
+    await worker.pollOnce();
+    await worker.pollOnce();
+
+    expect(
+      authService.clearExpiredAccountDeletionCancellationReceipts,
+    ).toHaveBeenCalledTimes(1);
+
+    jest.setSystemTime(new Date('2026-05-15T13:00:00.000Z'));
+    await worker.pollOnce();
+
+    expect(
+      authService.clearExpiredAccountDeletionCancellationReceipts,
+    ).toHaveBeenCalledTimes(2);
   });
 
   it('starts scheduled polling outside test and stops the timer on destroy', async () => {

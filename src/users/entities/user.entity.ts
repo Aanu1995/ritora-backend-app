@@ -76,6 +76,12 @@ export class User {
   @Column({ type: 'varchar', length: 255, nullable: true, select: false })
   account_deletion_cancel_token_hash: string | null;
 
+  @Index('idx_users_account_deletion_cancel_token_consumed_at', {
+    where: '"account_deletion_cancel_token_consumed_at" IS NOT NULL',
+  })
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_cancel_token_consumed_at: Date | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true, select: false })
   account_deletion_confirm_token_hash: string | null;
 

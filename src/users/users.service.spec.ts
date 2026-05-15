@@ -540,6 +540,102 @@ describe('UsersService', () => {
     });
   });
 
+  describe('markAccountDeletionCancellationComplete', () => {
+    it('atomically consumes a pending cancellation token', async () => {
+      const execute = jest.fn().mockResolvedValue({ affected: 1 });
+      const builder = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute,
+      };
+      repo.createQueryBuilder.mockReturnValue(builder as never);
+      const cancelledAt = new Date('2026-05-15T12:00:00.000Z');
+
+      const result = await service.markAccountDeletionCancellationComplete(
+        '01',
+        'token-hash',
+        cancelledAt,
+      );
+
+      expect(result).toBe(true);
+      expect(builder.update).toHaveBeenCalledWith(User);
+      expect(builder.set).toHaveBeenCalledWith({
+        account_deletion_requested_at: null,
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_hash: 'token-hash',
+        account_deletion_cancel_token_consumed_at: cancelledAt,
+        account_deletion_confirm_token_hash: null,
+        account_deletion_confirm_expires: null,
+      });
+      expect(builder.where).toHaveBeenCalledWith('id = :id', { id: '01' });
+      expect(builder.andWhere).toHaveBeenNthCalledWith(
+        1,
+        'account_deletion_cancel_token_hash = :cancelTokenHash',
+        { cancelTokenHash: 'token-hash' },
+      );
+      expect(builder.andWhere).toHaveBeenNthCalledWith(
+        2,
+        'account_deletion_scheduled_for IS NOT NULL',
+      );
+    });
+
+    it('reports a duplicate or already-cancelled token as not changed', async () => {
+      const execute = jest.fn().mockResolvedValue({ affected: 0 });
+      const builder = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute,
+      };
+      repo.createQueryBuilder.mockReturnValue(builder as never);
+
+      const result = await service.markAccountDeletionCancellationComplete(
+        '01',
+        'token-hash',
+        new Date('2026-05-15T12:00:00.000Z'),
+      );
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('clearExpiredAccountDeletionCancellationReceipts', () => {
+    it('removes consumed token hashes after the retry window', async () => {
+      const execute = jest.fn().mockResolvedValue({ affected: 2 });
+      const builder = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute,
+      };
+      repo.createQueryBuilder.mockReturnValue(builder as never);
+      const olderThan = new Date('2026-05-14T12:00:00.000Z');
+
+      const result =
+        await service.clearExpiredAccountDeletionCancellationReceipts(
+          olderThan,
+        );
+
+      expect(result).toBe(2);
+      expect(builder.update).toHaveBeenCalledWith(User);
+      expect(builder.set).toHaveBeenCalledWith({
+        account_deletion_cancel_token_hash: null,
+        account_deletion_cancel_token_consumed_at: null,
+      });
+      expect(builder.where).toHaveBeenCalledWith(
+        'account_deletion_scheduled_for IS NULL',
+      );
+      expect(builder.andWhere).toHaveBeenCalledWith(
+        'account_deletion_cancel_token_consumed_at <= :olderThan',
+        { olderThan },
+      );
+    });
+  });
+
   describe('remove', () => {
     it('deletes explicit user-owned rows before deleting the user entity', async () => {
       const user = { id: '01' } as User;

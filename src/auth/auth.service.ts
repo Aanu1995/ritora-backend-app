@@ -123,9 +123,18 @@ type AccountDeletionResult = {
   scheduledFor?: string;
 };
 
+type AccountDeletionScheduleOptions = {
+  confirmTokenHash?: string | null;
+  confirmExpires?: Date | null;
+};
+
 const ACCOUNT_DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
 const ACCOUNT_DELETION_CONFIRM_EXPIRY = '1h';
 const ACCOUNT_DELETION_BATCH_SIZE = 100;
+const ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS = 10_000;
+const ACCOUNT_DELETION_EXTERNAL_TIMEOUT_CONFIG_KEY =
+  'ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS';
 
 function roundUpToWholeSecond(value: Date): Date {
   const timestamp = value.getTime();
@@ -135,6 +144,21 @@ function roundUpToWholeSecond(value: Date): Date {
   }
 
   return new Date(timestamp + (1000 - millisecondRemainder));
+}
+
+function readPositiveMilliseconds(value: unknown, fallback: number): number {
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsed);
 }
 
 type OAuthProviderConfig = {
@@ -170,6 +194,7 @@ export class AuthService {
   private readonly privacyVersion: string;
   private readonly webAppUrl: string;
   private readonly nodeEnv: string;
+  private readonly accountDeletionExternalTimeoutMs: number;
 
   constructor(
     private readonly usersService: UsersService,
@@ -215,6 +240,10 @@ export class AuthService {
     this.privacyVersion = configService.getOrThrow('LEGAL_PRIVACY_VERSION');
     this.webAppUrl = configService.getOrThrow('WEB_APP_URL');
     this.nodeEnv = configService.getOrThrow('NODE_ENV');
+    this.accountDeletionExternalTimeoutMs = readPositiveMilliseconds(
+      configService.get(ACCOUNT_DELETION_EXTERNAL_TIMEOUT_CONFIG_KEY),
+      DEFAULT_ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS,
+    );
   }
 
   async register(
@@ -848,15 +877,31 @@ export class AuthService {
     token: string,
     language?: string,
   ): Promise<AccountDeletionResult> {
-    const user = await this.usersService.findByAccountDeletionConfirmTokenHash(
-      this.sha256(token),
-    );
+    const tokenHash = this.sha256(token);
+    const user =
+      await this.usersService.findByAccountDeletionConfirmTokenHash(tokenHash);
 
-    if (!user || !user.account_deletion_confirm_expires) {
+    if (!user) {
       throw new BadRequestException('Invalid account deletion token');
     }
 
-    if (isBeforeNow(user.account_deletion_confirm_expires)) {
+    if (user.account_deletion_scheduled_for) {
+      if (!isAfterNow(user.account_deletion_scheduled_for)) {
+        throw new BadRequestException('Account deletion token has expired');
+      }
+
+      return {
+        status: AccountDeletionStatus.Scheduled,
+        scheduledFor: toIsoString(user.account_deletion_scheduled_for),
+      };
+    }
+
+    const confirmExpires = user.account_deletion_confirm_expires;
+    if (!confirmExpires) {
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (isBeforeNow(confirmExpires)) {
       await this.usersService.clearAccountDeletionState(user.id);
       throw new BadRequestException('Account deletion token has expired');
     }
@@ -864,17 +909,28 @@ export class AuthService {
     const result = await this.scheduleAccountDeletion(
       user,
       normalizeLanguage(language),
+      {
+        confirmTokenHash: tokenHash,
+        confirmExpires,
+      },
     );
     await this.revokeAllSessions(user.id);
     return result;
   }
 
   async cancelAccountDeletion(token: string, language?: string): Promise<void> {
-    const user = await this.usersService.findByAccountDeletionCancelTokenHash(
-      this.sha256(token),
-    );
+    const tokenHash = this.sha256(token);
+    const user =
+      await this.usersService.findByAccountDeletionCancelTokenHash(tokenHash);
 
-    if (!user || !user.account_deletion_scheduled_for) {
+    if (!user) {
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (!user.account_deletion_scheduled_for) {
+      if (this.isRecentAccountDeletionCancellation(user)) {
+        return;
+      }
       throw new BadRequestException('Invalid account deletion token');
     }
 
@@ -882,7 +938,11 @@ export class AuthService {
       throw new BadRequestException('Account deletion token has expired');
     }
 
-    await this.cancelAccountDeletionForUser(user, normalizeLanguage(language));
+    await this.cancelAccountDeletionForUser(
+      user,
+      normalizeLanguage(language),
+      tokenHash,
+    );
   }
 
   async processDueAccountDeletions(
@@ -912,6 +972,14 @@ export class AuthService {
     }
 
     return deleted;
+  }
+
+  async clearExpiredAccountDeletionCancellationReceipts(
+    now: Date = nowDate(),
+  ): Promise<number> {
+    return this.usersService.clearExpiredAccountDeletionCancellationReceipts(
+      new Date(now.getTime() - ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS),
+    );
   }
 
   async processScheduledAccountDeletion(
@@ -964,6 +1032,7 @@ export class AuthService {
   private async scheduleAccountDeletion(
     user: User,
     language: AppLanguage,
+    options: AccountDeletionScheduleOptions = {},
   ): Promise<AccountDeletionResult> {
     const cancelToken = randomBytes(32).toString('hex');
     const requestedAt = nowDate();
@@ -976,17 +1045,21 @@ export class AuthService {
       requestedAt,
       scheduledFor,
       cancelTokenHash: this.sha256(cancelToken),
-      confirmTokenHash: null,
-      confirmExpires: null,
+      confirmTokenHash: options.confirmTokenHash ?? null,
+      confirmExpires: options.confirmExpires ?? null,
     });
 
     try {
-      await this.accountDeletionScheduler.scheduleFinalization(
-        user.id,
-        scheduledFor,
+      await this.runAccountDeletionExternalOperation(
+        this.accountDeletionScheduler.scheduleFinalization(
+          user.id,
+          scheduledFor,
+        ),
+        'Account deletion finalization scheduling timed out',
       );
     } catch (error) {
       await this.usersService.clearAccountDeletionState(user.id);
+      void this.cancelDurableAccountDeletionSchedule(user.id);
       this.logger.error(
         `Failed to create durable account deletion schedule for user ${user.id}`,
         error,
@@ -1029,17 +1102,47 @@ export class AuthService {
   private async cancelAccountDeletionForUser(
     user: User,
     language: AppLanguage,
+    cancelTokenHash?: string,
   ): Promise<void> {
-    await this.usersService.clearAccountDeletionState(user.id);
-    await this.cancelDurableAccountDeletionSchedule(user.id);
-    await this.sendAccountDeletionCancelledEmailOrLogFailure(user, language);
+    if (cancelTokenHash) {
+      const didCancel =
+        await this.usersService.markAccountDeletionCancellationComplete(
+          user.id,
+          cancelTokenHash,
+          nowDate(),
+        );
+
+      if (!didCancel) {
+        return;
+      }
+    } else {
+      await this.usersService.clearAccountDeletionState(user.id);
+    }
+    // The database state is the source of truth; external cleanup must not keep
+    // the cancellation request open after the account is already safe.
+    void this.cancelDurableAccountDeletionSchedule(user.id);
+    void this.sendAccountDeletionCancelledEmailOrLogFailure(user, language);
+  }
+
+  private isRecentAccountDeletionCancellation(user: User): boolean {
+    if (!user.account_deletion_cancel_token_consumed_at) {
+      return false;
+    }
+
+    const consumedAt = user.account_deletion_cancel_token_consumed_at.getTime();
+    return (
+      nowDate().getTime() - consumedAt <= ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS
+    );
   }
 
   private async cancelDurableAccountDeletionSchedule(
     userId: string,
   ): Promise<void> {
     try {
-      await this.accountDeletionScheduler.cancelFinalization(userId);
+      await this.runAccountDeletionExternalOperation(
+        this.accountDeletionScheduler.cancelFinalization(userId),
+        'Account deletion finalization cancellation timed out',
+      );
     } catch (error) {
       this.logger.warn(
         `Failed to cancel durable account deletion schedule for user ${userId}: ${
@@ -1238,11 +1341,14 @@ export class AuthService {
     language: AppLanguage,
   ): Promise<void> {
     try {
-      await this.mailService.sendAccountDeletionConfirmationEmail(
-        user.email,
-        token,
-        user.first_name,
-        language,
+      await this.runAccountDeletionExternalOperation(
+        this.mailService.sendAccountDeletionConfirmationEmail(
+          user.email,
+          token,
+          user.first_name,
+          language,
+        ),
+        'Account deletion confirmation email timed out',
       );
     } catch (error) {
       this.logAccountDeletionEmailFailure(
@@ -1264,12 +1370,15 @@ export class AuthService {
     scheduledFor: string,
   ): Promise<void> {
     try {
-      await this.mailService.sendAccountDeletionScheduledEmail(
-        user.email,
-        token,
-        user.first_name,
-        language,
-        scheduledFor,
+      await this.runAccountDeletionExternalOperation(
+        this.mailService.sendAccountDeletionScheduledEmail(
+          user.email,
+          token,
+          user.first_name,
+          language,
+          scheduledFor,
+        ),
+        'Account deletion scheduled email timed out',
       );
     } catch (error) {
       this.logAccountDeletionEmailFailure(
@@ -1277,8 +1386,8 @@ export class AuthService {
         user.email,
         error,
       );
-      await this.cancelDurableAccountDeletionSchedule(user.id);
       await this.usersService.clearAccountDeletionState(user.id);
+      void this.cancelDurableAccountDeletionSchedule(user.id);
       throw new InternalServerErrorException(
         'Account deletion email could not be sent',
       );
@@ -1301,6 +1410,26 @@ export class AuthService {
         user.email,
         error,
       );
+    }
+  }
+
+  private async runAccountDeletionExternalOperation<T>(
+    operation: Promise<T>,
+    timeoutMessage: string,
+  ): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        reject(new Error(timeoutMessage));
+      }, this.accountDeletionExternalTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([operation, timeoutPromise]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
     }
   }
 

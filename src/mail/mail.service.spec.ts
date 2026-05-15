@@ -160,12 +160,12 @@ describe('MailService', () => {
     const payload = getSentEmailPayload(sendEmail);
 
     expect(payload.subject).toBe(
-      'Your Ritora account will be deleted on 2026-06-13T12:00:00.000Z',
+      'Your Ritora account will be deleted on 13 June 2026',
     );
     expect(payload.html).toContain(
       'http://localhost:3000/cancel-account-deletion/token-cancel-delete',
     );
-    expect(payload.html).toContain('2026-06-13T12:00:00.000Z');
+    expect(payload.html).toContain('13 June 2026');
   });
 
   it('sends account deletion cancellation emails', async () => {
@@ -184,9 +184,7 @@ describe('MailService', () => {
     const payload = getSentEmailPayload(sendEmail);
 
     expect(payload.subject).toBe('Good news, your Ritora account is staying');
-    expect(payload.html).toContain(
-      'Your deletion request has been cancelled',
-    );
+    expect(payload.html).toContain('Your deletion request has been cancelled');
     expect(payload.html).toContain('http://localhost:3000/');
   });
 

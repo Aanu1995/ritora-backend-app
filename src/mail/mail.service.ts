@@ -10,6 +10,7 @@ import { join } from 'path';
 import { Resend } from 'resend';
 import { type AppLanguage, translate } from '../common/i18n/i18n';
 import {
+  EMAIL_LOGO_URL,
   MailTemplateName,
   NOTIFICATION_KIND_TEMPLATE,
   NOTIFICATION_KINDS_WITHOUT_LIST_UNSUBSCRIBE,
@@ -255,7 +256,7 @@ export class MailService {
     const html = await this.renderTemplate(MailTemplateName.Verification, {
       firstName: safeFirstName,
       verificationUrl,
-      logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      logoUrl: EMAIL_LOGO_URL,
       previewText: translate(language, 'mail.verification.previewText'),
       title: translate(language, 'mail.verification.title', {
         firstName: safeFirstName,
@@ -288,7 +289,7 @@ export class MailService {
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
       firstName: safeFirstName,
       resetUrl,
-      logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      logoUrl: EMAIL_LOGO_URL,
       previewText: translate(language, 'mail.passwordReset.previewText'),
       title: translate(language, 'mail.passwordReset.title'),
       intro: translate(language, 'mail.passwordReset.intro', {
@@ -338,9 +339,18 @@ export class MailService {
       sectionStyle: 'timeline',
       sectionTitleKey: 'mail.accountDeletion.confirm.timelineTitle',
       sectionItemKeys: [
-        ['mail.accountDeletion.confirm.timeline1Title', 'mail.accountDeletion.confirm.timeline1Body'],
-        ['mail.accountDeletion.confirm.timeline2Title', 'mail.accountDeletion.confirm.timeline2Body'],
-        ['mail.accountDeletion.confirm.timeline3Title', 'mail.accountDeletion.confirm.timeline3Body'],
+        [
+          'mail.accountDeletion.confirm.timeline1Title',
+          'mail.accountDeletion.confirm.timeline1Body',
+        ],
+        [
+          'mail.accountDeletion.confirm.timeline2Title',
+          'mail.accountDeletion.confirm.timeline2Body',
+        ],
+        [
+          'mail.accountDeletion.confirm.timeline3Title',
+          'mail.accountDeletion.confirm.timeline3Body',
+        ],
       ],
       ignoreNoteKey: 'mail.accountDeletion.confirm.ignoreNote',
     });
@@ -358,7 +368,10 @@ export class MailService {
       'cancel-account-deletion',
       token,
     );
-    const values = { firstName: safeFirstName, scheduledFor };
+    const values = {
+      firstName: safeFirstName,
+      scheduledFor: formatEmailDate(scheduledFor, language),
+    };
 
     await this.sendAccountDeletionEmail({
       email,
@@ -372,9 +385,18 @@ export class MailService {
       sectionStyle: 'timeline',
       sectionTitleKey: 'mail.accountDeletion.scheduled.timelineTitle',
       sectionItemKeys: [
-        ['mail.accountDeletion.scheduled.timeline1Title', 'mail.accountDeletion.scheduled.timeline1Body'],
-        ['mail.accountDeletion.scheduled.timeline2Title', 'mail.accountDeletion.scheduled.timeline2Body'],
-        ['mail.accountDeletion.scheduled.timeline3Title', 'mail.accountDeletion.scheduled.timeline3Body'],
+        [
+          'mail.accountDeletion.scheduled.timeline1Title',
+          'mail.accountDeletion.scheduled.timeline1Body',
+        ],
+        [
+          'mail.accountDeletion.scheduled.timeline2Title',
+          'mail.accountDeletion.scheduled.timeline2Body',
+        ],
+        [
+          'mail.accountDeletion.scheduled.timeline3Title',
+          'mail.accountDeletion.scheduled.timeline3Body',
+        ],
       ],
     });
   }
@@ -444,7 +466,7 @@ export class MailService {
 
     const baseContext: NotificationBaseContext = {
       firstName: safeFirstName,
-      logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      logoUrl: EMAIL_LOGO_URL,
       manageUrl: safeManageUrl,
       manageLabel: translate(language, 'mail.notification.shared.manageLabel'),
       supportEmail: NOTIFICATION_SUPPORT_EMAIL,
@@ -799,19 +821,18 @@ export class MailService {
     sectionItemKeys: Array<[string, string | null]>;
     ignoreNoteKey?: string;
   }): Promise<void> {
-    const sectionItems: AccountDeletionTimelineStep[] = input.sectionItemKeys.map(
-      ([titleKey, bodyKey], index) => ({
+    const sectionItems: AccountDeletionTimelineStep[] =
+      input.sectionItemKeys.map(([titleKey, bodyKey], index) => ({
         marker:
           input.sectionStyle === 'timeline' ? String(index + 1) : '&#10003;',
         title: translate(input.language, titleKey, input.values),
         body: bodyKey ? translate(input.language, bodyKey, input.values) : '',
-      }),
-    );
+      }));
 
     const html = await this.renderTemplate(input.templateName, {
       firstName: input.firstName,
       actionUrl: escapeExpression(input.actionUrl),
-      logoUrl: this.buildBrandAssetUrl('ritora-logo.png'),
+      logoUrl: EMAIL_LOGO_URL,
       previewText: translate(
         input.language,
         `${input.translationBase}.previewText`,
@@ -837,7 +858,11 @@ export class MailService {
         `${input.translationBase}.ctaLabel`,
         input.values,
       ),
-      sectionTitle: translate(input.language, input.sectionTitleKey, input.values),
+      sectionTitle: translate(
+        input.language,
+        input.sectionTitleKey,
+        input.values,
+      ),
       sectionItems,
       sectionStyle: input.sectionStyle,
       note: translate(
@@ -965,15 +990,6 @@ export class MailService {
     return base.toString();
   }
 
-  private buildBrandAssetUrl(fileName: string): string {
-    const base = new URL(this.webAppUrl);
-    const basePath = base.pathname.replace(/\/$/, '');
-    base.pathname = `${basePath}/brand/${fileName}`;
-    base.search = '';
-    base.hash = '';
-    return base.toString();
-  }
-
   private resolveApiPublicUrl(): string {
     const configuredApiPublicUrl = this.configService
       .get<string>('API_PUBLIC_URL')
@@ -1061,6 +1077,34 @@ export class MailService {
 
 function fallbackFirstName(language: AppLanguage): string {
   return language === 'sv' ? 'du' : 'there';
+}
+
+const EMAIL_DATE_LOCALE: Record<AppLanguage, string> = {
+  en: 'en-GB',
+  sv: 'sv-SE',
+};
+
+/**
+ * Formats a date for display in an email body.
+ *
+ * Emails must never show raw ISO timestamps (e.g. 2026-06-14T20:34:32.000Z).
+ * We render an unambiguous, localized long date in UTC — the same timezone
+ * the deletion scheduler operates in — so the date the user sees always
+ * matches when the action actually happens. The format ("14 June 2026" /
+ * "14 juni 2026") avoids the MM/DD vs DD/MM ambiguity of numeric formats.
+ */
+function formatEmailDate(value: string | Date, language: AppLanguage): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return typeof value === 'string' ? value : '';
+  }
+
+  return new Intl.DateTimeFormat(EMAIL_DATE_LOCALE[language], {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
 }
 
 function formatMailFrom(email: string): string {

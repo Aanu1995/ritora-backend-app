@@ -519,6 +519,13 @@ describe('Auth (e2e)', () => {
       expect(res.body.message).toBe('Account deletion has been cancelled');
       expect(mockMail.getDeletionCancelledCount(TEST_USER.email)).toBe(1);
 
+      const retryRes = await publicPost('/auth/account/deletion/cancel', {
+        token,
+      }).expect(200);
+
+      expect(retryRes.body.message).toBe('Account deletion has been cancelled');
+      expect(mockMail.getDeletionCancelledCount(TEST_USER.email)).toBe(1);
+
       await loginAndStoreSession(currentPassword);
     });
 

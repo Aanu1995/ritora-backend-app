@@ -19,6 +19,7 @@ const ACCOUNT_DELETION_SQS_FAILURE_BACKOFF_MIN_MS = 1_000;
 const ACCOUNT_DELETION_SQS_FAILURE_BACKOFF_MAX_MS = 30_000;
 const ACCOUNT_DELETION_SQS_FAILURE_BACKOFF_JITTER_MS = 1_000;
 const ACCOUNT_DELETION_SQS_VISIBILITY_HEARTBEAT_MS = 120_000;
+const ACCOUNT_DELETION_CANCEL_RECEIPT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class AccountDeletionWorkerService
@@ -30,6 +31,7 @@ export class AccountDeletionWorkerService
   private polling = false;
   private stopped = true;
   private consecutivePollFailures = 0;
+  private lastCancellationReceiptCleanupAt = 0;
 
   constructor(
     private readonly configService: ConfigService,
@@ -77,7 +79,31 @@ export class AccountDeletionWorkerService
         this.logger.log(`Finalized ${deleted} scheduled account deletions.`);
       }
     } finally {
+      await this.clearExpiredCancellationReceipts();
       this.polling = false;
+    }
+  }
+
+  private async clearExpiredCancellationReceipts(): Promise<void> {
+    const currentTime = nowDate().getTime();
+    if (
+      currentTime - this.lastCancellationReceiptCleanupAt <
+      ACCOUNT_DELETION_CANCEL_RECEIPT_CLEANUP_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.lastCancellationReceiptCleanupAt = currentTime;
+
+    try {
+      await this.authService.clearExpiredAccountDeletionCancellationReceipts();
+    } catch (error) {
+      this.lastCancellationReceiptCleanupAt = 0;
+      this.logger.warn(
+        `Failed to clear expired account deletion cancellation receipts: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
     }
   }
 

@@ -63,9 +63,14 @@ const mockConfigValues: Record<string, string | number | boolean> = {
   LEGAL_TERMS_VERSION: '1.0.0',
   LEGAL_PRIVACY_VERSION: '1.0.0',
   WEB_APP_URL: 'http://localhost:3000',
+  ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS: 25,
   NODE_ENV: 'development',
   RESEND_API_KEY: 're_test_mock',
 };
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -104,7 +109,13 @@ describe('AuthService', () => {
       findByAccountDeletionConfirmTokenHash: jest.fn(),
       findDueAccountDeletions: jest.fn(),
       setAccountDeletionState: jest.fn(),
+      markAccountDeletionCancellationComplete: jest
+        .fn()
+        .mockResolvedValue(true),
       clearAccountDeletionState: jest.fn(),
+      clearExpiredAccountDeletionCancellationReceipts: jest
+        .fn()
+        .mockResolvedValue(0),
     };
 
     jwtService = {
@@ -236,6 +247,7 @@ describe('AuthService', () => {
       account_deletion_requested_at: null,
       account_deletion_scheduled_for: null,
       account_deletion_cancel_token_hash: null,
+      account_deletion_cancel_token_consumed_at: null,
       account_deletion_confirm_token_hash: null,
       account_deletion_confirm_expires: null,
       preferred_language: 'en',
@@ -1288,7 +1300,102 @@ describe('AuthService', () => {
       expect(res.clearCookie).not.toHaveBeenCalled();
     });
 
+    it('does not leave OAuth deletion request pending when confirmation email stalls', async () => {
+      jest.useFakeTimers();
+      const res = mockRes();
+      const user = fakeUser({
+        password_hash: null,
+        google_subject: 'google-subject',
+      });
+      usersService.findByIdForAuth.mockResolvedValue(user);
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      mailService.sendAccountDeletionConfirmationEmail.mockReturnValue(
+        new Promise<void>(() => undefined),
+      );
+
+      try {
+        const request = service.deleteAccount(
+          user.id,
+          '',
+          asResponse(res),
+          'en',
+        );
+        const result = Promise.race([
+          request.then(() => 'resolved' as const).catch(toErrorMessage),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(() => resolve('pending'), 50);
+          }),
+        ]);
+
+        await jest.advanceTimersByTimeAsync(50);
+
+        await expect(result).resolves.toBe(
+          'Account deletion email could not be sent',
+        );
+        expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+          user.id,
+        );
+        expect(sessionsRepo.update).not.toHaveBeenCalled();
+        expect(res.clearCookie).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('confirms OAuth deletion tokens and schedules the 30-day grace period', async () => {
+      const token = 'a'.repeat(64);
+      const confirmExpires = new Date('2999-01-01T00:00:00.000Z');
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_confirm_expires: confirmExpires,
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+
+      const result = await service.confirmAccountDeletion(token, 'en');
+
+      expect(result.status).toBe(AccountDeletionStatus.Scheduled);
+      expect(usersService.setAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+        expect.objectContaining({
+          scheduledFor: expect.any(Date),
+          cancelTokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          confirmTokenHash: sha256(token),
+          confirmExpires,
+        }),
+      );
+      expect(mailService.sendAccountDeletionScheduledEmail).toHaveBeenCalled();
+      expect(sessionsRepo.update).toHaveBeenCalled();
+    });
+
+    it('treats an already scheduled confirmation token as success', async () => {
+      const scheduledFor = new Date('2999-01-01T00:00:00.000Z');
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_scheduled_for: scheduledFor,
+        account_deletion_confirm_expires: new Date('2026-05-14T12:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+
+      const result = await service.confirmAccountDeletion('a'.repeat(64), 'en');
+
+      expect(result).toEqual({
+        status: AccountDeletionStatus.Scheduled,
+        scheduledFor: scheduledFor.toISOString(),
+      });
+      expect(usersService.setAccountDeletionState).not.toHaveBeenCalled();
+      expect(
+        mailService.sendAccountDeletionScheduledEmail,
+      ).not.toHaveBeenCalled();
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('does not leave OAuth confirmation pending when durable scheduling stalls', async () => {
+      jest.useFakeTimers();
       const user = fakeUser({
         password_hash: null,
         account_deletion_confirm_expires: new Date('2999-01-01T00:00:00.000Z'),
@@ -1297,21 +1404,80 @@ describe('AuthService', () => {
         user,
       );
       usersService.setAccountDeletionState.mockResolvedValue(user);
-
-      const result = await service.confirmAccountDeletion('a'.repeat(64), 'en');
-
-      expect(result.status).toBe(AccountDeletionStatus.Scheduled);
-      expect(usersService.setAccountDeletionState).toHaveBeenCalledWith(
-        user.id,
-        expect.objectContaining({
-          scheduledFor: expect.any(Date),
-          cancelTokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-          confirmTokenHash: null,
-          confirmExpires: null,
-        }),
+      accountDeletionScheduler.scheduleFinalization.mockReturnValue(
+        new Promise<void>(() => undefined),
       );
-      expect(mailService.sendAccountDeletionScheduledEmail).toHaveBeenCalled();
-      expect(sessionsRepo.update).toHaveBeenCalled();
+
+      try {
+        const confirmation = service.confirmAccountDeletion(
+          'a'.repeat(64),
+          'en',
+        );
+        const result = Promise.race([
+          confirmation.then(() => 'resolved' as const).catch(toErrorMessage),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(() => resolve('pending'), 50);
+          }),
+        ]);
+
+        await jest.advanceTimersByTimeAsync(50);
+
+        await expect(result).resolves.toBe(
+          'Account deletion could not be scheduled',
+        );
+        expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+          user.id,
+        );
+        expect(
+          mailService.sendAccountDeletionScheduledEmail,
+        ).not.toHaveBeenCalled();
+        expect(sessionsRepo.update).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not leave OAuth confirmation pending when scheduled notice email stalls', async () => {
+      jest.useFakeTimers();
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_confirm_expires: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      mailService.sendAccountDeletionScheduledEmail.mockReturnValue(
+        new Promise<void>(() => undefined),
+      );
+
+      try {
+        const confirmation = service.confirmAccountDeletion(
+          'a'.repeat(64),
+          'en',
+        );
+        const result = Promise.race([
+          confirmation.then(() => 'resolved' as const).catch(toErrorMessage),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(() => resolve('pending'), 50);
+          }),
+        ]);
+
+        await jest.advanceTimersByTimeAsync(50);
+
+        await expect(result).resolves.toBe(
+          'Account deletion email could not be sent',
+        );
+        expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+          user.id,
+        );
+        expect(
+          accountDeletionScheduler.cancelFinalization,
+        ).toHaveBeenCalledWith(user.id);
+        expect(sessionsRepo.update).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('rounds scheduled deletion timestamps up to a whole second', async () => {
@@ -1365,8 +1531,12 @@ describe('AuthService', () => {
 
       await service.cancelAccountDeletion('b'.repeat(64), 'en');
 
-      expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
         user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
       );
       expect(
         mailService.sendAccountDeletionCancelledEmail,
@@ -1374,6 +1544,169 @@ describe('AuthService', () => {
       expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
         user.id,
       );
+    });
+
+    it('treats a recently consumed cancellation token as success', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_consumed_at: new Date(),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      await service.cancelAccountDeletion('b'.repeat(64), 'en');
+
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).not.toHaveBeenCalled();
+      expect(usersService.clearAccountDeletionState).not.toHaveBeenCalled();
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).not.toHaveBeenCalled();
+      expect(
+        accountDeletionScheduler.cancelFinalization,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rejects an expired consumed cancellation token receipt', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_consumed_at: new Date(
+          Date.now() - 25 * 60 * 60 * 1000,
+        ),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      await expect(
+        service.cancelAccountDeletion('b'.repeat(64), 'en'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).not.toHaveBeenCalled();
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not send duplicate cancellation side effects for a concurrent repeat', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+      usersService.markAccountDeletionCancellationComplete.mockResolvedValue(
+        false,
+      );
+
+      await service.cancelAccountDeletion('b'.repeat(64), 'en');
+
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
+        user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
+      );
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).not.toHaveBeenCalled();
+      expect(
+        accountDeletionScheduler.cancelFinalization,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('clears expired cancellation token receipts after the idempotency window', async () => {
+      const now = new Date('2026-05-15T12:00:00.000Z');
+      usersService.clearExpiredAccountDeletionCancellationReceipts.mockResolvedValue(
+        3,
+      );
+
+      const cleared =
+        await service.clearExpiredAccountDeletionCancellationReceipts(now);
+
+      expect(cleared).toBe(3);
+      expect(
+        usersService.clearExpiredAccountDeletionCancellationReceipts,
+      ).toHaveBeenCalledWith(new Date('2026-05-14T12:00:00.000Z'));
+    });
+
+    it('does not block cancellation on the notification email delivery', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      let resolveEmail: () => void = () => undefined;
+      mailService.sendAccountDeletionCancelledEmail.mockReturnValue(
+        new Promise<void>((resolve) => {
+          resolveEmail = resolve;
+        }),
+      );
+
+      const cancellation = service.cancelAccountDeletion('b'.repeat(64), 'en');
+      const result = await Promise.race([
+        cancellation.then(() => 'resolved' as const),
+        new Promise<'pending'>((resolve) => {
+          setTimeout(() => resolve('pending'), 25);
+        }),
+      ]);
+
+      expect(result).toBe('resolved');
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
+        user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
+      );
+      expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).toHaveBeenCalledWith(user.email, user.first_name, 'en');
+
+      resolveEmail();
+      await cancellation;
+    });
+
+    it('does not block cancellation on durable schedule cleanup', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      let resolveScheduleCleanup: () => void = () => undefined;
+      accountDeletionScheduler.cancelFinalization.mockReturnValue(
+        new Promise<void>((resolve) => {
+          resolveScheduleCleanup = resolve;
+        }),
+      );
+
+      const cancellation = service.cancelAccountDeletion('b'.repeat(64), 'en');
+      const result = await Promise.race([
+        cancellation.then(() => 'resolved' as const),
+        new Promise<'pending'>((resolve) => {
+          setTimeout(() => resolve('pending'), 25);
+        }),
+      ]);
+
+      expect(result).toBe('resolved');
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
+        user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
+      );
+      expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).toHaveBeenCalledWith(user.email, user.first_name, 'en');
+
+      resolveScheduleCleanup();
+      await cancellation;
     });
 
     it('cancels pending deletion on successful login within the grace period', async () => {

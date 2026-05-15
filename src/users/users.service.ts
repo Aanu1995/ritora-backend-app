@@ -275,9 +275,36 @@ export class UsersService {
       account_deletion_requested_at: data.requestedAt,
       account_deletion_scheduled_for: data.scheduledFor,
       account_deletion_cancel_token_hash: data.cancelTokenHash,
+      account_deletion_cancel_token_consumed_at: null,
       account_deletion_confirm_token_hash: data.confirmTokenHash,
       account_deletion_confirm_expires: data.confirmExpires,
     });
+  }
+
+  async markAccountDeletionCancellationComplete(
+    id: string,
+    cancelTokenHash: string,
+    cancelledAt: Date,
+  ): Promise<boolean> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_deletion_requested_at: null,
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_hash: cancelTokenHash,
+        account_deletion_cancel_token_consumed_at: cancelledAt,
+        account_deletion_confirm_token_hash: null,
+        account_deletion_confirm_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('account_deletion_cancel_token_hash = :cancelTokenHash', {
+        cancelTokenHash,
+      })
+      .andWhere('account_deletion_scheduled_for IS NOT NULL')
+      .execute();
+
+    return result.affected === 1;
   }
 
   async clearAccountDeletionState(id: string): Promise<void> {
@@ -288,6 +315,7 @@ export class UsersService {
         account_deletion_requested_at: null,
         account_deletion_scheduled_for: null,
         account_deletion_cancel_token_hash: null,
+        account_deletion_cancel_token_consumed_at: null,
         account_deletion_confirm_token_hash: null,
         account_deletion_confirm_expires: null,
       })
@@ -297,6 +325,7 @@ export class UsersService {
           'account_deletion_requested_at IS NOT NULL',
           'account_deletion_scheduled_for IS NOT NULL',
           'account_deletion_cancel_token_hash IS NOT NULL',
+          'account_deletion_cancel_token_consumed_at IS NOT NULL',
           'account_deletion_confirm_token_hash IS NOT NULL',
           'account_deletion_confirm_expires IS NOT NULL',
         ].join(' OR '),
@@ -313,6 +342,28 @@ export class UsersService {
       order: { account_deletion_scheduled_for: 'ASC' },
       take,
     });
+  }
+
+  async clearExpiredAccountDeletionCancellationReceipts(
+    olderThan: Date,
+  ): Promise<number> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_deletion_cancel_token_hash: null,
+        account_deletion_cancel_token_consumed_at: null,
+      })
+      .where('account_deletion_scheduled_for IS NULL')
+      .andWhere('account_deletion_requested_at IS NULL')
+      .andWhere('account_deletion_confirm_token_hash IS NULL')
+      .andWhere('account_deletion_confirm_expires IS NULL')
+      .andWhere('account_deletion_cancel_token_consumed_at <= :olderThan', {
+        olderThan,
+      })
+      .execute();
+
+    return result.affected ?? 0;
   }
 
   async remove(id: string): Promise<void> {

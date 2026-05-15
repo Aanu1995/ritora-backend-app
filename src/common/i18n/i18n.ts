@@ -110,7 +110,8 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.scheduled.timeline1Title': 'Today',
     'mail.accountDeletion.scheduled.timeline1Body':
       'All sessions signed out. Your data is held safely and not used.',
-    'mail.accountDeletion.scheduled.timeline2Title': 'Anytime before {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline2Title':
+      'Anytime before {{scheduledFor}}',
     'mail.accountDeletion.scheduled.timeline2Body':
       'Tap "Cancel deletion" above, or simply sign in again to keep your account.',
     'mail.accountDeletion.scheduled.timeline3Title': 'On {{scheduledFor}}',
@@ -125,8 +126,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.cancelled.previewText':
       'Good news. Your Ritora account is staying and nothing was deleted.',
     'mail.accountDeletion.cancelled.badgeLabel': 'Cancelled',
-    'mail.accountDeletion.cancelled.title':
-      'Welcome back, {{firstName}}',
+    'mail.accountDeletion.cancelled.title': 'Welcome back, {{firstName}}',
     'mail.accountDeletion.cancelled.intro':
       'Your deletion request has been cancelled. Your Ritora account is active and everything is exactly where you left it.',
     'mail.accountDeletion.cancelled.ctaLabel': 'Open Ritora',
@@ -388,7 +388,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.subject.accountDeletionConfirm':
       'Bekräfta radering av ditt Ritora-konto',
     'mail.subject.accountDeletionScheduled':
-      'Ditt Ritora-konto raderas {{scheduledFor}}',
+      'Ditt Ritora-konto raderas den {{scheduledFor}}',
     'mail.subject.accountDeletionCancelled':
       'Goda nyheter, ditt Ritora-konto är kvar',
     'mail.verification.previewText':
@@ -449,21 +449,23 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.confirm.footerLine':
       'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till support@getritora.com.',
     'mail.accountDeletion.scheduled.previewText':
-      'Ditt Ritora-konto raderas permanent {{scheduledFor}}. Avbryt när som helst innan dess.',
-    'mail.accountDeletion.scheduled.badgeLabel': 'Schemalagd · {{scheduledFor}}',
+      'Ditt Ritora-konto raderas permanent den {{scheduledFor}}. Avbryt när som helst innan dess.',
+    'mail.accountDeletion.scheduled.badgeLabel':
+      'Schemalagd · {{scheduledFor}}',
     'mail.accountDeletion.scheduled.title':
       'Ditt konto är schemalagt för radering',
     'mail.accountDeletion.scheduled.intro':
-      'Hej {{firstName}}, ditt Ritora-konto är schemalagt att raderas permanent {{scheduledFor}}. Du har 30 dagar att ångra dig.',
+      'Hej {{firstName}}, ditt Ritora-konto är schemalagt att raderas permanent den {{scheduledFor}}. Du har 30 dagar att ångra dig.',
     'mail.accountDeletion.scheduled.ctaLabel': 'Avbryt radering',
     'mail.accountDeletion.scheduled.timelineTitle': 'Din 30-dagarsfrist',
     'mail.accountDeletion.scheduled.timeline1Title': 'Idag',
     'mail.accountDeletion.scheduled.timeline1Body':
       'Alla sessioner är utloggade. Din data sparas säkert och används inte.',
-    'mail.accountDeletion.scheduled.timeline2Title': 'När som helst före {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline2Title':
+      'När som helst före den {{scheduledFor}}',
     'mail.accountDeletion.scheduled.timeline2Body':
       'Tryck på "Avbryt radering" ovan, eller logga in igen för att behålla kontot.',
-    'mail.accountDeletion.scheduled.timeline3Title': '{{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline3Title': 'Den {{scheduledFor}}',
     'mail.accountDeletion.scheduled.timeline3Body':
       'Din profil, dina bilder, hylla och historik raderas permanent. Detta kan inte ångras.',
     'mail.accountDeletion.scheduled.note':
@@ -475,8 +477,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.cancelled.previewText':
       'Goda nyheter. Ditt Ritora-konto är kvar och ingenting har raderats.',
     'mail.accountDeletion.cancelled.badgeLabel': 'Avbruten',
-    'mail.accountDeletion.cancelled.title':
-      'Välkommen tillbaka, {{firstName}}',
+    'mail.accountDeletion.cancelled.title': 'Välkommen tillbaka, {{firstName}}',
     'mail.accountDeletion.cancelled.intro':
       'Din raderingsbegäran är avbruten. Ditt Ritora-konto är aktivt och allting är precis där du lämnade det.',
     'mail.accountDeletion.cancelled.ctaLabel': 'Öppna Ritora',
