@@ -19,6 +19,7 @@ import {
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
+import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
@@ -51,6 +52,9 @@ const repo = () => ({
   delete: jest.fn().mockResolvedValue({ affected: 1 }),
   count: jest.fn().mockResolvedValue(0),
   createQueryBuilder: jest.fn(),
+  manager: {
+    transaction: jest.fn(),
+  },
 });
 
 function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
@@ -100,6 +104,29 @@ function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
     created_at: new Date('2026-04-29T00:00:00.000Z'),
     updated_at: new Date('2026-04-29T00:00:00.000Z'),
     user: undefined as never,
+    generateId: jest.fn(),
+    ...overrides,
+  };
+}
+
+function photoRow(
+  overrides: Partial<SkinJournalEntryPhoto> = {},
+): SkinJournalEntryPhoto {
+  return {
+    id: 'photo-1',
+    user_id: 'user-1',
+    entry_id: 'entry-1',
+    angle: 'head_on',
+    photo_object_key: 'skin-journal/user-1/entry-1/photo.webp',
+    photo_width: 100,
+    photo_height: 100,
+    photo_size: 10,
+    photo_content_type: 'image/webp',
+    exif_stripped: true,
+    created_at: new Date('2026-04-29T00:00:00.000Z'),
+    updated_at: new Date('2026-04-29T00:00:00.000Z'),
+    user: undefined as never,
+    entry: undefined as never,
     generateId: jest.fn(),
     ...overrides,
   };
@@ -239,6 +266,7 @@ function completeSkinProfile(
 describe('SkinJournalService', () => {
   let service: SkinJournalService;
   let entries: ReturnType<typeof repo>;
+  let entryPhotos: ReturnType<typeof repo>;
   let events: ReturnType<typeof repo>;
   let insights: ReturnType<typeof repo>;
   let insightRuns: ReturnType<typeof repo>;
@@ -365,6 +393,7 @@ describe('SkinJournalService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     entries = repo();
+    entryPhotos = repo();
     events = repo();
     insights = repo();
     insightRuns = repo();
@@ -374,6 +403,20 @@ describe('SkinJournalService', () => {
     consents = repo();
     exportsRepo = repo();
     skinProfiles = repo();
+    entries.manager.transaction.mockImplementation(
+      async (
+        callback: (manager: {
+          getRepository: (entity: unknown) => unknown;
+        }) => Promise<unknown>,
+      ) =>
+        callback({
+          getRepository: (entity: unknown) => {
+            if (entity === SkinJournalEntry) return entries;
+            if (entity === SkinJournalEntryPhoto) return entryPhotos;
+            throw new Error('Unexpected transactional repository');
+          },
+        }),
+    );
     skinProfiles.findOne.mockResolvedValue(completeSkinProfile());
     photoStorage.storePhoto.mockResolvedValue({
       object_key: 'skin-journal/user-1/entry-1/photo.webp',
@@ -434,6 +477,10 @@ describe('SkinJournalService', () => {
       providers: [
         SkinJournalService,
         { provide: getRepositoryToken(SkinJournalEntry), useValue: entries },
+        {
+          provide: getRepositoryToken(SkinJournalEntryPhoto),
+          useValue: entryPhotos,
+        },
         { provide: getRepositoryToken(SkinJournalEvent), useValue: events },
         { provide: getRepositoryToken(SkinJournalInsight), useValue: insights },
         {
@@ -488,7 +535,9 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: today,
         timeZone: 'UTC',
-        photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        photos: {
+          head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        },
         body: { skip_check_in: true },
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
@@ -507,7 +556,9 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('UTC'),
         timeZone: 'UTC',
-        photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        photos: {
+          head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        },
         body: {
           skip_check_in: true,
           photo_processing_consent: true,
@@ -533,7 +584,6 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('UTC'),
         timeZone: 'UTC',
-        photo: null,
         body: COMPLETE_CHECK_IN_BODY,
       }),
     ).rejects.toMatchObject({
@@ -557,7 +607,9 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: '2026-04-29',
         timeZone: 'UTC',
-        photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        photos: {
+          head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        },
         body: { skip_check_in: true },
       }),
     ).rejects.toThrow('Journal entries can only be changed on their local day');
@@ -625,7 +677,6 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('UTC'),
         timeZone: 'UTC',
-        photo: null,
         body: {
           overall_feel: 'good',
           ratings: { oiliness: 2, dryness: 2 },
@@ -642,7 +693,6 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('UTC'),
         timeZone: 'UTC',
-        photo: null,
         body: { skip_check_in: true },
       }),
     ).resolves.toMatchObject({ analysis_status: 'skipped' });
@@ -662,7 +712,6 @@ describe('SkinJournalService', () => {
       userId: 'user-1',
       targetDate: todayInTimeZone('UTC'),
       timeZone: 'UTC',
-      photo: null,
       body: COMPLETE_CHECK_IN_BODY,
     });
 
@@ -725,7 +774,9 @@ describe('SkinJournalService', () => {
       userId: 'user-1',
       targetDate: todayInTimeZone('UTC'),
       timeZone: 'UTC',
-      photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+      photos: {
+        head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+      },
       body: { skip_check_in: true },
     });
 
@@ -746,6 +797,131 @@ describe('SkinJournalService', () => {
     );
   });
 
+  it('stores a front-required multi-angle photo set and queues analysis from the front photo', async () => {
+    consents.findOne.mockResolvedValue({
+      consent_type: UserConsentType.SkinProgressProcessing,
+      granted: true,
+      revoked_at: null,
+    });
+    photoStorage.storePhoto
+      .mockResolvedValueOnce({
+        object_key: 'skin-journal/user-1/entry-1/front.webp',
+        width: 120,
+        height: 140,
+        size: 12,
+        content_type: 'image/webp',
+        exif_stripped: true,
+      })
+      .mockResolvedValueOnce({
+        object_key: 'skin-journal/user-1/entry-1/left.webp',
+        width: 100,
+        height: 100,
+        size: 10,
+        content_type: 'image/webp',
+        exif_stripped: true,
+      })
+      .mockResolvedValueOnce({
+        object_key: 'skin-journal/user-1/entry-1/right.webp',
+        width: 100,
+        height: 100,
+        size: 10,
+        content_type: 'image/webp',
+        exif_stripped: true,
+      });
+
+    const response = await service.upsertEntryForResolvedDate({
+      userId: 'user-1',
+      targetDate: todayInTimeZone('UTC'),
+      timeZone: 'UTC',
+      photos: {
+        head_on: { buffer: Buffer.from('front'), contentType: 'image/jpeg' },
+        left_profile: {
+          buffer: Buffer.from('left'),
+          contentType: 'image/jpeg',
+        },
+        right_profile: {
+          buffer: Buffer.from('right'),
+          contentType: 'image/jpeg',
+        },
+      },
+      body: {
+        skip_check_in: true,
+        photo_processing_consent: true,
+      },
+    });
+
+    expect(photoStorage.storePhoto).toHaveBeenCalledTimes(3);
+    expect(entries.manager.transaction).toHaveBeenCalled();
+    expect(entries.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        photo_object_key: 'skin-journal/user-1/entry-1/front.webp',
+        photo_width: 120,
+        photo_height: 140,
+      }),
+    );
+    expect(entryPhotos.save).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          angle: 'head_on',
+          photo_object_key: 'skin-journal/user-1/entry-1/front.webp',
+        }),
+        expect.objectContaining({
+          angle: 'left_profile',
+          photo_object_key: 'skin-journal/user-1/entry-1/left.webp',
+        }),
+        expect.objectContaining({
+          angle: 'right_profile',
+          photo_object_key: 'skin-journal/user-1/entry-1/right.webp',
+        }),
+      ]),
+    );
+    expect(analysisQueue.enqueueAnalysisJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        photoObjectKey: 'skin-journal/user-1/entry-1/front.webp',
+      }),
+    );
+    expect(response.photo_url).toContain(
+      'skin-journal/user-1/entry-1/front.webp',
+    );
+    expect(response.angle_count).toBe(3);
+    expect(response.has_side_photos).toBe(true);
+    expect(response.photos.map((photo) => photo.angle)).toEqual([
+      'left_profile',
+      'head_on',
+      'right_profile',
+    ]);
+  });
+
+  it('rejects side photo uploads when the entry would not have a front photo', async () => {
+    consents.findOne.mockResolvedValue({
+      consent_type: UserConsentType.SkinProgressProcessing,
+      granted: true,
+      revoked_at: null,
+    });
+
+    await expect(
+      service.upsertEntryForResolvedDate({
+        userId: 'user-1',
+        targetDate: todayInTimeZone('UTC'),
+        timeZone: 'UTC',
+        photos: {
+          left_profile: {
+            buffer: Buffer.from('left'),
+            contentType: 'image/jpeg',
+          },
+        },
+        body: {
+          skip_check_in: true,
+          photo_processing_consent: true,
+        },
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(photoStorage.storePhoto).not.toHaveBeenCalled();
+    expect(entries.save).not.toHaveBeenCalled();
+    expect(entryPhotos.save).not.toHaveBeenCalled();
+  });
+
   it('queues analysis with a durable DB job after photo upload', async () => {
     consents.findOne.mockResolvedValue({
       consent_type: UserConsentType.SkinProgressProcessing,
@@ -757,7 +933,9 @@ describe('SkinJournalService', () => {
       userId: 'user-1',
       targetDate: todayInTimeZone('UTC'),
       timeZone: 'UTC',
-      photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+      photos: {
+        head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+      },
       body: { skip_check_in: true },
     });
 
@@ -793,7 +971,9 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('UTC'),
         timeZone: 'UTC',
-        photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        photos: {
+          head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        },
         body: { skip_check_in: true },
       }),
     ).resolves.toMatchObject({ id: 'entry-1' });
@@ -839,7 +1019,9 @@ describe('SkinJournalService', () => {
       userId: 'user-1',
       targetDate: todayInTimeZone('UTC'),
       timeZone: 'UTC',
-      photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+      photos: {
+        head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+      },
       body: { skip_check_in: true },
     });
 
@@ -875,7 +1057,9 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('UTC'),
         timeZone: 'UTC',
-        photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        photos: {
+          head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        },
         body: { skip_check_in: true },
       }),
     ).resolves.toMatchObject({ id: 'entry-1' });
@@ -906,10 +1090,46 @@ describe('SkinJournalService', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('UTC'),
         timeZone: 'UTC',
-        photo: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        photos: {
+          head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        },
         body: { skip_check_in: true },
       }),
     ).rejects.toThrow('database unavailable');
+
+    expect(photoStorage.deletePhoto).toHaveBeenCalledWith(
+      'skin-journal/user-1/entry-1/photo.webp',
+    );
+    expect(photoStorage.deletePhoto).not.toHaveBeenCalledWith(
+      'skin-journal/user-1/entry-1/old.webp',
+    );
+  });
+
+  it('deletes newly stored photos when per-angle metadata save fails', async () => {
+    consents.findOne.mockResolvedValue({
+      consent_type: UserConsentType.SkinProgressProcessing,
+      granted: true,
+      revoked_at: null,
+    });
+    entries.findOne.mockResolvedValue(
+      entry({
+        entry_date: todayInTimeZone('UTC'),
+        photo_object_key: 'skin-journal/user-1/entry-1/old.webp',
+      }),
+    );
+    entryPhotos.save.mockRejectedValueOnce(new Error('photo metadata failed'));
+
+    await expect(
+      service.upsertEntryForResolvedDate({
+        userId: 'user-1',
+        targetDate: todayInTimeZone('UTC'),
+        timeZone: 'UTC',
+        photos: {
+          head_on: { buffer: Buffer.from('photo'), contentType: 'image/jpeg' },
+        },
+        body: { skip_check_in: true },
+      }),
+    ).rejects.toThrow('photo metadata failed');
 
     expect(photoStorage.deletePhoto).toHaveBeenCalledWith(
       'skin-journal/user-1/entry-1/photo.webp',
@@ -1386,6 +1606,61 @@ describe('SkinJournalService', () => {
     expect(insightPolish.polish).toHaveBeenCalledWith(
       expect.any(Array),
       expect.objectContaining({ aiPolishEnabled: false }),
+    );
+  });
+
+  it('passes all saved current photo angles into photo analysis', async () => {
+    const current = entry({
+      id: 'entry-current',
+      entry_date: '2026-04-10',
+      photo_object_key: 'skin-journal/user-1/entry-current/front.webp',
+      analysis_status: 'pending',
+    });
+    const savedPhotoRows = [
+      photoRow({
+        id: 'photo-left',
+        entry_id: current.id,
+        angle: 'left_profile',
+        photo_object_key: 'skin-journal/user-1/entry-current/left.webp',
+      }),
+      photoRow({
+        id: 'photo-front',
+        entry_id: current.id,
+        angle: 'head_on',
+        photo_object_key: 'skin-journal/user-1/entry-current/front.webp',
+      }),
+      photoRow({
+        id: 'photo-right',
+        entry_id: current.id,
+        angle: 'right_profile',
+        photo_object_key: 'skin-journal/user-1/entry-current/right.webp',
+      }),
+    ];
+    entries.findOne.mockResolvedValue(current);
+    entries.find.mockResolvedValue([]);
+    entryPhotos.find.mockResolvedValue(savedPhotoRows);
+
+    await service.runAnalysis(current.id, 'user-1');
+
+    const call = analysis.analyze.mock.calls.at(-1)?.[0] as {
+      photos: Array<{ angle: string; object_key: string }>;
+    };
+    expect(call.photos).toHaveLength(3);
+    expect(call.photos).toEqual(
+      expect.arrayContaining([
+        {
+          angle: 'head_on',
+          object_key: 'skin-journal/user-1/entry-current/front.webp',
+        },
+        {
+          angle: 'left_profile',
+          object_key: 'skin-journal/user-1/entry-current/left.webp',
+        },
+        {
+          angle: 'right_profile',
+          object_key: 'skin-journal/user-1/entry-current/right.webp',
+        },
+      ]),
     );
   });
 

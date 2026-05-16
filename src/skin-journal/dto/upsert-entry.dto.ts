@@ -18,6 +18,8 @@ import {
 } from 'class-transformer';
 import {
   CONCERN_KEYS,
+  SKIN_JOURNAL_PHOTO_ANGLES,
+  type Angle,
   type CycleMarker,
   type OverallFeel,
   type RecentChangeKind,
@@ -269,6 +271,12 @@ export class UpsertEntryDto {
   @Transform(transformOptionalBoolean)
   @IsBoolean()
   photo_processing_consent?: boolean;
+
+  @IsOptional()
+  @Transform(transformOptionalJsonArray)
+  @IsArray()
+  @IsIn(SKIN_JOURNAL_PHOTO_ANGLES, { each: true })
+  remove_photo_angles?: Angle[];
 }
 
 export const ALL_CONCERN_KEYS = CONCERN_KEYS;

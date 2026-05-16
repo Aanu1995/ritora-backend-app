@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { SkinJournalController } from './skin-journal.controller';
 import { SkinJournalService } from './skin-journal.service';
 import { todayInTimeZone } from './skin-journal.utils';
@@ -47,9 +48,109 @@ describe('SkinJournalController', () => {
         userId: 'user-1',
         targetDate: todayInTimeZone('Europe/Stockholm'),
         timeZone: 'Europe/Stockholm',
-        photo: null,
       }),
     );
+  });
+
+  it('maps angle-specific multipart uploads into a front-required photo set', async () => {
+    service.upsertEntryForResolvedDate.mockResolvedValue({ id: 'entry-1' });
+    const front = {
+      buffer: Buffer.from('front'),
+      mimetype: 'image/jpeg',
+      size: 10,
+      originalname: 'front.jpg',
+    };
+    const left = {
+      buffer: Buffer.from('left'),
+      mimetype: 'image/png',
+      size: 10,
+      originalname: 'left.png',
+    };
+    const right = {
+      buffer: Buffer.from('right'),
+      mimetype: 'image/webp',
+      size: 10,
+      originalname: 'right.webp',
+    };
+
+    await controller.upsertToday(
+      'user-1',
+      'Europe/Stockholm',
+      undefined,
+      {
+        photo_head_on: [front],
+        photo_left_profile: [left],
+        photo_right_profile: [right],
+      },
+      { skip_check_in: true, photo_processing_consent: true },
+    );
+
+    expect(service.upsertEntryForResolvedDate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        photos: {
+          head_on: { buffer: front.buffer, contentType: 'image/jpeg' },
+          left_profile: { buffer: left.buffer, contentType: 'image/png' },
+          right_profile: { buffer: right.buffer, contentType: 'image/webp' },
+        },
+      }),
+    );
+  });
+
+  it('maps the legacy single-photo multipart field as the front angle', async () => {
+    service.upsertEntryForResolvedDate.mockResolvedValue({ id: 'entry-1' });
+    const legacyFront = {
+      buffer: Buffer.from('legacy-front'),
+      mimetype: 'image/jpeg',
+      size: 10,
+      originalname: 'legacy-front.jpg',
+    };
+    await controller.upsertToday(
+      'user-1',
+      'Europe/Stockholm',
+      undefined,
+      {
+        photo: [legacyFront],
+      },
+      { skip_check_in: true, photo_processing_consent: true },
+    );
+
+    expect(service.upsertEntryForResolvedDate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        photos: {
+          head_on: { buffer: legacyFront.buffer, contentType: 'image/jpeg' },
+        },
+      }),
+    );
+  });
+
+  it('rejects duplicate legacy and named front photo uploads', async () => {
+    service.upsertEntryForResolvedDate.mockResolvedValue({ id: 'entry-1' });
+    const legacyFront = {
+      buffer: Buffer.from('legacy-front'),
+      mimetype: 'image/jpeg',
+      size: 10,
+      originalname: 'legacy-front.jpg',
+    };
+    const namedFront = {
+      buffer: Buffer.from('named-front'),
+      mimetype: 'image/jpeg',
+      size: 10,
+      originalname: 'named-front.jpg',
+    };
+
+    await expect(
+      controller.upsertToday(
+        'user-1',
+        'Europe/Stockholm',
+        undefined,
+        {
+          photo: [legacyFront],
+          photo_head_on: [namedFront],
+        },
+        { skip_check_in: true, photo_processing_consent: true },
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(service.upsertEntryForResolvedDate).not.toHaveBeenCalled();
   });
 
   it('falls back to a browser timezone header only when the user has no saved timezone', async () => {

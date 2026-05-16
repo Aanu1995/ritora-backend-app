@@ -45,4 +45,12 @@ describe('normalizeUpsertEntryBody', () => {
       } as never),
     ).toThrow(BadRequestException);
   });
+
+  it('throws a bad request for invalid JSON markers from DTO transforms', () => {
+    expect(() =>
+      normalizeUpsertEntryBody({
+        ratings: { __invalid_json_payload__: true },
+      } as never),
+    ).toThrow(BadRequestException);
+  });
 });

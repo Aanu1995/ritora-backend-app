@@ -33,6 +33,7 @@
     "smart-picks:generation-worker:dev": "ts-node -r tsconfig-paths/register src/scripts/start-smart-picks-generation-worker.ts",
     "account-deletion-worker:dev": "ts-node -r tsconfig-paths/register src/scripts/start-account-deletion-worker.ts",
     "smart-picks:evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-smart-picks.ts",
+    "suggestions:evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-todays-suggestion.ts",
     "smart-picks:seed-review:dev": "ts-node -r tsconfig-paths/register src/scripts/seed-smart-picks-review.ts",
     "smart-picks:monitoring-report:dev": "ts-node -r tsconfig-paths/register src/scripts/report-smart-picks-monitoring.ts",
     "skin-journal:analysis-evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-skin-journal-analysis.ts",
@@ -41,6 +42,7 @@
     "smart-picks:generation-worker": "npm run build && node dist/scripts/start-smart-picks-generation-worker.js",
     "account-deletion-worker": "npm run build && node dist/scripts/start-account-deletion-worker.js",
     "smart-picks:evaluate": "npm run build && node dist/scripts/evaluate-smart-picks.js",
+    "suggestions:evaluate": "npm run build && node dist/scripts/evaluate-todays-suggestion.js",
     "smart-picks:seed-review": "npm run build && node dist/scripts/seed-smart-picks-review.js",
     "smart-picks:monitoring-report": "npm run build && node dist/scripts/report-smart-picks-monitoring.js",
     "skin-journal:analysis-evaluate": "npm run build && node dist/scripts/evaluate-skin-journal-analysis.js"

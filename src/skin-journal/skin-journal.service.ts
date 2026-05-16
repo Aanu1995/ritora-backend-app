@@ -23,6 +23,7 @@ import {
   Not,
   Repository,
   SelectQueryBuilder,
+  EntityManager,
 } from 'typeorm';
 import { createHash } from 'crypto';
 import { decodeCursor, encodeCursor } from '../common/utils/cursor-pagination';
@@ -50,6 +51,7 @@ import {
   UserDataAccessPurpose,
 } from '../users/user-consent.constants';
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
+import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
@@ -79,7 +81,10 @@ import {
   CalendarDayStateValue,
   CalendarResponseDto,
 } from './dto/calendar-response.dto';
-import { JournalEntryResponseDto } from './dto/journal-entry-response.dto';
+import {
+  JournalEntryPhotoResponseDto,
+  JournalEntryResponseDto,
+} from './dto/journal-entry-response.dto';
 import { DayDetailResponseDto } from './dto/day-detail-response.dto';
 import { JournalEventResponseDto } from './dto/event-response.dto';
 import {
@@ -97,6 +102,7 @@ import {
 import { PhotoPageResponseDto } from './dto/photo-page-response.dto';
 import {
   ANALYSIS_CONCERNS,
+  AnalysisPhotoInput,
   AnalysisObservations,
   CONCERN_KEYS,
   PHOTO_FILTER_ALL_ID,
@@ -117,11 +123,14 @@ import {
   SKIN_JOURNAL_INSIGHT_FAILED_RETRY_COOLDOWN_DAYS,
   SKIN_JOURNAL_INSIGHT_MIN_ENTRIES_FOR_PERIODIC_GENERATION,
   SKIN_JOURNAL_INSIGHT_PERIODIC_INTERVAL_DAYS,
+  SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
   SKIN_JOURNAL_INSIGHT_SUMMARY_CARDS_ENABLED,
   SKIN_JOURNAL_PHOTO_PAGE_DEFAULT_LIMIT,
   SKIN_JOURNAL_PHOTO_PAGE_MAX_LIMIT,
+  SKIN_JOURNAL_PHOTO_ANGLES,
   SKIN_JOURNAL_WRAPPED_ENABLED,
   SkinJournalExportPayload,
+  type Angle,
   AnalysisStatus,
   AnalysisStatusValue,
   AnalysisEntryContext,
@@ -162,6 +171,20 @@ interface InsightEntryPreview {
   date: string;
   photo_url: string | null;
 }
+
+type PhotoUploadInput = { buffer: Buffer; contentType: string };
+type PhotoUploadMap = Partial<Record<Angle, PhotoUploadInput>>;
+type EntryPhotoRowsByEntryId = Map<string, SkinJournalEntryPhoto[]>;
+
+type StoredAnglePhoto = {
+  angle: Angle;
+  object_key: string;
+  width: number | null;
+  height: number | null;
+  size: number;
+  content_type: string;
+  exif_stripped: boolean;
+};
 
 const SKIN_PROGRESS_CONSENT = UserConsentType.SkinProgressProcessing;
 const NOTIFICATION_KEYS = {
@@ -205,6 +228,11 @@ const CHECK_IN_REQUIRED_FIELDS = {
   cycleMarker: 'cycle_marker',
 } as const;
 const VALID_CHECK_IN_RATINGS = new Set<number>([1, 2, 3, 4, 5]);
+const PHOTO_UPLOAD_ORDER: Angle[] = [
+  SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
+  'left_profile',
+  'right_profile',
+];
 
 type RequiredCheckInField =
   (typeof CHECK_IN_REQUIRED_FIELDS)[keyof typeof CHECK_IN_REQUIRED_FIELDS];
@@ -238,6 +266,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(SkinJournalEntry)
     private readonly entries: Repository<SkinJournalEntry>,
+    @InjectRepository(SkinJournalEntryPhoto)
+    private readonly entryPhotos: Repository<SkinJournalEntryPhoto>,
     @InjectRepository(SkinJournalEvent)
     private readonly events: Repository<SkinJournalEvent>,
     @InjectRepository(SkinJournalInsight)
@@ -292,14 +322,253 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     this.smartPicksPreparation?.scheduleForUser(userId);
   }
 
+  private normalizePhotoUploads(params: {
+    photos?: PhotoUploadMap | null;
+  }): PhotoUploadMap {
+    return { ...(params.photos ?? {}) };
+  }
+
+  private hasPhotoUploads(photos: PhotoUploadMap): boolean {
+    return Object.values(photos).some(Boolean);
+  }
+
+  private photoRowsByAngle(
+    rows: SkinJournalEntryPhoto[],
+  ): Map<Angle, SkinJournalEntryPhoto> {
+    return new Map(rows.map((photo) => [photo.angle, photo]));
+  }
+
+  private sortEntryPhotos(
+    rows: SkinJournalEntryPhoto[],
+  ): SkinJournalEntryPhoto[] {
+    const order = new Map<Angle, number>(
+      SKIN_JOURNAL_PHOTO_ANGLES.map((angle, index) => [angle, index]),
+    );
+    return [...rows].sort(
+      (a, b) => (order.get(a.angle) ?? 99) - (order.get(b.angle) ?? 99),
+    );
+  }
+
+  private frontPhotoRowFromEntrySnapshot(
+    entry: SkinJournalEntry,
+  ): SkinJournalEntryPhoto | null {
+    if (!entry.photo_object_key) {
+      return null;
+    }
+    return this.entryPhotos.create({
+      id: entry.id,
+      user_id: entry.user_id,
+      entry_id: entry.id,
+      angle: SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
+      photo_object_key: entry.photo_object_key,
+      photo_width: entry.photo_width,
+      photo_height: entry.photo_height,
+      photo_size: entry.photo_size,
+      photo_content_type: entry.photo_content_type,
+      exif_stripped: entry.exif_stripped,
+    });
+  }
+
+  private normalizePhotoRowsForEntry(
+    entry: SkinJournalEntry,
+    rows: SkinJournalEntryPhoto[] = [],
+  ): SkinJournalEntryPhoto[] {
+    const byAngle = this.photoRowsByAngle(rows);
+    const frontSnapshot = this.frontPhotoRowFromEntrySnapshot(entry);
+    if (frontSnapshot && !byAngle.has(SKIN_JOURNAL_FRONT_PHOTO_ANGLE)) {
+      byAngle.set(SKIN_JOURNAL_FRONT_PHOTO_ANGLE, frontSnapshot);
+    }
+    return this.sortEntryPhotos(Array.from(byAngle.values()));
+  }
+
+  private frontPhotoRow(
+    rows: SkinJournalEntryPhoto[],
+  ): SkinJournalEntryPhoto | null {
+    return (
+      rows.find((photo) => photo.angle === SKIN_JOURNAL_FRONT_PHOTO_ANGLE) ??
+      null
+    );
+  }
+
+  private entryWithFrontPhotoCompatibility(
+    entry: SkinJournalEntry,
+    frontPhoto: SkinJournalEntryPhoto | null,
+  ): SkinJournalEntry {
+    const compatible = { ...entry };
+    compatible.photo_object_key = frontPhoto?.photo_object_key ?? null;
+    compatible.photo_width = frontPhoto?.photo_width ?? null;
+    compatible.photo_height = frontPhoto?.photo_height ?? null;
+    compatible.photo_size = frontPhoto?.photo_size ?? null;
+    compatible.photo_content_type = frontPhoto?.photo_content_type ?? null;
+    compatible.exif_stripped = frontPhoto?.exif_stripped ?? false;
+    compatible.angle = SKIN_JOURNAL_FRONT_PHOTO_ANGLE;
+    return compatible as SkinJournalEntry;
+  }
+
+  private syncEntryFrontPhotoCompatibility(
+    entry: SkinJournalEntry,
+    frontPhoto: SkinJournalEntryPhoto | null,
+  ): void {
+    entry.photo_object_key = frontPhoto?.photo_object_key ?? null;
+    entry.photo_width = frontPhoto?.photo_width ?? null;
+    entry.photo_height = frontPhoto?.photo_height ?? null;
+    entry.photo_size = frontPhoto?.photo_size ?? null;
+    entry.photo_content_type = frontPhoto?.photo_content_type ?? null;
+    entry.exif_stripped = frontPhoto?.exif_stripped ?? false;
+    entry.angle = SKIN_JOURNAL_FRONT_PHOTO_ANGLE;
+  }
+
+  private buildEntryResponse(
+    entry: SkinJournalEntry,
+    rows: SkinJournalEntryPhoto[] = [],
+  ): JournalEntryResponseDto {
+    const photos = this.normalizePhotoRowsForEntry(entry, rows);
+    const front = this.frontPhotoRow(photos);
+    const signedPhotos: JournalEntryPhotoResponseDto[] = photos.map(
+      (photo) => ({
+        angle: photo.angle,
+        photo_url: this.photoStorage.getSignedUrl(photo.photo_object_key) ?? '',
+        width: photo.photo_width,
+        height: photo.photo_height,
+      }),
+    );
+    return JournalEntryResponseDto.fromEntity(
+      this.entryWithFrontPhotoCompatibility(entry, front),
+      this.photoStorage.getSignedUrl(front?.photo_object_key ?? null),
+      signedPhotos,
+    );
+  }
+
+  private toAnalysisPhotoInputs(
+    rows: SkinJournalEntryPhoto[],
+  ): AnalysisPhotoInput[] {
+    return rows.map((photo) => ({
+      angle: photo.angle,
+      object_key: photo.photo_object_key,
+    }));
+  }
+
+  private analysisPhotoInputSignature(photos: AnalysisPhotoInput[]): string {
+    return photos
+      .map((photo) => `${photo.angle}:${photo.object_key}`)
+      .sort()
+      .join('|');
+  }
+
+  private async loadEntryPhotoRows(
+    userId: string,
+    entryId: string,
+  ): Promise<SkinJournalEntryPhoto[]> {
+    return this.sortEntryPhotos(
+      await this.entryPhotos.find({
+        where: { user_id: userId, entry_id: entryId },
+      }),
+    );
+  }
+
+  private async loadEntryPhotoRowsByEntryId(
+    userId: string,
+    entryIds: string[],
+  ): Promise<EntryPhotoRowsByEntryId> {
+    if (entryIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.entryPhotos.find({
+      where: { user_id: userId, entry_id: In(entryIds) },
+    });
+    const byEntryId: EntryPhotoRowsByEntryId = new Map();
+    for (const row of rows) {
+      const list = byEntryId.get(row.entry_id) ?? [];
+      list.push(row);
+      byEntryId.set(row.entry_id, list);
+    }
+    for (const [entryId, list] of byEntryId) {
+      byEntryId.set(entryId, this.sortEntryPhotos(list));
+    }
+    return byEntryId;
+  }
+
+  private async buildEntryResponses(
+    userId: string,
+    entries: SkinJournalEntry[],
+  ): Promise<JournalEntryResponseDto[]> {
+    const rowsByEntry = await this.loadEntryPhotoRowsByEntryId(
+      userId,
+      entries.map((entry) => entry.id),
+    );
+    return entries.map((entry) =>
+      this.buildEntryResponse(entry, rowsByEntry.get(entry.id) ?? []),
+    );
+  }
+
+  private storedPhotoToRow(
+    entry: SkinJournalEntry,
+    stored: StoredAnglePhoto,
+    existing?: SkinJournalEntryPhoto,
+  ): SkinJournalEntryPhoto {
+    return this.entryPhotos.create({
+      id: existing?.id,
+      user_id: entry.user_id,
+      entry_id: entry.id,
+      angle: stored.angle,
+      photo_object_key: stored.object_key,
+      photo_width: stored.width,
+      photo_height: stored.height,
+      photo_size: stored.size,
+      photo_content_type: stored.content_type,
+      exif_stripped: stored.exif_stripped,
+    });
+  }
+
+  private photoSetsDiffer(
+    previous: Map<Angle, SkinJournalEntryPhoto>,
+    next: Map<Angle, SkinJournalEntryPhoto>,
+  ): boolean {
+    if (previous.size !== next.size) {
+      return true;
+    }
+    for (const angle of SKIN_JOURNAL_PHOTO_ANGLES) {
+      const before = previous.get(angle)?.photo_object_key ?? null;
+      const after = next.get(angle)?.photo_object_key ?? null;
+      if (before !== after) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private clearPhotoAnalysisState(entry: SkinJournalEntry): void {
+    entry.analysis_status = AnalysisStatusValue.Pending;
+    entry.analysis_observations = null;
+    entry.analysis_interpretation = null;
+    entry.analysis_concern_keys = [];
+    entry.has_reaction_signal = false;
+    entry.needs_retake = false;
+    entry.analysis_summary = null;
+    entry.analysis_model = null;
+    entry.analysis_version = null;
+    entry.analysis_prompt_version = null;
+    entry.analysis_started_at = null;
+    entry.analysis_completed_at = null;
+    entry.analysis_duration_ms = null;
+    entry.analysis_input_image_count = null;
+    entry.analysis_input_tokens = null;
+    entry.analysis_output_tokens = null;
+    entry.analysis_total_tokens = null;
+    entry.analysis_estimated_cost_usd = null;
+    entry.analysis_error = null;
+  }
+
   async upsertEntryForResolvedDate(params: {
     userId: string;
     targetDate: string;
     timeZone: string;
-    photo?: { buffer: Buffer; contentType: string } | null;
+    photos?: PhotoUploadMap | null;
     body: UpsertEntryDto;
   }): Promise<JournalEntryResponseDto> {
     const body = this.normalizeUpsertBody(params.body);
+    const incomingPhotos = this.normalizePhotoUploads(params);
+    const hasIncomingPhotos = this.hasPhotoUploads(incomingPhotos);
     const timeZone = resolveSkinJournalTimeZone(params.timeZone);
     const today = todayInTimeZone(timeZone);
     if (!isValidDate(params.targetDate)) {
@@ -355,38 +624,99 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       entry.id = this.photoStorage.newEntryId();
     }
 
-    let previousPhotoObjectKey: string | null = null;
-    let storedPhotoObjectKey: string | null = null;
-    if (params.photo) {
+    const existingRows = this.normalizePhotoRowsForEntry(
+      entry,
+      await this.loadEntryPhotoRows(params.userId, entry.id),
+    );
+    const existingByAngle = this.photoRowsByAngle(existingRows);
+    const removedAngles = new Set(body.remove_photo_angles ?? []);
+    const uploadAngles = PHOTO_UPLOAD_ORDER.filter(
+      (angle) => !!incomingPhotos[angle],
+    );
+    const desiredByAngle = new Map(existingByAngle);
+    for (const angle of removedAngles) {
+      if (!incomingPhotos[angle]) {
+        desiredByAngle.delete(angle);
+      }
+    }
+
+    if (hasIncomingPhotos) {
       await this.ensureSkinProgressConsent(
         params.userId,
         body.photo_processing_consent === true,
       );
-      previousPhotoObjectKey = entry.photo_object_key;
-      const stored = await this.photoStorage.storePhoto({
-        userId: params.userId,
-        entryId: entry.id,
-        buffer: params.photo.buffer,
-        contentType: params.photo.contentType,
-      });
-      storedPhotoObjectKey = stored.object_key;
-      entry.photo_object_key = stored.object_key;
-      entry.photo_size = stored.size;
-      entry.photo_content_type = stored.content_type;
-      entry.photo_width = stored.width;
-      entry.photo_height = stored.height;
-      entry.exif_stripped = stored.exif_stripped;
+      const headPreserved =
+        existingByAngle.has(SKIN_JOURNAL_FRONT_PHOTO_ANGLE) &&
+        !removedAngles.has(SKIN_JOURNAL_FRONT_PHOTO_ANGLE);
+      const headUploaded = !!incomingPhotos[SKIN_JOURNAL_FRONT_PHOTO_ANGLE];
+      const sideUploaded = uploadAngles.some(
+        (angle) => angle !== SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
+      );
+      if (sideUploaded && !headUploaded && !headPreserved) {
+        throw new BadRequestException(
+          'A front photo is required before adding side photos',
+        );
+      }
+    }
 
-      /* Re-analyse on photo replacement. */
-      entry.analysis_status = AnalysisStatusValue.Pending;
-      entry.analysis_observations = null;
-      entry.analysis_interpretation = null;
-      entry.analysis_concern_keys = [];
-      entry.has_reaction_signal = false;
-      entry.needs_retake = false;
-      entry.analysis_summary = null;
-      entry.analysis_completed_at = null;
-      entry.analysis_error = null;
+    const newlyStoredPhotos: StoredAnglePhoto[] = [];
+    try {
+      for (const angle of uploadAngles) {
+        const upload = incomingPhotos[angle];
+        if (!upload) {
+          continue;
+        }
+        const stored = await this.photoStorage.storePhoto({
+          userId: params.userId,
+          entryId: entry.id,
+          buffer: upload.buffer,
+          contentType: upload.contentType,
+        });
+        const anglePhoto: StoredAnglePhoto = { angle, ...stored };
+        newlyStoredPhotos.push(anglePhoto);
+        desiredByAngle.set(
+          angle,
+          this.storedPhotoToRow(entry, anglePhoto, existingByAngle.get(angle)),
+        );
+      }
+    } catch (error) {
+      for (const stored of newlyStoredPhotos) {
+        await this.deletePhotoBestEffort(
+          stored.object_key,
+          params.userId,
+          'photo_upload_failed_partial_cleanup',
+        );
+      }
+      throw error;
+    }
+
+    if (
+      desiredByAngle.size > 0 &&
+      !desiredByAngle.has(SKIN_JOURNAL_FRONT_PHOTO_ANGLE)
+    ) {
+      for (const stored of newlyStoredPhotos) {
+        await this.deletePhotoBestEffort(
+          stored.object_key,
+          params.userId,
+          'photo_upload_invalid_angle_set_cleanup',
+        );
+      }
+      throw new BadRequestException(
+        'A front photo is required when saving skin-progress photos',
+      );
+    }
+
+    const photoSetChanged = this.photoSetsDiffer(
+      existingByAngle,
+      desiredByAngle,
+    );
+
+    if (photoSetChanged) {
+      this.syncEntryFrontPhotoCompatibility(
+        entry,
+        desiredByAngle.get(SKIN_JOURNAL_FRONT_PHOTO_ANGLE) ?? null,
+      );
+      this.clearPhotoAnalysisState(entry);
     }
 
     if (!entry.photo_object_key) {
@@ -394,15 +724,21 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
 
     let saved: SkinJournalEntry;
+    let savedPhotoRows = Array.from(desiredByAngle.values());
     try {
-      saved = await this.entries.save(entry);
+      const savedState = await this.saveEntryAndPhotoSet({
+        userId: params.userId,
+        entry,
+        photoSetChanged,
+        existingByAngle,
+        desiredByAngle,
+      });
+      saved = savedState.saved;
+      savedPhotoRows = savedState.savedPhotoRows;
     } catch (error) {
-      if (
-        storedPhotoObjectKey &&
-        storedPhotoObjectKey !== previousPhotoObjectKey
-      ) {
+      for (const stored of newlyStoredPhotos) {
         await this.deletePhotoBestEffort(
-          storedPhotoObjectKey,
+          stored.object_key,
           params.userId,
           'entry_save_failed_after_photo_upload',
         );
@@ -410,20 +746,31 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       throw error;
     }
 
-    if (
-      previousPhotoObjectKey &&
-      previousPhotoObjectKey !== saved.photo_object_key
-    ) {
+    if (photoSetChanged) {
       await this.analysisQueue.cancelActiveJobsForEntry(
         saved.id,
-        'Photo was replaced before this analysis job ran.',
+        'Photo set was changed before this analysis job ran.',
       );
       await this.clearEntryAnalysisArtifacts(params.userId, saved.id);
-      await this.deletePhotoBestEffort(
-        previousPhotoObjectKey,
-        params.userId,
-        'photo_replaced',
+      const desiredObjectKeys = new Set(
+        Array.from(desiredByAngle.values()).map(
+          (photo) => photo.photo_object_key,
+        ),
       );
+      const staleObjectKeys = Array.from(
+        new Set(
+          existingRows
+            .filter((photo) => !desiredObjectKeys.has(photo.photo_object_key))
+            .map((photo) => photo.photo_object_key),
+        ),
+      );
+      for (const objectKey of staleObjectKeys) {
+        await this.deletePhotoBestEffort(
+          objectKey,
+          params.userId,
+          'photo_replaced_or_removed',
+        );
+      }
     }
 
     if (
@@ -443,10 +790,42 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
     this.scheduleSmartPicksPreparation(params.userId);
 
-    return JournalEntryResponseDto.fromEntity(
-      saved,
-      this.photoStorage.getSignedUrl(saved.photo_object_key),
-    );
+    return this.buildEntryResponse(saved, savedPhotoRows);
+  }
+
+  private async saveEntryAndPhotoSet(params: {
+    userId: string;
+    entry: SkinJournalEntry;
+    photoSetChanged: boolean;
+    existingByAngle: Map<Angle, SkinJournalEntryPhoto>;
+    desiredByAngle: Map<Angle, SkinJournalEntryPhoto>;
+  }): Promise<{
+    saved: SkinJournalEntry;
+    savedPhotoRows: SkinJournalEntryPhoto[];
+  }> {
+    return this.entries.manager.transaction(async (manager: EntityManager) => {
+      const entryRepo = manager.getRepository(SkinJournalEntry);
+      const entryPhotoRepo = manager.getRepository(SkinJournalEntryPhoto);
+      const saved = await entryRepo.save(params.entry);
+      let savedPhotoRows = Array.from(params.desiredByAngle.values());
+      if (params.photoSetChanged) {
+        const anglesToDelete = Array.from(params.existingByAngle.keys()).filter(
+          (angle) => !params.desiredByAngle.has(angle),
+        );
+        if (anglesToDelete.length > 0) {
+          await entryPhotoRepo.delete({
+            user_id: params.userId,
+            entry_id: saved.id,
+            angle: In(anglesToDelete),
+          });
+        }
+        savedPhotoRows =
+          savedPhotoRows.length > 0
+            ? await entryPhotoRepo.save(savedPhotoRows)
+            : [];
+      }
+      return { saved, savedPhotoRows };
+    });
   }
 
   private async deletePhotoBestEffort(
@@ -599,9 +978,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       'Analysis queued for retry.',
     );
     const refreshed = await this.entries.findOneByOrFail({ id: entry.id });
-    return JournalEntryResponseDto.fromEntity(
+    return this.buildEntryResponse(
       refreshed,
-      this.photoStorage.getSignedUrl(refreshed.photo_object_key),
+      await this.loadEntryPhotoRows(userId, refreshed.id),
     );
   }
 
@@ -620,9 +999,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     return {
       date,
       entry: entry
-        ? JournalEntryResponseDto.fromEntity(
+        ? this.buildEntryResponse(
             entry,
-            this.photoStorage.getSignedUrl(entry.photo_object_key),
+            await this.loadEntryPhotoRows(userId, entry.id),
           )
         : null,
     };
@@ -649,9 +1028,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     let insights: SkinJournalInsight[] = [];
 
     if (entry) {
-      entryDto = JournalEntryResponseDto.fromEntity(
+      entryDto = this.buildEntryResponse(
         entry,
-        this.photoStorage.getSignedUrl(entry.photo_object_key),
+        await this.loadEntryPhotoRows(userId, entry.id),
       );
       events = await this.events.find({
         where: { user_id: userId, entry_id: entry.id },
@@ -751,12 +1130,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       order: { entry_date: 'DESC' },
     });
     await this.recordDataAccess(userId, UserDataAccessPurpose.SkinJournalRead);
-    return entries.map((entry) =>
-      JournalEntryResponseDto.fromEntity(
-        entry,
-        this.photoStorage.getSignedUrl(entry.photo_object_key),
-      ),
-    );
+    return this.buildEntryResponses(userId, entries);
   }
 
   async listPhotos(
@@ -793,12 +1167,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     const hasMore = rows.length > take;
     const page = hasMore ? rows.slice(0, take) : rows;
     return {
-      items: page.map((entry) =>
-        JournalEntryResponseDto.fromEntity(
-          entry,
-          this.photoStorage.getSignedUrl(entry.photo_object_key),
-        ),
-      ),
+      items: await this.buildEntryResponses(userId, page),
       nextCursor: this.buildPhotoNextCursor(page.at(-1), fingerprint, hasMore),
     };
   }
@@ -948,15 +1317,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       );
     }
     await this.recordDataAccess(userId, UserDataAccessPurpose.SkinJournalRead);
+    const rowsByEntry = await this.loadEntryPhotoRowsByEntryId(userId, [
+      from.id,
+      to.id,
+    ]);
     return {
-      from: JournalEntryResponseDto.fromEntity(
-        from,
-        this.photoStorage.getSignedUrl(from.photo_object_key),
-      ),
-      to: JournalEntryResponseDto.fromEntity(
-        to,
-        this.photoStorage.getSignedUrl(to.photo_object_key),
-      ),
+      from: this.buildEntryResponse(from, rowsByEntry.get(from.id) ?? []),
+      to: this.buildEntryResponse(to, rowsByEntry.get(to.id) ?? []),
       delta: this.computeDelta(from, to),
     };
   }
@@ -964,18 +1331,25 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   async deleteEntry(userId: string, entryId: string): Promise<void> {
     const entry = await this.findOwnedEntry(userId, entryId);
     this.assertEntryIsEditableToday(entry);
+    const photoRows = this.normalizePhotoRowsForEntry(
+      entry,
+      await this.loadEntryPhotoRows(userId, entry.id),
+    );
+    const objectKeys = Array.from(
+      new Set(
+        photoRows
+          .map((photo) => photo.photo_object_key)
+          .filter((key): key is string => typeof key === 'string' && !!key),
+      ),
+    );
     await this.analysisQueue.cancelActiveJobsForEntry(
       entry.id,
       'Journal entry was deleted.',
     );
     await this.entries.delete({ id: entry.id });
     await this.clearEntryAnalysisArtifacts(userId, entry.id);
-    if (entry.photo_object_key) {
-      await this.deletePhotoBestEffort(
-        entry.photo_object_key,
-        userId,
-        'entry_deleted',
-      );
+    for (const objectKey of objectKeys) {
+      await this.deletePhotoBestEffort(objectKey, userId, 'entry_deleted');
     }
     await this.markInsightsAfterJournalChange(userId, 'entry_deleted');
     this.scheduleSmartPicksPreparation(userId);
@@ -992,7 +1366,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       userId,
       targetDate: entry.entry_date,
       timeZone: entry.time_zone,
-      photo: null,
       body,
     });
   }
@@ -1043,8 +1416,23 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const photoObjectKey = expectedPhotoObjectKey ?? entry.photo_object_key;
-    if (entry.photo_object_key !== photoObjectKey) {
+    const currentPhotoRows = this.normalizePhotoRowsForEntry(
+      entry,
+      await this.loadEntryPhotoRows(userId, entry.id),
+    );
+    const frontPhoto = this.frontPhotoRow(currentPhotoRows);
+    if (!frontPhoto) {
+      if (job) {
+        await this.analysisQueue.cancelJob(
+          job,
+          'Journal entry or photo no longer exists.',
+        );
+      }
+      return;
+    }
+    const photoObjectKey =
+      expectedPhotoObjectKey ?? frontPhoto.photo_object_key;
+    if (frontPhoto.photo_object_key !== photoObjectKey) {
       if (job) {
         await this.analysisQueue.cancelJob(
           job,
@@ -1053,9 +1441,12 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       }
       return;
     }
+    const currentPhotos = this.toAnalysisPhotoInputs(currentPhotoRows);
+    const expectedPhotoSignature =
+      this.analysisPhotoInputSignature(currentPhotos);
     const startedAt = nowDate();
     const fallbackStartedAt = Date.now();
-    let plannedInputImageCount = 1;
+    let plannedInputImageCount = currentPhotos.length;
     try {
       entry.analysis_status = AnalysisStatusValue.Running;
       entry.analysis_started_at = startedAt;
@@ -1070,11 +1461,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         this.skinProfiles.findOne({ where: { user_id: userId } }),
       ]);
       const skinContext = this.buildAnalysisSkinContext(skinProfile);
-      plannedInputImageCount = previousEntry?.photo_object_key ? 2 : 1;
+      plannedInputImageCount =
+        currentPhotos.length + (previousEntry?.photo_object_key ? 1 : 0);
       const result = await this.analysis.analyze({
         userId,
         entryId: entry.id,
         photoObjectKey,
+        photos: currentPhotos,
         priorPhotoObjectKey: previousEntry?.photo_object_key ?? null,
         concernFocus: entry.concern_focus,
         priorAnalysis: previousEntry?.analysis_observations ?? null,
@@ -1086,11 +1479,25 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       const current = await this.entries.findOne({
         where: { id: entryId, user_id: userId },
       });
-      if (!current || current.photo_object_key !== photoObjectKey) {
+      const latestPhotoRows = current
+        ? this.normalizePhotoRowsForEntry(
+            current,
+            await this.loadEntryPhotoRows(userId, current.id),
+          )
+        : [];
+      const latestFrontPhoto = this.frontPhotoRow(latestPhotoRows);
+      const latestPhotoSignature = this.analysisPhotoInputSignature(
+        this.toAnalysisPhotoInputs(latestPhotoRows),
+      );
+      if (
+        !current ||
+        latestFrontPhoto?.photo_object_key !== photoObjectKey ||
+        latestPhotoSignature !== expectedPhotoSignature
+      ) {
         if (job) {
           await this.analysisQueue.cancelJob(
             job,
-            'Photo was replaced before completed analysis could be saved.',
+            'Photo set was replaced before completed analysis could be saved.',
           );
         }
         return;
@@ -1140,11 +1547,25 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       const current = await this.entries.findOne({
         where: { id: entryId, user_id: userId },
       });
-      if (!current || current.photo_object_key !== photoObjectKey) {
+      const latestPhotoRows = current
+        ? this.normalizePhotoRowsForEntry(
+            current,
+            await this.loadEntryPhotoRows(userId, current.id),
+          )
+        : [];
+      const latestFrontPhoto = this.frontPhotoRow(latestPhotoRows);
+      const latestPhotoSignature = this.analysisPhotoInputSignature(
+        this.toAnalysisPhotoInputs(latestPhotoRows),
+      );
+      if (
+        !current ||
+        latestFrontPhoto?.photo_object_key !== photoObjectKey ||
+        latestPhotoSignature !== expectedPhotoSignature
+      ) {
         if (job) {
           await this.analysisQueue.cancelJob(
             job,
-            'Photo was replaced before failed analysis could be recorded.',
+            'Photo set was replaced before failed analysis could be recorded.',
           );
         }
         return;
@@ -2373,14 +2794,18 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   }
 
   async deleteAllMediaForUser(userId: string): Promise<void> {
-    const [entries, wrapped] = await Promise.all([
+    const [entries, entryPhotos, wrapped] = await Promise.all([
       this.entries.find({ where: { user_id: userId } }),
+      this.entryPhotos.find({ where: { user_id: userId } }),
       this.wrapped.find({ where: { user_id: userId } }),
     ]);
     const objectKeys = Array.from(
       new Set([
         ...entries
           .map((entry) => entry.photo_object_key)
+          .filter((key): key is string => typeof key === 'string' && !!key),
+        ...entryPhotos
+          .map((photo) => photo.photo_object_key)
           .filter((key): key is string => typeof key === 'string' && !!key),
         ...wrapped
           .map((wrapped) => wrapped.media_object_key)
@@ -2550,11 +2975,23 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       ]);
 
     const entryIds = new Set(entries.map((entry) => entry.id));
+    const photoRowsByEntry = await this.loadEntryPhotoRowsByEntryId(
+      userId,
+      entries.map((entry) => entry.id),
+    );
     return {
       generated_at: new Date().toISOString(),
       from,
       to,
-      entries: entries.map((entry) => toExportEntryRecord(entry)),
+      entries: entries.map((entry) =>
+        toExportEntryRecord(
+          entry,
+          this.normalizePhotoRowsForEntry(
+            entry,
+            photoRowsByEntry.get(entry.id) ?? [],
+          ),
+        ),
+      ),
       events: events.map((event) => toExportEventRecord(event)),
       insights: insights
         .filter((insight) =>

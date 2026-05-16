@@ -41,15 +41,31 @@ export function deterministicExplanation(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionExplanationJson {
+  const missingSunscreen = needsMissingDaytimeSunscreen(inputs);
   return {
     headline:
-      inputs.requestSource === SuggestionRequestSource.OnDemand
-        ? 'Quick shelf suggestion'
-        : 'Using your shelf today',
+      steps.length === 0
+        ? 'No shelf steps yet'
+        : inputs.requestSource === SuggestionRequestSource.OnDemand
+          ? 'Quick shelf suggestion'
+          : 'Using your shelf today',
     body: [
       inputs.requestSource === SuggestionRequestSource.OnDemand
-        ? 'Ritora used your shelf and safety rules for this request.'
+        ? onDemandFallbackDetail(inputs)
         : 'Ritora used your shelf and safety rules for this slot.',
+      ...(steps.length === 0
+        ? ['No active shelf products are available to apply right now.']
+        : []),
+      ...(missingSunscreen
+        ? [
+            'Sunscreen is missing from your shelf, so it stays a gap instead of an invented step.',
+          ]
+        : []),
+      ...(missingSunscreen && needsPigmentProtection(inputs)
+        ? [
+            'For dark marks or uneven tone, that SPF gap is essential for daytime care.',
+          ]
+        : []),
       ...(inputs.contextSummary.routineBreak.recentlyResumed
         ? ['Restarting gently after your break.']
         : []),
@@ -90,6 +106,40 @@ export function deterministicExplanation(
   };
 }
 
+function needsMissingDaytimeSunscreen(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  return (
+    (inputs.daypart === SuggestionDaypart.Morning ||
+      inputs.daypart === SuggestionDaypart.Noon) &&
+    !inputs.contextSummary.productScores.some(
+      (score) => score.category === ProductCategory.SunProtection,
+    )
+  );
+}
+
+function onDemandFallbackDetail(inputs: SuggestionGenerationInputs): string {
+  switch (inputs.requestContext?.intent) {
+    case 'post_workout':
+      return 'Post-workout reset: cleanse sweat, keep it quick, and avoid strong actives.';
+    case 'event_prep':
+      return 'Event prep: keep skin calm now and avoid risky last-minute actives.';
+    case 'post_sun':
+      return 'Post-sun reset: keep skin comfortable and prioritize barrier support.';
+    case 'post_swim':
+      return 'Post-swim reset: rinse, moisturize, and protect the barrier.';
+    case 'travel_refresh':
+      return 'Travel refresh: keep the routine simple and comfortable.';
+    case 'quick_refresh':
+      return 'Quick refresh: use the simplest helpful shelf steps right now.';
+    case 'post_makeup_or_shower':
+      return 'Post-makeup or shower reset: cleanse gently and support the barrier.';
+    case 'other':
+    case undefined:
+      return 'Ritora used your shelf and safety rules for this request.';
+  }
+}
+
 export function buildDeterministicGapRecommendations(
   inputs: SuggestionGenerationInputs,
 ): SuggestionGapRecommendationJson[] {
@@ -110,9 +160,12 @@ export function buildDeterministicGapRecommendations(
       inputs.daypart === SuggestionDaypart.Noon) &&
     !hasSunscreen
   ) {
+    const sunscreenReason = needsPigmentProtection(inputs)
+      ? 'A sunscreen is the essential missing daytime step for dark marks or uneven tone.'
+      : 'Daytime routines need a sunscreen option.';
     gaps.push({
       ingredientOrCategory: 'Broad-spectrum sunscreen SPF 30+',
-      reason: 'Daytime routines need a sunscreen option.',
+      reason: sunscreenReason,
       budgetTier: null,
       goalAlignment: inputs.skinProfile?.primary_goal ?? null,
       sourceIds: [
@@ -158,6 +211,16 @@ export function buildDeterministicGapRecommendations(
   }));
 }
 
+function needsPigmentProtection(inputs: SuggestionGenerationInputs): boolean {
+  return /(dark mark|hyperpigmentation|uneven tone|melasma|pigment)/i.test(
+    JSON.stringify([
+      inputs.skinProfile?.primary_goal ?? '',
+      inputs.skinProfile?.current_concerns ?? [],
+      inputs.contextSummary.skinProfile.activeConcerns,
+    ]),
+  );
+}
+
 function environmentDetail(
   environment: NonNullable<
     SuggestionGenerationInputs['contextSummary']['environment']
@@ -182,8 +245,14 @@ function selectBaselineProducts(
   const preferredOrder = preferredCategoryOrder(inputs);
   const selected: SuggestionProductScore[] = [];
   const usedCategories = new Set<ProductCategory>();
+  const skippedProductIds = new Set(
+    inputs.contextSummary.skippedCandidates.map(
+      (candidate) => candidate.productId,
+    ),
+  );
   const candidates = inputs.contextSummary.productScores
     .filter((score) => score.suitabilityScore >= 40)
+    .filter((score) => !skippedProductIds.has(score.productId))
     .filter((score) =>
       shouldAvoidStrongActives(inputs)
         ? !score.activeTags.some((tag) =>
@@ -202,10 +271,13 @@ function selectBaselineProducts(
     usedCategories.add(match.category);
   }
 
-  return selected.slice(
-    0,
-    inputs.requestContext?.intensity === 'minimal' ? 2 : 4,
-  );
+  const limit =
+    inputs.requestContext?.intensity === 'minimal'
+      ? requiresOwnedDaytimeSpf(inputs)
+        ? 3
+        : 2
+      : 4;
+  return selected.slice(0, limit);
 }
 
 function preferredCategoryOrder(
@@ -243,6 +315,16 @@ function preferredCategoryOrder(
     }
   }
 
+  if (prefersMinimalRoutine(inputs)) {
+    return inputs.daypart === SuggestionDaypart.Evening
+      ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
+      : [
+          ProductCategory.Cleanser,
+          ProductCategory.Moisturizer,
+          ProductCategory.SunProtection,
+        ];
+  }
+
   if (shouldAvoidStrongActives(inputs)) {
     return inputs.daypart === SuggestionDaypart.Evening
       ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
@@ -276,8 +358,60 @@ function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
     inputs.contextSummary.reaction.hasSignal ||
     inputs.contextSummary.reaction.barrierCompromised ||
     inputs.contextSummary.routineBreak.recentlyResumed ||
-    inputs.contextSummary.applicationPatterns.conservativeRestart
+    inputs.contextSummary.applicationPatterns.conservativeRestart ||
+    hasPregnancyOrMedicationCaution(inputs)
   );
+}
+
+function hasPregnancyOrMedicationCaution(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  const safetyValues = Object.values(inputs.skinProfile?.safety_context ?? {});
+  const text = JSON.stringify([
+    inputs.skinProfile?.pregnancy_status ?? '',
+    safetyValues,
+    inputs.skinProfile?.under_dermatologist_care ?? '',
+  ]).toLowerCase();
+  return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(text);
+}
+
+function requiresOwnedDaytimeSpf(inputs: SuggestionGenerationInputs): boolean {
+  if (
+    inputs.daypart !== SuggestionDaypart.Morning &&
+    inputs.daypart !== SuggestionDaypart.Noon
+  ) {
+    return false;
+  }
+  if (
+    /\b(indoor|indoors|inside|at home all day|no daylight)\b/i.test(
+      inputs.requestContext?.note ?? '',
+    )
+  ) {
+    return false;
+  }
+  return inputs.contextSummary.productScores.some(
+    (score) => score.category === ProductCategory.SunProtection,
+  );
+}
+
+function prefersMinimalRoutine(inputs: SuggestionGenerationInputs): boolean {
+  const preferences = inputs.skinProfile?.routine_preferences;
+  if (preferences?.pace === 'minimal') return true;
+  if (
+    inputs.daypart === SuggestionDaypart.Morning &&
+    typeof preferences?.am_minutes === 'number' &&
+    preferences.am_minutes <= 5
+  ) {
+    return true;
+  }
+  if (
+    inputs.daypart === SuggestionDaypart.Evening &&
+    typeof preferences?.pm_minutes === 'number' &&
+    preferences.pm_minutes <= 5
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function productScoreToStep(

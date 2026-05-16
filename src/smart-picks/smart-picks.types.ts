@@ -58,6 +58,8 @@ export interface SmartPicksProductPerformanceSummary {
   goalTrend: SmartPicksProductPerformanceSignal;
   concernTrend: string | null;
   photoCheckpoints: number;
+  photoInputImages?: number;
+  multiAnglePhotoCheckpoints?: number;
   reactionSignalCount: number;
   replacementCandidate: boolean;
   replacementReason: string | null;

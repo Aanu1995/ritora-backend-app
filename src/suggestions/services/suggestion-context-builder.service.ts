@@ -38,7 +38,11 @@ import {
 } from './suggestion-product-intelligence';
 import { buildRoutineBreakSummary } from './suggestion-routine-break-context';
 import { buildSuggestionContextCacheKey } from './suggestion-context-cache-key';
-import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
+import {
+  currentJournalPhotoAngleCount,
+  hasMultiAngleJournalPhoto,
+  hasUsableJournalReactionSignal,
+} from './suggestion-journal-context';
 
 @Injectable()
 export class SuggestionContextBuilder {
@@ -243,6 +247,10 @@ function buildReactionSummary(
   const concerns = entries.flatMap(
     (entry) => entry.analysis_observations?.detected_concerns ?? [],
   );
+  const photoInputImages = entries.reduce(
+    (sum, entry) => sum + currentJournalPhotoAngleCount(entry),
+    0,
+  );
   const reactionConcerns = concerns.filter((concern) =>
     [
       'redness_inflammation',
@@ -273,6 +281,8 @@ function buildReactionSummary(
         (concern) => concern.concern === 'skin_barrier_damage',
       ),
     ),
+    photoInputImages,
+    multiAnglePhotoEntries: entries.filter(hasMultiAngleJournalPhoto).length,
   };
 }
 

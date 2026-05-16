@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
+import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
@@ -35,6 +36,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
     UsersModule,
     TypeOrmModule.forFeature([
       SkinJournalEntry,
+      SkinJournalEntryPhoto,
       SkinJournalEvent,
       SkinJournalInsight,
       SkinJournalInsightGenerationRun,

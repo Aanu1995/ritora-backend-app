@@ -265,21 +265,24 @@ export function sanitizeExplanation(
 export function sanitizeGapRecommendations(
   gaps: SuggestionGapRecommendationJson[],
 ): SuggestionGapRecommendationJson[] {
-  return gaps.map((gap) => ({
-    ingredientOrCategory:
-      sanitizeSuggestionText(gap.ingredientOrCategory, { maxLength: 80 }) ?? '',
-    reason:
-      sanitizeSuggestionText(gap.reason, {
-        maxLength: 150,
+  return gaps
+    .map((gap) => ({
+      ingredientOrCategory:
+        sanitizeSuggestionText(gap.ingredientOrCategory, { maxLength: 80 }) ??
+        '',
+      reason:
+        sanitizeSuggestionText(gap.reason, {
+          maxLength: 150,
+          maxSentences: 1,
+        }) ?? '',
+      budgetTier: gap.budgetTier,
+      goalAlignment: sanitizeSuggestionText(gap.goalAlignment, {
+        maxLength: 80,
         maxSentences: 1,
-      }) ?? '',
-    budgetTier: gap.budgetTier,
-    goalAlignment: sanitizeSuggestionText(gap.goalAlignment, {
-      maxLength: 80,
-      maxSentences: 1,
-    }),
-    sourceIds: mergeEvidenceSourceIds(gap.sourceIds ?? []),
-  }));
+      }),
+      sourceIds: mergeEvidenceSourceIds(gap.sourceIds ?? []),
+    }))
+    .filter((gap) => !isNoOpGapRecommendation(gap));
 }
 
 export function sanitizeSafetyFlags(
@@ -312,6 +315,14 @@ function resolveActiveProduct(
     );
   }
   return null;
+}
+
+function isNoOpGapRecommendation(
+  gap: SuggestionGapRecommendationJson,
+): boolean {
+  return /^(none|n\/a|nothing|no gap|no gaps)$/i.test(
+    gap.ingredientOrCategory.trim(),
+  );
 }
 
 function toStepLabel(value: string | null | undefined): StepLabel {

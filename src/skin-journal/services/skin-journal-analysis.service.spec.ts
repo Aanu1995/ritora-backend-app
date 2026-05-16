@@ -41,6 +41,19 @@ function openAiPayload(overrides: Record<string, unknown> = {}) {
         needs_retake: false,
         excluded_from_trends_reason: null,
       },
+      per_angle_quality: [
+        {
+          angle: 'head_on',
+          face_detected: true,
+          lighting_quality: 'good',
+          framing_quality: 'good',
+          blur_detected: false,
+          issues: [],
+          quality_score: 0.9,
+          needs_retake: false,
+          used_for_analysis: true,
+        },
+      ],
       detected_concerns: [],
       reaction_signals: {
         reaction_detected: false,
@@ -331,6 +344,250 @@ describe('SkinJournalAnalysisService', () => {
     expect(promptText(body, 'user')).toContain(
       'Image B is the prior reference',
     );
+  });
+
+  it('passes multiple current angles while keeping prior comparison front-only', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          schema_version: '1.2',
+          per_angle_quality: [
+            {
+              angle: 'head_on',
+              face_detected: true,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.9,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+            {
+              angle: 'left_profile',
+              face_detected: true,
+              lighting_quality: 'fair',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.75,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+            {
+              angle: 'right_profile',
+              face_detected: true,
+              lighting_quality: 'fair',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.76,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+          ],
+        }),
+      ),
+    });
+    global.fetch = fetchMock;
+    const storage = {
+      readPhotoBuffer: jest
+        .fn()
+        .mockResolvedValueOnce(Buffer.from('front-photo'))
+        .mockResolvedValueOnce(Buffer.from('left-photo'))
+        .mockResolvedValueOnce(Buffer.from('right-photo'))
+        .mockResolvedValueOnce(Buffer.from('previous-front')),
+    } as unknown as SkinJournalPhotoStorageService;
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      storage,
+    );
+
+    const result = await service.analyze({
+      userId: 'user-1',
+      entryId: 'entry-1',
+      photoObjectKey: 'skin-journal/user-1/entry-1/front.webp',
+      photos: [
+        {
+          angle: 'head_on',
+          object_key: 'skin-journal/user-1/entry-1/front.webp',
+        },
+        {
+          angle: 'left_profile',
+          object_key: 'skin-journal/user-1/entry-1/left.webp',
+        },
+        {
+          angle: 'right_profile',
+          object_key: 'skin-journal/user-1/entry-1/right.webp',
+        },
+      ],
+      priorPhotoObjectKey: 'skin-journal/user-1/entry-0/front.webp',
+      concernFocus: null,
+      priorAnalysis: null,
+      skinContext: null,
+      entryContext: null,
+    });
+
+    const body = requestBody(fetchMock);
+    const images = body.input
+      .flatMap((item) => item.content)
+      .filter((content) => content.type === 'input_image');
+    const labels = body.input
+      .flatMap((item) => item.content)
+      .filter((content) => content.type === 'input_text')
+      .map((content) => content.text ?? '')
+      .join('\n');
+
+    expect(storage.readPhotoBuffer).toHaveBeenCalledWith(
+      'skin-journal/user-1/entry-1/front.webp',
+    );
+    expect(storage.readPhotoBuffer).toHaveBeenCalledWith(
+      'skin-journal/user-1/entry-1/left.webp',
+    );
+    expect(storage.readPhotoBuffer).toHaveBeenCalledWith(
+      'skin-journal/user-1/entry-1/right.webp',
+    );
+    expect(images).toHaveLength(4);
+    expect(labels).toContain("today's front photo");
+    expect(labels).toContain("today's left profile photo");
+    expect(labels).toContain('front-to-front change direction');
+    expect(result.metadata.input_image_count).toBe(4);
+    expect(result.observations.per_angle_quality).toHaveLength(3);
+  });
+
+  it('rejects multi-angle model output that omits supplied angle quality rows', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          schema_version: '1.2',
+          per_angle_quality: [
+            {
+              angle: 'head_on',
+              face_detected: true,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.9,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+          ],
+        }),
+      ),
+    });
+    const storage = {
+      readPhotoBuffer: jest
+        .fn()
+        .mockResolvedValueOnce(Buffer.from('front-photo'))
+        .mockResolvedValueOnce(Buffer.from('left-photo')),
+    } as unknown as SkinJournalPhotoStorageService;
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      storage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/front.webp',
+        photos: [
+          {
+            angle: 'head_on',
+            object_key: 'skin-journal/user-1/entry-1/front.webp',
+          },
+          {
+            angle: 'left_profile',
+            object_key: 'skin-journal/user-1/entry-1/left.webp',
+          },
+        ],
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toThrow('per_angle_quality must include every supplied angle');
+  });
+
+  it('rejects duplicate per-angle quality rows from model output', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          schema_version: '1.2',
+          per_angle_quality: [
+            {
+              angle: 'head_on',
+              face_detected: true,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.9,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+            {
+              angle: 'head_on',
+              face_detected: true,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.91,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+            {
+              angle: 'left_profile',
+              face_detected: true,
+              lighting_quality: 'fair',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.74,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+          ],
+        }),
+      ),
+    });
+    const storage = {
+      readPhotoBuffer: jest
+        .fn()
+        .mockResolvedValueOnce(Buffer.from('front-photo'))
+        .mockResolvedValueOnce(Buffer.from('left-photo')),
+    } as unknown as SkinJournalPhotoStorageService;
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      storage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/front.webp',
+        photos: [
+          {
+            angle: 'head_on',
+            object_key: 'skin-journal/user-1/entry-1/front.webp',
+          },
+          {
+            angle: 'left_profile',
+            object_key: 'skin-journal/user-1/entry-1/left.webp',
+          },
+        ],
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toThrow('per_angle_quality must include every supplied angle');
   });
 
   it('rejects forbidden diagnostic language from model output', async () => {

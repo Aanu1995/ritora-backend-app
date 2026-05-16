@@ -78,6 +78,8 @@ describe('SuggestionContextBuilder', () => {
         severity: 'moderate',
         confidence: 0.86,
         affectedZones: ['cheeks'],
+        photoInputImages: 3,
+        multiAnglePhotoEntries: 1,
       }),
     );
     expect(summary.applicationPatterns).toEqual(
@@ -407,6 +409,11 @@ function reactionJournalEntry(): SkinJournalEntry {
     photo_object_key: 'skin-journal/user-1/2026-04-29.jpg',
     has_reaction_signal: true,
     analysis_observations: {
+      per_angle_quality: [
+        { angle: 'head_on' },
+        { angle: 'left_profile' },
+        { angle: 'right_profile' },
+      ],
       reaction_signals: {
         reaction_detected: true,
         reaction_severity: 'moderate',

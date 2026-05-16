@@ -14,6 +14,20 @@ import type {
   SunExposure,
 } from '../skin-journal.constants';
 
+export class JournalEntryPhotoResponseDto {
+  @ApiProperty()
+  angle: Angle;
+
+  @ApiProperty()
+  photo_url: string;
+
+  @ApiProperty({ required: false, nullable: true })
+  width: number | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  height: number | null;
+}
+
 export class JournalEntryResponseDto {
   @ApiProperty()
   id: string;
@@ -38,6 +52,15 @@ export class JournalEntryResponseDto {
 
   @ApiProperty({ required: false, nullable: true })
   photo_height: number | null;
+
+  @ApiProperty({ type: [JournalEntryPhotoResponseDto] })
+  photos: JournalEntryPhotoResponseDto[];
+
+  @ApiProperty()
+  angle_count: number;
+
+  @ApiProperty()
+  has_side_photos: boolean;
 
   @ApiProperty()
   angle: Angle;
@@ -135,15 +158,19 @@ export class JournalEntryResponseDto {
   static fromEntity(
     entry: SkinJournalEntry,
     photoUrl: string | null,
+    photos: JournalEntryPhotoResponseDto[] = [],
   ): JournalEntryResponseDto {
     const dto = new JournalEntryResponseDto();
     dto.id = entry.id;
     dto.entry_date = entry.entry_date;
     dto.time_zone = entry.time_zone;
     dto.photo_url = photoUrl;
-    dto.has_photo = !!entry.photo_object_key;
+    dto.has_photo = photos.length > 0 || !!entry.photo_object_key;
     dto.photo_width = entry.photo_width;
     dto.photo_height = entry.photo_height;
+    dto.photos = photos;
+    dto.angle_count = photos.length || (entry.photo_object_key ? 1 : 0);
+    dto.has_side_photos = photos.some((photo) => photo.angle !== 'head_on');
     dto.angle = entry.angle;
     dto.concern_focus = entry.concern_focus;
     dto.is_pre_routine = entry.is_pre_routine;

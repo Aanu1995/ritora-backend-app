@@ -4,6 +4,8 @@ import {
   ConcernKey,
   RatingsPayload,
   RecentChangePayload,
+  SKIN_JOURNAL_PHOTO_ANGLES,
+  type Angle,
 } from './skin-journal.constants';
 import { UpsertEntryDto } from './dto/upsert-entry.dto';
 
@@ -18,6 +20,8 @@ const RECENT_CHANGE_KINDS: ReadonlySet<RecentChangePayload['kind']> = new Set<
   'travelled',
   'other',
 ]);
+const PHOTO_ANGLES = new Set<Angle>(SKIN_JOURNAL_PHOTO_ANGLES);
+const INVALID_JSON_PAYLOAD_KEY = '__invalid_json_payload__';
 
 export function normalizeUpsertEntryBody(body: UpsertEntryDto): UpsertEntryDto {
   const record = body as Record<string, unknown>;
@@ -32,10 +36,22 @@ export function normalizeUpsertEntryBody(body: UpsertEntryDto): UpsertEntryDto {
     record.photo_processing_consent,
   );
   normalized.concern_focus = parseOptionalStringArray(record.concern_focus);
+  normalized.remove_photo_angles = parseOptionalPhotoAngleArray(
+    record.remove_photo_angles,
+  );
   normalized.ratings = parseOptionalRatings(record.ratings, record);
   normalized.recent_change = parseOptionalRecentChange(record.recent_change);
 
   return normalized;
+}
+
+function parseOptionalPhotoAngleArray(value: unknown): Angle[] | undefined {
+  const parsed = parseOptionalStringArray(value);
+  if (parsed === undefined) return undefined;
+  if (!parsed.every((item): item is Angle => PHOTO_ANGLES.has(item as Angle))) {
+    throw new BadRequestException('Invalid photo angle value');
+  }
+  return [...new Set(parsed)];
 }
 
 function parseOptionalBoolean(value: unknown): boolean | undefined {
@@ -133,10 +149,18 @@ function parseOptionalRecentChange(
 
 function parseObjectish(value: unknown): Record<string, unknown> | undefined {
   if (value === undefined) return undefined;
-  if (isPlainRecord(value)) return value;
+  if (isPlainRecord(value)) {
+    if (isInvalidJsonPayload(value)) {
+      throw new BadRequestException('Invalid JSON payload');
+    }
+    return value;
+  }
   if (typeof value === 'string') {
     const parsed = parseJson(value);
     if (isPlainRecord(parsed)) {
+      if (isInvalidJsonPayload(parsed)) {
+        throw new BadRequestException('Invalid JSON payload');
+      }
       return parsed;
     }
   }
@@ -153,4 +177,8 @@ function parseJson(value: string): unknown {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isInvalidJsonPayload(value: Record<string, unknown>): boolean {
+  return value[INVALID_JSON_PAYLOAD_KEY] === true;
 }

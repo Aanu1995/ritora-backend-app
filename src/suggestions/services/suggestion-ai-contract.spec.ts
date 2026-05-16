@@ -71,6 +71,36 @@ describe('suggestion AI contract', () => {
     expect(prompt).not.toContain('59.33');
   });
 
+  it('includes multi-angle photo coverage in recent journal prompt context', () => {
+    const prompt = buildPrompt({
+      ...generationInputs(),
+      recentJournalEntries: [
+        {
+          id: 'journal-1',
+          entry_date: '2026-05-03',
+          photo_object_key: 'skin-journal/user-1/journal-1/front.webp',
+          analysis_status: 'completed',
+          analysis_input_image_count: 3,
+          has_reaction_signal: true,
+          analysis_observations: {
+            per_angle_quality: [
+              { angle: 'head_on' },
+              { angle: 'left_profile' },
+              { angle: 'right_profile' },
+            ],
+            reaction_signals: { reaction_detected: true },
+            barrier_signs: { barrier_compromise: false },
+          },
+        } as unknown as SuggestionGenerationInputs['recentJournalEntries'][number],
+      ],
+    });
+
+    expect(prompt).toContain(
+      'currentPhotoAngles=3, analysisImages=3, angles=head_on+left_profile+right_profile',
+    );
+    expect(prompt).toContain('reactionSignal=true');
+  });
+
   it('treats on-demand free text as context instead of instructions', () => {
     const prompt = buildPrompt({
       ...generationInputs(),
@@ -225,6 +255,8 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
       concernKeys: [],
       daysSinceLatestSignal: null,
       barrierCompromised: false,
+      photoInputImages: 0,
+      multiAnglePhotoEntries: 0,
     },
     routineBreak: {
       recentlyResumed: false,

@@ -47,7 +47,20 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
       .map((entry) => [
         entry.id,
         entry.updated_at?.toISOString() ?? null,
+        entry.analysis_status,
+        entry.analysis_version,
+        entry.analysis_completed_at?.toISOString() ?? null,
+        entry.analysis_input_image_count,
         entry.has_reaction_signal,
+        entry.needs_retake,
+        entry.analysis_summary,
+        entry.analysis_concern_keys ?? [],
+        entry.analysis_observations?.per_angle_quality?.map((quality) => [
+          quality.angle,
+          quality.used_for_analysis,
+          quality.needs_retake,
+          quality.quality_score ?? null,
+        ]) ?? [],
       ]),
     logs: inputs.recentApplications
       .slice()

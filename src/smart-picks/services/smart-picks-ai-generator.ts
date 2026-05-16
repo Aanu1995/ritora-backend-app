@@ -815,7 +815,7 @@ function buildPrompt(
     `Safety and preferences: ${JSON.stringify(buildSafetyAndPreferenceSummary(context))}`,
     `Shelf products to avoid recommending again:\n${context.allProducts.map(formatProduct).join('\n') || '(none)'}`,
     `Product performance summary:\n${formatProductPerformance(context)}`,
-    `Gaps needing product picks:\n${gaps.map((gap) => `- key=${gap.normalizedKey}; kind=${gap.gapKind}; priority=${gap.priority}; category=${gap.ingredientOrCategory}; reason=${gap.reason}; replacementFor=${gap.replacementFor ? `${gap.replacementFor.productName}; usageDaysLast90=${gap.replacementFor.usageDaysLast90}; photoCheckpoints=${gap.replacementFor.photoCheckpoints}; reactionSignalCount=${gap.replacementFor.reactionSignalCount}` : 'none'}; sourceIds=${gap.sourceIds.join(',')}`).join('\n')}`,
+    `Gaps needing product picks:\n${gaps.map((gap) => `- key=${gap.normalizedKey}; kind=${gap.gapKind}; priority=${gap.priority}; category=${gap.ingredientOrCategory}; reason=${gap.reason}; replacementFor=${gap.replacementFor ? `${gap.replacementFor.productName}; usageDaysLast90=${gap.replacementFor.usageDaysLast90}; photoCheckpoints=${gap.replacementFor.photoCheckpoints}; photoInputImages=${gap.replacementFor.photoInputImages ?? gap.replacementFor.photoCheckpoints}; multiAnglePhotoCheckpoints=${gap.replacementFor.multiAnglePhotoCheckpoints ?? 0}; reactionSignalCount=${gap.replacementFor.reactionSignalCount}` : 'none'}; sourceIds=${gap.sourceIds.join(',')}`).join('\n')}`,
     'Return one concrete product pick for every listed gap, including priority=consider gaps. The only difference is where Ritora displays the card.',
     'Rank product fit by the user goal, budget, skin profile, history, safety context, and shelf compatibility.',
     'For premium or luxury budgets, do not default to the cheapest basic option; choose the strongest compatible product fit and use alternatives for lower-cost tradeoffs.',
@@ -899,7 +899,7 @@ function formatProductPerformance(context: SmartPicksContext): string {
   return summaries
     .map(
       (summary) =>
-        `- product=${summary.brand} ${summary.productName}; category=${summary.category ?? 'unknown'}; adherence=${summary.adherence}; goalTrend=${summary.goalTrend}; concernTrend=${summary.concernTrend ?? 'unknown'}; usageDaysLast30=${summary.usageDaysLast30}; usageDaysLast90=${summary.usageDaysLast90}; photoCheckpoints=${summary.photoCheckpoints}; reactionSignalCount=${summary.reactionSignalCount}; replacementCandidate=${summary.replacementCandidate}; reason=${summary.replacementReason ?? 'none'}`,
+        `- product=${summary.brand} ${summary.productName}; category=${summary.category ?? 'unknown'}; adherence=${summary.adherence}; goalTrend=${summary.goalTrend}; concernTrend=${summary.concernTrend ?? 'unknown'}; usageDaysLast30=${summary.usageDaysLast30}; usageDaysLast90=${summary.usageDaysLast90}; photoCheckpoints=${summary.photoCheckpoints}; photoInputImages=${summary.photoInputImages ?? summary.photoCheckpoints}; multiAnglePhotoCheckpoints=${summary.multiAnglePhotoCheckpoints ?? 0}; reactionSignalCount=${summary.reactionSignalCount}; replacementCandidate=${summary.replacementCandidate}; reason=${summary.replacementReason ?? 'none'}`,
     )
     .join('\n');
 }

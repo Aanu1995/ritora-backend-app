@@ -10,11 +10,11 @@ import {
   Post,
   Query,
   Res,
-  UploadedFile,
+  UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AllowBrowserCache } from '../common/decorators/http-cache.decorator';
@@ -36,8 +36,11 @@ import {
   JournalExportResponseDto,
 } from './dto/export-journal.dto';
 import { StartSimplificationDto } from './dto/start-simplification.dto';
-import type { EventKind, InsightWindow } from './skin-journal.constants';
-import { SKIN_JOURNAL_PHOTO_MAX_BYTES } from './skin-journal.constants';
+import type { Angle, EventKind, InsightWindow } from './skin-journal.constants';
+import {
+  SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
+  SKIN_JOURNAL_PHOTO_MAX_BYTES,
+} from './skin-journal.constants';
 import { todayInTimeZone } from './skin-journal.utils';
 
 interface UploadedPhoto {
@@ -46,6 +49,13 @@ interface UploadedPhoto {
   size: number;
   originalname: string;
 }
+
+type UploadedPhotoMap = Partial<
+  Record<
+    'photo' | 'photo_head_on' | 'photo_left_profile' | 'photo_right_profile',
+    UploadedPhoto[]
+  >
+>;
 
 const INSIGHT_WINDOWS: ReadonlySet<InsightWindow> = new Set([
   'all',
@@ -166,15 +176,23 @@ export class SkinJournalController {
 
   @Post('today')
   @UseInterceptors(
-    FileInterceptor('photo', {
-      limits: { fileSize: SKIN_JOURNAL_PHOTO_MAX_BYTES },
-    }),
+    FileFieldsInterceptor(
+      [
+        { name: 'photo', maxCount: 1 },
+        { name: 'photo_head_on', maxCount: 1 },
+        { name: 'photo_left_profile', maxCount: 1 },
+        { name: 'photo_right_profile', maxCount: 1 },
+      ],
+      {
+        limits: { fileSize: SKIN_JOURNAL_PHOTO_MAX_BYTES },
+      },
+    ),
   )
   async upsertToday(
     @CurrentUser('id') userId: string,
     @CurrentUser('timeZone') timeZone: string | null,
     @Headers('x-timezone') requestTimeZone: string | undefined,
-    @UploadedFile() photo: UploadedPhoto | undefined,
+    @UploadedFiles() files: UploadedPhotoMap | undefined,
     @Body() body: UpsertEntryDto,
   ) {
     const tz = timeZone || requestTimeZone || 'UTC';
@@ -182,9 +200,7 @@ export class SkinJournalController {
       userId,
       targetDate: todayInTimeZone(tz),
       timeZone: tz,
-      photo: photo
-        ? { buffer: photo.buffer, contentType: photo.mimetype }
-        : null,
+      photos: normalizeUploadedPhotoAngles(files),
       body,
     });
   }
@@ -358,6 +374,41 @@ export class SkinJournalController {
   ) {
     return this.service.getExport(userId, jobId);
   }
+}
+
+function normalizeUploadedPhotoAngles(
+  files: UploadedPhotoMap | undefined,
+): Partial<Record<Angle, { buffer: Buffer; contentType: string }>> {
+  const namedFront = files?.photo_head_on?.[0];
+  const legacyFront = files?.photo?.[0];
+  if (namedFront && legacyFront) {
+    throw new BadRequestException('Only one front photo can be uploaded');
+  }
+  const front = namedFront ?? legacyFront;
+
+  const photos: Partial<
+    Record<Angle, { buffer: Buffer; contentType: string }>
+  > = {};
+  if (front) {
+    photos[SKIN_JOURNAL_FRONT_PHOTO_ANGLE] = {
+      buffer: front.buffer,
+      contentType: front.mimetype,
+    };
+  }
+
+  const left = files?.photo_left_profile?.[0];
+  if (left) {
+    photos.left_profile = { buffer: left.buffer, contentType: left.mimetype };
+  }
+  const right = files?.photo_right_profile?.[0];
+  if (right) {
+    photos.right_profile = {
+      buffer: right.buffer,
+      contentType: right.mimetype,
+    };
+  }
+
+  return photos;
 }
 
 function parseOptionalPositiveInteger(

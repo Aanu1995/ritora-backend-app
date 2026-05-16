@@ -1,5 +1,18 @@
 export type Angle = 'head_on' | 'left_profile' | 'right_profile';
 
+export const SKIN_JOURNAL_PHOTO_ANGLES = [
+  'left_profile',
+  'head_on',
+  'right_profile',
+] as const satisfies readonly Angle[];
+
+export const SKIN_JOURNAL_FRONT_PHOTO_ANGLE: Angle = 'head_on';
+
+export const SKIN_JOURNAL_SIDE_PHOTO_ANGLES = [
+  'left_profile',
+  'right_profile',
+] as const satisfies readonly Angle[];
+
 export const AnalysisStatusValue = {
   Pending: 'pending',
   Queued: 'queued',
@@ -259,7 +272,7 @@ export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT = 4;
 export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER = 2;
 export const SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD = 1;
 export const SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION =
-  'skin-journal-photo-v2026-04-30.1';
+  'skin-journal-photo-v2026-05-16.1';
 export const SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: AnalysisQueueDriver =
   'database';
 export const SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS = 10;
@@ -366,8 +379,25 @@ export interface AnalysisRunResult {
   metadata: AnalysisRunMetadata;
 }
 
+export interface AnalysisPhotoInput {
+  angle: Angle;
+  object_key: string;
+}
+
+export interface AnalysisAngleQuality {
+  angle: Angle;
+  face_detected: boolean;
+  lighting_quality: 'poor' | 'fair' | 'good' | 'excellent';
+  framing_quality: 'poor' | 'fair' | 'good' | 'excellent';
+  blur_detected: boolean;
+  issues: string[];
+  quality_score?: number;
+  needs_retake?: boolean;
+  used_for_analysis: boolean;
+}
+
 export interface AnalysisObservations {
-  schema_version: '1.0' | '1.1';
+  schema_version: '1.0' | '1.1' | '1.2';
   model_version: string;
   image_quality: {
     face_detected: boolean;
@@ -379,6 +409,7 @@ export interface AnalysisObservations {
     needs_retake?: boolean;
     excluded_from_trends_reason?: AnalysisTrendExclusionReason | null;
   };
+  per_angle_quality?: AnalysisAngleQuality[];
   detected_concerns: Array<{
     concern: AnalysisConcern;
     severity: 'mild' | 'moderate' | 'severe';
@@ -480,6 +511,13 @@ export interface ScheduleSnapshot {
 export type SkinJournalExportEntryRecord = Record<string, unknown> & {
   photo_object_key: string | null;
   photo_url: string | null;
+  photos?: Array<{
+    angle: Angle;
+    photo_object_key: string;
+    photo_url: string | null;
+    width: number | null;
+    height: number | null;
+  }>;
 };
 
 export type SkinJournalExportPayload = {

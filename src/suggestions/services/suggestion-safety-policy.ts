@@ -67,6 +67,39 @@ export function buildPolicySafetyFlags(
       sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
     });
   }
+  if (
+    (context.daypart === SuggestionDaypart.Morning ||
+      context.daypart === SuggestionDaypart.Noon) &&
+    !context.productScores.some(
+      (product) => product.category === ProductCategory.SunProtection,
+    )
+  ) {
+    flags.push({
+      severity: 'info',
+      message:
+        'No sunscreen is on your shelf, so daytime SPF stays a gap rather than an application step.',
+      ingredientSlugs: ['spf'],
+      sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+    });
+  }
+  if (
+    hasPregnancyOrMedicationCaution(context) &&
+    context.productScores.some((product) =>
+      product.activeTags.some((tag) =>
+        ['retinoid', 'retinol', 'adapalene', 'tretinoin'].includes(
+          tag.toLowerCase(),
+        ),
+      ),
+    )
+  ) {
+    flags.push({
+      severity: 'warning',
+      message:
+        'Pregnancy or medication changes need clinician guidance before retinoids.',
+      ingredientSlugs: ['retinoid'],
+      sourceIds: [SuggestionEvidenceSourceId.DermNetTopicalRetinoids],
+    });
+  }
   if (selectedTags.has('retinoid') && selectedTags.has('aha')) {
     flags.push(
       activeMixFlag(
@@ -136,13 +169,17 @@ export function buildPolicySafetyFlags(
   if (
     context.environment &&
     isHighUvRisk(context.environment.uvRisk) &&
-    !selectedProducts.some(
-      (product) => product.category === ProductCategory.SunProtection,
-    )
+    (context.daypart === SuggestionDaypart.Morning ||
+      context.daypart === SuggestionDaypart.Noon)
   ) {
+    const hasSelectedSunscreen = selectedProducts.some(
+      (product) => product.category === ProductCategory.SunProtection,
+    );
     flags.push({
       severity: 'info',
-      message: 'UV is high today, so daytime sunscreen matters.',
+      message: hasSelectedSunscreen
+        ? 'UV is high today, so keep sunscreen as the priority daytime step.'
+        : 'UV is high today, so daytime sunscreen matters.',
       ingredientSlugs: ['spf'],
       sourceIds: [
         SuggestionEvidenceSourceId.OpenMeteoWeather,
@@ -160,6 +197,17 @@ export function buildPolicySafetyFlags(
     });
   }
   return dedupeFlags(flags);
+}
+
+function hasPregnancyOrMedicationCaution(
+  context: SuggestionContextSummary,
+): boolean {
+  return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(
+    JSON.stringify([
+      context.skinProfile.pregnancyStatus ?? '',
+      context.safetyConstraints,
+    ]),
+  );
 }
 
 export function skippedReasonsFromPolicy(

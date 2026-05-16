@@ -48,7 +48,9 @@ describe('summarizeSmartPicksProductPerformance', () => {
         journalEntry('2026-02-12', concern('hyperpigmentation', 'severe')),
         journalEntry('2026-03-12', concern('hyperpigmentation', 'severe')),
         journalEntry('2026-04-12', concern('hyperpigmentation', 'severe')),
-        journalEntry('2026-05-10', concern('hyperpigmentation', 'severe')),
+        journalEntry('2026-05-10', concern('hyperpigmentation', 'severe'), {
+          angleCount: 3,
+        }),
       ],
       primaryGoal: 'fade dark marks',
       referenceDate: new Date('2026-05-12T09:00:00.000Z'),
@@ -63,6 +65,8 @@ describe('summarizeSmartPicksProductPerformance', () => {
         goalTrend: SmartPicksProductPerformanceSignal.NotImproving,
         concernTrend: 'hyperpigmentation',
         photoCheckpoints: 3,
+        photoInputImages: 6,
+        multiAnglePhotoCheckpoints: 1,
         replacementCandidate: true,
       }),
     );
@@ -306,6 +310,36 @@ describe('summarizeSmartPicksProductPerformance', () => {
       }),
     );
   });
+
+  it('deduplicates duplicate per-angle quality rows before counting photo inputs', () => {
+    const duplicateAngleEntry = journalEntry(
+      '2026-05-10',
+      concern('hyperpigmentation', 'moderate'),
+    );
+    duplicateAngleEntry.analysis_observations = {
+      ...duplicateAngleEntry.analysis_observations,
+      per_angle_quality: [
+        { angle: 'head_on' },
+        { angle: 'head_on' },
+        { angle: 'left_profile' },
+      ],
+    } as AnalysisObservations;
+
+    const summary = summarizeSmartPicksProductPerformance({
+      products: [product('serum-1', ProductCategory.Serum)],
+      applicationLogs: logsForProduct('serum-1', ['2026-05-01']),
+      journalEntries: [duplicateAngleEntry],
+      primaryGoal: 'fade dark marks',
+      referenceDate: new Date('2026-05-12T09:00:00.000Z'),
+    });
+
+    expect(summary[0]).toEqual(
+      expect.objectContaining({
+        photoInputImages: 2,
+        multiAnglePhotoCheckpoints: 1,
+      }),
+    );
+  });
 });
 
 describe('SmartPicksProductPerformanceService', () => {
@@ -487,9 +521,24 @@ function journalEntry(
     lightingQuality?: AnalysisObservations['image_quality']['lighting_quality'];
     faceDetected?: boolean;
     overallChange?: AnalysisObservations['overall_change_from_previous'];
+    angleCount?: number;
   } = {},
 ): SkinJournalEntry {
   const reactionDetected = options.reactionDetected ?? false;
+  const perAngleQuality =
+    options.angleCount && options.angleCount > 1
+      ? ['head_on', 'left_profile', 'right_profile']
+          .slice(0, options.angleCount)
+          .map((angle) => ({
+            angle,
+            face_detected: true,
+            lighting_quality: 'good',
+            framing_quality: 'good',
+            blur_detected: false,
+            issues: [],
+            used_for_analysis: true,
+          }))
+      : undefined;
   return {
     id: `journal-${date}`,
     user_id: 'user-1',
@@ -508,6 +557,7 @@ function journalEntry(
         quality_score: 0.9,
         needs_retake: options.needsRetake ?? false,
       },
+      per_angle_quality: perAngleQuality,
       detected_concerns: [detectedConcern],
       reaction_signals: {
         reaction_detected: reactionDetected,

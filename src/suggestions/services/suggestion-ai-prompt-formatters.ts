@@ -47,9 +47,18 @@ export function formatScheduledSlotContext(
 
 export function formatShelfProduct(product: InventoryProduct): string {
   const guidance = product.guidance;
+  const identity = product.identity;
+  const userFields = product.user_fields;
+  const ingredients = identity?.inciIngredients?.slice(0, 16) ?? [];
+  const benefits = identity?.benefits?.slice(0, 6) ?? [];
   return [
     `- ${product.brand} ${product.name}`,
     `(category=${product.category}, id=${product.id})`,
+    userFields?.preferredTimeOfDay
+      ? `preferredTime=${userFields.preferredTimeOfDay}`
+      : null,
+    benefits.length ? `benefits=${benefits.join('|')}` : null,
+    ingredients.length ? `inci=${ingredients.join('|')}` : null,
     guidance?.waitMinutes ? `wait=${guidance.waitMinutes}min` : null,
     guidance?.cautions?.length
       ? `cautions=${guidance.cautions.join('|')}`

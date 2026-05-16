@@ -9,6 +9,7 @@ import {
   resolveRawStep,
   routineStepToOutput,
   sanitizeExplanation,
+  sanitizeGapRecommendations,
 } from './suggestion-ai-assembly';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 
@@ -120,6 +121,20 @@ describe('suggestion AI assembly validation', () => {
       140,
     );
     expect(explanation.inputs[0].label.length).toBeLessThanOrEqual(40);
+  });
+
+  it('drops no-op gap recommendations instead of showing a fake gap', () => {
+    expect(
+      sanitizeGapRecommendations([
+        {
+          ingredientOrCategory: 'none',
+          reason: 'No missing products for this slot.',
+          budgetTier: null,
+          goalAlignment: null,
+          sourceIds: [],
+        },
+      ]),
+    ).toEqual([]);
   });
 
   it('keeps specialist-locked steps at their original routine order', () => {
@@ -250,6 +265,8 @@ function contextSummary(): SuggestionContextSummary {
       concernKeys: [],
       daysSinceLatestSignal: null,
       barrierCompromised: false,
+      photoInputImages: 0,
+      multiAnglePhotoEntries: 0,
     },
     routineBreak: {
       recentlyResumed: false,

@@ -9,12 +9,14 @@ import {
 } from './dto/wrapped-response.dto';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
+import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import {
   SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS,
+  SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
   SkinJournalExportEntryRecord,
   SkinJournalExportPayload,
 } from './skin-journal.constants';
@@ -37,11 +39,35 @@ export function toExportResponse(
 
 export function toExportEntryRecord(
   entry: SkinJournalEntry,
+  photos: SkinJournalEntryPhoto[] = [],
 ): SkinJournalExportEntryRecord {
-  return {
-    ...toRecord(JournalEntryResponseDto.fromEntity(entry, null)),
-    photo_object_key: entry.photo_object_key,
+  const frontPhoto =
+    photos.find((photo) => photo.angle === SKIN_JOURNAL_FRONT_PHOTO_ANGLE) ??
+    null;
+  const photoObjectKey = frontPhoto?.photo_object_key ?? entry.photo_object_key;
+  const exportedPhotos = photos.map((photo) => ({
+    angle: photo.angle,
+    photo_object_key: photo.photo_object_key,
     photo_url: null,
+    width: photo.photo_width,
+    height: photo.photo_height,
+  }));
+  return {
+    ...toRecord(
+      JournalEntryResponseDto.fromEntity(
+        entry,
+        null,
+        exportedPhotos.map((photo) => ({
+          angle: photo.angle,
+          photo_url: '',
+          width: photo.width,
+          height: photo.height,
+        })),
+      ),
+    ),
+    photo_object_key: photoObjectKey,
+    photo_url: null,
+    photos: exportedPhotos,
   };
 }
 
@@ -113,6 +139,14 @@ function resolveExportPayloadUrls(
       photo_url: resolvePhotoUrl(entry.photo_object_key, {
         ttlSeconds: SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS,
       }),
+      photos: Array.isArray(entry.photos)
+        ? entry.photos.map((photo) => ({
+            ...photo,
+            photo_url: resolvePhotoUrl(photo.photo_object_key, {
+              ttlSeconds: SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS,
+            }),
+          }))
+        : undefined,
     })),
     wrapped: payload.wrapped.map((wrapped) =>
       resolveExportWrappedUrls(wrapped, resolvePhotoUrl),

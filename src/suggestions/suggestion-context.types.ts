@@ -32,6 +32,8 @@ export interface SuggestionContextSummary {
     concernKeys: string[];
     daysSinceLatestSignal: number | null;
     barrierCompromised: boolean;
+    photoInputImages: number;
+    multiAnglePhotoEntries: number;
   };
   routineBreak: {
     recentlyResumed: boolean;

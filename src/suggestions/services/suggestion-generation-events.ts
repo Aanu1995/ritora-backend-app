@@ -61,6 +61,7 @@ export async function recordSuggestionGenerationOutcome(params: {
   output: SuggestionGenerationOutput;
 }): Promise<void> {
   const fallback =
+    params.output.metadata.provider === 'deterministic_baseline' ||
     params.output.metadata.model.startsWith('deterministic-baseline') ||
     params.output.metadata.model.startsWith('fallback:');
   await params.observability.record({
@@ -74,6 +75,7 @@ export async function recordSuggestionGenerationOutcome(params: {
       promptVersion: params.output.metadata.promptVersion,
       durationMs: params.output.metadata.durationMs,
       estimatedCostUsd: params.output.metadata.estimatedCostUsd,
+      fallbackReason: params.output.metadata.fallbackReason ?? null,
       requestSource:
         params.instance.request_source ?? SuggestionRequestSource.Scheduled,
     },

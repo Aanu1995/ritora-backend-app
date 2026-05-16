@@ -13,6 +13,9 @@ import {
   AnalysisConcern,
   AnalysisObservations,
   AnalysisStatusValue,
+  SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
+  SKIN_JOURNAL_PHOTO_ANGLES,
+  type Angle,
 } from '../../skin-journal/skin-journal.constants';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import {
@@ -37,6 +40,7 @@ const PROGRESS_REPLACEABLE_CATEGORIES = new Set<ProductCategory>([
   ProductCategory.SunProtection,
   ProductCategory.Moisturizer,
 ]);
+const PHOTO_ANGLE_SET: ReadonlySet<Angle> = new Set(SKIN_JOURNAL_PHOTO_ANGLES);
 
 export interface SmartPicksProductPerformanceParams {
   userId: string;
@@ -214,6 +218,8 @@ export function summarizeSmartPicksProductPerformance(
       goalTrend,
       concernTrend: trend.concernTrend,
       photoCheckpoints: trend.photoCheckpoints,
+      photoInputImages: trend.photoInputImages,
+      multiAnglePhotoCheckpoints: trend.multiAnglePhotoCheckpoints,
       reactionSignalCount,
       replacementCandidate,
       replacementReason,
@@ -262,6 +268,8 @@ function summarizePhotoTrend(
   signal: SmartPicksProductPerformanceSignal;
   concernTrend: string | null;
   photoCheckpoints: number;
+  photoInputImages: number;
+  multiAnglePhotoCheckpoints: number;
 } {
   const analyzedEntries = entries
     .filter((entry) => isTrendUsable(entry.analysis_observations))
@@ -269,12 +277,21 @@ function summarizePhotoTrend(
   const concernSet = concernsForGoal(primaryGoal);
   const concernTrend = firstConcernName(analyzedEntries, concernSet);
   const photoCheckpoints = countPhotoCheckpoints(analyzedEntries);
+  const photoInputImages = analyzedEntries.reduce(
+    (sum, entry) => sum + currentPhotoAngleCount(entry),
+    0,
+  );
+  const multiAnglePhotoCheckpoints = analyzedEntries.filter(
+    (entry) => currentPhotoAngleCount(entry) > 1,
+  ).length;
 
   if (analyzedEntries.length < 2 || photoCheckpoints === 0) {
     return {
       signal: SmartPicksProductPerformanceSignal.InsufficientHistory,
       concernTrend,
       photoCheckpoints,
+      photoInputImages,
+      multiAnglePhotoCheckpoints,
     };
   }
 
@@ -293,6 +310,8 @@ function summarizePhotoTrend(
       signal: SmartPicksProductPerformanceSignal.InsufficientHistory,
       concernTrend,
       photoCheckpoints,
+      photoInputImages,
+      multiAnglePhotoCheckpoints,
     };
   }
 
@@ -305,6 +324,8 @@ function summarizePhotoTrend(
       signal: SmartPicksProductPerformanceSignal.Working,
       concernTrend,
       photoCheckpoints,
+      photoInputImages,
+      multiAnglePhotoCheckpoints,
     };
   }
   if (latestChangeSignal === 'worsened') {
@@ -312,6 +333,8 @@ function summarizePhotoTrend(
       signal: SmartPicksProductPerformanceSignal.NotImproving,
       concernTrend,
       photoCheckpoints,
+      photoInputImages,
+      multiAnglePhotoCheckpoints,
     };
   }
 
@@ -322,6 +345,8 @@ function summarizePhotoTrend(
       signal: SmartPicksProductPerformanceSignal.InsufficientHistory,
       concernTrend,
       photoCheckpoints,
+      photoInputImages,
+      multiAnglePhotoCheckpoints,
     };
   }
 
@@ -329,7 +354,13 @@ function summarizePhotoTrend(
     recentScore <= baselineScore * PROGRESS_IMPROVEMENT_RATIO
       ? SmartPicksProductPerformanceSignal.Working
       : SmartPicksProductPerformanceSignal.NotImproving;
-  return { signal, concernTrend, photoCheckpoints };
+  return {
+    signal,
+    concernTrend,
+    photoCheckpoints,
+    photoInputImages,
+    multiAnglePhotoCheckpoints,
+  };
 }
 
 function isTrendUsable(obs: AnalysisObservations | null): boolean {
@@ -451,6 +482,30 @@ function countPhotoCheckpoints(entries: SkinJournalEntry[]): number {
       return daysAgo >= from && daysAgo <= to;
     }),
   ).length;
+}
+
+function currentPhotoAngleCount(entry: SkinJournalEntry): number {
+  return currentPhotoAngles(entry).length;
+}
+
+function currentPhotoAngles(entry: SkinJournalEntry): Angle[] {
+  const perAngleQuality = entry.analysis_observations?.per_angle_quality;
+  if (Array.isArray(perAngleQuality) && perAngleQuality.length > 0) {
+    const seen = new Set<Angle>();
+    for (const quality of perAngleQuality) {
+      const angle = quality.angle;
+      if (PHOTO_ANGLE_SET.has(angle) && !seen.has(angle)) {
+        seen.add(angle);
+      }
+    }
+    if (seen.size > 0) {
+      return Array.from(seen);
+    }
+  }
+  if (entry.photo_object_key || entry.analysis_observations) {
+    return [SKIN_JOURNAL_FRONT_PHOTO_ANGLE];
+  }
+  return [];
 }
 
 function countReactionSignalsNearUse(

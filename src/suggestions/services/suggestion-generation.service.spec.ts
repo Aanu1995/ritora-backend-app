@@ -787,6 +787,8 @@ function contextSummary(): SuggestionContextSummary {
       concernKeys: [],
       daysSinceLatestSignal: null,
       barrierCompromised: false,
+      photoInputImages: 0,
+      multiAnglePhotoEntries: 0,
     },
     routineBreak: {
       recentlyResumed: false,
