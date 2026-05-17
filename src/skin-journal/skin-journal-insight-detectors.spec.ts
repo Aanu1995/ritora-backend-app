@@ -4,6 +4,7 @@ import {
   buildDeterministicInsights,
   isModerateOrSevereReaction,
   strongestWorsening,
+  type RoutineApplicationEvidence,
 } from './skin-journal-insight-detectors';
 
 function observations(
@@ -71,6 +72,36 @@ function entry(
     recent_change: null,
     ...overrides,
   } as SkinJournalEntry;
+}
+
+function routineApplication(
+  targetDate: string,
+  overrides: Partial<RoutineApplicationEvidence> = {},
+): RoutineApplicationEvidence {
+  return {
+    id: `application-${targetDate}`,
+    suggestion_instance_id: `suggestion-${targetDate}`,
+    slot_id: null,
+    target_date: targetDate,
+    target_time: '08:00',
+    daypart: 'morning',
+    updated_at: `${targetDate}T09:00:00.000Z`,
+    has_been_edited: false,
+    items: [
+      {
+        step_order: 0,
+        suggestion_step_id: null,
+        status: 'applied',
+        step_label: 'moisturizer',
+        inventory_product_id: 'moisturizer-1',
+        substituted_with_product_id: null,
+        applied_at: `${targetDate}T07:30:00.000Z`,
+        item_source: 'recommended',
+        is_ad_hoc: false,
+      },
+    ],
+    ...overrides,
+  };
 }
 
 describe('skin journal insight detectors', () => {
@@ -153,6 +184,58 @@ describe('skin journal insight detectors', () => {
     expect(trend?.headline.values).toMatchObject({ concern: 'breakouts' });
   });
 
+  it('builds trend insights from repeated photo analysis concern severity', () => {
+    const severities: ReadonlyArray<'mild' | 'moderate' | 'severe' | null> = [
+      'severe',
+      'severe',
+      'moderate',
+      'moderate',
+      'mild',
+      'mild',
+      null,
+      null,
+    ];
+    const entries = severities.map((severity, index) =>
+      entry(
+        `entry-${index + 1}`,
+        `2026-04-${String(index + 1).padStart(2, '0')}`,
+        {
+          analysis_observations: observationsWith({
+            detected_concerns: severity
+              ? [
+                  {
+                    concern: 'hyperpigmentation',
+                    severity,
+                    locations: ['cheek'],
+                    confidence: 0.82,
+                  },
+                ]
+              : [],
+          }),
+        },
+      ),
+    );
+
+    const trend = buildDeterministicInsights(entries.reverse(), {
+      aiSummaryEnabled: false,
+      aiPatternEnabled: false,
+    }).find((candidate) => candidate.kind === 'trend');
+
+    expect(trend).toMatchObject({
+      kind: 'trend',
+      severity: 'info',
+      headline: {
+        values: expect.objectContaining({
+          concern: 'hyperpigmentation',
+          direction: 'improved',
+        }),
+      },
+      metadata: expect.objectContaining({ source: 'deterministic' }),
+    });
+    expect(trend?.referenced_kb_ids).toContain('derm_skin_of_color_acne');
+    expect(trend?.blocks.map((block) => block.type)).toContain('sparkline');
+  });
+
   it('can disable AI sourced summary and pattern candidates', () => {
     const entries = Array.from({ length: 14 }, (_, index) =>
       entry(
@@ -229,6 +312,38 @@ describe('skin journal insight detectors', () => {
 
     const kinds = buildDeterministicInsights(entries.reverse(), {
       generatedAt: new Date('2026-05-04T10:00:00.000Z'),
+      routineApplications: [
+        routineApplication('2026-04-08', {
+          items: [
+            {
+              step_order: 0,
+              suggestion_step_id: null,
+              status: 'applied',
+              step_label: 'serum',
+              inventory_product_id: 'product-1',
+              substituted_with_product_id: null,
+              applied_at: '2026-04-08T08:00:00.000Z',
+              item_source: 'recommended',
+              is_ad_hoc: false,
+            },
+          ],
+        }),
+        routineApplication('2026-04-10', {
+          items: [
+            {
+              step_order: 0,
+              suggestion_step_id: null,
+              status: 'applied',
+              step_label: 'serum',
+              inventory_product_id: 'product-1',
+              substituted_with_product_id: null,
+              applied_at: '2026-04-10T08:00:00.000Z',
+              item_source: 'recommended',
+              is_ad_hoc: false,
+            },
+          ],
+        }),
+      ],
     }).map((candidate) => candidate.kind);
 
     expect(kinds).toEqual(
@@ -303,6 +418,166 @@ describe('skin journal insight detectors', () => {
     expect(kinds).not.toContain('correlation');
     expect(kinds).not.toContain('cycle');
     expect(kinds).not.toContain('effectiveness');
+  });
+
+  it('builds a routine adherence insight from repeated recorded sunscreen skips', () => {
+    const entries = Array.from({ length: 10 }, (_, index) => {
+      const day = index + 1;
+      return entry(`entry-${day}`, `2026-04-${String(day).padStart(2, '0')}`, {
+        ratings: { breakouts: 2, redness: 2 },
+        sun_exposure_today: day <= 4 ? 'lots' : 'brief',
+      });
+    });
+    const routineApplications = entries.map((item, index) => {
+      const skippedSunProtection = index < 4;
+      return routineApplication(item.entry_date, {
+        items: [
+          {
+            step_order: 0,
+            suggestion_step_id: null,
+            status: skippedSunProtection ? 'skipped' : 'applied',
+            step_label: 'sun-protection',
+            inventory_product_id: 'spf-1',
+            substituted_with_product_id: null,
+            applied_at: skippedSunProtection
+              ? null
+              : `${item.entry_date}T07:30:00.000Z`,
+            item_source: 'recommended',
+            is_ad_hoc: false,
+          },
+        ],
+      });
+    });
+
+    const routineInsight = buildDeterministicInsights(entries.reverse(), {
+      routineApplications,
+      aiSummaryEnabled: false,
+      aiPatternEnabled: false,
+    }).find((candidate) => candidate.kind === 'routine_adherence');
+
+    expect(routineInsight).toMatchObject({
+      severity: 'warning',
+      confidence: expect.any(Number),
+      headline: {
+        key: 'journal.insightsTab.headlines.routine_adherence',
+        values: {
+          category: 'sun-protection',
+          skippedCount: 4,
+        },
+      },
+      metadata: expect.objectContaining({ source: 'deterministic' }),
+    });
+    expect(routineInsight?.blocks.map((block) => block.type)).toEqual(
+      expect.arrayContaining(['evidence_grade', 'factor_table', 'disclaimer']),
+    );
+    expect(routineInsight?.source_entry_ids).toEqual([
+      'entry-1',
+      'entry-2',
+      'entry-3',
+      'entry-4',
+    ]);
+  });
+
+  it('does not build routine adherence from skipped ad-hoc application items', () => {
+    const entries = Array.from({ length: 10 }, (_, index) => {
+      const day = index + 1;
+      return entry(`entry-${day}`, `2026-04-${String(day).padStart(2, '0')}`, {
+        ratings: { breakouts: 2, redness: 2 },
+      });
+    });
+    const routineApplications = entries.map((item, index) =>
+      routineApplication(item.entry_date, {
+        items: [
+          {
+            step_order: 0,
+            suggestion_step_id: null,
+            status: index < 4 ? 'skipped' : 'applied',
+            step_label: 'sun-protection',
+            inventory_product_id: 'spf-1',
+            substituted_with_product_id: null,
+            applied_at: index < 4 ? null : `${item.entry_date}T07:30:00.000Z`,
+            item_source: 'added_shelf',
+            is_ad_hoc: true,
+          },
+        ],
+      }),
+    );
+
+    const kinds = buildDeterministicInsights(entries.reverse(), {
+      routineApplications,
+      aiSummaryEnabled: false,
+      aiPatternEnabled: false,
+    }).map((candidate) => candidate.kind);
+
+    expect(kinds).not.toContain('routine_adherence');
+  });
+
+  it('requires recorded application evidence before emitting product-specific effectiveness', () => {
+    const entries = Array.from({ length: 10 }, (_, index) => {
+      const day = index + 1;
+      return entry(`entry-${day}`, `2026-04-${String(day).padStart(2, '0')}`, {
+        ratings: { redness: day < 6 ? 5 : 2 },
+        recent_change:
+          day === 6
+            ? {
+                kind: 'started_new_product' as const,
+                related_inventory_product_id: 'product-1',
+              }
+            : null,
+      });
+    });
+
+    const withoutUsage = buildDeterministicInsights(entries.reverse(), {
+      routineApplications: [],
+    });
+    const withUsage = buildDeterministicInsights(entries.reverse(), {
+      routineApplications: [
+        routineApplication('2026-04-06', {
+          items: [
+            {
+              step_order: 0,
+              suggestion_step_id: null,
+              status: 'applied',
+              step_label: 'serum',
+              inventory_product_id: 'product-1',
+              substituted_with_product_id: null,
+              applied_at: '2026-04-06T08:00:00.000Z',
+              item_source: 'recommended',
+              is_ad_hoc: false,
+            },
+          ],
+        }),
+        routineApplication('2026-04-08', {
+          items: [
+            {
+              step_order: 0,
+              suggestion_step_id: null,
+              status: 'applied',
+              step_label: 'serum',
+              inventory_product_id: 'product-1',
+              substituted_with_product_id: null,
+              applied_at: '2026-04-08T08:00:00.000Z',
+              item_source: 'recommended',
+              is_ad_hoc: false,
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(withoutUsage.map((candidate) => candidate.kind)).not.toContain(
+      'effectiveness',
+    );
+    expect(withUsage.map((candidate) => candidate.kind)).toContain(
+      'effectiveness',
+    );
+    expect(
+      withUsage.find((candidate) => candidate.kind === 'effectiveness')
+        ?.metadata.facts_hash,
+    ).not.toEqual(
+      withoutUsage.find((candidate) => candidate.kind === 'effectiveness')
+        ?.metadata.facts_hash,
+    );
   });
 
   it('finds the strongest worsening rating change', () => {

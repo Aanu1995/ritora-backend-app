@@ -26,6 +26,22 @@ export const AnalysisStatusValue = {
 export type AnalysisStatus =
   (typeof AnalysisStatusValue)[keyof typeof AnalysisStatusValue];
 
+export const AnalysisFailureCodeValue = {
+  ProviderUnavailable: 'provider_unavailable',
+  ProviderRateLimited: 'provider_rate_limited',
+  ProviderTimeout: 'provider_timeout',
+  ProviderInvalidResponse: 'provider_invalid_response',
+  PhotoPreflightRejected: 'photo_preflight_rejected',
+  PayloadTooLarge: 'payload_too_large',
+  CostLimitExceeded: 'cost_limit_exceeded',
+  ConfigurationError: 'configuration_error',
+  InvalidPhotoInput: 'invalid_photo_input',
+  Unknown: 'unknown',
+} as const;
+
+export type AnalysisFailureCode =
+  (typeof AnalysisFailureCodeValue)[keyof typeof AnalysisFailureCodeValue];
+
 export type OverallFeel = 'awful' | 'bad' | 'ok' | 'good' | 'great';
 
 export type SleepBand = 'lt5h' | '5to7h' | '7to9h' | 'gt9h' | 'skipped';
@@ -71,6 +87,7 @@ export type InsightKind =
   | 'referral'
   | 'photo_quality_drift'
   | 'face_zone_pattern'
+  | 'routine_adherence'
   | 'cycle'
   | 'ai_summary'
   | 'ai_pattern';
@@ -90,6 +107,19 @@ export const InsightGenerationStatusValue = {
 
 export type InsightGenerationStatus =
   (typeof InsightGenerationStatusValue)[keyof typeof InsightGenerationStatusValue];
+
+export const InsightInteractionTypeValue = {
+  Seen: 'seen',
+  Dismissed: 'dismissed',
+  ActionClicked: 'action_clicked',
+} as const;
+
+export type InsightInteractionType =
+  (typeof InsightInteractionTypeValue)[keyof typeof InsightInteractionTypeValue];
+
+export const INSIGHT_INTERACTION_TYPES = Object.values(
+  InsightInteractionTypeValue,
+);
 
 export type InsightWindow = 'all' | 'week' | 'month';
 
@@ -268,6 +298,14 @@ export const SKIN_JOURNAL_PHOTO_WEBP_QUALITY = 85;
 export const SKIN_JOURNAL_MEDIA_SIGNED_URL_TTL_SECONDS = 300;
 export const SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
 export const SKIN_JOURNAL_ANALYSIS_TIMEOUT_MS = 45000;
+export const SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS = 1600;
+export const SKIN_JOURNAL_ANALYSIS_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+export const SKIN_JOURNAL_ANALYSIS_MAX_TOTAL_IMAGE_BYTES = 5 * 1024 * 1024;
+export const SKIN_JOURNAL_ANALYSIS_MIN_IMAGE_DIMENSION = 180;
+export const SKIN_JOURNAL_ANALYSIS_MAX_ASPECT_RATIO = 2.4;
+export const SKIN_JOURNAL_ANALYSIS_MIN_LUMA_STANDARD_DEVIATION = 2.5;
+export const SKIN_JOURNAL_ANALYSIS_ASSUMED_INPUT_IMAGE_COST_USD = 0.01;
+export const SKIN_JOURNAL_ANALYSIS_MAX_REQUEST_COST_USD = 0.08;
 export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT = 4;
 export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER = 2;
 export const SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD = 1;
@@ -289,6 +327,8 @@ export const SKIN_JOURNAL_ANALYSIS_CAPACITY_RETRY_DELAY_MS = 5000;
 export const SKIN_JOURNAL_ANALYSIS_ASSUMED_RUN_COST_USD = 0.01;
 export const SKIN_JOURNAL_ANALYSIS_QUEUE_AGE_ALERT_SECONDS = 900;
 export const SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD = 0.2;
+export const SKIN_JOURNAL_LOCAL_FACE_REJECTION_RATE_ML_REVIEW_THRESHOLD = 0.02;
+export const SKIN_JOURNAL_AI_NO_FACE_RATE_ML_REVIEW_THRESHOLD = 0.02;
 export const SKIN_JOURNAL_REMINDER_DEFAULT_TIME = '08:00';
 export const SKIN_JOURNAL_WRAPPED_MIN_PHOTOS = 3;
 export const SKIN_JOURNAL_WRAPPED_ENABLED = false;

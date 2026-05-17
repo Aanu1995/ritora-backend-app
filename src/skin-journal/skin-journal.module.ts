@@ -4,6 +4,7 @@ import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
+import { SkinJournalInsightInteraction } from './entities/skin-journal-insight-interaction.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
 import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
 import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
@@ -13,7 +14,9 @@ import { SkinJournalMediaDeletionJob } from './entities/skin-journal-media-delet
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
+import { User } from '../users/entities/user.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
 import { UsersModule } from '../users/users.module';
@@ -39,6 +42,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       SkinJournalEntryPhoto,
       SkinJournalEvent,
       SkinJournalInsight,
+      SkinJournalInsightInteraction,
       SkinJournalInsightGenerationRun,
       SkinJournalInsightJob,
       SkinJournalInsightState,
@@ -48,7 +52,9 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       RoutineSimplificationEvent,
       SkinJournalExportJob,
       UserConsent,
+      User,
       SkinProfile,
+      ApplicationLog,
     ]),
   ],
   controllers: [SkinJournalController],

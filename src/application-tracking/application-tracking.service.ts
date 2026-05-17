@@ -32,6 +32,7 @@ import {
 import { ApplicationReactiveRegenerationService } from './application-reactive-regeneration.service';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
+import { SkinJournalService } from '../skin-journal/skin-journal.service';
 
 @Injectable()
 export class ApplicationTrackingService {
@@ -46,6 +47,8 @@ export class ApplicationTrackingService {
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
     @Optional()
     private readonly smartPicksPreparation?: SmartPicksPreparationService,
+    @Optional()
+    private readonly skinJournal?: SkinJournalService,
   ) {}
 
   async record(
@@ -88,6 +91,7 @@ export class ApplicationTrackingService {
       itemDrafts,
     );
     await this.reactiveRegeneration.queueAfterApplicationChange(user, response);
+    await this.markInsightInputsDirty(user.id);
     this.scheduleSmartPicksPreparation(user.id);
     return response;
   }
@@ -194,12 +198,17 @@ export class ApplicationTrackingService {
       );
     });
     await this.reactiveRegeneration.queueAfterApplicationChange(user, response);
+    await this.markInsightInputsDirty(user.id);
     this.scheduleSmartPicksPreparation(user.id);
     return response;
   }
 
   private scheduleSmartPicksPreparation(userId: string): void {
     this.smartPicksPreparation?.scheduleForUser(userId);
+  }
+
+  private async markInsightInputsDirty(userId: string): Promise<void> {
+    await this.skinJournal?.markProductOrRoutineInsightsDirty(userId);
   }
 
   async getOne(user: User, logId: string): Promise<ApplicationLogResponseDto> {

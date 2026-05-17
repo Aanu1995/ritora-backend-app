@@ -442,6 +442,10 @@ export class MailService {
       firstName: safeFirstName,
       ...stringPayload,
     };
+    const daypartSlot = resolveDaypartSlot(payload, language);
+    if (daypartSlot) {
+      translateValues.slot = daypartSlot;
+    }
 
     const subject = translate(
       language,
@@ -1116,6 +1120,27 @@ function safeHtmlText(value: string | null | undefined, fallback = ''): string {
     normalizeTemplateText(value, EMAIL_NAME_MAX_LENGTH) ||
       normalizeTemplateText(fallback, EMAIL_NAME_MAX_LENGTH),
   );
+}
+
+const DAYPART_SLOT_TRANSLATION_KEYS: ReadonlyMap<string, string> = new Map([
+  ['morning', 'mail.daypart.morning'],
+  ['noon', 'mail.daypart.noon'],
+  ['evening', 'mail.daypart.evening'],
+] as const);
+
+function resolveDaypartSlot(
+  payload: Record<string, unknown>,
+  language: AppLanguage,
+): string | null {
+  const daypart = payload.daypart;
+  const translationKey =
+    typeof daypart === 'string'
+      ? DAYPART_SLOT_TRANSLATION_KEYS.get(daypart)
+      : undefined;
+  if (!translationKey) {
+    return null;
+  }
+  return translate(language, translationKey);
 }
 
 function extractStringValues(

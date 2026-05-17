@@ -145,6 +145,9 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Sent from Ritora for account safety. Questions? Write to support@getritora.com.',
     'mail.notification.shared.manageLabel': 'Manage notification preferences',
     'mail.notification.shared.supportLine': 'Need help? Reach us at',
+    'mail.daypart.morning': 'morning',
+    'mail.daypart.noon': 'midday',
+    'mail.daypart.evening': 'evening',
     'mail.subject.photo_reminder': "Add today's skin photo",
     'mail.notification.photo_reminder.previewText':
       'A quick photo today keeps your progress honest.',
@@ -496,6 +499,9 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till support@getritora.com.',
     'mail.notification.shared.manageLabel': 'Hantera aviseringar',
     'mail.notification.shared.supportLine': 'Behöver du hjälp? Skriv till',
+    'mail.daypart.morning': 'morgon',
+    'mail.daypart.noon': 'middag',
+    'mail.daypart.evening': 'kväll',
     'mail.subject.photo_reminder': 'Lägg till dagens hudbild',
     'mail.notification.photo_reminder.previewText':
       'En kort bild idag håller din utveckling ärlig.',

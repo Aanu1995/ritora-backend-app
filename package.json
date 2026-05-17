@@ -37,6 +37,8 @@
     "smart-picks:seed-review:dev": "ts-node -r tsconfig-paths/register src/scripts/seed-smart-picks-review.ts",
     "smart-picks:monitoring-report:dev": "ts-node -r tsconfig-paths/register src/scripts/report-smart-picks-monitoring.ts",
     "skin-journal:analysis-evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-skin-journal-analysis.ts",
+    "skin-journal:insight-evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-skin-journal-insights.ts",
+    "skin-journal:insight-launch-gate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-skin-journal-insights.ts --require-broad-launch-clinical-review",
     "skin-journal:analysis-worker": "npm run build && node dist/scripts/start-skin-journal-analysis-worker.js",
     "skin-journal:insight-worker": "npm run build && node dist/scripts/start-skin-journal-insight-worker.js",
     "smart-picks:generation-worker": "npm run build && node dist/scripts/start-smart-picks-generation-worker.js",
@@ -45,7 +47,9 @@
     "suggestions:evaluate": "npm run build && node dist/scripts/evaluate-todays-suggestion.js",
     "smart-picks:seed-review": "npm run build && node dist/scripts/seed-smart-picks-review.js",
     "smart-picks:monitoring-report": "npm run build && node dist/scripts/report-smart-picks-monitoring.js",
-    "skin-journal:analysis-evaluate": "npm run build && node dist/scripts/evaluate-skin-journal-analysis.js"
+    "skin-journal:analysis-evaluate": "npm run build && node dist/scripts/evaluate-skin-journal-analysis.js",
+    "skin-journal:insight-evaluate": "npm run build && node dist/scripts/evaluate-skin-journal-insights.js",
+    "skin-journal:insight-launch-gate": "npm run build && node dist/scripts/evaluate-skin-journal-insights.js --require-broad-launch-clinical-review"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1033.0",

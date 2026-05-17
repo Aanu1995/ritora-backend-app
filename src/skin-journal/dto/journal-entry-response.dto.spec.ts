@@ -49,6 +49,7 @@ function entry(): SkinJournalEntry {
     analysis_version: null,
     analysis_prompt_version: 'skin-journal-photo-vtest',
     analysis_error: null,
+    analysis_error_code: null,
     analysis_started_at: new Date('2026-04-29T09:00:00.000Z'),
     analysis_completed_at: null,
     analysis_duration_ms: 1234,
@@ -83,5 +84,6 @@ describe('JournalEntryResponseDto', () => {
     expect(dto.analysis_output_tokens).toBe(100);
     expect(dto.analysis_total_tokens).toBe(1100);
     expect(dto.analysis_estimated_cost_usd).toBe(0.0065);
+    expect(dto.analysis_error_code).toBeNull();
   });
 });

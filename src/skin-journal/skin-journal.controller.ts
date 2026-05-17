@@ -26,6 +26,7 @@ import { CalendarResponseDto } from './dto/calendar-response.dto';
 import { DayDetailResponseDto } from './dto/day-detail-response.dto';
 import { JournalEventResponseDto } from './dto/event-response.dto';
 import { JournalInsightsResponseDto } from './dto/insight-response.dto';
+import { RecordInsightActionDto } from './dto/insight-interaction.dto';
 import { JournalStatsResponseDto } from './dto/stats-response.dto';
 import { WrappedResponseDto } from './dto/wrapped-response.dto';
 import { PhotoDatesResponseDto } from './dto/photo-dates-response.dto';
@@ -299,6 +300,16 @@ export class SkinJournalController {
     return { ok: true };
   }
 
+  @Post('insights/:id/interactions')
+  async recordInsightAction(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() body: RecordInsightActionDto,
+  ) {
+    await this.service.recordInsightAction(userId, id, body);
+    return { ok: true };
+  }
+
   @Get('wrapped')
   @ApiOkResponse({ type: [WrappedResponseDto] })
   async listWrapped(@CurrentUser('id') userId: string) {
@@ -355,6 +366,14 @@ export class SkinJournalController {
     @Headers('x-ritora-ops-token') operationsToken?: string,
   ) {
     return this.service.getAnalysisQueueOperations(operationsToken);
+  }
+
+  @Public()
+  @Get('ops/insights')
+  async insightOperations(
+    @Headers('x-ritora-ops-token') operationsToken?: string,
+  ) {
+    return this.service.getInsightOperations(operationsToken);
   }
 
   @Post('export')

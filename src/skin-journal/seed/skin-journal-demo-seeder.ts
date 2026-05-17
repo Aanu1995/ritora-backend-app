@@ -284,6 +284,8 @@ export class SkinJournalDemoSeeder {
             entrySeed.analysisStatus === 'failed'
               ? 'Demo failed analysis state for retry UI.'
               : null,
+          analysis_error_code:
+            entrySeed.analysisStatus === 'failed' ? 'unknown' : null,
           analysis_started_at:
             entrySeed.analysisStatus === 'completed' ||
             entrySeed.analysisStatus === 'needs_review'

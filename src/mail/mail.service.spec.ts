@@ -354,6 +354,37 @@ describe('MailService', () => {
     expect(payload.html).toContain('The Ordinary');
   });
 
+  it('derives the localized slot label from a daypart payload value', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendNotificationEmail({
+      userId: 'user-1',
+      email: 'test@example.com',
+      language: 'sv',
+      kind: 'suggestion_ready',
+      firstName: 'Aanu',
+      payload: {
+        daypart: 'morning',
+        slotTime: '06:30',
+        stepCount: 4,
+        minutes: 6,
+        steps: [{ title: 'Rengöring', brand: 'CeraVe' }],
+      },
+      deepLink: '/today',
+    });
+
+    const payload = getSentEmailPayload(sendEmail);
+    expect(payload.subject).toBe('Din morgonrutin är klar');
+    expect(payload.html).toContain('morgon · 06:30');
+    expect(payload.html).toContain('4 steg, ungefär 6 minuter');
+    expect(payload.html).toContain('Rengöring');
+    expect(payload.html).not.toContain('{{');
+  });
+
   it('omits List-Unsubscribe headers for safety-critical reaction_detected', async () => {
     const service = new MailService(
       resendClient,

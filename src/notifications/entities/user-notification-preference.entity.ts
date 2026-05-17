@@ -11,7 +11,13 @@ import {
 import { ulid } from 'ulid';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../../skin-journal/skin-journal.constants';
 import { User } from '../../users/entities/user.entity';
-import { PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT } from '../notifications.constants';
+import {
+  INSIGHT_CADENCE_DEFAULT,
+  INSIGHT_DIGEST_DAY_DEFAULT,
+  INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
+  PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
+  type InsightCadence,
+} from '../notifications.constants';
 
 export type NotificationChannel = 'email' | 'in_app' | 'push';
 
@@ -43,6 +49,15 @@ export class UserNotificationPreference {
 
   @Column({ type: 'boolean', default: true })
   ai_polished_insights_enabled: boolean;
+
+  @Column({ type: 'varchar', length: 16, default: INSIGHT_CADENCE_DEFAULT })
+  insight_cadence: InsightCadence;
+
+  @Column({ type: 'integer', default: INSIGHT_DIGEST_DAY_DEFAULT })
+  insight_digest_day: number;
+
+  @Column({ type: 'time', default: INSIGHT_DIGEST_LOCAL_TIME_DEFAULT })
+  insight_digest_local_time: string;
 
   @Column({ type: 'boolean', default: true })
   wrapped_alerts_enabled: boolean;

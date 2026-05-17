@@ -39,6 +39,9 @@ import {
   NOTIFICATION_PAGE_DEFAULT_LIMIT,
   NOTIFICATION_PAGE_MAX_LIMIT,
   NOTIFICATION_RETENTION_SWEEP_INTERVAL_MS,
+  INSIGHT_CADENCE_DEFAULT,
+  INSIGHT_DIGEST_DAY_DEFAULT,
+  INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
   PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
 } from './notifications.constants';
 import {
@@ -447,6 +450,9 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         simplification_alerts_enabled: true,
         insight_alerts_enabled: true,
         ai_polished_insights_enabled: true,
+        insight_cadence: INSIGHT_CADENCE_DEFAULT,
+        insight_digest_day: INSIGHT_DIGEST_DAY_DEFAULT,
+        insight_digest_local_time: INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
         wrapped_alerts_enabled: true,
         suggestion_ready_enabled: true,
         smart_pick_ready_enabled: false,

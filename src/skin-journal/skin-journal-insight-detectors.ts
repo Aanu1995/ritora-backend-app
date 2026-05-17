@@ -1,6 +1,13 @@
 import { createHash } from 'crypto';
+import {
+  ApplicationItemSource,
+  ApplicationItemStatus,
+} from '../application-tracking/application-tracking.constants';
+import { ProductCategory } from '../shelf/shelf.types';
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import {
+  ANALYSIS_CONCERNS,
+  AnalysisConcern,
   AnalysisObservations,
   CONCERN_KEYS,
   ConcernKey,
@@ -38,6 +45,31 @@ interface BuildInsightsOptions {
   generatedAt?: Date;
   aiSummaryEnabled?: boolean;
   aiPatternEnabled?: boolean;
+  routineApplications?: RoutineApplicationEvidence[];
+}
+
+export interface RoutineApplicationEvidenceItem {
+  step_order: number;
+  suggestion_step_id: string | null;
+  status: ApplicationItemStatus;
+  step_label: string | null;
+  inventory_product_id: string | null;
+  substituted_with_product_id: string | null;
+  applied_at: string | null;
+  item_source: ApplicationItemSource;
+  is_ad_hoc: boolean;
+}
+
+export interface RoutineApplicationEvidence {
+  id: string;
+  suggestion_instance_id: string | null;
+  slot_id: string | null;
+  target_date: string;
+  target_time: string | null;
+  daypart: string | null;
+  updated_at: string | null;
+  has_been_edited: boolean;
+  items: RoutineApplicationEvidenceItem[];
 }
 
 interface CandidateInput {
@@ -59,6 +91,16 @@ interface CandidateInput {
     InsightValue | InsightValue[] | Record<string, unknown>
   >;
   source?: InsightCandidate['metadata']['source'];
+}
+
+interface TrendInsightFacts {
+  concern: ConcernKey | AnalysisConcern;
+  first_avg: number;
+  second_avg: number;
+  delta: number;
+  series: Array<{ x: string; y: number }>;
+  evidence_source: 'rating' | 'photo_analysis';
+  referenced_kb_ids: string[];
 }
 
 export function isModerateOrSevereReaction(
@@ -107,7 +149,10 @@ export function buildDeterministicInsights(
   if (entries.length >= 8) {
     const firstHalf = entries.slice(0, Math.floor(entries.length / 2));
     const secondHalf = entries.slice(Math.floor(entries.length / 2));
-    const trend = strongestConcernTrend(firstHalf, secondHalf);
+    const ratingTrend = strongestConcernTrend(firstHalf, secondHalf);
+    const trend = ratingTrend
+      ? ratingTrendInsightFacts(entries, ratingTrend)
+      : strongestAnalysisConcernTrend(firstHalf, secondHalf, entries);
     if (trend) {
       candidates.push(
         trendInsight(entries, trend, timeWindow, dataCutoffAt, trigger),
@@ -145,11 +190,21 @@ export function buildDeterministicInsights(
   const recovery = reactionRecoveryInsight(entries, dataCutoffAt, trigger);
   if (recovery) candidates.push(recovery);
 
+  const routineAdherence = routineAdherenceInsight(
+    entries,
+    options.routineApplications ?? [],
+    timeWindow,
+    dataCutoffAt,
+    trigger,
+  );
+  if (routineAdherence) candidates.push(routineAdherence);
+
   const referral = referralInsight(entries, dataCutoffAt, trigger);
   if (referral) candidates.push(referral);
 
   const effectiveness = effectivenessInsight(
     entries,
+    options.routineApplications ?? [],
     timeWindow,
     dataCutoffAt,
     trigger,
@@ -348,7 +403,7 @@ function weeklyInsight(
 
 function trendInsight(
   entries: SkinJournalEntry[],
-  trend: ConcernTrendFacts,
+  trend: TrendInsightFacts,
   timeWindow: { start: string; end: string },
   dataCutoffAt: string,
   trigger: InsightGenerationTrigger,
@@ -373,21 +428,27 @@ function trendInsight(
         concern: trend.concern,
         direction: improved ? 'improved' : 'increased',
       }),
-      sparklineBlock(ratingSeries(entries, trend.concern), trend.first_avg),
+      sparklineBlock(trend.series, trend.first_avg),
       metricDeltaBlock({
         value: trend.second_avg,
         previous: trend.first_avg,
         direction: 'down_is_good',
       }),
       entryThumbsBlock(entries.slice(-6).map((entry) => entry.id)),
-      sourceLinkBlock('derm_6_8_week_acne_window'),
+      ...trend.referenced_kb_ids.map((kbId) => sourceLinkBlock(kbId)),
     ],
     sourceEntryIds: entries.map((entry) => entry.id),
     timeWindow,
     dataCutoffAt,
     trigger,
-    referencedKbIds: ['derm_6_8_week_acne_window'],
-    facts: trend,
+    referencedKbIds: trend.referenced_kb_ids,
+    facts: {
+      concern: trend.concern,
+      first_avg: trend.first_avg,
+      second_avg: trend.second_avg,
+      delta: trend.delta,
+      evidence_source: trend.evidence_source,
+    },
   });
 }
 
@@ -547,6 +608,7 @@ function referralInsight(
 
 function effectivenessInsight(
   entries: SkinJournalEntry[],
+  routineApplications: RoutineApplicationEvidence[],
   timeWindow: { start: string; end: string },
   dataCutoffAt: string,
   trigger: InsightGenerationTrigger,
@@ -572,6 +634,16 @@ function effectivenessInsight(
   const improved = trend.delta < 0;
   const productId =
     productChange.recent_change?.related_inventory_product_id ?? null;
+  const applicationEvidence = productId
+    ? productApplicationEvidence(
+        routineApplications,
+        productId,
+        productChange.entry_date,
+      )
+    : null;
+  if (productId && (!applicationEvidence || applicationEvidence.applied < 2)) {
+    return null;
+  }
   return candidate({
     kind: 'effectiveness',
     severity: improved ? 'info' : 'warning',
@@ -612,6 +684,7 @@ function effectivenessInsight(
           ]
         : []),
       sourceLinkBlock('derm_6_8_week_acne_window'),
+      disclaimerBlock('journal.insightsTab.disclaimers.correlation', 'neutral'),
     ],
     sourceEntryIds: after.map((entry) => entry.id),
     timeWindow,
@@ -623,8 +696,162 @@ function effectivenessInsight(
       productId,
       changeKind: productChange.recent_change?.kind ?? 'product_change',
       changeEntryDate: productChange.entry_date,
+      routineAppliedCount: applicationEvidence?.applied ?? null,
+      routineLoggedCount: applicationEvidence?.logged ?? null,
     },
   });
+}
+
+function routineAdherenceInsight(
+  entries: SkinJournalEntry[],
+  routineApplications: RoutineApplicationEvidence[],
+  timeWindow: { start: string; end: string },
+  dataCutoffAt: string,
+  trigger: InsightGenerationTrigger,
+): InsightCandidate | null {
+  if (routineApplications.length < 5) {
+    return null;
+  }
+  const rows = skippedCategoryRows(routineApplications);
+  const sunProtectionCategory: string = ProductCategory.SunProtection;
+  const top =
+    rows.find((row) => row.category === sunProtectionCategory) ?? rows[0];
+  if (!top || top.skipped < 2 || top.skipRate < 0.3) {
+    return null;
+  }
+  const entryIds = entries
+    .filter((entry) => top.dates.includes(entry.entry_date))
+    .map((entry) => entry.id);
+  return candidate({
+    kind: 'routine_adherence',
+    severity: 'warning',
+    confidence: Math.min(0.78, 0.5 + top.skipRate / 2),
+    headlineKey: 'journal.insightsTab.headlines.routine_adherence',
+    headlineValues: {
+      category: top.category,
+      skippedCount: top.skipped,
+    },
+    blocks: [
+      evidenceGradeBlock('anecdotal', {
+        key: 'journal.insightsTab.evidenceGrade.basis.routine_adherence',
+        values: { loggedCount: top.logged },
+      }),
+      textBlock('journal.insightsTab.blocks.routine_adherence.text', {
+        category: top.category,
+        skippedCount: top.skipped,
+        loggedCount: top.logged,
+      }),
+      factorTableBlock(
+        [
+          {
+            factor: {
+              key: `journal.insightsTab.categories.${top.category}`,
+            },
+            effect: top.skipped,
+            n: top.logged,
+            tone: 'warning',
+          },
+        ],
+        'entries',
+      ),
+      disclaimerBlock('journal.insightsTab.disclaimers.correlation', 'neutral'),
+    ],
+    sourceEntryIds: entryIds,
+    timeWindow,
+    dataCutoffAt,
+    trigger,
+    facts: {
+      category: top.category,
+      skippedCount: top.skipped,
+      loggedCount: top.logged,
+      skipRate: Number(top.skipRate.toFixed(2)),
+    },
+  });
+}
+
+function skippedCategoryRows(
+  routineApplications: RoutineApplicationEvidence[],
+): Array<{
+  category: string;
+  skipped: number;
+  logged: number;
+  skipRate: number;
+  dates: string[];
+}> {
+  const byCategory = new Map<
+    string,
+    { skipped: number; logged: number; dates: Set<string> }
+  >();
+  for (const application of routineApplications) {
+    for (const item of application.items) {
+      if (
+        item.is_ad_hoc ||
+        item.item_source !== ApplicationItemSource.Recommended
+      ) {
+        continue;
+      }
+      const category = item.step_label;
+      if (!category) {
+        continue;
+      }
+      const row = byCategory.get(category) ?? {
+        skipped: 0,
+        logged: 0,
+        dates: new Set<string>(),
+      };
+      row.logged += 1;
+      if (item.status === ApplicationItemStatus.Skipped) {
+        row.skipped += 1;
+        row.dates.add(application.target_date);
+      }
+      byCategory.set(category, row);
+    }
+  }
+
+  return [...byCategory.entries()]
+    .map(([category, row]) => ({
+      category,
+      skipped: row.skipped,
+      logged: row.logged,
+      skipRate: row.logged > 0 ? row.skipped / row.logged : 0,
+      dates: [...row.dates].sort(),
+    }))
+    .sort((left, right) => {
+      if (right.skipped !== left.skipped) {
+        return right.skipped - left.skipped;
+      }
+      return right.skipRate - left.skipRate;
+    });
+}
+
+function productApplicationEvidence(
+  routineApplications: RoutineApplicationEvidence[],
+  productId: string,
+  startDate: string,
+): { applied: number; logged: number } | null {
+  let applied = 0;
+  let logged = 0;
+  for (const application of routineApplications) {
+    if (application.target_date < startDate) {
+      continue;
+    }
+    for (const item of application.items) {
+      const matchedProduct =
+        item.inventory_product_id === productId ||
+        item.substituted_with_product_id === productId;
+      if (!matchedProduct) {
+        continue;
+      }
+      logged += 1;
+      if (
+        item.status === ApplicationItemStatus.Applied ||
+        item.status === ApplicationItemStatus.Substituted
+      ) {
+        applied += 1;
+      }
+    }
+  }
+  return logged > 0 ? { applied, logged } : null;
 }
 
 function faceZoneInsight(
@@ -962,6 +1189,53 @@ function strongestConcernTrend(
   return strongest && Math.abs(strongest.delta) >= 0.5 ? strongest : null;
 }
 
+function ratingTrendInsightFacts(
+  entries: SkinJournalEntry[],
+  trend: ConcernTrendFacts,
+): TrendInsightFacts {
+  return {
+    ...trend,
+    series: ratingSeries(entries, trend.concern),
+    evidence_source: 'rating',
+    referenced_kb_ids: ['derm_6_8_week_acne_window'],
+  };
+}
+
+function strongestAnalysisConcernTrend(
+  firstWindow: SkinJournalEntry[],
+  secondWindow: SkinJournalEntry[],
+  entries: SkinJournalEntry[],
+): TrendInsightFacts | null {
+  let strongest: TrendInsightFacts | null = null;
+  for (const concern of ANALYSIS_CONCERNS) {
+    const firstAvg = averageAnalysisConcernSeverity(firstWindow, concern);
+    const secondAvg = averageAnalysisConcernSeverity(secondWindow, concern);
+    if (firstAvg === null || secondAvg === null) {
+      continue;
+    }
+    const delta = Number((secondAvg - firstAvg).toFixed(2));
+    if (Math.abs(delta) < 0.5) {
+      continue;
+    }
+    const candidateTrend: TrendInsightFacts = {
+      concern,
+      first_avg: firstAvg,
+      second_avg: secondAvg,
+      delta,
+      series: analysisConcernSeveritySeries(entries, concern),
+      evidence_source: 'photo_analysis',
+      referenced_kb_ids: analysisConcernKnowledgeBaseIds(concern),
+    };
+    if (
+      !strongest ||
+      Math.abs(candidateTrend.delta) > Math.abs(strongest.delta)
+    ) {
+      strongest = candidateTrend;
+    }
+  }
+  return strongest;
+}
+
 function averageRating(
   entries: SkinJournalEntry[],
   concern: ConcernKey,
@@ -980,6 +1254,18 @@ function averageRating(
   return Number(average.toFixed(2));
 }
 
+function averageAnalysisConcernSeverity(
+  entries: SkinJournalEntry[],
+  concern: AnalysisConcern,
+): number | null {
+  const series = analysisConcernSeveritySeries(entries, concern);
+  if (series.length < Math.max(2, Math.ceil(entries.length / 2))) {
+    return null;
+  }
+  const total = series.reduce((sum, point) => sum + point.y, 0);
+  return Number((total / series.length).toFixed(2));
+}
+
 function ratingSeries(
   entries: SkinJournalEntry[],
   concern: ConcernKey,
@@ -992,6 +1278,64 @@ function ratingSeries(
     }
   }
   return series;
+}
+
+function analysisConcernSeveritySeries(
+  entries: SkinJournalEntry[],
+  concern: AnalysisConcern,
+): Array<{ x: string; y: number }> {
+  return entries.flatMap((entry) => {
+    if (!isTrendEligibleObservation(entry.analysis_observations)) {
+      return [];
+    }
+    return [
+      {
+        x: entry.entry_date,
+        y: maxAnalysisConcernSeverity(entry.analysis_observations, concern),
+      },
+    ];
+  });
+}
+
+function isTrendEligibleObservation(
+  observations: AnalysisObservations | null,
+): observations is AnalysisObservations {
+  return (
+    observations?.image_quality.face_detected === true &&
+    observations.image_quality.lighting_quality !== 'poor' &&
+    observations.image_quality.framing_quality !== 'poor' &&
+    observations.image_quality.blur_detected !== true
+  );
+}
+
+function maxAnalysisConcernSeverity(
+  observations: AnalysisObservations,
+  concern: AnalysisConcern,
+): number {
+  const scores = observations.detected_concerns
+    .filter((item) => item.concern === concern && item.confidence >= 0.55)
+    .map((item) => analysisConcernSeverityScore(item.severity));
+  return scores.length > 0 ? Math.max(...scores) : 0;
+}
+
+function analysisConcernSeverityScore(severity: string): number {
+  if (severity === 'severe') return 3;
+  if (severity === 'moderate') return 2;
+  if (severity === 'mild') return 1;
+  return 0;
+}
+
+function analysisConcernKnowledgeBaseIds(concern: AnalysisConcern): string[] {
+  if (concern === 'hyperpigmentation' || concern === 'uneven_tone') {
+    return ['derm_skin_of_color_acne'];
+  }
+  if (concern === 'acne') {
+    return ['derm_6_8_week_acne_window'];
+  }
+  if (concern === 'skin_barrier_damage' || concern === 'dryness') {
+    return ['derm_dry_skin_relief'];
+  }
+  return [];
 }
 
 function candidate(input: CandidateInput): InsightCandidate {

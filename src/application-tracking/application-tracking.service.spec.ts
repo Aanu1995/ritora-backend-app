@@ -11,6 +11,7 @@ import { ApplicationLogVersion } from './entities/application-log-version.entity
 import { ApplicationLog } from './entities/application-log.entity';
 import { ApplicationTrackingService } from './application-tracking.service';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
+import { SkinJournalService } from '../skin-journal/skin-journal.service';
 
 describe('ApplicationTrackingService', () => {
   const logRepo = repo<ApplicationLog>();
@@ -30,6 +31,9 @@ describe('ApplicationTrackingService', () => {
   const smartPicksPreparation = {
     scheduleForUser: jest.fn(),
   } as unknown as jest.Mocked<SmartPicksPreparationService>;
+  const skinJournal = {
+    markProductOrRoutineInsightsDirty: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<SkinJournalService>;
 
   let txLogRepo: jest.Mocked<Repository<ApplicationLog>>;
   let txItemRepo: jest.Mocked<Repository<ApplicationLogItem>>;
@@ -51,6 +55,7 @@ describe('ApplicationTrackingService', () => {
       reactiveRegeneration,
       cataloguePhotoStorageService,
       smartPicksPreparation,
+      skinJournal,
     );
   });
 
@@ -112,6 +117,9 @@ describe('ApplicationTrackingService', () => {
     expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
       'user-1',
     );
+    expect(skinJournal.markProductOrRoutineInsightsDirty).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('rejects duplicate records for the same suggestion', async () => {
@@ -128,6 +136,9 @@ describe('ApplicationTrackingService', () => {
 
     expect(dataSource.transaction).not.toHaveBeenCalled();
     expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
+    expect(
+      skinJournal.markProductOrRoutineInsightsDirty,
+    ).not.toHaveBeenCalled();
   });
 
   it('edits a record, replaces items, increments edit metadata, and versions the change', async () => {
@@ -180,6 +191,9 @@ describe('ApplicationTrackingService', () => {
     );
     expect(reactiveRegeneration.queueAfterApplicationChange).toHaveBeenCalled();
     expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
+    expect(skinJournal.markProductOrRoutineInsightsDirty).toHaveBeenCalledWith(
       'user-1',
     );
   });

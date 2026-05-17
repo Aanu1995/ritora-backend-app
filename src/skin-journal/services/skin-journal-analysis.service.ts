@@ -25,12 +25,26 @@ import type {
   ReactionSeverity,
 } from '../skin-journal.constants';
 import {
+  AnalysisFailureCodeValue,
   ANALYSIS_CONCERNS,
   SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
+  SKIN_JOURNAL_ANALYSIS_ASSUMED_INPUT_IMAGE_COST_USD,
+  SKIN_JOURNAL_ANALYSIS_MAX_IMAGE_BYTES,
+  SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS,
+  SKIN_JOURNAL_ANALYSIS_MAX_REQUEST_COST_USD,
+  SKIN_JOURNAL_ANALYSIS_MAX_TOTAL_IMAGE_BYTES,
   SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
   SKIN_JOURNAL_ANALYSIS_TIMEOUT_MS,
   SKIN_JOURNAL_PHOTO_ANGLES,
 } from '../skin-journal.constants';
+import {
+  isProviderTimeoutError,
+  SkinJournalAnalysisError,
+} from './skin-journal-analysis-errors';
+import {
+  assertAnalysisPhotoPayloadLimits,
+  assertAnalysisPhotoPreflight,
+} from './skin-journal-analysis-preflight';
 
 const MOCK_MODEL = 'ritora-stub-1.0';
 const DEFAULT_OPENAI_MODEL = 'gpt-5.2';
@@ -339,7 +353,11 @@ export class SkinJournalAnalysisService {
       params.photos ?? null,
     );
     if (currentPhotoInputs.length === 0) {
-      throw new Error('Photo analysis requires a stored front photo');
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.InvalidPhotoInput,
+        'Photo analysis requires a stored front photo.',
+        false,
+      );
     }
     if (this.shouldUseMockAnalysis()) {
       return {
@@ -357,11 +375,19 @@ export class SkinJournalAnalysisService {
       };
     }
     if (!params.photoObjectKey) {
-      throw new Error('Photo analysis requires a stored photo');
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.InvalidPhotoInput,
+        'Photo analysis requires a stored photo.',
+        false,
+      );
     }
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.ConfigurationError,
+        'OPENAI_API_KEY is not configured.',
+        false,
+      );
     }
 
     const model = this.getModel();
@@ -386,11 +412,16 @@ export class SkinJournalAnalysisService {
   async analyzeEvaluationPhoto(params: {
     fixtureId: string;
     imageBuffer: Buffer;
+    angle?: Angle;
   }): Promise<AnalysisRunResult> {
     const startedAt = Date.now();
+    const angle = params.angle ?? SKIN_JOURNAL_FRONT_PHOTO_ANGLE;
+    const photos: AnalysisPhotoInput[] = [
+      { angle, object_key: 'evaluation-fixture' },
+    ];
     if (this.shouldUseMockAnalysis()) {
       return {
-        observations: this.mockAnalysis(params.fixtureId),
+        observations: this.mockAnalysis(params.fixtureId, photos),
         metadata: {
           prompt_version: SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
           duration_ms: Date.now() - startedAt,
@@ -404,17 +435,19 @@ export class SkinJournalAnalysisService {
     }
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.ConfigurationError,
+        'OPENAI_API_KEY is not configured.',
+        false,
+      );
     }
 
     return this.runVisionRequest({
       startedAt,
       model: this.getModel(),
-      photos: [
-        { angle: SKIN_JOURNAL_FRONT_PHOTO_ANGLE, buffer: params.imageBuffer },
-      ],
+      photos: [{ angle, buffer: params.imageBuffer }],
       priorPhoto: null,
-      userPrompt: buildEvaluationUserPrompt(params.fixtureId),
+      userPrompt: buildEvaluationUserPrompt(params.fixtureId, angle),
     });
   }
 
@@ -427,8 +460,29 @@ export class SkinJournalAnalysisService {
   }): Promise<AnalysisRunResult> {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
-      throw new Error('OPENAI_API_KEY is not configured');
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.ConfigurationError,
+        'OPENAI_API_KEY is not configured.',
+        false,
+      );
     }
+    assertAnalysisPhotoPayloadLimits({
+      photos: params.photos,
+      priorPhoto: params.priorPhoto,
+      maxImageBytes: this.readNumericConfig(
+        'SKIN_JOURNAL_ANALYSIS_MAX_IMAGE_BYTES',
+        SKIN_JOURNAL_ANALYSIS_MAX_IMAGE_BYTES,
+      ),
+      maxTotalImageBytes: this.readNumericConfig(
+        'SKIN_JOURNAL_ANALYSIS_MAX_TOTAL_IMAGE_BYTES',
+        SKIN_JOURNAL_ANALYSIS_MAX_TOTAL_IMAGE_BYTES,
+      ),
+    });
+    this.assertEstimatedRequestCostAllowed(
+      params.photos.length + (params.priorPhoto ? 1 : 0),
+    );
+    await assertAnalysisPhotoPreflight({ photos: params.photos });
+
     const userContent: Array<
       | { type: 'input_text'; text: string }
       | { type: 'input_image'; image_url: string }
@@ -462,53 +516,94 @@ export class SkinJournalAnalysisService {
         },
       );
     }
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: params.model,
-        store: false,
-        input: [
-          {
-            role: 'system',
-            content: [
-              {
-                type: 'input_text',
-                text: buildSystemPrompt(),
-              },
-            ],
-          },
-          {
-            role: 'user',
-            content: userContent,
-          },
-        ],
-        max_output_tokens: 1600,
-        ...openAiRepeatabilityRequestOptions(params.model),
-        text: {
-          verbosity: 'low',
-          format: RESPONSE_FORMAT,
+    let response: Response;
+    try {
+      response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
         },
-      }),
-      signal: AbortSignal.timeout(SKIN_JOURNAL_ANALYSIS_TIMEOUT_MS),
-    });
+        body: JSON.stringify({
+          model: params.model,
+          store: false,
+          input: [
+            {
+              role: 'system',
+              content: [
+                {
+                  type: 'input_text',
+                  text: buildSystemPrompt(),
+                },
+              ],
+            },
+            {
+              role: 'user',
+              content: userContent,
+            },
+          ],
+          max_output_tokens: SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS,
+          ...openAiRepeatabilityRequestOptions(params.model),
+          text: {
+            verbosity: 'low',
+            format: RESPONSE_FORMAT,
+          },
+        }),
+        signal: AbortSignal.timeout(SKIN_JOURNAL_ANALYSIS_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (isProviderTimeoutError(error)) {
+        throw new SkinJournalAnalysisError(
+          AnalysisFailureCodeValue.ProviderTimeout,
+          'OpenAI photo analysis timed out.',
+          true,
+          { cause: error },
+        );
+      }
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.ProviderUnavailable,
+        'OpenAI photo analysis is temporarily unavailable.',
+        true,
+        { cause: error },
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(`OpenAI photo analysis failed with ${response.status}`);
+      const code =
+        response.status === 429
+          ? AnalysisFailureCodeValue.ProviderRateLimited
+          : AnalysisFailureCodeValue.ProviderUnavailable;
+      throw new SkinJournalAnalysisError(
+        code,
+        `OpenAI photo analysis failed with ${response.status}.`,
+        true,
+      );
     }
 
-    const payload = (await response.json()) as OpenAiResponsePayload;
+    let payload: OpenAiResponsePayload;
+    try {
+      payload = (await response.json()) as OpenAiResponsePayload;
+    } catch (error) {
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.ProviderInvalidResponse,
+        'OpenAI photo analysis returned unreadable JSON.',
+        true,
+        { cause: error },
+      );
+    }
     const outputText = extractOutputText(payload);
     if (!outputText) {
-      throw new Error('OpenAI photo analysis returned no output text');
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.ProviderInvalidResponse,
+        'OpenAI photo analysis returned no output text.',
+        true,
+      );
     }
-    const parsed = JSON.parse(extractJsonObject(outputText)) as unknown;
-    const observations = validateAnalysisObservations(parsed, params.model);
-    assertPerAngleQualityCoverage(observations, params.photos);
-    assertNonDiagnosticLanguage(observations);
+    const observations = this.parseAndValidateObservations(
+      outputText,
+      params.model,
+      params.photos,
+    );
     const usage = extractUsage(payload);
     const metadata: AnalysisRunMetadata = {
       prompt_version: SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
@@ -524,6 +619,55 @@ export class SkinJournalAnalysisService {
 
   promptVersion(): string {
     return SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION;
+  }
+
+  private parseAndValidateObservations(
+    outputText: string,
+    model: string,
+    photos: VisionPhotoInput[],
+  ): AnalysisObservations {
+    try {
+      const parsed = JSON.parse(extractJsonObject(outputText)) as unknown;
+      const observations = validateAnalysisObservations(parsed, model);
+      assertPerAngleQualityCoverage(observations, photos);
+      assertSemanticConsistency(observations);
+      assertNonDiagnosticLanguage(observations);
+      return observations;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'invalid output';
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.ProviderInvalidResponse,
+        `Photo analysis model response failed validation: ${detail}`,
+        true,
+        { cause: error },
+      );
+    }
+  }
+
+  private assertEstimatedRequestCostAllowed(inputImageCount: number): void {
+    const assumedImageCost = this.readNumericConfig(
+      'SKIN_JOURNAL_ANALYSIS_ASSUMED_INPUT_IMAGE_COST_USD',
+      SKIN_JOURNAL_ANALYSIS_ASSUMED_INPUT_IMAGE_COST_USD,
+    );
+    const maxRequestCost = this.readNumericConfig(
+      'SKIN_JOURNAL_ANALYSIS_MAX_REQUEST_COST_USD',
+      SKIN_JOURNAL_ANALYSIS_MAX_REQUEST_COST_USD,
+    );
+    const outputCostPerMillion = this.readNumericConfig(
+      'SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD',
+      0,
+    );
+    const estimatedCost =
+      inputImageCount * assumedImageCost +
+      (SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS / 1_000_000) *
+        outputCostPerMillion;
+    if (estimatedCost > maxRequestCost) {
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.CostLimitExceeded,
+        'Photo analysis request exceeds the configured cost budget.',
+        false,
+      );
+    }
   }
 
   private estimateCostUsd(usage: AnalysisUsage): number | null {
@@ -544,6 +688,16 @@ export class SkinJournalAnalysisService {
     const outputCost =
       ((usage.output_tokens ?? 0) / 1_000_000) * outputCostPerMillion;
     return Number((inputCost + outputCost).toFixed(6));
+  }
+
+  private readNumericConfig(key: string, fallback: number): number {
+    const value = this.configService.get<number | string>(key);
+    if (value === undefined || value === null || value === '') {
+      return fallback;
+    }
+    const parsed =
+      typeof value === 'number' ? value : Number.parseFloat(String(value));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   }
 
   private readCostConfig(key: string): number {
@@ -802,12 +956,13 @@ function buildUserPrompt(params: {
   ].join('\n');
 }
 
-function buildEvaluationUserPrompt(fixtureId: string): string {
+function buildEvaluationUserPrompt(fixtureId: string, angle: Angle): string {
   return [
     `Task: analyze private evaluation fixture ${fixtureId}.`,
+    `Evaluation fixture angle: ${angle}.`,
     'This image is part of Ritora internal Skin Journal analysis regression evaluation.',
     'Assess the photo exactly as a user-uploaded daily photo, with no identity inference and no diagnostic claims.',
-    'Return strict JSON with image quality, detected concerns, change directions, reaction signals, barrier signs, safety flags, and concise non-diagnostic wording.',
+    'Return strict JSON with image quality, per-angle quality, detected concerns, change directions, reaction signals, barrier signs, safety flags, and concise non-diagnostic wording.',
   ].join('\n');
 }
 
@@ -1003,6 +1158,112 @@ function assertPerAngleQualityCoverage(
   ) {
     throw new Error('per_angle_quality must include every supplied angle');
   }
+}
+
+function assertSemanticConsistency(observations: AnalysisObservations): void {
+  const reaction = observations.reaction_signals;
+  if (
+    !reaction.reaction_detected &&
+    (reaction.reaction_severity !== 'none' || reaction.indicators.length > 0)
+  ) {
+    throw new Error(
+      'reaction_signals severity and indicators must match reaction_detected',
+    );
+  }
+  if (
+    reaction.reaction_detected &&
+    (reaction.reaction_severity === 'none' || reaction.indicators.length === 0)
+  ) {
+    throw new Error(
+      'reaction_signals must include severity and indicators when detected',
+    );
+  }
+
+  const safety = observations.safety_flags;
+  const hasSafetyFlag =
+    safety?.urgent_review_recommended === true ||
+    safety?.doctor_follow_up_recommended === true ||
+    observations.should_flag_for_doctor;
+  if (hasSafetyFlag && (!safety || safety.reasons.length === 0)) {
+    throw new Error('safety_flags must include reasons when flagged');
+  }
+  if (
+    observations.should_flag_for_doctor &&
+    !observations.doctor_flag_reason?.trim()
+  ) {
+    throw new Error('doctor_flag_reason is required when flagged');
+  }
+
+  const frontQuality = observations.per_angle_quality?.find(
+    (quality) => quality.angle === SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
+  );
+  const imageQualityNeedsRetake = imageQualityNeedsRetakeSignal(
+    observations.image_quality,
+  );
+  if (
+    imageQualityNeedsRetake &&
+    observations.image_quality.needs_retake !== true
+  ) {
+    throw new Error('image_quality needs_retake must match quality signals');
+  }
+  if (
+    observations.image_quality.needs_retake === true &&
+    observations.image_quality.excluded_from_trends_reason === null
+  ) {
+    throw new Error(
+      'image_quality excluded_from_trends_reason is required for retakes',
+    );
+  }
+  if (
+    frontQuality &&
+    frontQuality.needs_retake === true &&
+    observations.image_quality.needs_retake !== true
+  ) {
+    throw new Error('front per_angle_quality retake must set top-level retake');
+  }
+
+  for (const quality of observations.per_angle_quality ?? []) {
+    const needsRetake = angleQualityNeedsRetakeSignal(quality);
+    if (needsRetake && quality.needs_retake !== true) {
+      throw new Error(
+        'per_angle_quality needs_retake must match quality signals',
+      );
+    }
+    if (quality.needs_retake === true && quality.used_for_analysis) {
+      throw new Error('retake angle cannot be marked used_for_analysis');
+    }
+  }
+}
+
+function imageQualityNeedsRetakeSignal(
+  imageQuality: AnalysisObservations['image_quality'],
+): boolean {
+  return (
+    imageQuality.face_detected === false ||
+    imageQuality.blur_detected ||
+    imageQuality.lighting_quality === 'poor' ||
+    imageQuality.framing_quality === 'poor' ||
+    (imageQuality.quality_score ?? 1) < 0.45 ||
+    imageQuality.issues.includes('non_face_image')
+  );
+}
+
+function angleQualityNeedsRetakeSignal(quality: {
+  face_detected: boolean;
+  blur_detected: boolean;
+  lighting_quality: string;
+  framing_quality: string;
+  issues: string[];
+  quality_score?: number;
+}): boolean {
+  return (
+    quality.face_detected === false ||
+    quality.blur_detected ||
+    quality.lighting_quality === 'poor' ||
+    quality.framing_quality === 'poor' ||
+    (quality.quality_score ?? 1) < 0.45 ||
+    quality.issues.includes('non_face_image')
+  );
 }
 
 function extractUsage(payload: OpenAiResponsePayload): AnalysisUsage {

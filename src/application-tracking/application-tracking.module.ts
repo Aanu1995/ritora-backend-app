@@ -6,6 +6,7 @@ import { ScheduledNotification } from '../notifications/entities/scheduled-notif
 import { UserNotificationPreference } from '../notifications/entities/user-notification-preference.entity';
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
+import { SkinJournalModule } from '../skin-journal/skin-journal.module';
 import { RoutineBreak } from '../suggestions/entities/routine-break.entity';
 import { SuggestionGenerationJob } from '../suggestions/entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
@@ -23,6 +24,7 @@ import { ApplicationTrackingValidationService } from './application-tracking-val
   imports: [
     CatalogueModule,
     SmartPicksModule,
+    SkinJournalModule,
     TypeOrmModule.forFeature([
       ApplicationLog,
       ApplicationLogItem,

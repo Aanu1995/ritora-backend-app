@@ -1,7 +1,11 @@
 import { ConfigService } from '@nestjs/config';
+import sharp from 'sharp';
 import { SkinJournalAnalysisService } from './skin-journal-analysis.service';
 import { SkinJournalPhotoStorageService } from './skin-journal-photo-storage.service';
-import { SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION } from '../skin-journal.constants';
+import {
+  AnalysisFailureCodeValue,
+  SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
+} from '../skin-journal.constants';
 
 function config(values: Record<string, string | number | boolean>) {
   const configValues: Record<string, string | number | boolean> = {
@@ -80,6 +84,59 @@ function openAiPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+async function variedImageBuffer(width = 320, height = 320): Promise<Buffer> {
+  const pixels = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 3;
+      pixels[offset] = 180 + ((x + y) % 35);
+      pixels[offset + 1] = 130 + ((x * 2) % 45);
+      pixels[offset + 2] = 110 + ((y * 2) % 35);
+    }
+  }
+
+  return sharp(pixels, {
+    raw: {
+      width,
+      height,
+      channels: 3,
+    },
+  })
+    .webp()
+    .toBuffer();
+}
+
+async function faceLikeImageBuffer(): Promise<Buffer> {
+  const svg = `
+    <svg width="360" height="460" viewBox="0 0 360 460" xmlns="http://www.w3.org/2000/svg">
+      <rect width="360" height="460" fill="#ece7df"/>
+      <ellipse cx="180" cy="235" rx="104" ry="142" fill="#a96f56"/>
+      <ellipse cx="180" cy="218" rx="86" ry="118" fill="#b8795d"/>
+      <circle cx="142" cy="194" r="10" fill="#36211d"/>
+      <circle cx="218" cy="194" r="10" fill="#36211d"/>
+      <path d="M152 282 Q180 305 208 282" fill="none" stroke="#50302b" stroke-width="10" stroke-linecap="round"/>
+      <path d="M180 206 Q169 238 183 248" fill="none" stroke="#704334" stroke-width="8" stroke-linecap="round"/>
+      <ellipse cx="180" cy="354" rx="72" ry="34" fill="#8a5847"/>
+    </svg>
+  `;
+
+  return sharp(Buffer.from(svg)).webp().toBuffer();
+}
+
+async function nonFaceImageBuffer(): Promise<Buffer> {
+  const svg = `
+    <svg width="420" height="320" viewBox="0 0 420 320" xmlns="http://www.w3.org/2000/svg">
+      <rect width="420" height="320" fill="#2d8a72"/>
+      <rect y="0" width="420" height="92" fill="#2376a8"/>
+      <rect x="0" y="188" width="420" height="132" fill="#1c6548"/>
+      <path d="M0 240 C80 185 125 198 200 232 C270 265 330 220 420 252" fill="none" stroke="#e6f2ce" stroke-width="18"/>
+      <path d="M15 268 C85 218 155 230 230 262 C300 292 352 254 410 284" fill="none" stroke="#365f4f" stroke-width="12"/>
+    </svg>
+  `;
+
+  return sharp(Buffer.from(svg)).webp().toBuffer();
+}
+
 type OpenAiRequestBody = {
   model: string;
   store: boolean;
@@ -111,13 +168,21 @@ function promptText(body: OpenAiRequestBody, role: 'system' | 'user'): string {
 
 describe('SkinJournalAnalysisService', () => {
   const originalNodeEnv = process.env.NODE_ENV;
+  let validPhotoBuffer: Buffer;
   const photoStorage = {
-    readPhotoBuffer: jest.fn().mockResolvedValue(Buffer.from('photo')),
-  } as unknown as SkinJournalPhotoStorageService;
+    readPhotoBuffer: jest.fn(),
+  } as unknown as SkinJournalPhotoStorageService & {
+    readPhotoBuffer: jest.Mock;
+  };
+
+  beforeAll(async () => {
+    validPhotoBuffer = await faceLikeImageBuffer();
+  });
 
   beforeEach(() => {
     process.env.NODE_ENV = 'development';
     jest.clearAllMocks();
+    photoStorage.readPhotoBuffer.mockResolvedValue(validPhotoBuffer);
   });
 
   afterAll(() => {
@@ -307,8 +372,8 @@ describe('SkinJournalAnalysisService', () => {
     const storage = {
       readPhotoBuffer: jest
         .fn()
-        .mockResolvedValueOnce(Buffer.from('current-photo'))
-        .mockResolvedValueOnce(Buffer.from('previous-photo')),
+        .mockResolvedValueOnce(validPhotoBuffer)
+        .mockResolvedValueOnce(validPhotoBuffer),
     } as unknown as SkinJournalPhotoStorageService;
     const service = new SkinJournalAnalysisService(
       config({
@@ -394,10 +459,10 @@ describe('SkinJournalAnalysisService', () => {
     const storage = {
       readPhotoBuffer: jest
         .fn()
-        .mockResolvedValueOnce(Buffer.from('front-photo'))
-        .mockResolvedValueOnce(Buffer.from('left-photo'))
-        .mockResolvedValueOnce(Buffer.from('right-photo'))
-        .mockResolvedValueOnce(Buffer.from('previous-front')),
+        .mockResolvedValueOnce(validPhotoBuffer)
+        .mockResolvedValueOnce(validPhotoBuffer)
+        .mockResolvedValueOnce(validPhotoBuffer)
+        .mockResolvedValueOnce(validPhotoBuffer),
     } as unknown as SkinJournalPhotoStorageService;
     const service = new SkinJournalAnalysisService(
       config({ OPENAI_API_KEY: 'sk-test' }),
@@ -456,6 +521,54 @@ describe('SkinJournalAnalysisService', () => {
     expect(result.observations.per_angle_quality).toHaveLength(3);
   });
 
+  it('uses the fixture angle when running private evaluation photos', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          schema_version: '1.2',
+          per_angle_quality: [
+            {
+              angle: 'left_profile',
+              face_detected: true,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              quality_score: 0.86,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+          ],
+        }),
+      ),
+    });
+    global.fetch = fetchMock;
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    const result = await service.analyzeEvaluationPhoto({
+      fixtureId: 'side-localized-reaction',
+      imageBuffer: validPhotoBuffer,
+      angle: 'left_profile',
+    });
+
+    const body = requestBody(fetchMock);
+    const labels = body.input
+      .flatMap((item) => item.content)
+      .filter((content) => content.type === 'input_text')
+      .map((content) => content.text ?? '')
+      .join('\n');
+
+    expect(labels).toContain("today's left profile photo");
+    expect(labels).toContain('Evaluation fixture angle: left_profile');
+    expect(result.observations.per_angle_quality?.[0]?.angle).toBe(
+      'left_profile',
+    );
+  });
+
   it('rejects multi-angle model output that omits supplied angle quality rows', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -481,8 +594,8 @@ describe('SkinJournalAnalysisService', () => {
     const storage = {
       readPhotoBuffer: jest
         .fn()
-        .mockResolvedValueOnce(Buffer.from('front-photo'))
-        .mockResolvedValueOnce(Buffer.from('left-photo')),
+        .mockResolvedValueOnce(validPhotoBuffer)
+        .mockResolvedValueOnce(validPhotoBuffer),
     } as unknown as SkinJournalPhotoStorageService;
     const service = new SkinJournalAnalysisService(
       config({ OPENAI_API_KEY: 'sk-test' }),
@@ -559,8 +672,8 @@ describe('SkinJournalAnalysisService', () => {
     const storage = {
       readPhotoBuffer: jest
         .fn()
-        .mockResolvedValueOnce(Buffer.from('front-photo'))
-        .mockResolvedValueOnce(Buffer.from('left-photo')),
+        .mockResolvedValueOnce(validPhotoBuffer)
+        .mockResolvedValueOnce(validPhotoBuffer),
     } as unknown as SkinJournalPhotoStorageService;
     const service = new SkinJournalAnalysisService(
       config({ OPENAI_API_KEY: 'sk-test' }),
@@ -650,5 +763,275 @@ describe('SkinJournalAnalysisService', () => {
         entryContext: null,
       }),
     ).rejects.toThrow('Unexpected enum value');
+  });
+
+  it('rejects obviously unusable current photos locally before sending them to OpenAI', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    photoStorage.readPhotoBuffer.mockResolvedValueOnce(
+      await variedImageBuffer(96, 96),
+    );
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.PhotoPreflightRejected,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects obvious non-face current photos locally before sending them to OpenAI', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    photoStorage.readPhotoBuffer.mockResolvedValueOnce(
+      await nonFaceImageBuffer(),
+    );
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.PhotoPreflightRejected,
+      message: expect.stringContaining('no_local_face_detected'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects photo payloads that exceed the post-processing byte budget before OpenAI', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    photoStorage.readPhotoBuffer.mockResolvedValueOnce(
+      Buffer.concat([validPhotoBuffer, Buffer.alloc(1024)]),
+    );
+    const service = new SkinJournalAnalysisService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        SKIN_JOURNAL_ANALYSIS_MAX_IMAGE_BYTES: validPhotoBuffer.length,
+      }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.PayloadTooLarge,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects multi-angle requests when the estimated request cost exceeds the configured cap', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    const service = new SkinJournalAnalysisService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        SKIN_JOURNAL_ANALYSIS_ASSUMED_INPUT_IMAGE_COST_USD: 0.02,
+        SKIN_JOURNAL_ANALYSIS_MAX_REQUEST_COST_USD: 0.03,
+      }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/front.webp',
+        photos: [
+          {
+            angle: 'head_on',
+            object_key: 'skin-journal/user-1/entry-1/front.webp',
+          },
+          {
+            angle: 'left_profile',
+            object_key: 'skin-journal/user-1/entry-1/left.webp',
+          },
+        ],
+        priorPhotoObjectKey: null,
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.CostLimitExceeded,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('wraps provider timeouts with a retryable failure code', async () => {
+    const timeout = Object.assign(new Error('operation timed out'), {
+      name: 'TimeoutError',
+    });
+    global.fetch = jest.fn().mockRejectedValue(timeout);
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.ProviderTimeout,
+      retryable: true,
+    });
+  });
+
+  it('rejects semantically inconsistent reaction output from the model', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          reaction_signals: {
+            reaction_detected: false,
+            reaction_severity: 'mild',
+            indicators: [],
+            confidence: 0.2,
+          },
+        }),
+      ),
+    });
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.ProviderInvalidResponse,
+    });
+  });
+
+  it('rejects safety flags that do not include an actionable reason', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          safety_flags: {
+            urgent_review_recommended: true,
+            doctor_follow_up_recommended: true,
+            reasons: [],
+          },
+          should_flag_for_doctor: true,
+          doctor_flag_reason: null,
+        }),
+      ),
+    });
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.ProviderInvalidResponse,
+    });
+  });
+
+  it('rejects per-angle quality rows that mark unusable photos as usable', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          image_quality: {
+            face_detected: true,
+            lighting_quality: 'good',
+            framing_quality: 'good',
+            blur_detected: false,
+            issues: [],
+            quality_score: 0.9,
+            needs_retake: false,
+            excluded_from_trends_reason: null,
+          },
+          per_angle_quality: [
+            {
+              angle: 'head_on',
+              face_detected: false,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: ['non_face_image'],
+              quality_score: 0.2,
+              needs_retake: false,
+              used_for_analysis: true,
+            },
+          ],
+        }),
+      ),
+    });
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.ProviderInvalidResponse,
+    });
   });
 });

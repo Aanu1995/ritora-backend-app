@@ -124,6 +124,9 @@ export class SuggestionGenerationService {
       userId: user.id,
       slotId: slot.id,
       targetDate,
+      targetTime,
+      daypart: savedInstance.daypart,
+      steps: output.steps,
       suggestionInstanceId: savedInstance.id,
       jobId: job.id,
     });
@@ -179,6 +182,9 @@ export class SuggestionGenerationService {
       userId: user.id,
       slotId: null,
       targetDate,
+      targetTime,
+      daypart: savedInstance.daypart,
+      steps: output.steps,
       suggestionInstanceId: savedInstance.id,
       jobId: job.id,
     });

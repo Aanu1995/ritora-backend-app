@@ -18,6 +18,7 @@ import {
 import { AnalysisStatusValue } from '../skin-journal.constants';
 import type {
   Angle,
+  AnalysisFailureCode,
   AnalysisObservations,
   AnalysisConcern,
   AnalysisStatus,
@@ -191,6 +192,9 @@ export class SkinJournalEntry {
 
   @Column({ type: 'text', nullable: true })
   analysis_error: string | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  analysis_error_code: AnalysisFailureCode | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   analysis_started_at: Date | null;

@@ -1,4 +1,5 @@
 import {
+  QUALITY_ISSUE_PRESENCE_OPTIONAL,
   REQUIRED_SKIN_JOURNAL_ANALYSIS_EVALUATION_CASES,
   SKIN_JOURNAL_ANALYSIS_EVALUATION_FIXTURES,
 } from './skin-journal-analysis-evaluation.fixtures';
@@ -21,9 +22,13 @@ describe('Skin Journal analysis evaluation fixtures', () => {
       expect(fixture.private_image_filename).not.toContain('@');
       expect(fixture.expected).toEqual(
         expect.objectContaining({
-          should_include_quality_issue: expect.any(Boolean),
+          local_face_gate: expect.stringMatching(/^(pass|reject)$/),
+          local_preflight: expect.stringMatching(/^(pass|reject)$/),
           should_flag_safety: expect.any(Boolean),
         }),
+      );
+      expect([true, false, QUALITY_ISSUE_PRESENCE_OPTIONAL]).toContain(
+        fixture.expected.should_include_quality_issue,
       );
     }
   });

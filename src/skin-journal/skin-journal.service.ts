@@ -54,6 +54,7 @@ import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
+import { SkinJournalInsightInteraction } from './entities/skin-journal-insight-interaction.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
 import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
 import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
@@ -63,6 +64,12 @@ import { RoutineSimplificationEvent } from './entities/routine-simplification-ev
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalPhotoStorageService } from './services/skin-journal-photo-storage.service';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
+import { classifyAnalysisFailure } from './services/skin-journal-analysis-errors';
+import {
+  AnalysisPhotoPreflightIssue,
+  AnalysisPhotoPreflightIssueValue,
+  parseAnalysisPhotoPreflightIssues,
+} from './services/skin-journal-analysis-preflight';
 import { SkinJournalPhotoInterpretationService } from './services/skin-journal-photo-interpretation.service';
 import {
   AnalysisQueueMetrics,
@@ -114,7 +121,9 @@ import {
   InsightKind,
   InsightWindow,
   InsightGenerationTrigger,
+  InsightInteractionTypeValue,
   RatingsPayload,
+  SKIN_JOURNAL_AI_NO_FACE_RATE_ML_REVIEW_THRESHOLD,
   SKIN_JOURNAL_ANALYSIS_CAPACITY_RETRY_DELAY_MS,
   SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD,
   SKIN_JOURNAL_ANALYSIS_QUEUE_AGE_ALERT_SECONDS,
@@ -122,9 +131,9 @@ import {
   SKIN_JOURNAL_INSIGHT_PATTERN_CARDS_ENABLED,
   SKIN_JOURNAL_INSIGHT_FAILED_RETRY_COOLDOWN_DAYS,
   SKIN_JOURNAL_INSIGHT_MIN_ENTRIES_FOR_PERIODIC_GENERATION,
-  SKIN_JOURNAL_INSIGHT_PERIODIC_INTERVAL_DAYS,
   SKIN_JOURNAL_FRONT_PHOTO_ANGLE,
   SKIN_JOURNAL_INSIGHT_SUMMARY_CARDS_ENABLED,
+  SKIN_JOURNAL_LOCAL_FACE_REJECTION_RATE_ML_REVIEW_THRESHOLD,
   SKIN_JOURNAL_PHOTO_PAGE_DEFAULT_LIMIT,
   SKIN_JOURNAL_PHOTO_PAGE_MAX_LIMIT,
   SKIN_JOURNAL_PHOTO_ANGLES,
@@ -133,6 +142,8 @@ import {
   type Angle,
   AnalysisStatus,
   AnalysisStatusValue,
+  AnalysisFailureCode,
+  AnalysisFailureCodeValue,
   AnalysisEntryContext,
   AnalysisSkinContext,
   CompareDeltaBullet,
@@ -164,7 +175,18 @@ import { normalizeUpsertEntryBody } from './skin-journal-multipart.parser';
 import { InsightPolishService } from './insights/insight-polish.service';
 import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.service';
 import type { InsightBlock, InsightCandidate } from './insights/insight-types';
+import type { InsightAction } from './insights/insight-types';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
+import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import type { RoutineApplicationEvidence } from './skin-journal-insight-detectors';
+import { User } from '../users/entities/user.entity';
+import {
+  INSIGHT_CADENCE_DEFAULT,
+  INSIGHT_CADENCE_INTERVAL_DAYS,
+  INSIGHT_DIGEST_DAY_DEFAULT,
+  INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
+  type InsightCadence,
+} from '../notifications/notifications.constants';
 
 interface InsightEntryPreview {
   entry_id: string;
@@ -175,6 +197,71 @@ interface InsightEntryPreview {
 type PhotoUploadInput = { buffer: Buffer; contentType: string };
 type PhotoUploadMap = Partial<Record<Angle, PhotoUploadInput>>;
 type EntryPhotoRowsByEntryId = Map<string, SkinJournalEntryPhoto[]>;
+
+export interface AngleQualityOperationsMetric {
+  count: number;
+  average_quality_score: number | null;
+  needs_retake_rate: number;
+  face_missing_rate: number;
+  used_for_analysis_rate: number;
+  poor_quality_rate: number;
+}
+
+export type AngleQualityOperationsMetrics = Record<
+  Angle,
+  AngleQualityOperationsMetric
+>;
+
+export interface PhotoPreflightOperationsMetrics {
+  rejected_count: number;
+  issue_counts: Partial<Record<AnalysisPhotoPreflightIssue, number>>;
+  local_face_rejection_rate: number;
+  ai_no_face_rate: number;
+  ml_detector_review_recommended: boolean;
+  ml_detector_review_reasons: string[];
+}
+
+export interface AnalysisOperationsMetrics {
+  window_hours: number;
+  completed_count: number;
+  failed_count: number;
+  needs_review_count: number;
+  average_duration_ms: number | null;
+  average_input_image_count: number | null;
+  multi_angle_rate: number;
+  failure_rate: number;
+  retake_rate: number;
+  safety_flag_rate: number;
+  estimated_cost_usd: number;
+  total_tokens: number;
+  failure_codes: Partial<Record<AnalysisFailureCode, number>>;
+  photo_preflight: PhotoPreflightOperationsMetrics;
+  per_angle_quality: AngleQualityOperationsMetrics;
+  concern_counts: Partial<Record<AnalysisConcern, number>>;
+}
+
+export interface InsightUsefulnessKindMetric {
+  generated_count: number;
+  seen_count: number;
+  dismissed_count: number;
+  action_click_count: number;
+  seen_rate: number;
+  dismissed_rate: number;
+  action_click_rate: number;
+}
+
+export interface InsightEvaluationCaseHint {
+  insight_kind: InsightKind;
+  reason: 'high_dismissal_rate' | 'low_action_click_rate';
+  value: number;
+  threshold: number;
+}
+
+export interface InsightUsefulnessOperationsMetrics extends InsightUsefulnessKindMetric {
+  window_hours: number;
+  by_kind: Partial<Record<InsightKind, InsightUsefulnessKindMetric>>;
+  evaluation_case_hints: InsightEvaluationCaseHint[];
+}
 
 type StoredAnglePhoto = {
   angle: Angle;
@@ -233,6 +320,9 @@ const PHOTO_UPLOAD_ORDER: Angle[] = [
   'left_profile',
   'right_profile',
 ];
+const INSIGHT_USEFULNESS_MIN_KIND_SAMPLE = 1;
+const INSIGHT_HIGH_DISMISSAL_RATE_THRESHOLD = 0.5;
+const INSIGHT_LOW_ACTION_CLICK_RATE_THRESHOLD = 0.05;
 
 type RequiredCheckInField =
   (typeof CHECK_IN_REQUIRED_FIELDS)[keyof typeof CHECK_IN_REQUIRED_FIELDS];
@@ -250,6 +340,13 @@ interface InsightQueryOptions {
 interface InsightGenerationOptions extends InsightQueryOptions {
   trigger: InsightGenerationTrigger;
   expectedInputSignature?: string;
+}
+
+interface InsightCadenceSettings {
+  cadence: InsightCadence;
+  digestDay: number;
+  digestLocalTime: string;
+  timeZone: string;
 }
 
 class InsightInputChangedError extends Error {
@@ -272,6 +369,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly events: Repository<SkinJournalEvent>,
     @InjectRepository(SkinJournalInsight)
     private readonly insights: Repository<SkinJournalInsight>,
+    @InjectRepository(SkinJournalInsightInteraction)
+    private readonly insightInteractions: Repository<SkinJournalInsightInteraction>,
+    @InjectRepository(ApplicationLog)
+    private readonly applicationLogs: Repository<ApplicationLog>,
     @InjectRepository(SkinJournalInsightGenerationRun)
     private readonly insightRuns: Repository<SkinJournalInsightGenerationRun>,
     @InjectRepository(SkinJournalInsightState)
@@ -286,6 +387,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly consents: Repository<UserConsent>,
     @InjectRepository(SkinProfile)
     private readonly skinProfiles: Repository<SkinProfile>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
     private readonly photoStorage: SkinJournalPhotoStorageService,
     private readonly analysis: SkinJournalAnalysisService,
     private readonly photoInterpretation: SkinJournalPhotoInterpretationService,
@@ -557,6 +660,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     entry.analysis_total_tokens = null;
     entry.analysis_estimated_cost_usd = null;
     entry.analysis_error = null;
+    entry.analysis_error_code = null;
   }
 
   async upsertEntryForResolvedDate(params: {
@@ -721,6 +825,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
     if (!entry.photo_object_key) {
       entry.analysis_status = AnalysisStatusValue.Skipped;
+      entry.analysis_error_code = null;
     }
 
     let saved: SkinJournalEntry;
@@ -965,6 +1070,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
     entry.analysis_status = AnalysisStatusValue.Pending;
     entry.analysis_error = null;
+    entry.analysis_error_code = null;
     entry.analysis_interpretation = null;
     entry.analysis_retry_count = (entry.analysis_retry_count ?? 0) + 1;
     await this.entries.save(entry);
@@ -1536,6 +1642,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       current.analysis_estimated_cost_usd = result.metadata.estimated_cost_usd;
       current.analysis_completed_at = new Date();
       current.analysis_error = null;
+      current.analysis_error_code = null;
       await this.entries.save(current);
       this.scheduleSmartPicksPreparation(userId);
 
@@ -1570,15 +1677,17 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         }
         return;
       }
-      const errorMessage =
-        err instanceof Error ? err.message : 'Analysis failed';
+      const failure = classifyAnalysisFailure(err);
+      const errorMessage = failure.message;
       const shouldRetry =
         !!job &&
+        failure.retryable &&
         job.attempt_count <
           (job.max_attempts || this.analysisQueue.getMaxAttempts());
       if (shouldRetry && job) {
         current.analysis_status = AnalysisStatusValue.Queued;
         current.analysis_error = errorMessage;
+        current.analysis_error_code = failure.code;
         current.analysis_prompt_version = this.analysis.promptVersion();
         current.analysis_started_at = startedAt;
         current.analysis_duration_ms = Date.now() - fallbackStartedAt;
@@ -1593,6 +1702,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
       current.analysis_status = AnalysisStatusValue.Failed;
       current.analysis_error = errorMessage;
+      current.analysis_error_code = failure.code;
       current.analysis_prompt_version = this.analysis.promptVersion();
       current.analysis_started_at = startedAt;
       current.analysis_duration_ms = Date.now() - fallbackStartedAt;
@@ -1631,6 +1741,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
     current.analysis_status = AnalysisStatusValue.Queued;
     current.analysis_error = reason;
+    current.analysis_error_code = null;
     await this.entries.save(current);
   }
 
@@ -1675,6 +1786,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         entry.analysis_status = AnalysisStatusValue.Queued;
         entry.analysis_error =
           'Analysis queue is temporarily unavailable; it will retry automatically.';
+        entry.analysis_error_code = null;
         await this.entries.save(entry);
       }
     }
@@ -1727,6 +1839,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       entry.analysis_status = AnalysisStatusValue.Queued;
       entry.analysis_error =
         'Analysis queued after service restart; it will retry automatically.';
+      entry.analysis_error_code = null;
       await this.entries.save(entry);
       await this.analysisQueue.enqueueAnalysisJob({
         userId: entry.user_id,
@@ -1746,18 +1859,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
   async getAnalysisQueueOperations(token: string | undefined): Promise<{
     queue: AnalysisQueueMetrics;
-    analysis: {
-      window_hours: number;
-      completed_count: number;
-      failed_count: number;
-      needs_review_count: number;
-      average_duration_ms: number | null;
-      failure_rate: number;
-      retake_rate: number;
-      safety_flag_rate: number;
-      estimated_cost_usd: number;
-      total_tokens: number;
-    };
+    analysis: AnalysisOperationsMetrics;
     alerts: Array<{
       code: string;
       severity: 'warning' | 'critical';
@@ -1794,9 +1896,26 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
               durationValues.length,
           )
         : null;
+    const inputImageCountValues = analysedEntries
+      .map((entry) => entry.analysis_input_image_count)
+      .filter((value): value is number => typeof value === 'number');
+    const averageInputImageCount =
+      inputImageCountValues.length > 0
+        ? Number(
+            (
+              inputImageCountValues.reduce((sum, value) => sum + value, 0) /
+              inputImageCountValues.length
+            ).toFixed(2),
+          )
+        : null;
     const denominator = Math.max(1, analysedEntries.length);
+    const multiAngleCount = analysedEntries.filter(
+      (entry) => (entry.analysis_input_image_count ?? 0) > 1,
+    ).length;
     const retakeCount = analysedEntries.filter(
-      (entry) => entry.analysis_observations?.image_quality?.needs_retake,
+      (entry) =>
+        entry.needs_retake ||
+        entry.analysis_observations?.image_quality?.needs_retake,
     ).length;
     const safetyFlagCount = analysedEntries.filter(
       (entry) =>
@@ -1811,6 +1930,12 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       (sum, entry) => sum + (entry.analysis_total_tokens ?? 0),
       0,
     );
+    const failureCodes = this.buildFailureCodeCounts(analysedEntries);
+    const photoPreflight =
+      this.buildPhotoPreflightOperationsMetrics(analysedEntries);
+    const perAngleQuality =
+      this.buildPerAngleQualityOperationsMetrics(analysedEntries);
+    const concernCounts = this.buildConcernCounts(analysedEntries);
     const failureRate = failedCount / denominator;
     const alerts: Array<{
       code: string;
@@ -1846,6 +1971,28 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         threshold: 0,
       });
     }
+    if (
+      photoPreflight.local_face_rejection_rate >=
+      SKIN_JOURNAL_LOCAL_FACE_REJECTION_RATE_ML_REVIEW_THRESHOLD
+    ) {
+      alerts.push({
+        code: 'local_face_rejection_rate_high',
+        severity: 'warning',
+        value: photoPreflight.local_face_rejection_rate,
+        threshold: SKIN_JOURNAL_LOCAL_FACE_REJECTION_RATE_ML_REVIEW_THRESHOLD,
+      });
+    }
+    if (
+      photoPreflight.ai_no_face_rate >=
+      SKIN_JOURNAL_AI_NO_FACE_RATE_ML_REVIEW_THRESHOLD
+    ) {
+      alerts.push({
+        code: 'ai_no_face_rate_high',
+        severity: 'warning',
+        value: photoPreflight.ai_no_face_rate,
+        threshold: SKIN_JOURNAL_AI_NO_FACE_RATE_ML_REVIEW_THRESHOLD,
+      });
+    }
 
     return {
       queue,
@@ -1855,14 +2002,316 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         failed_count: failedCount,
         needs_review_count: needsReviewCount,
         average_duration_ms: averageDuration,
+        average_input_image_count: averageInputImageCount,
+        multi_angle_rate: multiAngleCount / denominator,
         failure_rate: failureRate,
         retake_rate: retakeCount / denominator,
         safety_flag_rate: safetyFlagCount / denominator,
         estimated_cost_usd: estimatedCost,
         total_tokens: totalTokens,
+        failure_codes: failureCodes,
+        photo_preflight: photoPreflight,
+        per_angle_quality: perAngleQuality,
+        concern_counts: concernCounts,
       },
       alerts,
     };
+  }
+
+  async getInsightOperations(token: string | undefined): Promise<{
+    usefulness: InsightUsefulnessOperationsMetrics;
+    alerts: Array<{
+      code: string;
+      severity: 'warning';
+      value: number;
+      threshold: number;
+    }>;
+  }> {
+    this.assertOperationsToken(token);
+    const windowHours = 24 * 30;
+    const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+    const [recentInsights, recentInteractions] = await Promise.all([
+      this.insights.find({
+        where: {
+          generated_at: MoreThanOrEqual(since),
+        } as FindOptionsWhere<SkinJournalInsight>,
+        take: 1000,
+      }),
+      this.insightInteractions.find({
+        where: {
+          created_at: MoreThanOrEqual(since),
+        } as FindOptionsWhere<SkinJournalInsightInteraction>,
+        take: 5000,
+      }),
+    ]);
+    const usefulness = this.buildInsightUsefulnessMetrics(
+      recentInsights,
+      recentInteractions,
+      windowHours,
+    );
+    const alerts = usefulness.evaluation_case_hints.map((hint) => ({
+      code:
+        hint.reason === 'high_dismissal_rate'
+          ? 'insight_kind_dismissal_rate_high'
+          : 'insight_kind_action_click_rate_low',
+      severity: 'warning' as const,
+      value: hint.value,
+      threshold: hint.threshold,
+    }));
+
+    return { usefulness, alerts };
+  }
+
+  private buildInsightUsefulnessMetrics(
+    insights: SkinJournalInsight[],
+    interactions: SkinJournalInsightInteraction[],
+    windowHours: number,
+  ): InsightUsefulnessOperationsMetrics {
+    const actionInsightIds = new Set(
+      interactions
+        .filter(
+          (interaction) =>
+            interaction.interaction_type ===
+            InsightInteractionTypeValue.ActionClicked,
+        )
+        .map((interaction) => interaction.insight_id),
+    );
+    const metricsFor = (
+      source: SkinJournalInsight[],
+    ): InsightUsefulnessKindMetric => {
+      const generatedCount = source.length;
+      const denominator = Math.max(1, generatedCount);
+      const seenCount = source.filter((insight) => insight.seen_at).length;
+      const dismissedCount = source.filter(
+        (insight) => insight.dismissed_at,
+      ).length;
+      const actionClickCount = source.filter((insight) =>
+        actionInsightIds.has(insight.id),
+      ).length;
+      return {
+        generated_count: generatedCount,
+        seen_count: seenCount,
+        dismissed_count: dismissedCount,
+        action_click_count: actionClickCount,
+        seen_rate: seenCount / denominator,
+        dismissed_rate: dismissedCount / denominator,
+        action_click_rate: actionClickCount / denominator,
+      };
+    };
+    const byKind: Partial<Record<InsightKind, InsightUsefulnessKindMetric>> =
+      {};
+    for (const kind of new Set(insights.map((insight) => insight.kind))) {
+      byKind[kind] = metricsFor(
+        insights.filter((insight) => insight.kind === kind),
+      );
+    }
+    return {
+      window_hours: windowHours,
+      ...metricsFor(insights),
+      by_kind: byKind,
+      evaluation_case_hints: this.buildInsightEvaluationCaseHints(byKind),
+    };
+  }
+
+  private buildInsightEvaluationCaseHints(
+    byKind: Partial<Record<InsightKind, InsightUsefulnessKindMetric>>,
+  ): InsightEvaluationCaseHint[] {
+    const hints: InsightEvaluationCaseHint[] = [];
+    for (const [kind, metrics] of Object.entries(byKind) as Array<
+      [InsightKind, InsightUsefulnessKindMetric]
+    >) {
+      if (metrics.generated_count < INSIGHT_USEFULNESS_MIN_KIND_SAMPLE) {
+        continue;
+      }
+      if (
+        metrics.dismissed_rate >= INSIGHT_HIGH_DISMISSAL_RATE_THRESHOLD &&
+        metrics.dismissed_count > 0
+      ) {
+        hints.push({
+          insight_kind: kind,
+          reason: 'high_dismissal_rate',
+          value: metrics.dismissed_rate,
+          threshold: INSIGHT_HIGH_DISMISSAL_RATE_THRESHOLD,
+        });
+        continue;
+      }
+      if (
+        metrics.seen_count >= INSIGHT_USEFULNESS_MIN_KIND_SAMPLE &&
+        metrics.action_click_rate <= INSIGHT_LOW_ACTION_CLICK_RATE_THRESHOLD
+      ) {
+        hints.push({
+          insight_kind: kind,
+          reason: 'low_action_click_rate',
+          value: metrics.action_click_rate,
+          threshold: INSIGHT_LOW_ACTION_CLICK_RATE_THRESHOLD,
+        });
+      }
+    }
+    return hints;
+  }
+
+  private buildFailureCodeCounts(
+    entries: SkinJournalEntry[],
+  ): Partial<Record<AnalysisFailureCode, number>> {
+    const counts: Partial<Record<AnalysisFailureCode, number>> = {};
+    for (const entry of entries) {
+      const code = entry.analysis_error_code;
+      if (code) {
+        counts[code] = (counts[code] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  private buildPhotoPreflightOperationsMetrics(
+    entries: SkinJournalEntry[],
+  ): PhotoPreflightOperationsMetrics {
+    const issueCounts: Partial<Record<AnalysisPhotoPreflightIssue, number>> =
+      {};
+    let rejectedCount = 0;
+    let localFaceRejectedCount = 0;
+    let completedWithAnalysisCount = 0;
+    let aiNoFaceCount = 0;
+
+    for (const entry of entries) {
+      if (
+        entry.analysis_error_code ===
+        AnalysisFailureCodeValue.PhotoPreflightRejected
+      ) {
+        rejectedCount += 1;
+        const issues = parseAnalysisPhotoPreflightIssues(entry.analysis_error);
+        for (const issue of issues) {
+          issueCounts[issue] = (issueCounts[issue] ?? 0) + 1;
+        }
+      }
+
+      if (entry.analysis_observations) {
+        completedWithAnalysisCount += 1;
+        if (hasAiNoFaceSignal(entry.analysis_observations)) {
+          aiNoFaceCount += 1;
+        }
+      }
+    }
+
+    localFaceRejectedCount =
+      issueCounts[AnalysisPhotoPreflightIssueValue.NoLocalFaceDetected] ?? 0;
+    const localFaceRejectionRate =
+      localFaceRejectedCount / Math.max(1, entries.length);
+    const aiNoFaceRate =
+      aiNoFaceCount / Math.max(1, completedWithAnalysisCount);
+    const mlDetectorReviewReasons: string[] = [];
+    if (
+      localFaceRejectionRate >=
+      SKIN_JOURNAL_LOCAL_FACE_REJECTION_RATE_ML_REVIEW_THRESHOLD
+    ) {
+      mlDetectorReviewReasons.push('local_face_rejection_rate_high');
+    }
+    if (aiNoFaceRate >= SKIN_JOURNAL_AI_NO_FACE_RATE_ML_REVIEW_THRESHOLD) {
+      mlDetectorReviewReasons.push('ai_no_face_rate_high');
+    }
+
+    return {
+      rejected_count: rejectedCount,
+      issue_counts: issueCounts,
+      local_face_rejection_rate: localFaceRejectionRate,
+      ai_no_face_rate: aiNoFaceRate,
+      ml_detector_review_recommended: mlDetectorReviewReasons.length > 0,
+      ml_detector_review_reasons: mlDetectorReviewReasons,
+    };
+  }
+
+  private buildConcernCounts(
+    entries: SkinJournalEntry[],
+  ): Partial<Record<AnalysisConcern, number>> {
+    const counts: Partial<Record<AnalysisConcern, number>> = {};
+    for (const entry of entries) {
+      for (const concern of entry.analysis_observations?.detected_concerns ??
+        []) {
+        counts[concern.concern] = (counts[concern.concern] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  private buildPerAngleQualityOperationsMetrics(
+    entries: SkinJournalEntry[],
+  ): AngleQualityOperationsMetrics {
+    const accumulators = Object.fromEntries(
+      SKIN_JOURNAL_PHOTO_ANGLES.map((angle) => [
+        angle,
+        {
+          count: 0,
+          qualityScoreSum: 0,
+          qualityScoreCount: 0,
+          needsRetakeCount: 0,
+          faceMissingCount: 0,
+          usedForAnalysisCount: 0,
+          poorQualityCount: 0,
+        },
+      ]),
+    ) as Record<
+      Angle,
+      {
+        count: number;
+        qualityScoreSum: number;
+        qualityScoreCount: number;
+        needsRetakeCount: number;
+        faceMissingCount: number;
+        usedForAnalysisCount: number;
+        poorQualityCount: number;
+      }
+    >;
+
+    for (const entry of entries) {
+      for (const quality of entry.analysis_observations?.per_angle_quality ??
+        []) {
+        const accumulator = accumulators[quality.angle];
+        accumulator.count += 1;
+        if (typeof quality.quality_score === 'number') {
+          accumulator.qualityScoreSum += quality.quality_score;
+          accumulator.qualityScoreCount += 1;
+        }
+        if (quality.needs_retake) accumulator.needsRetakeCount += 1;
+        if (!quality.face_detected) accumulator.faceMissingCount += 1;
+        if (quality.used_for_analysis) accumulator.usedForAnalysisCount += 1;
+        if (
+          quality.needs_retake ||
+          quality.lighting_quality === 'poor' ||
+          quality.framing_quality === 'poor' ||
+          quality.blur_detected ||
+          !quality.face_detected
+        ) {
+          accumulator.poorQualityCount += 1;
+        }
+      }
+    }
+
+    return Object.fromEntries(
+      SKIN_JOURNAL_PHOTO_ANGLES.map((angle) => {
+        const accumulator = accumulators[angle];
+        const denominator = Math.max(1, accumulator.count);
+        const averageQualityScore =
+          accumulator.qualityScoreCount > 0
+            ? Number(
+                (
+                  accumulator.qualityScoreSum / accumulator.qualityScoreCount
+                ).toFixed(3),
+              )
+            : null;
+        return [
+          angle,
+          {
+            count: accumulator.count,
+            average_quality_score: averageQualityScore,
+            needs_retake_rate: accumulator.needsRetakeCount / denominator,
+            face_missing_rate: accumulator.faceMissingCount / denominator,
+            used_for_analysis_rate:
+              accumulator.usedForAnalysisCount / denominator,
+            poor_quality_rate: accumulator.poorQualityCount / denominator,
+          },
+        ];
+      }),
+    ) as AngleQualityOperationsMetrics;
   }
 
   private scheduleAnalysisRecovery(): void {
@@ -2053,8 +2502,14 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       where: { id: insightId, user_id: userId },
     });
     if (!insight) throw new NotFoundException('Insight not found');
-    insight.dismissed_at = new Date();
+    insight.dismissed_at = nowDate();
     await this.insights.save(insight);
+    await this.recordInsightInteraction({
+      userId,
+      insightId,
+      interactionType: InsightInteractionTypeValue.Dismissed,
+      actionKind: null,
+    });
   }
 
   async markInsightSeen(userId: string, insightId: string): Promise<void> {
@@ -2063,9 +2518,58 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     });
     if (!insight) return;
     if (!insight.seen_at) {
-      insight.seen_at = new Date();
+      insight.seen_at = nowDate();
       await this.insights.save(insight);
+      await this.recordInsightInteraction({
+        userId,
+        insightId,
+        interactionType: InsightInteractionTypeValue.Seen,
+        actionKind: null,
+      });
     }
+  }
+
+  async recordInsightAction(
+    userId: string,
+    insightId: string,
+    params: { action_kind: InsightAction['kind'] },
+  ): Promise<void> {
+    const insight = await this.insights.findOne({
+      where: { id: insightId, user_id: userId },
+    });
+    if (!insight) throw new NotFoundException('Insight not found');
+    if (!insight.seen_at) {
+      insight.seen_at = nowDate();
+      await this.insights.save(insight);
+      await this.recordInsightInteraction({
+        userId,
+        insightId,
+        interactionType: InsightInteractionTypeValue.Seen,
+        actionKind: null,
+      });
+    }
+    await this.recordInsightInteraction({
+      userId,
+      insightId,
+      interactionType: InsightInteractionTypeValue.ActionClicked,
+      actionKind: params.action_kind,
+    });
+  }
+
+  private async recordInsightInteraction(params: {
+    userId: string;
+    insightId: string;
+    interactionType: SkinJournalInsightInteraction['interaction_type'];
+    actionKind: SkinJournalInsightInteraction['action_kind'];
+  }): Promise<void> {
+    await this.insightInteractions.save(
+      this.insightInteractions.create({
+        user_id: params.userId,
+        insight_id: params.insightId,
+        interaction_type: params.interactionType,
+        action_kind: params.actionKind,
+      }),
+    );
   }
 
   async generateInsightsIfNeeded(
@@ -2081,6 +2585,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     const state = await this.insightStates.findOne({
       where: { user_id: userId },
     });
+    const cadence = await this.loadInsightCadenceSettings(userId);
     const activeJob = await this.insightQueue.getActiveJobForUser(userId);
     if (activeJob) {
       await this.updateInsightStateAfterSchedulerCheck(
@@ -2091,7 +2596,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    if (!this.shouldQueuePeriodicInsightGeneration(state, snapshot)) {
+    if (!this.shouldQueuePeriodicInsightGeneration(state, snapshot, cadence)) {
       await this.updateInsightStateAfterSchedulerCheck(
         userId,
         snapshot.signature,
@@ -2132,6 +2637,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   private shouldQueuePeriodicInsightGeneration(
     state: SkinJournalInsightState | null,
     snapshot: { signature: string; entryCount: number },
+    cadence: InsightCadenceSettings,
   ): boolean {
     if (
       snapshot.entryCount <
@@ -2171,9 +2677,33 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
 
     const nextEligibleAt = new Date(state.last_generated_at);
     nextEligibleAt.setUTCDate(
-      nextEligibleAt.getUTCDate() + SKIN_JOURNAL_INSIGHT_PERIODIC_INTERVAL_DAYS,
+      nextEligibleAt.getUTCDate() +
+        INSIGHT_CADENCE_INTERVAL_DAYS[cadence.cadence],
     );
-    return nextEligibleAt.getTime() <= Date.now();
+    return (
+      nextEligibleAt.getTime() <= Date.now() &&
+      isInsightDigestWindowOpen(nowDate(), cadence)
+    );
+  }
+
+  private async loadInsightCadenceSettings(
+    userId: string,
+  ): Promise<InsightCadenceSettings> {
+    const [prefs, user] = await Promise.all([
+      this.notifications.getPreferences(userId),
+      this.users.findOne({
+        where: { id: userId },
+        select: { id: true, time_zone: true },
+      }),
+    ]);
+    return {
+      cadence: normalizeInsightCadence(prefs.insight_cadence),
+      digestDay: normalizeInsightDigestDay(prefs.insight_digest_day),
+      digestLocalTime: normalizeInsightDigestLocalTime(
+        prefs.insight_digest_local_time,
+      ),
+      timeZone: resolveSkinJournalTimeZone(user?.time_zone ?? null),
+    };
   }
 
   private async updateInsightStateAfterSchedulerCheck(
@@ -2225,15 +2755,119 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     if (recentEntries.length === 0) {
       return null;
     }
+    const routineApplications = await this.loadInsightRoutineApplications(
+      userId,
+      recentEntries,
+    );
     const normalizedEntryCount = Math.max(entryCount, recentEntries.length);
     return {
-      signature: this.hashInsightInputs(recentEntries),
+      signature: this.hashInsightInputs(recentEntries, routineApplications),
       entryCount: normalizedEntryCount,
     };
   }
 
-  private hashInsightInputs(entries: SkinJournalEntry[]): string {
-    const payload = [...entries]
+  private async loadInsightRoutineApplications(
+    userId: string,
+    entries: SkinJournalEntry[],
+  ): Promise<RoutineApplicationEvidence[]> {
+    if (entries.length === 0) {
+      return [];
+    }
+    const dates = entries.map((entry) => entry.entry_date).sort();
+    const start = dates[0];
+    const end = dates.at(-1) ?? start;
+    const logs = await this.applicationLogs.find({
+      where: {
+        user_id: userId,
+        target_date: Between(start, end),
+      },
+      relations: { items: true },
+      select: {
+        id: true,
+        user_id: true,
+        suggestion_instance_id: true,
+        slot_id: true,
+        target_date: true,
+        target_time: true,
+        daypart: true,
+        updated_at: true,
+        has_been_edited: true,
+        items: {
+          id: true,
+          application_log_id: true,
+          step_order: true,
+          suggestion_step_id: true,
+          status: true,
+          step_label: true,
+          inventory_product_id: true,
+          substituted_with_product_id: true,
+          applied_at: true,
+          item_source: true,
+          is_ad_hoc: true,
+        },
+      },
+      order: { target_date: 'ASC' },
+    });
+
+    const compareNullable = (
+      left: string | null | undefined,
+      right: string | null | undefined,
+    ) => (left ?? '').localeCompare(right ?? '');
+
+    return [...logs]
+      .sort(
+        (left, right) =>
+          left.target_date.localeCompare(right.target_date) ||
+          left.id.localeCompare(right.id),
+      )
+      .map((log) => ({
+        id: log.id,
+        suggestion_instance_id: log.suggestion_instance_id,
+        slot_id: log.slot_id,
+        target_date: log.target_date,
+        target_time: log.target_time,
+        daypart: log.daypart,
+        updated_at: log.updated_at?.toISOString?.() ?? null,
+        has_been_edited: log.has_been_edited,
+        items: [...(log.items ?? [])]
+          .sort((left, right) => {
+            return (
+              left.step_order - right.step_order ||
+              compareNullable(left.step_label, right.step_label) ||
+              compareNullable(
+                left.inventory_product_id,
+                right.inventory_product_id,
+              ) ||
+              compareNullable(
+                left.substituted_with_product_id,
+                right.substituted_with_product_id,
+              ) ||
+              left.status.localeCompare(right.status) ||
+              compareNullable(
+                left.applied_at?.toISOString?.(),
+                right.applied_at?.toISOString?.(),
+              )
+            );
+          })
+          .map((item) => ({
+            step_order: item.step_order,
+            suggestion_step_id: item.suggestion_step_id,
+            status: item.status,
+            step_label: item.step_label,
+            inventory_product_id: item.inventory_product_id,
+            substituted_with_product_id: item.substituted_with_product_id,
+            applied_at: item.applied_at?.toISOString?.() ?? null,
+            item_source: item.item_source,
+            is_ad_hoc: item.is_ad_hoc,
+          })),
+      }));
+  }
+
+  private hashInsightInputs(
+    entries: SkinJournalEntry[],
+    routineApplications: RoutineApplicationEvidence[] = [],
+  ): string {
+    const entryPayload = [...entries]
       .sort((left, right) => left.entry_date.localeCompare(right.entry_date))
       .map((entry) => ({
         id: entry.id,
@@ -2257,6 +2891,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         recent_change: entry.recent_change,
         complaint_note: entry.complaint_note,
       }));
+    const payload =
+      routineApplications.length > 0
+        ? {
+            entries: entryPayload,
+            routine_applications: routineApplications,
+          }
+        : entryPayload;
     return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   }
 
@@ -2338,6 +2979,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       take: 30,
     });
     if (recentEntries.length === 0) return;
+    const routineApplications = await this.loadInsightRoutineApplications(
+      userId,
+      recentEntries,
+    );
 
     const entriesAsc = [...recentEntries].sort((a, b) =>
       a.entry_date.localeCompare(b.entry_date),
@@ -2372,6 +3017,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         generatedAt,
         aiSummaryEnabled,
         aiPatternEnabled,
+        routineApplications,
       });
       const polished = await this.insightPolish.polish(candidates, {
         locale: options.locale ?? 'en',
@@ -3228,6 +3874,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async markProductOrRoutineInsightsDirty(userId: string): Promise<void> {
+    await this.markInsightsAfterJournalChange(
+      userId,
+      'product_or_routine_changed',
+    );
+  }
+
   private async markInsightInputsDirty(
     userId: string,
     reason: InsightGenerationTrigger,
@@ -3614,6 +4267,88 @@ function isTrendSafeBaseline(obs: AnalysisObservations | null): boolean {
     obs.image_quality.needs_retake !== true &&
     obs.image_quality.excluded_from_trends_reason == null
   );
+}
+
+function hasAiNoFaceSignal(obs: AnalysisObservations): boolean {
+  return (
+    obs.image_quality.face_detected === false ||
+    obs.image_quality.issues.includes('non_face_image') ||
+    (obs.per_angle_quality ?? []).some(
+      (quality) =>
+        quality.face_detected === false ||
+        quality.issues.includes('non_face_image'),
+    )
+  );
+}
+
+function normalizeInsightCadence(value: unknown): InsightCadence {
+  return value === 'fewer' || value === 'weekly'
+    ? value
+    : INSIGHT_CADENCE_DEFAULT;
+}
+
+function normalizeInsightDigestDay(value: unknown): number {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 7
+    ? value
+    : INSIGHT_DIGEST_DAY_DEFAULT;
+}
+
+function normalizeInsightDigestLocalTime(value: unknown): string {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d/.test(value)
+    ? value.slice(0, 5)
+    : INSIGHT_DIGEST_LOCAL_TIME_DEFAULT;
+}
+
+function isInsightDigestWindowOpen(
+  now: Date,
+  cadence: InsightCadenceSettings,
+): boolean {
+  if (isoDayInTimeZone(now, cadence.timeZone) !== cadence.digestDay) {
+    return false;
+  }
+  return (
+    minutesInTimeZone(now, cadence.timeZone) >=
+    parseClockMinutes(cadence.digestLocalTime)
+  );
+}
+
+function isoDayInTimeZone(now: Date, timeZone: string): number {
+  const shortDay = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+  }).format(now);
+  const dayByName: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+  return dayByName[shortDay] ?? 1;
+}
+
+function minutesInTimeZone(now: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0);
+  const minute = Number(
+    parts.find((part) => part.type === 'minute')?.value ?? 0,
+  );
+  return hour * 60 + minute;
+}
+
+function parseClockMinutes(value: string): number {
+  const [hours = '0', minutes = '0'] = value.split(':');
+  return Number(hours) * 60 + Number(minutes);
 }
 
 function isUniqueViolation(error: unknown): boolean {

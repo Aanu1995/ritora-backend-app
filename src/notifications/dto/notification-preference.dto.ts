@@ -17,9 +17,16 @@ import {
 } from '../entities/user-notification-preference.entity';
 import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 import {
+  INSIGHT_CADENCE_DEFAULT,
+  INSIGHT_CADENCE_VALUES,
+  INSIGHT_DIGEST_DAY_DEFAULT,
+  INSIGHT_DIGEST_DAY_MAX,
+  INSIGHT_DIGEST_DAY_MIN,
+  INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
   PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
   PRODUCT_EXPIRY_NOTICE_DAYS_MAX,
   PRODUCT_EXPIRY_NOTICE_DAYS_MIN,
+  type InsightCadence,
 } from '../notifications.constants';
 
 export const SUGGESTION_LEAD_TIME_MIN_MINUTES = 30;
@@ -50,6 +57,23 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() simplification_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() insight_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() ai_polished_insights_enabled?: boolean;
+  @IsOptional()
+  @IsIn(INSIGHT_CADENCE_VALUES)
+  insight_cadence?: InsightCadence;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsInt()
+  @Min(INSIGHT_DIGEST_DAY_MIN)
+  @Max(INSIGHT_DIGEST_DAY_MAX)
+  insight_digest_day?: number;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @Matches(HHMM_PATTERN)
+  insight_digest_local_time?: string;
+
   @IsOptional() @IsBoolean() wrapped_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() photo_tutorial_completed?: boolean;
 
@@ -110,6 +134,18 @@ export class PreferencesResponseDto {
   @ApiProperty()
   ai_polished_insights_enabled: boolean;
 
+  @ApiProperty({ enum: INSIGHT_CADENCE_VALUES })
+  insight_cadence: InsightCadence;
+
+  @ApiProperty({
+    minimum: INSIGHT_DIGEST_DAY_MIN,
+    maximum: INSIGHT_DIGEST_DAY_MAX,
+  })
+  insight_digest_day: number;
+
+  @ApiProperty()
+  insight_digest_local_time: string;
+
   @ApiProperty()
   wrapped_alerts_enabled: boolean;
 
@@ -154,13 +190,22 @@ export class PreferencesResponseDto {
 
   static fromEntity(p: UserNotificationPreference): PreferencesResponseDto {
     const dto = new PreferencesResponseDto();
-    dto.photo_reminder_local_time = normalizeHhmm(p.photo_reminder_local_time);
+    dto.photo_reminder_local_time = normalizeHhmm(
+      p.photo_reminder_local_time,
+      '00:00',
+    );
     dto.photo_reminder_enabled = p.photo_reminder_enabled;
     dto.channels = p.channels;
     dto.reaction_alerts_enabled = p.reaction_alerts_enabled;
     dto.simplification_alerts_enabled = p.simplification_alerts_enabled;
     dto.insight_alerts_enabled = p.insight_alerts_enabled;
     dto.ai_polished_insights_enabled = p.ai_polished_insights_enabled;
+    dto.insight_cadence = normalizeInsightCadence(p.insight_cadence);
+    dto.insight_digest_day = normalizeInsightDigestDay(p.insight_digest_day);
+    dto.insight_digest_local_time = normalizeHhmm(
+      p.insight_digest_local_time,
+      INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
+    );
     dto.wrapped_alerts_enabled = p.wrapped_alerts_enabled;
     dto.suggestion_ready_enabled = p.suggestion_ready_enabled;
     dto.smart_pick_ready_enabled = p.smart_pick_ready_enabled ?? false;
@@ -172,11 +217,29 @@ export class PreferencesResponseDto {
     );
     dto.suggestion_lead_time_minutes = p.suggestion_lead_time_minutes;
     dto.quiet_hours_enabled = p.quiet_hours_enabled;
-    dto.quiet_hours_start = normalizeHhmm(p.quiet_hours_start);
-    dto.quiet_hours_end = normalizeHhmm(p.quiet_hours_end);
+    dto.quiet_hours_start = normalizeHhmm(p.quiet_hours_start, '00:00');
+    dto.quiet_hours_end = normalizeHhmm(p.quiet_hours_end, '00:00');
     dto.photo_tutorial_completed = p.photo_tutorial_completed;
     return dto;
   }
+}
+
+function normalizeInsightCadence(
+  value: InsightCadence | null | undefined,
+): InsightCadence {
+  return INSIGHT_CADENCE_VALUES.includes(value as InsightCadence)
+    ? (value as InsightCadence)
+    : INSIGHT_CADENCE_DEFAULT;
+}
+
+function normalizeInsightDigestDay(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return INSIGHT_DIGEST_DAY_DEFAULT;
+  }
+  return Math.max(
+    INSIGHT_DIGEST_DAY_MIN,
+    Math.min(INSIGHT_DIGEST_DAY_MAX, value),
+  );
 }
 
 function normalizeProductExpiryNoticeDays(value: number | null | undefined) {
@@ -189,8 +252,11 @@ function normalizeProductExpiryNoticeDays(value: number | null | undefined) {
   );
 }
 
-function normalizeHhmm(value: string | null | undefined): string {
-  if (!value) return '00:00';
+function normalizeHhmm(
+  value: string | null | undefined,
+  fallback: string,
+): string {
+  if (!value) return fallback;
   const [hours = '00', minutes = '00'] = value.split(':');
   return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}`;
 }

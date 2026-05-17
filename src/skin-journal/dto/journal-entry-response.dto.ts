@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { SkinJournalEntry } from '../entities/skin-journal-entry.entity';
 import type {
   AnalysisObservations,
+  AnalysisFailureCode,
   AnalysisStatus,
   Angle,
   CycleMarker,
@@ -123,6 +124,9 @@ export class JournalEntryResponseDto {
   analysis_prompt_version: string | null;
 
   @ApiProperty({ required: false, nullable: true })
+  analysis_error_code: AnalysisFailureCode | null;
+
+  @ApiProperty({ required: false, nullable: true })
   analysis_started_at: Date | null;
 
   @ApiProperty({ required: false, nullable: true })
@@ -190,6 +194,7 @@ export class JournalEntryResponseDto {
     dto.analysis_model = entry.analysis_model;
     dto.analysis_version = entry.analysis_version;
     dto.analysis_prompt_version = entry.analysis_prompt_version;
+    dto.analysis_error_code = entry.analysis_error_code;
     dto.analysis_started_at = entry.analysis_started_at;
     dto.analysis_completed_at = entry.analysis_completed_at;
     dto.analysis_duration_ms = entry.analysis_duration_ms;
