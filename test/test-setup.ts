@@ -5,6 +5,7 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { CataloguePhotoStorageService } from '../src/catalogue/catalogue-photo-storage.service';
 import { IngredientCatalogService } from '../src/ingredients/ingredient-catalog.service';
 import { IngredientsSeeder } from '../src/ingredients/seed/ingredients-seeder';
 import { MailService } from '../src/mail/mail.service';
@@ -98,6 +99,31 @@ export class MockMailService {
   }
 }
 
+export class MockCataloguePhotoStorageService {
+  startHeroImageUpload(): { url: Promise<null>; cleanup: () => Promise<void> } {
+    return {
+      url: Promise.resolve(null),
+      cleanup: async () => {},
+    };
+  }
+
+  async saveHeroImage(): Promise<null> {
+    return null;
+  }
+
+  toPersistentImageUrls(imageUrls: string[]): string[] {
+    return imageUrls;
+  }
+
+  resolvePublicImageUrls(imageUrls: string[]): string[] {
+    return imageUrls;
+  }
+
+  async deleteManagedImageUrls(): Promise<void> {}
+
+  async deleteManagedImagesForOwner(): Promise<void> {}
+}
+
 export async function createTestApp(
   mockMailService: MockMailService,
   providerOverrides: TestAppProviderOverride[] = [],
@@ -106,7 +132,9 @@ export async function createTestApp(
     imports: [AppModule],
   })
     .overrideProvider(MailService)
-    .useValue(mockMailService);
+    .useValue(mockMailService)
+    .overrideProvider(CataloguePhotoStorageService)
+    .useValue(new MockCataloguePhotoStorageService());
 
   for (const override of providerOverrides) {
     moduleBuilder = moduleBuilder

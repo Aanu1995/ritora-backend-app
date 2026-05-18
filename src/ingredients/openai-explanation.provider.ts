@@ -17,8 +17,44 @@ import type {
   ExplanationPort,
 } from './explanation.port';
 
-const REQUEST_TIMEOUT_MS = 15000;
+export const OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS = 45_000;
 const DEFAULT_MODEL = 'gpt-5-mini';
+const EXPLANATION_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  name: 'ingredient_explanations',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['conflicts', 'overlaps'],
+    properties: {
+      conflicts: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'explanation'],
+          properties: {
+            id: { type: 'string' },
+            explanation: { type: 'string' },
+          },
+        },
+      },
+      overlaps: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'explanation'],
+          properties: {
+            id: { type: 'string' },
+            explanation: { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+} as const;
 
 @Injectable()
 export class OpenAiExplanationProvider implements ExplanationPort {
@@ -83,7 +119,10 @@ export class OpenAiExplanationProvider implements ExplanationPort {
           model,
           store: false,
           reasoning: { effort: 'low' },
-          text: { verbosity: 'low' },
+          text: {
+            verbosity: 'low',
+            format: EXPLANATION_RESPONSE_FORMAT,
+          },
           max_output_tokens: 700,
           ...openAiRepeatabilityRequestOptions(model),
           input: [
@@ -117,7 +156,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
             },
           ],
         }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS),
       });
 
       const durationMs = Date.now() - startedAt;

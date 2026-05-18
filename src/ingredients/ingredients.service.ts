@@ -7,23 +7,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { AppLanguage } from '../common/i18n/i18n';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
-import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
-import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
-import { UserDataAccessLogService } from '../users/user-data-access-log.service';
-import { UserDataAccessPurpose } from '../users/user-consent.constants';
 import { AnalysisService } from './analysis.service';
 import { AnalyzeProductsDto } from './dto/analyze-products.dto';
 import type { AnalysisResult, ProductForAnalysis } from './ingredients.types';
+import { SkinProfileAnalysisContextService } from './skin-profile-analysis-context.service';
 
 @Injectable()
 export class IngredientsService {
   constructor(
     @InjectRepository(InventoryProduct)
     private readonly inventoryRepository: Repository<InventoryProduct>,
-    @InjectRepository(SkinProfile)
-    private readonly skinProfileRepository: Repository<SkinProfile>,
     private readonly analysisService: AnalysisService,
-    private readonly dataAccessLogService: UserDataAccessLogService,
+    private readonly analysisContext: SkinProfileAnalysisContextService,
   ) {}
 
   async analyzeForUser(
@@ -32,17 +27,7 @@ export class IngredientsService {
     language: AppLanguage,
   ): Promise<AnalysisResult> {
     this.validateAnalyzeRequest(dto);
-    const skinProfile = await this.skinProfileRepository.findOne({
-      where: { user_id: userId },
-    });
-
-    if (skinProfile) {
-      await this.dataAccessLogService.recordDataAccess(
-        userId,
-        getSensitiveSkinProfileConsentTypes(skinProfile),
-        UserDataAccessPurpose.RecommendationAnalysis,
-      );
-    }
+    const skinProfile = await this.analysisContext.loadForUser(userId);
 
     if (dto.focusProductId) {
       const focusProduct = await this.inventoryRepository.findOne({

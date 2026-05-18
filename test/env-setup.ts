@@ -11,6 +11,7 @@ config({
 });
 
 applyTestEnv(resolve(rootDir, '.env.test'), shellProvidedKeys);
+applyE2eSafeDrivers();
 
 function applyTestEnv(
   envPath: string,
@@ -37,4 +38,11 @@ function applyTestEnv(
 
     process.env[key] = value;
   }
+}
+
+function applyE2eSafeDrivers(): void {
+  process.env.ACCOUNT_DELETION_FINALIZATION_DRIVER = 'database';
+  process.env.SMART_PICKS_QUEUE_DRIVER = 'database';
+  process.env.SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER = 'database';
+  process.env.SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER = 'database';
 }

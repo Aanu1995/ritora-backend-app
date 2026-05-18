@@ -81,7 +81,7 @@ export function scoreAnalysis(input: {
 }): number {
   let score = 100;
 
-  for (const conflict of input.conflicts) {
+  for (const conflict of uniquePenaltyConflicts(input.conflicts)) {
     score -= CONFLICT_PENALTIES[conflict.severity];
   }
 
@@ -90,4 +90,27 @@ export function scoreAnalysis(input: {
   }
 
   return Math.max(0, score);
+}
+
+function uniquePenaltyConflicts(
+  conflicts: AnalysisConflict[],
+): AnalysisConflict[] {
+  const seen = new Set<string>();
+  const unique: AnalysisConflict[] = [];
+
+  for (const conflict of conflicts) {
+    const key = [
+      conflict.code,
+      ...[conflict.productAId, conflict.productBId].sort(),
+    ].join(':');
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    unique.push(conflict);
+  }
+
+  return unique;
 }

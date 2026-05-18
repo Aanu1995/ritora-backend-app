@@ -1096,7 +1096,10 @@ describe('AuthService', () => {
       });
       expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
         user.id,
-        [UserConsentType.LocationProcessing],
+        [
+          UserConsentType.LocationProcessing,
+          UserConsentType.HealthContextProcessing,
+        ],
         UserDataAccessPurpose.AccountExport,
       );
       expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(

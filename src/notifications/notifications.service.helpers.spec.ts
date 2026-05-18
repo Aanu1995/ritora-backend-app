@@ -226,7 +226,6 @@ describe('notification persistence helpers', () => {
       reaction_alerts_enabled: false,
       simplification_alerts_enabled: false,
       insight_alerts_enabled: false,
-      ai_polished_insights_enabled: false,
       insight_cadence: 'fewer',
       insight_digest_day: 5,
       insight_digest_local_time: '14:30',

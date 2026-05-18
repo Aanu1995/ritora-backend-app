@@ -1694,10 +1694,7 @@ describe('SkinJournalService', () => {
     );
   });
 
-  it('does not generate AI sourced insight cards when the user disables AI refined insights', async () => {
-    notifications.getPreferences.mockResolvedValueOnce({
-      ai_polished_insights_enabled: false,
-    });
+  it('keeps AI sourced insight generation enabled without a user quality toggle', async () => {
     const entriesForInsights = Array.from({ length: 14 }, (_, index) =>
       entry({
         id: `entry-${index}`,
@@ -1722,11 +1719,10 @@ describe('SkinJournalService', () => {
     const savedKinds = insights.save.mock.calls.map(
       ([candidate]) => candidate.kind as string,
     );
-    expect(savedKinds).not.toContain('ai_summary');
-    expect(savedKinds).not.toContain('ai_pattern');
+    expect(savedKinds).toEqual(expect.arrayContaining(['ai_summary']));
     expect(insightPolish.polish).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({ aiPolishEnabled: false }),
+      expect.objectContaining({ aiPolishEnabled: true }),
     );
   });
 

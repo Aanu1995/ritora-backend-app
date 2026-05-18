@@ -56,7 +56,6 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() reaction_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() simplification_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() insight_alerts_enabled?: boolean;
-  @IsOptional() @IsBoolean() ai_polished_insights_enabled?: boolean;
   @IsOptional()
   @IsIn(INSIGHT_CADENCE_VALUES)
   insight_cadence?: InsightCadence;
@@ -131,9 +130,6 @@ export class PreferencesResponseDto {
   @ApiProperty()
   insight_alerts_enabled: boolean;
 
-  @ApiProperty()
-  ai_polished_insights_enabled: boolean;
-
   @ApiProperty({ enum: INSIGHT_CADENCE_VALUES })
   insight_cadence: InsightCadence;
 
@@ -199,7 +195,6 @@ export class PreferencesResponseDto {
     dto.reaction_alerts_enabled = p.reaction_alerts_enabled;
     dto.simplification_alerts_enabled = p.simplification_alerts_enabled;
     dto.insight_alerts_enabled = p.insight_alerts_enabled;
-    dto.ai_polished_insights_enabled = p.ai_polished_insights_enabled;
     dto.insight_cadence = normalizeInsightCadence(p.insight_cadence);
     dto.insight_digest_day = normalizeInsightDigestDay(p.insight_digest_day);
     dto.insight_digest_local_time = normalizeHhmm(

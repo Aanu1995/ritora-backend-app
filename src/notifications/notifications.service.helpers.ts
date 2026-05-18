@@ -419,8 +419,6 @@ export function applyPreferenceUpdates(
     prefs.simplification_alerts_enabled = dto.simplification_alerts_enabled;
   if (dto.insight_alerts_enabled !== undefined)
     prefs.insight_alerts_enabled = dto.insight_alerts_enabled;
-  if (dto.ai_polished_insights_enabled !== undefined)
-    prefs.ai_polished_insights_enabled = dto.ai_polished_insights_enabled;
   if (dto.insight_cadence !== undefined)
     prefs.insight_cadence = dto.insight_cadence;
   if (dto.insight_digest_day !== undefined)

@@ -12,8 +12,11 @@ import type { Request } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { normalizeLanguage, resolveRequestLanguage } from '../common/i18n/i18n';
 import { AnalyzeProductsDto } from './dto/analyze-products.dto';
+import { CheckProductDto } from './dto/check-product.dto';
 import { IngredientsService } from './ingredients.service';
 import type { AnalysisResult } from './ingredients.types';
+import { ProductCheckService } from './product-check.service';
+import type { ProductCheckResponse } from './product-check.types';
 
 const isTest = process.env.NODE_ENV === 'test';
 
@@ -27,7 +30,10 @@ const analyzeThrottle = {
 @ApiTags('ingredients')
 @Controller('ingredients')
 export class IngredientsController {
-  constructor(private readonly ingredientsService: IngredientsService) {}
+  constructor(
+    private readonly ingredientsService: IngredientsService,
+    private readonly productCheckService: ProductCheckService,
+  ) {}
 
   @Post('analyze')
   @HttpCode(HttpStatus.OK)
@@ -43,5 +49,21 @@ export class IngredientsController {
       : resolveRequestLanguage(request);
 
     return this.ingredientsService.analyzeForUser(userId, dto, language);
+  }
+
+  @Post('check-product')
+  @HttpCode(HttpStatus.OK)
+  @Throttle(analyzeThrottle)
+  @ApiOkResponse({ description: 'Ephemeral product check result' })
+  checkProduct(
+    @CurrentUser('id') userId: string,
+    @Req() request: Request,
+    @Body() dto: CheckProductDto,
+  ): Promise<ProductCheckResponse> {
+    const language = dto.language
+      ? normalizeLanguage(dto.language)
+      : resolveRequestLanguage(request);
+
+    return this.productCheckService.checkForUser(userId, dto, language);
   }
 }

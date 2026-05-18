@@ -54,7 +54,7 @@ describe('safety-scorer', () => {
         ingredientA: 'Retinol',
         ingredientB: 'Glycolic acid',
         productAId: 'a',
-        productBId: 'b',
+        productBId: `b-${index}`,
         explanation: null,
         description: 'desc',
       })),
@@ -62,6 +62,49 @@ describe('safety-scorer', () => {
     });
 
     expect(score).toBe(0);
+  });
+
+  it('penalizes repeated conflict families between the same products once', () => {
+    const score = scoreAnalysis({
+      conflicts: [
+        {
+          id: 'aha-bha:citric:azelaic',
+          code: 'AHA_BHA',
+          severity: AnalysisSeverity.Medium,
+          ingredientA: 'Citric acid',
+          ingredientB: 'Azelaic acid',
+          productAId: 'checked-product',
+          productBId: 'shelf-1',
+          explanation: null,
+          description: 'desc',
+        },
+        {
+          id: 'aha-bha:citric:salicylic',
+          code: 'AHA_BHA',
+          severity: AnalysisSeverity.Medium,
+          ingredientA: 'Citric acid',
+          ingredientB: 'Salicylic acid',
+          productAId: 'checked-product',
+          productBId: 'shelf-1',
+          explanation: null,
+          description: 'desc',
+        },
+        {
+          id: 'aha-bha:citric:willow',
+          code: 'AHA_BHA',
+          severity: AnalysisSeverity.Medium,
+          ingredientA: 'Citric acid',
+          ingredientB: 'Willow bark extract',
+          productAId: 'checked-product',
+          productBId: 'shelf-1',
+          explanation: null,
+          description: 'desc',
+        },
+      ],
+      overlaps: [],
+    });
+
+    expect(score).toBe(85);
   });
 
   it('bumps severity for sensitive skin type', () => {

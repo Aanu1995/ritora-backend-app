@@ -3004,9 +3004,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     );
 
     try {
-      const preferences = await this.notifications.getPreferences(userId);
-      const aiPolishEnabled =
-        preferences.ai_polished_insights_enabled !== false;
+      const aiPolishEnabled = true;
       const aiSummaryEnabled =
         aiPolishEnabled && SKIN_JOURNAL_INSIGHT_SUMMARY_CARDS_ENABLED;
       const aiPatternEnabled =

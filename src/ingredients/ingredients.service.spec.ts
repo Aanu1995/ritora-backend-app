@@ -2,10 +2,9 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ProductCategory } from '../shelf/shelf.types';
-import { UserDataAccessPurpose } from '../users/user-consent.constants';
-import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { AnalysisService } from './analysis.service';
 import { IngredientsService } from './ingredients.service';
+import { SkinProfileAnalysisContextService } from './skin-profile-analysis-context.service';
 
 function product(id: string): InventoryProduct {
   return Object.assign(new InventoryProduct(), {
@@ -23,14 +22,11 @@ describe('IngredientsService', () => {
     findOne: jest.fn(),
     find: jest.fn(),
   };
-  const skinProfileRepository = {
-    findOne: jest.fn(),
-  };
   const analysisService = {
     analyze: jest.fn(),
   };
-  const dataAccessLogService = {
-    recordDataAccess: jest.fn(),
+  const analysisContext = {
+    loadForUser: jest.fn(),
   };
   let service: IngredientsService;
 
@@ -38,12 +34,11 @@ describe('IngredientsService', () => {
     jest.clearAllMocks();
     service = new IngredientsService(
       inventoryRepository as never,
-      skinProfileRepository as never,
       analysisService as unknown as AnalysisService,
-      dataAccessLogService as unknown as UserDataAccessLogService,
+      analysisContext as unknown as SkinProfileAnalysisContextService,
     );
     analysisService.analyze.mockResolvedValue({ status: 'ok' });
-    skinProfileRepository.findOne.mockResolvedValue(null);
+    analysisContext.loadForUser.mockResolvedValue(null);
   });
 
   it('rejects ambiguous analyze requests before touching user data', async () => {
@@ -66,7 +61,7 @@ describe('IngredientsService', () => {
         'en',
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(skinProfileRepository.findOne).not.toHaveBeenCalled();
+    expect(analysisContext.loadForUser).not.toHaveBeenCalled();
   });
 
   it('runs focus analysis only for a product owned by the user', async () => {
@@ -75,7 +70,7 @@ describe('IngredientsService', () => {
       has_health_context_consent: true,
       safety_context: { conditions: ['eczema'] },
     });
-    skinProfileRepository.findOne.mockResolvedValue(skinProfile);
+    analysisContext.loadForUser.mockResolvedValue(skinProfile);
     inventoryRepository.findOne.mockResolvedValue(focusProduct);
 
     await service.analyzeForUser(
@@ -87,11 +82,7 @@ describe('IngredientsService', () => {
     expect(inventoryRepository.findOne).toHaveBeenCalledWith({
       where: { id: 'product-1', user_id: 'user-1' },
     });
-    expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
-      'user-1',
-      expect.any(Array),
-      UserDataAccessPurpose.RecommendationAnalysis,
-    );
+    expect(analysisContext.loadForUser).toHaveBeenCalledWith('user-1');
     expect(analysisService.analyze).toHaveBeenCalledWith({
       products: [
         {

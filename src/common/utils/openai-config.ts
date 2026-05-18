@@ -9,6 +9,7 @@ export const INGREDIENT_TRANSLATION_AI_MODEL_ENV_KEY =
 export const SKIN_JOURNAL_ANALYSIS_AI_MODEL_ENV_KEY =
   'SKIN_JOURNAL_ANALYSIS_AI_MODEL';
 export const INSIGHTS_AI_MODEL_ENV_KEY = 'INSIGHTS_AI_MODEL';
+export const PRODUCT_CHECK_AI_MODEL_ENV_KEY = 'PRODUCT_CHECK_AI_MODEL';
 
 export function readOpenAiModel(
   configService: ConfigService,

@@ -1,7 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AnalysisSeverity } from './ingredients.types';
-import { OpenAiExplanationProvider } from './openai-explanation.provider';
+import {
+  OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS,
+  OpenAiExplanationProvider,
+} from './openai-explanation.provider';
 
 type ExplainInput = Parameters<OpenAiExplanationProvider['explainFindings']>[0];
 
@@ -47,6 +50,12 @@ describe('OpenAiExplanationProvider', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     jest.restoreAllMocks();
+  });
+
+  it('keeps the OpenAI timeout long enough for launch Quick Check requests', () => {
+    expect(OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(
+      45_000,
+    );
   });
 
   it('returns null and skips the network when the api key is missing', async () => {
@@ -199,9 +208,16 @@ describe('OpenAiExplanationProvider', () => {
     const body = JSON.parse(String(init.body)) as {
       store?: boolean;
       temperature?: number;
+      text?: { format?: { type?: string; strict?: boolean } };
     };
     expect(body.store).toBe(false);
     expect(body.temperature).toBe(0);
+    expect(body.text?.format).toEqual(
+      expect.objectContaining({
+        type: 'json_schema',
+        strict: true,
+      }),
+    );
   });
 
   it('short-circuits with null when there are no findings', async () => {
