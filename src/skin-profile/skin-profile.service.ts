@@ -29,7 +29,10 @@ import {
   SkinProfileSexAtBirth,
 } from './dto/skin-profile.constants';
 import { UpdateSkinProfileDto } from './dto/update-skin-profile.dto';
-import { SkinProfile } from './entities/skin-profile.entity';
+import {
+  type ReactionHistory,
+  SkinProfile,
+} from './entities/skin-profile.entity';
 import {
   computeSkinProfileCompleteness,
   isHormonalContextApplicable,
@@ -144,7 +147,7 @@ export class SkinProfileService {
       allow_smart_picks: dto.allowSmartPicks ?? true,
       budget_tier: dto.budgetTier ?? null,
       safety_context: dto.safetyContext ?? {},
-      reaction_history: dto.reactionHistory ?? {},
+      reaction_history: this.normalizeReactionHistory(dto.reactionHistory),
       concern_details: dto.concernDetails ?? {},
       skin_behavior: dto.skinBehavior ?? {},
       active_tolerances: dto.activeTolerances ?? {},
@@ -233,7 +236,9 @@ export class SkinProfileService {
     if (dto.safetyContext !== undefined)
       profile.safety_context = dto.safetyContext ?? {};
     if (dto.reactionHistory !== undefined)
-      profile.reaction_history = dto.reactionHistory ?? {};
+      profile.reaction_history = this.normalizeReactionHistory(
+        dto.reactionHistory,
+      );
     if (dto.concernDetails !== undefined)
       profile.concern_details = dto.concernDetails ?? {};
     if (dto.skinBehavior !== undefined)
@@ -557,7 +562,8 @@ export class SkinProfileService {
     return (
       dto.pregnancyStatus !== undefined ||
       dto.underDermatologistCare !== undefined ||
-      dto.safetyContext !== undefined
+      dto.safetyContext !== undefined ||
+      dto.reactionHistory !== undefined
     );
   }
 
@@ -627,6 +633,10 @@ export class SkinProfileService {
         dto.safetyContext !== undefined
           ? (dto.safetyContext ?? {})
           : (existingProfile?.safety_context ?? {}),
+      reaction_history:
+        dto.reactionHistory !== undefined
+          ? this.normalizeReactionHistory(dto.reactionHistory)
+          : (existingProfile?.reaction_history ?? {}),
     } as SkinProfile;
 
     if (!this.hasHealthContextData(projected)) {
@@ -680,6 +690,35 @@ export class SkinProfileService {
           'Hormonal-context consent is required when saving hormonal context',
       });
     }
+  }
+
+  private normalizeReactionHistory(
+    reactionHistory: CreateSkinProfileDto['reactionHistory'] | null | undefined,
+  ): ReactionHistory {
+    const entries = reactionHistory?.entries ?? [];
+
+    if (reactionHistory?.has_known_reactions === false) {
+      return {
+        has_known_reactions: false,
+        entries: [],
+      };
+    }
+
+    if (reactionHistory?.has_known_reactions === true) {
+      return {
+        has_known_reactions: true,
+        entries,
+      };
+    }
+
+    if (entries.length > 0) {
+      return {
+        has_known_reactions: true,
+        entries,
+      };
+    }
+
+    return {};
   }
 
   private async syncLocationConsent(

@@ -38,6 +38,7 @@ export interface ReactionEntry {
 }
 
 export interface ReactionHistory {
+  has_known_reactions?: boolean | null;
   entries?: ReactionEntry[];
 }
 

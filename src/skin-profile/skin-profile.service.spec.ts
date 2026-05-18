@@ -299,6 +299,48 @@ describe('SkinProfileService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('requires health consent when saving reaction-history answers', async () => {
+      usersService.findById.mockResolvedValue(fakeUser());
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.create('01TESTUSER', {
+          ...validCreateDto(),
+          reactionHistory: { has_known_reactions: false },
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('stores no known reactions as an answered health-context field', async () => {
+      usersService.findById.mockResolvedValue(fakeUser());
+      repo.findOne.mockResolvedValue(null);
+
+      await service.create('01TESTUSER', {
+        ...validCreateDto(),
+        reactionHistory: {
+          has_known_reactions: false,
+          entries: [{ trigger: 'Fragrance' }],
+        },
+        healthContextConsent: true,
+      });
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reaction_history: {
+            has_known_reactions: false,
+            entries: [],
+          },
+        }),
+      );
+      expect(consentsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: '01TESTUSER',
+          consent_type: UserConsentType.HealthContextProcessing,
+          granted: true,
+        }),
+      );
+    });
+
     it('records hormonal consent when hormonal context is saved', async () => {
       usersService.findById.mockResolvedValue(fakeUser());
       repo.findOne.mockResolvedValue(null);
@@ -480,6 +522,39 @@ describe('SkinProfileService', () => {
       expect(repo.save).not.toHaveBeenCalled();
     });
 
+    it('requires health consent when updating reaction-history answers', async () => {
+      repo.findOne.mockResolvedValue(fakeProfile());
+
+      await expect(
+        service.update('01TESTUSER', {
+          reactionHistory: { has_known_reactions: false },
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('updates no known reactions when health consent is provided', async () => {
+      repo.findOne.mockResolvedValue(fakeProfile());
+
+      await service.update('01TESTUSER', {
+        reactionHistory: {
+          has_known_reactions: false,
+          entries: [{ trigger: 'Fragrance' }],
+        },
+        healthContextConsent: true,
+      });
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reaction_history: {
+            has_known_reactions: false,
+            entries: [],
+          },
+        }),
+      );
+    });
+
     it('rejects active tolerances for unknown ingredients', async () => {
       repo.findOne.mockResolvedValue(fakeProfile());
 
@@ -545,10 +620,14 @@ describe('SkinProfileService', () => {
 
   describe('computeCompleteness', () => {
     it('weights completed essentials as the required foundation', () => {
-      expect(service.computeCompleteness(fakeProfile())).toBe(65);
+      expect(service.computeCompleteness(fakeProfile())).toBe(74);
     });
 
-    it('does not count location as water context completeness', () => {
+    it('counts location separately from water context completeness', () => {
+      const withoutLocation = fakeProfile({
+        country_code: null,
+        city: null,
+      });
       const withLocationOnly = fakeProfile({
         country_code: 'SE',
         city: 'Stockholm',
@@ -558,7 +637,8 @@ describe('SkinProfileService', () => {
         },
       });
 
-      expect(service.computeCompleteness(withLocationOnly)).toBe(65);
+      expect(service.computeCompleteness(withoutLocation)).toBe(70);
+      expect(service.computeCompleteness(withLocationOnly)).toBe(74);
     });
 
     it('keeps water context inside the essential score', () => {
@@ -569,7 +649,7 @@ describe('SkinProfileService', () => {
         },
       });
 
-      expect(service.computeCompleteness(withWaterContext)).toBe(65);
+      expect(service.computeCompleteness(withWaterContext)).toBe(74);
     });
 
     it('reaches full completeness when all applicable profile sections are filled', () => {
@@ -579,6 +659,30 @@ describe('SkinProfileService', () => {
         },
         reaction_history: {
           entries: [{ trigger: 'Salicylic acid' }],
+        },
+        lifestyle_context: {
+          sleep: '6_to_8',
+          water_hardness: 'hard',
+          water_sensitivity: 'suspected',
+        },
+        pregnancy_status: 'not_pregnant',
+        safety_context: {
+          conditions: ['eczema'],
+        },
+        hormonal_context: { cycle_pattern: 'regular' },
+      });
+
+      expect(service.computeCompleteness(profile)).toBe(100);
+    });
+
+    it('treats no known reaction history as completed reaction context', () => {
+      const profile = fakeProfile({
+        active_tolerances: {
+          retinoids: { tolerance: 'tolerates_well' },
+        },
+        reaction_history: {
+          has_known_reactions: false,
+          entries: [],
         },
         lifestyle_context: {
           sleep: '6_to_8',

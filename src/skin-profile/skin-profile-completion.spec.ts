@@ -77,11 +77,13 @@ describe('skin profile completion helpers', () => {
     ).toBe(false);
   });
 
-  it('scores essential completion separately from optional context', () => {
-    expect(computeSkinProfileCompleteness(completeProfile())).toBe(65);
+  it('does not penalize a profile when no reaction history is known', () => {
+    expect(computeSkinProfileCompleteness(completeProfile())).toBe(70);
     expect(
       computeSkinProfileCompleteness(
         completeProfile({
+          country_code: 'SE',
+          city: 'Stockholm',
           active_tolerances: {
             retinoids: { tolerance: 'tolerates_well' },
           },
@@ -99,6 +101,69 @@ describe('skin profile completion helpers', () => {
         }),
       ),
     ).toBe(100);
+  });
+
+  it('counts location context as its own completeness score', () => {
+    expect(
+      computeSkinProfileCompleteness(
+        completeProfile({
+          country_code: 'SE',
+          city: null,
+        }),
+      ),
+    ).toBe(74);
+  });
+
+  it('counts an explicit no-reaction-history answer as complete', () => {
+    expect(
+      computeSkinProfileCompleteness(
+        completeProfile({
+          country_code: 'SE',
+          city: 'Stockholm',
+          active_tolerances: {
+            retinoids: { tolerance: 'tolerates_well' },
+          },
+          reaction_history: {
+            has_known_reactions: false,
+            entries: [],
+          },
+          pregnancy_status: 'not_pregnant',
+          safety_context: { conditions: ['eczema'] },
+          lifestyle_context: {
+            sleep: '6_to_8',
+            water_hardness: 'hard',
+            water_sensitivity: 'suspected',
+          },
+          hormonal_context: { cycle_pattern: 'regular' },
+        }),
+      ),
+    ).toBe(100);
+  });
+
+  it('does not count a yes-reaction-history answer until entries are logged', () => {
+    expect(
+      computeSkinProfileCompleteness(
+        completeProfile({
+          country_code: 'SE',
+          city: 'Stockholm',
+          active_tolerances: {
+            retinoids: { tolerance: 'tolerates_well' },
+          },
+          reaction_history: {
+            has_known_reactions: true,
+            entries: [],
+          },
+          pregnancy_status: 'not_pregnant',
+          safety_context: { conditions: ['eczema'] },
+          lifestyle_context: {
+            sleep: '6_to_8',
+            water_hardness: 'hard',
+            water_sensitivity: 'suspected',
+          },
+          hormonal_context: { cycle_pattern: 'regular' },
+        }),
+      ),
+    ).toBe(92);
   });
 
   it('uses a stable error code for prerequisite failures', () => {

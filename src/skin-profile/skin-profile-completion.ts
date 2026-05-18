@@ -91,6 +91,7 @@ const SkinProfileCompletenessSection = {
   Reactions: 'reactions',
   ActiveTolerance: 'active_tolerance',
   Lifestyle: 'lifestyle',
+  Location: 'location',
   Hormonal: 'hormonal',
 } as const;
 
@@ -118,8 +119,7 @@ const COMPLETENESS_SECTIONS: CompletenessSection[] = [
   {
     key: SkinProfileCompletenessSection.Reactions,
     weight: 8,
-    isComplete: (profile) =>
-      (profile.reaction_history?.entries?.length ?? 0) > 0,
+    isComplete: hasCompletedReactionHistory,
   },
   {
     key: SkinProfileCompletenessSection.ActiveTolerance,
@@ -133,6 +133,11 @@ const COMPLETENESS_SECTIONS: CompletenessSection[] = [
     isComplete: hasLifestyleContext,
   },
   {
+    key: SkinProfileCompletenessSection.Location,
+    weight: 5,
+    isComplete: hasLocationContext,
+  },
+  {
     key: SkinProfileCompletenessSection.Hormonal,
     weight: 5,
     isApplicable: isHormonalContextApplicable,
@@ -140,6 +145,21 @@ const COMPLETENESS_SECTIONS: CompletenessSection[] = [
       Object.keys(profile.hormonal_context ?? {}).length > 0,
   },
 ];
+
+function hasCompletedReactionHistory(profile: SkinProfile): boolean {
+  const reactionHistory = profile.reaction_history ?? {};
+  const entryCount = reactionHistory.entries?.length ?? 0;
+
+  if (reactionHistory.has_known_reactions === true) {
+    return entryCount > 0;
+  }
+
+  return true;
+}
+
+function hasLocationContext(profile: SkinProfile): boolean {
+  return Boolean(profile.country_code?.trim() || profile.city?.trim());
+}
 
 function hasMedicalSafetyContext(profile: SkinProfile): boolean {
   return (

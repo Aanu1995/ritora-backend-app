@@ -141,6 +141,14 @@ export class ReactionEntryDto {
 }
 
 export class ReactionHistoryDto {
+  @ApiPropertyOptional({
+    description:
+      'Whether the user has known past skin reactions. False means the user answered that they have no known reaction history.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  has_known_reactions?: boolean;
+
   @ApiPropertyOptional({ type: [ReactionEntryDto] })
   @EmptyStringToUndefined()
   @IsOptional()

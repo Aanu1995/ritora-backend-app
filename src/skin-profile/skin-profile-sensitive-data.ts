@@ -11,6 +11,9 @@ export function hasSkinProfileLocationData(profile: SkinProfile): boolean {
 export function hasSkinProfileHealthContextData(profile: SkinProfile): boolean {
   if (profile.pregnancy_status) return true;
   if (profile.under_dermatologist_care) return true;
+  if (typeof profile.reaction_history?.has_known_reactions === 'boolean') {
+    return true;
+  }
   if ((profile.reaction_history?.entries ?? []).length > 0) return true;
 
   const ctx = profile.safety_context ?? {};
