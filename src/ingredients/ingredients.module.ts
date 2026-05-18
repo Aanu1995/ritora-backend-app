@@ -21,7 +21,10 @@ import { IngredientsController } from './ingredients.controller';
 import { IngredientsService } from './ingredients.service';
 import { MatchingService } from './matching.service';
 import { OpenAiExplanationProvider } from './openai-explanation.provider';
+import { OpenAiProductCompareReviewProvider } from './openai-product-compare-review.provider';
 import { OpenAiProductCheckReviewProvider } from './openai-product-check-review.provider';
+import { PRODUCT_COMPARE_AI_REVIEW_PORT } from './product-compare-ai-review.port';
+import { ProductCompareService } from './product-compare.service';
 import { PRODUCT_CHECK_AI_REVIEW_PORT } from './product-check-ai-review.port';
 import { ProductCheckContextService } from './product-check-context.service';
 import { ProductCheckPurchaseGuidanceService } from './product-check-purchase-guidance.service';
@@ -59,6 +62,7 @@ import { TranslationService } from './translation.service';
     MatchingService,
     AnalysisService,
     IngredientsService,
+    ProductCompareService,
     ProductCheckService,
     ProductCheckContextService,
     ProductCheckReactionEvidenceService,
@@ -66,6 +70,7 @@ import { TranslationService } from './translation.service';
     ProductVerdictService,
     SkinProfileAnalysisContextService,
     OpenAiExplanationProvider,
+    OpenAiProductCompareReviewProvider,
     OpenAiProductCheckReviewProvider,
     {
       provide: EXPLANATION_PORT,
@@ -74,6 +79,10 @@ import { TranslationService } from './translation.service';
     {
       provide: PRODUCT_CHECK_AI_REVIEW_PORT,
       useExisting: OpenAiProductCheckReviewProvider,
+    },
+    {
+      provide: PRODUCT_COMPARE_AI_REVIEW_PORT,
+      useExisting: OpenAiProductCompareReviewProvider,
     },
   ],
   exports: [MatchingService],
@@ -85,6 +94,7 @@ export class IngredientsModule implements OnApplicationBootstrap {
     private readonly catalog: IngredientCatalogService,
     private readonly explanationProvider: OpenAiExplanationProvider,
     private readonly productCheckReviewProvider: OpenAiProductCheckReviewProvider,
+    private readonly productCompareReviewProvider: OpenAiProductCompareReviewProvider,
   ) {}
 
   /**
@@ -104,5 +114,6 @@ export class IngredientsModule implements OnApplicationBootstrap {
 
     this.explanationProvider.warnIfMisconfigured();
     this.productCheckReviewProvider.warnIfMisconfigured();
+    this.productCompareReviewProvider.warnIfMisconfigured();
   }
 }

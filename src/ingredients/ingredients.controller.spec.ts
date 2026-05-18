@@ -1,6 +1,8 @@
 import type { Request } from 'express';
 import { IngredientsController } from './ingredients.controller';
 import { IngredientsService } from './ingredients.service';
+import { ProductCompareService } from './product-compare.service';
+import { ProductCompareItemKind } from './product-compare.types';
 import { ProductCheckService } from './product-check.service';
 import { ProductCheckSource } from './product-check.types';
 import { ProductCategory } from '../shelf/shelf.types';
@@ -13,17 +15,24 @@ const mockProductCheckService = () => ({
   checkForUser: jest.fn(),
 });
 
+const mockProductCompareService = () => ({
+  compareForUser: jest.fn(),
+});
+
 describe('IngredientsController', () => {
   let controller: IngredientsController;
   let ingredientsService: ReturnType<typeof mockIngredientsService>;
   let productCheckService: ReturnType<typeof mockProductCheckService>;
+  let productCompareService: ReturnType<typeof mockProductCompareService>;
 
   beforeEach(() => {
     ingredientsService = mockIngredientsService();
     productCheckService = mockProductCheckService();
+    productCompareService = mockProductCompareService();
     controller = new IngredientsController(
       ingredientsService as unknown as IngredientsService,
       productCheckService as unknown as ProductCheckService,
+      productCompareService as unknown as ProductCompareService,
     );
   });
 
@@ -101,6 +110,43 @@ describe('IngredientsController', () => {
     ).resolves.toBe(result);
 
     expect(productCheckService.checkForUser).toHaveBeenCalledWith(
+      'user-1',
+      dto,
+      'sv',
+    );
+  });
+
+  it('compares products using request language fallback', async () => {
+    const result = { comparison: { outcome: 'no_clear_winner' } };
+    productCompareService.compareForUser.mockResolvedValue(result);
+    const dto = {
+      anchor: {
+        kind: ProductCompareItemKind.CheckedProduct,
+        product: {
+          source: ProductCheckSource.IngredientPaste,
+          brand: 'Ritora Lab',
+          name: 'Barrier Serum',
+          category: ProductCategory.Serum,
+          inciIngredients: ['Niacinamide'],
+        },
+      },
+      candidates: [
+        {
+          kind: ProductCompareItemKind.ShelfProduct,
+          productId: 'shelf-1',
+        },
+      ],
+    };
+
+    await expect(
+      controller.compareProducts(
+        'user-1',
+        { headers: { 'accept-language': 'sv-SE,sv;q=0.9' } } as Request,
+        dto,
+      ),
+    ).resolves.toBe(result);
+
+    expect(productCompareService.compareForUser).toHaveBeenCalledWith(
       'user-1',
       dto,
       'sv',

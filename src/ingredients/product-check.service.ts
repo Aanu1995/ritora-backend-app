@@ -5,7 +5,7 @@ import { InventoryProduct } from '../inventory/entities/inventory-product.entity
 import { LookupConfidence, ShelfStatus } from '../shelf/shelf.types';
 import type { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { AnalysisService } from './analysis.service';
-import { CheckProductDto } from './dto/check-product.dto';
+import { CheckProductDto, CheckProductInputDto } from './dto/check-product.dto';
 import {
   AnalysisSeverity,
   type AnalysisResult,
@@ -25,6 +25,8 @@ import { ProductCheckReactionEvidenceService } from './product-check-reaction-ev
 import {
   ProductCheckPersonalizationLevel,
   ProductCheckSource,
+  type ProductCheckEvaluation,
+  type ProductCheckProductInput,
   type ProductCheckResponse,
 } from './product-check.types';
 import {
@@ -63,6 +65,10 @@ type ActiveShelfContext = {
   analysisProducts: ProductForAnalysis[];
 };
 
+type ProductCheckEvaluationOptions = {
+  excludeShelfProductIds?: readonly string[];
+};
+
 @Injectable()
 export class ProductCheckService {
   constructor(
@@ -84,9 +90,27 @@ export class ProductCheckService {
     dto: CheckProductDto,
     language: AppLanguage,
   ): Promise<ProductCheckResponse> {
-    const product = this.toAnalysisProduct(dto);
+    const evaluation = await this.evaluateForUser(
+      userId,
+      dto.product,
+      language,
+    );
+
+    return evaluation.response;
+  }
+
+  async evaluateForUser(
+    userId: string,
+    productInput: CheckProductInputDto | ProductCheckProductInput,
+    language: AppLanguage,
+    options: ProductCheckEvaluationOptions = {},
+  ): Promise<ProductCheckEvaluation> {
+    const product = this.toAnalysisProduct(productInput);
     const skinProfile = await this.analysisContext.loadForUser(userId);
-    const activeShelfContext = await this.loadActiveShelfContext(userId);
+    const activeShelfContext = await this.loadActiveShelfContext(
+      userId,
+      options.excludeShelfProductIds ?? [],
+    );
     const activeShelfProducts = activeShelfContext.analysisProducts;
     const { context, activeConsentTypes } =
       await this.contextService.loadForUser({
@@ -131,14 +155,14 @@ export class ProductCheckService {
     const verdictInput = {
       analysis: enrichedAnalysis,
       matchedIngredientCount: match.matchedIngredients.length,
-      lookupConfidence: this.resolveQuickCheckLookupConfidence(dto.product),
+      lookupConfidence: this.resolveQuickCheckLookupConfidence(productInput),
       hasPersonalContext:
         context.level === ProductCheckPersonalizationLevel.Personalized,
       hasReactionContext: hasReactionContext(context),
       recentJournalReactionCount: context.recentJournalReactionCount,
       recentSuggestionReactionCount: context.recentSuggestionReactionCount,
       reactionEvidenceCount: reactionEvidence.length,
-      reviewRequired: this.requiresIngredientReview(dto.product),
+      reviewRequired: this.requiresIngredientReview(productInput),
       hasSensitiveProfile: this.hasSensitiveProfile(skinProfile),
       reactionTriggerIngredients,
       photosensitizingIngredients: this.findPhotosensitizingIngredients(match),
@@ -170,22 +194,32 @@ export class ProductCheckService {
     });
 
     return {
-      context,
-      analysis: enrichedAnalysis,
-      verdict,
-      aiReview,
-      reactionEvidence,
-      purchaseGuidance,
+      product,
+      match,
+      response: {
+        context,
+        analysis: enrichedAnalysis,
+        verdict,
+        aiReview,
+        reactionEvidence,
+        purchaseGuidance,
+      },
+      reactionTriggerIngredients,
+      photosensitizingIngredients: this.findPhotosensitizingIngredients(match),
+      activeShelfProducts,
+      activeShelfInventoryProducts: activeShelfContext.inventoryProducts,
     };
   }
 
-  private toAnalysisProduct(dto: CheckProductDto): ProductForAnalysis {
+  private toAnalysisProduct(
+    product: CheckProductInputDto | ProductCheckProductInput,
+  ): ProductForAnalysis {
     return {
       id: CHECKED_PRODUCT_ID,
-      brand: dto.product.brand?.trim() ?? '',
-      name: dto.product.name?.trim() || CHECKED_PRODUCT_FALLBACK_NAME,
-      category: dto.product.category,
-      inciIngredients: normalizeIngredientList(dto.product.inciIngredients),
+      brand: product.brand?.trim() ?? '',
+      name: product.name?.trim() || CHECKED_PRODUCT_FALLBACK_NAME,
+      category: product.category,
+      inciIngredients: normalizeIngredientList(product.inciIngredients),
     };
   }
 
@@ -273,16 +307,21 @@ export class ProductCheckService {
 
   private async loadActiveShelfContext(
     userId: string,
+    excludeProductIds: readonly string[] = [],
   ): Promise<ActiveShelfContext> {
+    const excluded = new Set(excludeProductIds);
     const products = await this.inventoryProducts.find({
       where: { user_id: userId, status: ShelfStatus.Active },
       order: { created_at: 'DESC' },
       take: ACTIVE_SHELF_CONTEXT_LIMIT,
     });
+    const includedProducts = products.filter(
+      (product) => !excluded.has(product.id),
+    );
 
     return {
-      inventoryProducts: products,
-      analysisProducts: products
+      inventoryProducts: includedProducts,
+      analysisProducts: includedProducts
         .map((product) => this.toAnalysisProductFromInventory(product))
         .filter((product) => product.inciIngredients.length > 0),
     };
@@ -368,7 +407,7 @@ export class ProductCheckService {
   }
 
   private resolveQuickCheckLookupConfidence(
-    product: CheckProductDto['product'],
+    product: CheckProductInputDto | ProductCheckProductInput,
   ): LookupConfidence | undefined {
     if (product.source !== ProductCheckSource.PhotoExtraction) {
       return product.lookupConfidence;
@@ -378,7 +417,7 @@ export class ProductCheckService {
   }
 
   private requiresIngredientReview(
-    product: CheckProductDto['product'],
+    product: CheckProductInputDto | ProductCheckProductInput,
   ): boolean {
     if (product.source !== ProductCheckSource.PhotoExtraction) {
       return Boolean(product.reviewRequired);

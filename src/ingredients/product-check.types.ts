@@ -3,10 +3,13 @@ import type {
   LookupWarningCode,
   ProductCategory,
 } from '../shelf/shelf.types';
+import type { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import type {
   AnalysisConfidence,
   AnalysisResult,
   AnalysisSeverity,
+  ProductForAnalysis,
+  ProductMatchResult,
 } from './ingredients.types';
 
 export enum ProductCheckSource {
@@ -178,4 +181,14 @@ export type ProductCheckResponse = {
   aiReview: ProductCheckAiReview;
   reactionEvidence: ProductCheckReactionEvidence[];
   purchaseGuidance: ProductCheckPurchaseGuidance;
+};
+
+export type ProductCheckEvaluation = {
+  product: ProductForAnalysis;
+  match: ProductMatchResult;
+  response: ProductCheckResponse;
+  reactionTriggerIngredients: string[];
+  photosensitizingIngredients: string[];
+  activeShelfProducts: ProductForAnalysis[];
+  activeShelfInventoryProducts: InventoryProduct[];
 };
