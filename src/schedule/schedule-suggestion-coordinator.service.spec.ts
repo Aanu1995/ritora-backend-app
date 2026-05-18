@@ -73,7 +73,11 @@ describe('ScheduleSuggestionCoordinator', () => {
     await service.handleSlotChanged('user-1', scheduleSlot());
 
     expect(existing.generation_status).toBe('superseded');
-    expect(suggestionRepo.save).toHaveBeenCalledWith(existing);
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.objectContaining({ _type: 'in' }) }),
+      expect.objectContaining({ generation_status: 'superseded' }),
+    );
+    expect(suggestionRepo.save).toHaveBeenCalledTimes(1);
     expect(suggestionRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: 'user-1',
@@ -123,7 +127,11 @@ describe('ScheduleSuggestionCoordinator', () => {
     await service.handleSlotRemoved('user-1', scheduleSlot());
 
     expect(existing.generation_status).toBe('superseded');
-    expect(suggestionRepo.save).toHaveBeenCalledWith(existing);
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.objectContaining({ _type: 'in' }) }),
+      expect.objectContaining({ generation_status: 'superseded' }),
+    );
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
     expect(jobRepo.update).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: 'user-1',

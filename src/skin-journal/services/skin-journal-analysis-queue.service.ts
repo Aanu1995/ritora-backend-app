@@ -428,12 +428,16 @@ export class SkinJournalAnalysisQueueService
     if (!(await this.ensureAnalysisJobTableReady())) {
       return;
     }
-    const jobs = await this.jobs.find({
-      where: { entry_id: entryId, status: In(ACTIVE_JOB_STATUSES) },
-    });
-    for (const job of jobs) {
-      await this.cancelJob(job, reason);
-    }
+    await this.jobs.update(
+      { entry_id: entryId, status: In(ACTIVE_JOB_STATUSES) },
+      {
+        status: AnalysisJobStatusValue.Cancelled,
+        locked_at: null,
+        locked_by: null,
+        last_error: reason,
+        completed_at: new Date(),
+      },
+    );
   }
 
   async recoverExpiredLocks(): Promise<number> {
@@ -450,28 +454,33 @@ export class SkinJournalAnalysisQueueService
       },
       take: 100,
     });
-    let recovered = 0;
-    for (const job of candidates) {
+    const expiredJobIds = candidates.flatMap((job) => {
       const referenceDate =
         job.status === AnalysisJobStatusValue.Running
           ? job.locked_at
           : job.updated_at;
       if (referenceDate && referenceDate.getTime() > cutoff.getTime()) {
-        continue;
+        return [];
       }
-      job.status = AnalysisJobStatusValue.Queued;
-      job.locked_at = null;
-      job.locked_by = null;
-      job.last_error =
-        'Analysis job recovered after worker interruption or message loss.';
-      job.run_after = new Date();
-      await this.jobs.save(job);
-      recovered += 1;
+      return [job.id];
+    });
+    if (expiredJobIds.length > 0) {
+      await this.jobs.update(
+        { id: In(expiredJobIds) },
+        {
+          status: AnalysisJobStatusValue.Queued,
+          locked_at: null,
+          locked_by: null,
+          last_error:
+            'Analysis job recovered after worker interruption or message loss.',
+          run_after: new Date(),
+        },
+      );
     }
-    if (recovered > 0) {
+    if (expiredJobIds.length > 0) {
       this.scheduleDispatch();
     }
-    return recovered;
+    return expiredJobIds.length;
   }
 
   async getQueueMetrics(): Promise<AnalysisQueueMetrics> {

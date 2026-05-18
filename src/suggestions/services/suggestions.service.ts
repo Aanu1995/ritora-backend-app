@@ -91,63 +91,89 @@ export class SuggestionsService {
     const now = new Date();
     const today = formatDateInTimeZone(timeZone, now);
     const dayOfWeek = mapDayOfWeekShort(timeZone, now);
-    const leadTimeMinutes = await resolveSuggestionLeadTimeMinutes(
-      this.preferenceRepo,
-      user.id,
-    );
-    const { routineBreak } = await this.routineBreakService.getBreakState(user);
-    const activeSlots = await this.slotRepo.find({
-      where: { user_id: user.id, day_of_week: dayOfWeek, deleted_at: IsNull() },
-      relations: ['steps', 'steps.product'],
-      order: { slot_time: 'ASC' },
-    });
-
-    const suggestions = await this.suggestionRepo.find({
-      where: {
-        user_id: user.id,
-        target_date: today,
-        generation_status: Not(SuggestionGenerationStatus.Superseded),
-      },
-      relations: ['steps', 'steps.product'],
-    });
+    const [
+      leadTimeMinutes,
+      breakState,
+      activeSlots,
+      suggestions,
+      applications,
+      skinProfile,
+    ] = await Promise.all([
+      resolveSuggestionLeadTimeMinutes(this.preferenceRepo, user.id),
+      this.routineBreakService.getBreakState(user),
+      this.slotRepo.find({
+        where: {
+          user_id: user.id,
+          day_of_week: dayOfWeek,
+          deleted_at: IsNull(),
+        },
+        relations: ['steps', 'steps.product'],
+        order: { slot_time: 'ASC' },
+      }),
+      this.suggestionRepo.find({
+        where: {
+          user_id: user.id,
+          target_date: today,
+          generation_status: Not(SuggestionGenerationStatus.Superseded),
+        },
+        relations: ['steps', 'steps.product'],
+      }),
+      this.applicationLogRepo.find({
+        where: {
+          user_id: user.id,
+          target_date: today,
+          suggestion_instance_id: Not(IsNull()),
+        },
+        relations: ['items', 'items.product', 'items.substituted_with_product'],
+      }),
+      this.skinProfileRepo.findOne({
+        where: { user_id: user.id },
+      }),
+    ]);
+    const { routineBreak } = breakState;
     const scheduledSuggestions = suggestions.filter(
       (suggestion) =>
         (suggestion.request_source ?? SuggestionRequestSource.Scheduled) ===
         SuggestionRequestSource.Scheduled,
     );
-    const slots = await includeHistoricalSlotsForReadySuggestions({
-      slotRepo: this.slotRepo,
-      userId: user.id,
-      activeSlots,
-      scheduledSuggestions,
-    });
     const onDemandSuggestions = suggestions.filter(
       (suggestion) =>
         suggestion.request_source === SuggestionRequestSource.OnDemand,
     );
-
-    const applications = await this.applicationLogRepo.find({
-      where: {
-        user_id: user.id,
-        target_date: today,
-        suggestion_instance_id: Not(IsNull()),
-      },
-      relations: ['items', 'items.product', 'items.substituted_with_product'],
-    });
-
     const suggestionBySlot = mapLatestSuggestionBySlot(scheduledSuggestions);
     const applicationLogBySuggestion =
       mapLatestApplicationLogBySuggestion(applications);
     const productImageOptions = this.productImageOptions();
-    const gapActionMaps = await this.todayActionService.getGapActionMaps(
-      user.id,
-      suggestions.map((suggestion) => suggestion.id),
-    );
-    const reminderSnoozeMap =
-      await this.todayActionService.getReminderSnoozeMap(
+    const suggestionIds = suggestions.map((suggestion) => suggestion.id);
+    const [
+      slots,
+      gapActionMaps,
+      reminderSnoozeMap,
+      reactionAlert,
+      environment,
+    ] = await Promise.all([
+      includeHistoricalSlotsForReadySuggestions({
+        slotRepo: this.slotRepo,
+        userId: user.id,
+        activeSlots,
+        scheduledSuggestions,
+      }),
+      this.todayActionService.getGapActionMaps(user.id, suggestionIds),
+      this.todayActionService.getReminderSnoozeMap(user.id, suggestionIds),
+      this.reactionService.getReactionAlert(
         user.id,
-        suggestions.map((suggestion) => suggestion.id),
-      );
+        today,
+        buildPausedActiveNames(scheduledSuggestions),
+      ),
+      this.environmentContext.buildContext({
+        userId: user.id,
+        profile: skinProfile,
+        targetDate: today,
+        targetTime: formatTimeInTimeZone(timeZone, now),
+        timeZone,
+        now,
+      }),
+    ]);
 
     const slotDtos: TodaysSuggestionSlotDto[] = slots.map((slot) => {
       const suggestion = suggestionBySlot.get(slot.id) ?? null;
@@ -193,11 +219,6 @@ export class SuggestionsService {
       )
       .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
 
-    const reactionAlert = await this.reactionService.getReactionAlert(
-      user.id,
-      today,
-      buildPausedActiveNames(scheduledSuggestions),
-    );
     const visibleSlotDtos = slotDtos.filter(shouldExposeTodaySlot);
     const responseSlots =
       routineBreak?.status === 'active'
@@ -216,17 +237,6 @@ export class SuggestionsService {
           )
         : onDemandDtos;
 
-    const skinProfile = await this.skinProfileRepo.findOne({
-      where: { user_id: user.id },
-    });
-    const environment = await this.environmentContext.buildContext({
-      userId: user.id,
-      profile: skinProfile,
-      targetDate: today,
-      targetTime: formatTimeInTimeZone(timeZone, now),
-      timeZone,
-      now,
-    });
     const environmentPolicy = environment
       ? buildEnvironmentAdaptationPolicy(environment.summary)
       : null;

@@ -286,47 +286,61 @@ export class SuggestionGenerationContextService {
     consentDecision: SuggestionConsentDecision,
   ): Promise<GenerationContextData> {
     const canReadSensitiveContext = consentDecision.canReadSensitiveContext;
-    const skinProfile = canReadSensitiveContext
-      ? await this.skinProfileRepo.findOne({
-          where: { user_id: userId },
-        })
-      : null;
-    const activeProducts = await this.inventoryRepo.find({
-      where: { user_id: userId, status: ShelfStatus.Active },
-    });
-    const finishedProducts = await this.inventoryRepo.find({
-      where: { user_id: userId, status: ShelfStatus.FinishedUp },
-      select: ['id'],
-    });
-    const ignoreReactionContext =
-      await this.todayActionService.shouldIgnoreReactionContext(
-        userId,
-        targetDate,
-        lastError,
-      );
-    const recentJournalRows =
-      canReadSensitiveContext && !ignoreReactionContext
-        ? await this.journalRepo.find({
+    const ignoreReactionContextPromise = canReadSensitiveContext
+      ? this.todayActionService.shouldIgnoreReactionContext(
+          userId,
+          targetDate,
+          lastError,
+        )
+      : Promise.resolve(true);
+    const recentJournalRowsPromise = ignoreReactionContextPromise.then(
+      (ignoreReactionContext) =>
+        canReadSensitiveContext && !ignoreReactionContext
+          ? this.journalRepo.find({
+              where: { user_id: userId },
+              order: { entry_date: 'DESC' },
+              take: 7,
+            })
+          : Promise.resolve([]),
+    );
+
+    const [
+      skinProfile,
+      activeProducts,
+      finishedProducts,
+      recentJournalRows,
+      recentApplications,
+      recentRoutineBreaks,
+    ] = await Promise.all([
+      canReadSensitiveContext
+        ? this.skinProfileRepo.findOne({
             where: { user_id: userId },
-            order: { entry_date: 'DESC' },
-            take: 7,
           })
-        : [];
+        : Promise.resolve(null),
+      this.inventoryRepo.find({
+        where: { user_id: userId, status: ShelfStatus.Active },
+      }),
+      this.inventoryRepo.find({
+        where: { user_id: userId, status: ShelfStatus.FinishedUp },
+        select: ['id'],
+      }),
+      recentJournalRowsPromise,
+      canReadSensitiveContext
+        ? this.applicationLogRepo.find({
+            where: { user_id: userId },
+            relations: ['items'],
+            order: { target_date: 'DESC' },
+            take: 30,
+          })
+        : Promise.resolve([]),
+      this.routineBreakRepo.find({
+        where: { user_id: userId },
+        order: { starts_at: 'DESC' },
+        take: 3,
+      }),
+    ]);
     const recentJournal =
       normalizeJournalEntriesForSuggestions(recentJournalRows);
-    const recentApplications = canReadSensitiveContext
-      ? await this.applicationLogRepo.find({
-          where: { user_id: userId },
-          relations: ['items'],
-          order: { target_date: 'DESC' },
-          take: 30,
-        })
-      : [];
-    const recentRoutineBreaks = await this.routineBreakRepo.find({
-      where: { user_id: userId },
-      order: { starts_at: 'DESC' },
-      take: 3,
-    });
 
     return {
       skinProfile,

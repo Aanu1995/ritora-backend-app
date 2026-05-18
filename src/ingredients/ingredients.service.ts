@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import type { AppLanguage } from '../common/i18n/i18n';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { AnalysisService } from './analysis.service';
@@ -27,15 +27,17 @@ export class IngredientsService {
     language: AppLanguage,
   ): Promise<AnalysisResult> {
     this.validateAnalyzeRequest(dto);
-    const skinProfile = await this.analysisContext.loadForUser(userId);
 
     if (dto.focusProductId) {
-      const focusProduct = await this.inventoryRepository.findOne({
-        where: {
-          id: dto.focusProductId,
-          user_id: userId,
-        },
-      });
+      const [skinProfile, focusProduct] = await Promise.all([
+        this.analysisContext.loadForUser(userId),
+        this.inventoryRepository.findOne({
+          where: {
+            id: dto.focusProductId,
+            user_id: userId,
+          },
+        }),
+      ]);
       if (!focusProduct) {
         throw new NotFoundException('Inventory product not found');
       }
@@ -53,9 +55,12 @@ export class IngredientsService {
     }
 
     const uniqueProductIds = Array.from(new Set(dto.productIds ?? []));
-    const ownedProducts = await this.inventoryRepository.find({
-      where: uniqueProductIds.map((id) => ({ id, user_id: userId })),
-    });
+    const [skinProfile, ownedProducts] = await Promise.all([
+      this.analysisContext.loadForUser(userId),
+      this.inventoryRepository.find({
+        where: { id: In(uniqueProductIds), user_id: userId },
+      }),
+    ]);
 
     if (ownedProducts.length !== uniqueProductIds.length) {
       throw new BadRequestException(

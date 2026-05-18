@@ -32,6 +32,7 @@ const repo = () => ({
   find: jest.fn().mockResolvedValue([]),
   findOne: jest.fn().mockResolvedValue(null),
   save: jest.fn(async (data) => data),
+  update: jest.fn().mockResolvedValue({ affected: 0 }),
   count: jest.fn().mockResolvedValue(0),
   createQueryBuilder: jest.fn(),
   manager: {},
@@ -496,15 +497,16 @@ describe('SkinJournalInsightQueueService', () => {
     const recovered = await service.recoverExpiredLocks();
 
     expect(recovered).toBe(2);
-    expect(jobs.save).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'old-running', status: 'queued' }),
+    expect(jobs.update).toHaveBeenCalledWith(
+      { id: expect.objectContaining({ _type: 'in' }) },
+      expect.objectContaining({
+        status: 'queued',
+        locked_at: null,
+        locked_by: null,
+        run_after: expect.any(Date),
+      }),
     );
-    expect(jobs.save).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'old-sent', status: 'queued' }),
-    );
-    expect(jobs.save).not.toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'recent-running', status: 'queued' }),
-    );
+    expect(jobs.save).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
 

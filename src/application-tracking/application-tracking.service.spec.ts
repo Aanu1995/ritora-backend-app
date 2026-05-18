@@ -12,6 +12,7 @@ import { ApplicationLog } from './entities/application-log.entity';
 import { ApplicationTrackingService } from './application-tracking.service';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
 import { SkinJournalService } from '../skin-journal/skin-journal.service';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 
 describe('ApplicationTrackingService', () => {
   const logRepo = repo<ApplicationLog>();
@@ -38,6 +39,7 @@ describe('ApplicationTrackingService', () => {
   let txLogRepo: jest.Mocked<Repository<ApplicationLog>>;
   let txItemRepo: jest.Mocked<Repository<ApplicationLogItem>>;
   let txVersionRepo: jest.Mocked<Repository<ApplicationLogVersion>>;
+  let txInventoryRepo: jest.Mocked<Repository<InventoryProduct>>;
   let dataSource: DataSource;
   let service: ApplicationTrackingService;
 
@@ -46,7 +48,14 @@ describe('ApplicationTrackingService', () => {
     txLogRepo = repo<ApplicationLog>();
     txItemRepo = repo<ApplicationLogItem>();
     txVersionRepo = repo<ApplicationLogVersion>();
-    dataSource = dataSourceWithRepos(txLogRepo, txItemRepo, txVersionRepo);
+    txInventoryRepo = repo<InventoryProduct>();
+    txInventoryRepo.find.mockResolvedValue([]);
+    dataSource = dataSourceWithRepos(
+      txLogRepo,
+      txItemRepo,
+      txVersionRepo,
+      txInventoryRepo,
+    );
     service = new ApplicationTrackingService(
       dataSource,
       logRepo,
@@ -83,11 +92,6 @@ describe('ApplicationTrackingService', () => {
       (value) => value as ApplicationLogVersion,
     );
     txVersionRepo.save.mockResolvedValue({} as ApplicationLogVersion);
-    txLogRepo.findOne.mockResolvedValue({
-      ...savedLog,
-      items: savedItems,
-    } as ApplicationLog);
-
     const response = await service.record(user(), {
       suggestionInstanceId: 'suggestion-1',
       targetDate: '2026-05-04',
@@ -120,6 +124,7 @@ describe('ApplicationTrackingService', () => {
     expect(skinJournal.markProductOrRoutineInsightsDirty).toHaveBeenCalledWith(
       'user-1',
     );
+    expect(txLogRepo.findOne).not.toHaveBeenCalled();
   });
 
   it('rejects duplicate records for the same suggestion', async () => {
@@ -196,6 +201,7 @@ describe('ApplicationTrackingService', () => {
     expect(skinJournal.markProductOrRoutineInsightsDirty).toHaveBeenCalledWith(
       'user-1',
     );
+    expect(txLogRepo.findOne).toHaveBeenCalledTimes(1);
   });
 
   it('protects records from cross-user reads and summarizes tracking analytics', async () => {
@@ -254,6 +260,7 @@ function dataSourceWithRepos(
   logRepo: Repository<ApplicationLog>,
   itemRepo: Repository<ApplicationLogItem>,
   versionRepo: Repository<ApplicationLogVersion>,
+  inventoryRepo: Repository<InventoryProduct>,
 ): DataSource {
   const manager = {
     getRepository: (entity: unknown): Repository<ObjectLiteral> => {
@@ -265,6 +272,9 @@ function dataSourceWithRepos(
       }
       if (entity === ApplicationLogVersion) {
         return versionRepo;
+      }
+      if (entity === InventoryProduct) {
+        return inventoryRepo;
       }
       throw new Error('Unexpected repository token.');
     },

@@ -425,28 +425,33 @@ export class SkinJournalInsightQueueService
       },
       take: 100,
     });
-    let recovered = 0;
-    for (const job of candidates) {
+    const expiredJobIds = candidates.flatMap((job) => {
       const referenceDate =
         job.status === InsightJobStatusValue.Running
           ? job.locked_at
           : job.updated_at;
       if (referenceDate && referenceDate.getTime() > cutoff.getTime()) {
-        continue;
+        return [];
       }
-      job.status = InsightJobStatusValue.Queued;
-      job.locked_at = null;
-      job.locked_by = null;
-      job.last_error =
-        'Insight job recovered after worker interruption or message loss.';
-      job.run_after = new Date();
-      await this.jobs.save(job);
-      recovered += 1;
+      return [job.id];
+    });
+    if (expiredJobIds.length > 0) {
+      await this.jobs.update(
+        { id: In(expiredJobIds) },
+        {
+          status: InsightJobStatusValue.Queued,
+          locked_at: null,
+          locked_by: null,
+          last_error:
+            'Insight job recovered after worker interruption or message loss.',
+          run_after: new Date(),
+        },
+      );
     }
-    if (recovered > 0) {
+    if (expiredJobIds.length > 0) {
       this.scheduleDispatch();
     }
-    return recovered;
+    return expiredJobIds.length;
   }
 
   async getActiveJobForUser(

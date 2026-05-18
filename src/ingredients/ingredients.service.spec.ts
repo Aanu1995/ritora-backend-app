@@ -127,10 +127,10 @@ describe('IngredientsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(inventoryRepository.find).toHaveBeenCalledWith({
-      where: [
-        { id: 'product-1', user_id: 'user-1' },
-        { id: 'missing', user_id: 'user-1' },
-      ],
+      where: {
+        id: expect.objectContaining({ _type: 'in' }),
+        user_id: 'user-1',
+      },
     });
   });
 

@@ -392,6 +392,34 @@ describe('ProductCheckService', () => {
     );
   });
 
+  it('excludes compared shelf products in SQL before building active shelf context', async () => {
+    await service.evaluateForUser(
+      'user-1',
+      {
+        source: ProductCheckSource.IngredientPaste,
+        brand: 'Ritora Lab',
+        name: 'Barrier Serum',
+        category: ProductCategory.Serum,
+        inciIngredients: ['Niacinamide'],
+      },
+      'en',
+      { excludeShelfProductIds: ['shelf-1', 'shelf-1', 'shelf-2'] },
+    );
+
+    expect(inventoryRepository.find).toHaveBeenCalledWith({
+      where: {
+        user_id: 'user-1',
+        status: ShelfStatus.Active,
+        id: expect.objectContaining({
+          _type: 'not',
+          _value: expect.objectContaining({ _type: 'in' }),
+        }),
+      },
+      order: { created_at: 'DESC' },
+      take: 50,
+    });
+  });
+
   it('does not let Shelf metadata review flags downgrade photo Quick Check verdicts', async () => {
     await service.checkForUser(
       'user-1',

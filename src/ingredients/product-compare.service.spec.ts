@@ -191,6 +191,7 @@ describe('ProductCompareService', () => {
     loadForUser: jest.fn(),
   };
   const inventoryRepository = {
+    find: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn(),
   };
@@ -208,7 +209,10 @@ describe('ProductCompareService', () => {
       inventoryRepository as never,
       aiReviewProvider,
     );
-    inventoryRepository.findOne.mockResolvedValue(shelfProduct());
+    inventoryRepository.find.mockResolvedValue([
+      shelfProduct({ id: 'shelf-1' }),
+      shelfProduct({ id: 'shelf-2' }),
+    ]);
     analysisContext.loadForUser.mockResolvedValue(null);
     analysisService.analyze.mockResolvedValue({
       ...baseAnalysis,
@@ -249,8 +253,12 @@ describe('ProductCompareService', () => {
       'en',
     );
 
-    expect(inventoryRepository.findOne).toHaveBeenCalledWith({
-      where: { id: 'shelf-1', user_id: 'user-1' },
+    expect(inventoryRepository.find).toHaveBeenCalledTimes(1);
+    expect(inventoryRepository.find).toHaveBeenCalledWith({
+      where: {
+        id: expect.objectContaining({ _type: 'in' }),
+        user_id: 'user-1',
+      },
     });
     expect(productCheckService.evaluateForUser).toHaveBeenCalledTimes(2);
     expect(productCheckService.evaluateForUser).toHaveBeenCalledWith(
@@ -288,7 +296,7 @@ describe('ProductCompareService', () => {
   });
 
   it('rejects shelf products that are not owned by the current user', async () => {
-    inventoryRepository.findOne.mockResolvedValue(null);
+    inventoryRepository.find.mockResolvedValue([]);
 
     await expect(
       service.compareForUser(
@@ -371,7 +379,7 @@ describe('ProductCompareService', () => {
   });
 
   it('treats a safe different-role checked product as worth considering, not a forced replacement', async () => {
-    inventoryRepository.findOne.mockResolvedValue(
+    inventoryRepository.find.mockResolvedValue([
       shelfProduct({
         category: ProductCategory.Moisturizer,
         identity: {
@@ -381,7 +389,7 @@ describe('ProductCompareService', () => {
           inciIngredients: ['Aqua', 'Glycerin', 'Ceramide NP'],
         },
       }),
-    );
+    ]);
 
     const result = await service.compareForUser(
       'user-1',
@@ -436,7 +444,7 @@ describe('ProductCompareService', () => {
       ],
       overlaps: [],
     });
-    inventoryRepository.findOne.mockResolvedValue(
+    inventoryRepository.find.mockResolvedValue([
       shelfProduct({
         category: ProductCategory.Treatment,
         identity: {
@@ -446,7 +454,7 @@ describe('ProductCompareService', () => {
           inciIngredients: ['Aqua', 'Retinol'],
         },
       }),
-    );
+    ]);
 
     const result = await service.compareForUser(
       'user-1',
@@ -546,31 +554,28 @@ describe('ProductCompareService', () => {
   });
 
   it('does not force a winner for different-role shelf products that can coexist', async () => {
-    inventoryRepository.findOne
-      .mockResolvedValueOnce(
-        shelfProduct({
-          id: 'shelf-1',
+    inventoryRepository.find.mockResolvedValue([
+      shelfProduct({
+        id: 'shelf-1',
+        category: ProductCategory.Moisturizer,
+        identity: {
+          brand: 'Shelf Lab',
+          name: 'Daily Moisturizer',
           category: ProductCategory.Moisturizer,
-          identity: {
-            brand: 'Shelf Lab',
-            name: 'Daily Moisturizer',
-            category: ProductCategory.Moisturizer,
-            inciIngredients: ['Aqua', 'Glycerin', 'Ceramide NP'],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        shelfProduct({
-          id: 'shelf-2',
+          inciIngredients: ['Aqua', 'Glycerin', 'Ceramide NP'],
+        },
+      }),
+      shelfProduct({
+        id: 'shelf-2',
+        category: ProductCategory.SunProtection,
+        identity: {
+          brand: 'SPF Lab',
+          name: 'Mineral SPF',
           category: ProductCategory.SunProtection,
-          identity: {
-            brand: 'SPF Lab',
-            name: 'Mineral SPF',
-            category: ProductCategory.SunProtection,
-            inciIngredients: ['Zinc Oxide', 'Dimethicone'],
-          },
-        }),
-      );
+          inciIngredients: ['Zinc Oxide', 'Dimethicone'],
+        },
+      }),
+    ]);
 
     const result = await service.compareForUser(
       'user-1',
@@ -616,31 +621,28 @@ describe('ProductCompareService', () => {
       ],
       overlaps: [],
     });
-    inventoryRepository.findOne
-      .mockResolvedValueOnce(
-        shelfProduct({
-          id: 'shelf-1',
+    inventoryRepository.find.mockResolvedValue([
+      shelfProduct({
+        id: 'shelf-1',
+        category: ProductCategory.Treatment,
+        identity: {
+          brand: 'Shelf Lab',
+          name: 'Retinol Treatment',
           category: ProductCategory.Treatment,
-          identity: {
-            brand: 'Shelf Lab',
-            name: 'Retinol Treatment',
-            category: ProductCategory.Treatment,
-            inciIngredients: ['Aqua', 'Retinol'],
-          },
-        }),
-      )
-      .mockResolvedValueOnce(
-        shelfProduct({
-          id: 'shelf-2',
+          inciIngredients: ['Aqua', 'Retinol'],
+        },
+      }),
+      shelfProduct({
+        id: 'shelf-2',
+        category: ProductCategory.Exfoliant,
+        identity: {
+          brand: 'Acid Lab',
+          name: 'AHA Toner',
           category: ProductCategory.Exfoliant,
-          identity: {
-            brand: 'Acid Lab',
-            name: 'AHA Toner',
-            category: ProductCategory.Exfoliant,
-            inciIngredients: ['Aqua', 'Glycolic Acid'],
-          },
-        }),
-      );
+          inciIngredients: ['Aqua', 'Glycolic Acid'],
+        },
+      }),
+    ]);
 
     const result = await service.compareForUser(
       'user-1',

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { LookupConfidence, ShelfStatus } from '../shelf/shelf.types';
 import type { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
@@ -106,11 +106,11 @@ export class ProductCheckService {
     options: ProductCheckEvaluationOptions = {},
   ): Promise<ProductCheckEvaluation> {
     const product = this.toAnalysisProduct(productInput);
-    const skinProfile = await this.analysisContext.loadForUser(userId);
-    const activeShelfContext = await this.loadActiveShelfContext(
-      userId,
-      options.excludeShelfProductIds ?? [],
-    );
+    const match = this.matchingService.matchProduct(product);
+    const [skinProfile, activeShelfContext] = await Promise.all([
+      this.analysisContext.loadForUser(userId),
+      this.loadActiveShelfContext(userId, options.excludeShelfProductIds ?? []),
+    ]);
     const activeShelfProducts = activeShelfContext.analysisProducts;
     const { context, activeConsentTypes } =
       await this.contextService.loadForUser({
@@ -118,7 +118,6 @@ export class ProductCheckService {
         skinProfile,
         activeShelfProducts,
       });
-    const match = this.matchingService.matchProduct(product);
     const [analysis, focusAnalysis] = await Promise.all([
       this.analysisService.analyze({
         products: [product, ...activeShelfProducts],
@@ -309,19 +308,22 @@ export class ProductCheckService {
     userId: string,
     excludeProductIds: readonly string[] = [],
   ): Promise<ActiveShelfContext> {
-    const excluded = new Set(excludeProductIds);
+    const excludedProductIds = uniqueStringValues(excludeProductIds);
     const products = await this.inventoryProducts.find({
-      where: { user_id: userId, status: ShelfStatus.Active },
+      where: {
+        user_id: userId,
+        status: ShelfStatus.Active,
+        ...(excludedProductIds.length > 0
+          ? { id: Not(In(excludedProductIds)) }
+          : {}),
+      },
       order: { created_at: 'DESC' },
       take: ACTIVE_SHELF_CONTEXT_LIMIT,
     });
-    const includedProducts = products.filter(
-      (product) => !excluded.has(product.id),
-    );
 
     return {
-      inventoryProducts: includedProducts,
-      analysisProducts: includedProducts
+      inventoryProducts: products,
+      analysisProducts: products
         .map((product) => this.toAnalysisProductFromInventory(product))
         .filter((product) => product.inciIngredients.length > 0),
     };
@@ -425,4 +427,8 @@ export class ProductCheckService {
 
     return false;
   }
+}
+
+function uniqueStringValues(values: readonly string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
 }

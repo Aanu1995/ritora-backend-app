@@ -51,11 +51,9 @@ describe('ApplicationReactiveRegenerationService', () => {
         generation_status: 'ready',
       } as SuggestionInstance,
     ]);
-    suggestionRepo.save.mockResolvedValue({
-      id: 'noon-suggestion',
-      slot_id: 'noon-slot',
-      generation_status: 'superseded',
-    } as SuggestionInstance);
+    suggestionRepo.save.mockImplementation((value) =>
+      Promise.resolve(value as SuggestionInstance),
+    );
     jobRepo.findOne.mockResolvedValue(null);
     jobRepo.insert.mockResolvedValue({
       identifiers: [],
@@ -74,13 +72,11 @@ describe('ApplicationReactiveRegenerationService', () => {
         },
       }),
     );
-    expect(suggestionRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'noon-suggestion',
-        generation_status: 'superseded',
-      }),
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      { id: expect.objectContaining({ _type: 'in' }) },
+      { generation_status: 'superseded' },
     );
-    expect(suggestionRepo.save).toHaveBeenCalledWith(
+    expect(suggestionRepo.save).toHaveBeenCalledWith([
       expect.objectContaining({
         user_id: 'user-1',
         slot_id: 'noon-slot',
@@ -90,7 +86,7 @@ describe('ApplicationReactiveRegenerationService', () => {
         visible_at: new Date('2026-04-29T10:00:00.000Z'),
         supersedes_id: 'noon-suggestion',
       }),
-    );
+    ]);
     expect(jobRepo.insert).toHaveBeenCalledTimes(1);
     expect(jobRepo.insert).toHaveBeenCalledWith(
       expect.objectContaining({

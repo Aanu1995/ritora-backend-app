@@ -6,8 +6,9 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, DataSource, Repository } from 'typeorm';
+import { Between, DataSource, In, Repository } from 'typeorm';
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { ProductImageUrlResolverOptions } from '../inventory/product-image-url-resolver';
 import { User } from '../users/entities/user.entity';
 import {
@@ -130,6 +131,7 @@ export class ApplicationTrackingService {
       const logRepo = manager.getRepository(ApplicationLog);
       const itemRepo = manager.getRepository(ApplicationLogItem);
       const versionRepo = manager.getRepository(ApplicationLogVersion);
+      const productRepo = manager.getRepository(InventoryProduct);
 
       const lockedLog = await logRepo.findOne({
         where: { id: log.id },
@@ -188,12 +190,13 @@ export class ApplicationTrackingService {
         }),
       );
 
-      const fresh = await logRepo.findOne({
-        where: { id: savedLog.id },
-        relations: ['items', 'items.product', 'items.substituted_with_product'],
-      });
+      savedLog.items = await this.hydrateApplicationLogItems(
+        productRepo,
+        user.id,
+        savedItems,
+      );
       return ApplicationLogResponseDto.fromEntity(
-        fresh!,
+        savedLog,
         this.productImageOptions(),
       );
     });
@@ -305,6 +308,7 @@ export class ApplicationTrackingService {
         const logRepo = manager.getRepository(ApplicationLog);
         const itemRepo = manager.getRepository(ApplicationLogItem);
         const versionRepo = manager.getRepository(ApplicationLogVersion);
+        const productRepo = manager.getRepository(InventoryProduct);
 
         const now = new Date();
         const log = logRepo.create({
@@ -348,16 +352,13 @@ export class ApplicationTrackingService {
           }),
         );
 
-        const fresh = await logRepo.findOne({
-          where: { id: savedLog.id },
-          relations: [
-            'items',
-            'items.product',
-            'items.substituted_with_product',
-          ],
-        });
+        savedLog.items = await this.hydrateApplicationLogItems(
+          productRepo,
+          user.id,
+          savedItems,
+        );
         return ApplicationLogResponseDto.fromEntity(
-          fresh!,
+          savedLog,
           this.productImageOptions(),
         );
       });
@@ -376,5 +377,42 @@ export class ApplicationTrackingService {
       resolveProductImageUrls: (imageUrls) =>
         this.cataloguePhotoStorageService.resolvePublicImageUrls(imageUrls),
     };
+  }
+
+  private async hydrateApplicationLogItems(
+    productRepo: Repository<InventoryProduct>,
+    userId: string,
+    items: ApplicationLogItem[],
+  ): Promise<ApplicationLogItem[]> {
+    const productIds = Array.from(
+      new Set(
+        items.flatMap((item) =>
+          [item.inventory_product_id, item.substituted_with_product_id].filter(
+            (id): id is string => typeof id === 'string',
+          ),
+        ),
+      ),
+    );
+    if (productIds.length === 0) {
+      return items;
+    }
+
+    const products = await productRepo.find({
+      where: { id: In(productIds), user_id: userId },
+    });
+    const productById = new Map(
+      products.map((product) => [product.id, product]),
+    );
+
+    for (const item of items) {
+      item.product = item.inventory_product_id
+        ? (productById.get(item.inventory_product_id) ?? null)
+        : null;
+      item.substituted_with_product = item.substituted_with_product_id
+        ? (productById.get(item.substituted_with_product_id) ?? null)
+        : null;
+    }
+
+    return items;
   }
 }

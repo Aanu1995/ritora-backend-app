@@ -26,6 +26,7 @@ const repo = () => ({
   find: jest.fn().mockResolvedValue([]),
   findOne: jest.fn().mockResolvedValue(null),
   save: jest.fn(async (data) => data),
+  update: jest.fn().mockResolvedValue({ affected: 0 }),
   count: jest.fn().mockResolvedValue(0),
   createQueryBuilder: jest.fn(),
 });
@@ -438,6 +439,48 @@ describe('SkinJournalAnalysisQueueService', () => {
       dlq_visible_count: 1,
       dlq_oldest_message_age_seconds: null,
     });
+  });
+
+  it('recovers expired sent and running jobs with one batch update', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-01T10:00:00.000Z'));
+    const jobs = repo();
+    jobs.find.mockResolvedValue([
+      {
+        id: 'old-running',
+        status: 'running',
+        locked_at: new Date('2026-05-01T09:00:00.000Z'),
+      },
+      {
+        id: 'recent-running',
+        status: 'running',
+        locked_at: new Date('2026-05-01T09:59:00.000Z'),
+      },
+      {
+        id: 'old-sent',
+        status: 'sent',
+        updated_at: new Date('2026-05-01T09:00:00.000Z'),
+      },
+    ]);
+    const service = new SkinJournalAnalysisQueueService(
+      jobs as never,
+      config({ SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: 'database' }),
+    );
+    services.push(service);
+
+    const recovered = await service.recoverExpiredLocks();
+
+    expect(recovered).toBe(2);
+    expect(jobs.update).toHaveBeenCalledWith(
+      { id: expect.objectContaining({ _type: 'in' }) },
+      expect.objectContaining({
+        status: 'queued',
+        locked_at: null,
+        locked_by: null,
+        run_after: expect.any(Date),
+      }),
+    );
+    expect(jobs.save).not.toHaveBeenCalled();
+    jest.useRealTimers();
   });
 
   it('does not crash local startup when the analysis job table has not been migrated yet', async () => {

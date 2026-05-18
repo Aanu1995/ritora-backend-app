@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import type { AppLanguage } from '../common/i18n/i18n';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { AnalysisService } from './analysis.service';
@@ -134,41 +134,51 @@ export class ProductCompareService {
     userId: string,
     dto: ProductCompareProductsDto,
   ): Promise<ResolvedCompareItem[]> {
-    return Promise.all(
-      [dto.anchor, ...dto.candidates].map(async (item, index) => {
-        const itemId = index === 0 ? 'anchor' : `candidate-${index}`;
-        if (item.kind === ProductCompareItemKind.CheckedProduct) {
-          if (!item.product) {
-            throw new BadRequestException(
-              'Checked product payload is required',
-            );
-          }
+    const inputItems = [dto.anchor, ...dto.candidates];
+    const shelfProductIds = uniqueStrings(
+      inputItems
+        .filter((item) => item.kind === ProductCompareItemKind.ShelfProduct)
+        .map((item) => item.productId),
+    );
+    const shelfProducts =
+      shelfProductIds.length > 0
+        ? await this.inventoryProducts.find({
+            where: { id: In(shelfProductIds), user_id: userId },
+          })
+        : [];
+    const shelfProductById = new Map(
+      shelfProducts.map((product) => [product.id, product]),
+    );
 
-          return {
-            itemId,
-            kind: item.kind,
-            productId: null,
-            product: item.product,
-            isOwnedShelfProduct: false,
-          };
-        }
-
-        const product = await this.inventoryProducts.findOne({
-          where: { id: item.productId as string, user_id: userId },
-        });
-        if (!product) {
-          throw new NotFoundException('Inventory product not found');
+    return inputItems.map((item, index) => {
+      const itemId = index === 0 ? 'anchor' : `candidate-${index}`;
+      if (item.kind === ProductCompareItemKind.CheckedProduct) {
+        if (!item.product) {
+          throw new BadRequestException('Checked product payload is required');
         }
 
         return {
           itemId,
           kind: item.kind,
-          productId: product.id,
-          product: inventoryProductToCompareInput(product),
-          isOwnedShelfProduct: true,
+          productId: null,
+          product: item.product,
+          isOwnedShelfProduct: false,
         };
-      }),
-    );
+      }
+
+      const product = shelfProductById.get(item.productId as string);
+      if (!product) {
+        throw new NotFoundException('Inventory product not found');
+      }
+
+      return {
+        itemId,
+        kind: item.kind,
+        productId: product.id,
+        product: inventoryProductToCompareInput(product),
+        isOwnedShelfProduct: true,
+      };
+    });
   }
 
   private resolveGoal(
@@ -268,6 +278,14 @@ export class ProductCompareService {
       }),
     );
   }
+}
+
+function uniqueStrings(values: readonly unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values.filter((value): value is string => typeof value === 'string'),
+    ),
+  );
 }
 
 function educationalProductCompareContext(): ProductCheckContextSummary {

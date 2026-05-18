@@ -92,13 +92,15 @@ export class ScheduleSuggestionCoordinator {
 
   private async buildContext(userId: string): Promise<ScheduleChangeContext> {
     const now = new Date();
-    const user = await this.userRepo.findOne({
-      where: { id: userId },
-      select: ['id', 'time_zone'],
-    });
-    const preference = await this.preferenceRepo.findOne({
-      where: { user_id: userId },
-    });
+    const [user, preference] = await Promise.all([
+      this.userRepo.findOne({
+        where: { id: userId },
+        select: ['id', 'time_zone'],
+      }),
+      this.preferenceRepo.findOne({
+        where: { user_id: userId },
+      }),
+    ]);
     const timeZone = user?.time_zone ?? 'UTC';
     const dates = [
       formatDateInTimeZone(timeZone, now),
@@ -154,10 +156,14 @@ export class ScheduleSuggestionCoordinator {
   private async supersedeSuggestions(
     suggestions: readonly SuggestionInstance[],
   ): Promise<void> {
+    if (suggestions.length === 0) return;
     for (const suggestion of suggestions) {
       suggestion.generation_status = SuggestionGenerationStatus.Superseded;
-      await this.suggestionRepo.save(suggestion);
     }
+    await this.suggestionRepo.update(
+      { id: In(suggestions.map((suggestion) => suggestion.id)) },
+      { generation_status: SuggestionGenerationStatus.Superseded },
+    );
   }
 
   private async cancelJobs(

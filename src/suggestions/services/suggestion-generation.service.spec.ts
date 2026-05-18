@@ -385,6 +385,9 @@ describe('SuggestionGenerationService', () => {
     expect(skinProfileRepo.findOne).not.toHaveBeenCalled();
     expect(journalRepo.find).not.toHaveBeenCalled();
     expect(applicationLogRepo.find).not.toHaveBeenCalled();
+    expect(
+      todayActionService.shouldIgnoreReactionContext,
+    ).not.toHaveBeenCalled();
     expect(dataAccessLog.recordDataAccess).not.toHaveBeenCalled();
     expect(contextBuilder.build).toHaveBeenCalledWith(
       expect.objectContaining({

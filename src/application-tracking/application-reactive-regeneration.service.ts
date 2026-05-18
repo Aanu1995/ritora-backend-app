@@ -20,7 +20,10 @@ import {
   compareClockTimes,
   deriveSuggestionDaypart,
 } from '../suggestions/services/suggestion-helpers';
-import { requeueSuggestionGenerationJob } from '../suggestions/services/suggestion-generation-job-queue';
+import {
+  requeueSuggestionGenerationJob,
+  type SuggestionGenerationJobDraft,
+} from '../suggestions/services/suggestion-generation-job-queue';
 import { hasScheduledSlotElapsed } from '../suggestions/services/suggestion-scheduled-job-guards';
 import {
   ApplicationItemSource,
@@ -79,6 +82,9 @@ export class ApplicationReactiveRegenerationService {
     const suggestionBySlot = new Map(
       existingSuggestions.map((suggestion) => [suggestion.slot_id, suggestion]),
     );
+    const suggestionIdsToSupersede: string[] = [];
+    const pendingSuggestions: SuggestionInstance[] = [];
+    const jobDrafts: SuggestionGenerationJobDraft[] = [];
 
     for (const slot of futureSlots) {
       const slotInstant = buildSlotInstant(
@@ -107,7 +113,7 @@ export class ApplicationReactiveRegenerationService {
       ) {
         supersedesId = existing.id;
         existing.generation_status = SuggestionGenerationStatus.Superseded;
-        await this.suggestionRepo.save(existing);
+        suggestionIdsToSupersede.push(existing.id);
       }
       if (
         existing?.generation_status === SuggestionGenerationStatus.Generating
@@ -115,7 +121,7 @@ export class ApplicationReactiveRegenerationService {
         continue;
       }
       if (!existing || supersedesId) {
-        await this.suggestionRepo.save(
+        pendingSuggestions.push(
           this.suggestionRepo.create({
             user_id: user.id,
             slot_id: slot.id,
@@ -148,7 +154,7 @@ export class ApplicationReactiveRegenerationService {
           }),
         );
       }
-      await requeueSuggestionGenerationJob(this.jobRepo, {
+      jobDrafts.push({
         user_id: user.id,
         slot_id: slot.id,
         target_date: log.targetDate,
@@ -160,6 +166,24 @@ export class ApplicationReactiveRegenerationService {
         last_error: `reactive:${log.id}`,
       });
     }
+
+    const uniqueSupersededSuggestionIds = Array.from(
+      new Set(suggestionIdsToSupersede),
+    );
+    if (uniqueSupersededSuggestionIds.length > 0) {
+      await this.suggestionRepo.update(
+        { id: In(uniqueSupersededSuggestionIds) },
+        { generation_status: SuggestionGenerationStatus.Superseded },
+      );
+    }
+    if (pendingSuggestions.length > 0) {
+      await this.suggestionRepo.save(pendingSuggestions);
+    }
+    await Promise.all(
+      jobDrafts.map((draft) =>
+        requeueSuggestionGenerationJob(this.jobRepo, draft),
+      ),
+    );
   }
 }
 
