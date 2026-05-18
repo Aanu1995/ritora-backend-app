@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { SkinJournalEntry } from '../entities/skin-journal-entry.entity';
 import type {
+  AnalysisComparisonReference,
   AnalysisObservations,
   AnalysisFailureCode,
   AnalysisStatus,
@@ -8,12 +9,14 @@ import type {
   CycleMarker,
   OverallFeel,
   PhotoAnalysisInterpretation,
+  PhotoReferenceQuality,
   RatingsPayload,
   RecentChangePayload,
   SleepBand,
   StressLevel,
   SunExposure,
 } from '../skin-journal.constants';
+import { buildPhotoReferenceQuality } from '../skin-journal-reference-quality';
 
 export class JournalEntryPhotoResponseDto {
   @ApiProperty()
@@ -106,6 +109,12 @@ export class JournalEntryResponseDto {
   analysis_observations: AnalysisObservations | null;
 
   @ApiProperty({ required: false, nullable: true })
+  analysis_reference: AnalysisComparisonReference | null;
+
+  @ApiProperty()
+  photo_reference_quality: PhotoReferenceQuality;
+
+  @ApiProperty({ required: false, nullable: true })
   analysis_interpretation: PhotoAnalysisInterpretation | null;
 
   @ApiProperty({ required: false, nullable: true })
@@ -189,6 +198,9 @@ export class JournalEntryResponseDto {
     dto.complaint_note = entry.complaint_note;
     dto.analysis_status = entry.analysis_status;
     dto.analysis_observations = entry.analysis_observations;
+    dto.analysis_reference =
+      entry.analysis_observations?.comparison_reference ?? null;
+    dto.photo_reference_quality = buildPhotoReferenceQuality(entry);
     dto.analysis_interpretation = entry.analysis_interpretation;
     dto.analysis_summary = entry.analysis_summary;
     dto.analysis_model = entry.analysis_model;

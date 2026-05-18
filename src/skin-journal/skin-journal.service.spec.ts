@@ -2135,6 +2135,120 @@ describe('SkinJournalService', () => {
     );
   });
 
+  it('skips reaction days as normal analysis references and stores the chosen reference metadata', async () => {
+    const current = entry({
+      id: 'entry-current',
+      entry_date: '2026-04-12',
+      photo_object_key: 'skin-journal/user-1/entry-current/photo.webp',
+      analysis_status: 'pending',
+    });
+    const reactionPrior = entry({
+      id: 'entry-reaction',
+      entry_date: '2026-04-11',
+      photo_object_key: 'skin-journal/user-1/entry-reaction/photo.webp',
+      analysis_status: 'completed',
+      has_reaction_signal: true,
+      analysis_observations: {
+        schema_version: '1.2',
+        model_version: 'test-model',
+        image_quality: {
+          face_detected: true,
+          lighting_quality: 'good',
+          framing_quality: 'good',
+          blur_detected: false,
+          issues: [],
+          needs_retake: false,
+          quality_score: 0.92,
+          excluded_from_trends_reason: null,
+        },
+        per_angle_quality: [],
+        detected_concerns: [],
+        reaction_signals: {
+          reaction_detected: true,
+          reaction_severity: 'moderate',
+          indicators: ['redness_spike'],
+          confidence: 0.72,
+        },
+        barrier_signs: { barrier_compromise: false, indicators: [] },
+        overall_assessment: 'Reaction day.',
+        overall_change_from_previous: 'worsened',
+        user_visible_message: 'Reaction day.',
+        safety_flags: {
+          urgent_review_recommended: false,
+          doctor_follow_up_recommended: false,
+          reasons: [],
+        },
+        should_flag_for_doctor: false,
+      },
+    });
+    const cleanPrior = entry({
+      id: 'entry-clean',
+      entry_date: '2026-04-09',
+      photo_object_key: 'skin-journal/user-1/entry-clean/photo.webp',
+      analysis_status: 'completed',
+      has_reaction_signal: false,
+      analysis_observations: {
+        schema_version: '1.2',
+        model_version: 'test-model',
+        image_quality: {
+          face_detected: true,
+          lighting_quality: 'good',
+          framing_quality: 'good',
+          blur_detected: false,
+          issues: [],
+          needs_retake: false,
+          quality_score: 0.88,
+          excluded_from_trends_reason: null,
+        },
+        per_angle_quality: [],
+        detected_concerns: [],
+        reaction_signals: {
+          reaction_detected: false,
+          reaction_severity: 'none',
+          indicators: [],
+          confidence: 0.1,
+        },
+        barrier_signs: { barrier_compromise: false, indicators: [] },
+        overall_assessment: 'Clean reference.',
+        overall_change_from_previous: 'stable',
+        user_visible_message: 'Clean reference.',
+        safety_flags: {
+          urgent_review_recommended: false,
+          doctor_follow_up_recommended: false,
+          reasons: [],
+        },
+        should_flag_for_doctor: false,
+      },
+    });
+    entries.findOne.mockResolvedValue(current);
+    entries.find
+      .mockResolvedValueOnce([reactionPrior, cleanPrior])
+      .mockResolvedValue([cleanPrior, reactionPrior, current]);
+
+    await service.runAnalysis(current.id, 'user-1');
+
+    expect(analysis.analyze).toHaveBeenCalledWith(
+      expect.objectContaining({
+        priorPhotoObjectKey: 'skin-journal/user-1/entry-clean/photo.webp',
+        priorAnalysis: cleanPrior.analysis_observations,
+      }),
+    );
+    expect(entries.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'entry-current',
+        analysis_observations: expect.objectContaining({
+          comparison_reference: expect.objectContaining({
+            entry_id: 'entry-clean',
+            entry_date: '2026-04-09',
+            quality: expect.objectContaining({
+              status: 'good_reference',
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('marks analysis as needs_review when the model asks for a retake', async () => {
     const current = entry({
       id: 'entry-current',
@@ -3294,5 +3408,208 @@ describe('SkinJournalService', () => {
         expect.objectContaining({ text: expect.any(String) }),
       ]),
     );
+  });
+
+  it('adds photo-analysis concern, reaction, and barrier deltas to compare results', async () => {
+    entries.findOne
+      .mockResolvedValueOnce(
+        entry({
+          id: 'from-entry',
+          entry_date: '2026-04-10',
+          photo_object_key: 'skin-journal/user-1/from-entry/photo.webp',
+          analysis_status: 'completed',
+          analysis_observations: {
+            schema_version: '1.2',
+            model_version: 'test-model',
+            image_quality: {
+              face_detected: true,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              needs_retake: false,
+              quality_score: 0.9,
+              excluded_from_trends_reason: null,
+            },
+            per_angle_quality: [],
+            detected_concerns: [
+              {
+                concern: 'acne',
+                severity: 'mild',
+                locations: ['chin'],
+                confidence: 0.66,
+                change_from_previous: 'stable',
+                change_confidence: 0.62,
+              },
+            ],
+            reaction_signals: {
+              reaction_detected: false,
+              reaction_severity: 'none',
+              indicators: [],
+              confidence: 0.1,
+            },
+            barrier_signs: {
+              barrier_compromise: false,
+              indicators: [],
+            },
+            overall_assessment: 'Earlier photo.',
+            overall_change_from_previous: 'stable',
+            user_visible_message: 'Earlier photo.',
+            safety_flags: {
+              urgent_review_recommended: false,
+              doctor_follow_up_recommended: false,
+              reasons: [],
+            },
+            should_flag_for_doctor: false,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        entry({
+          id: 'to-entry',
+          entry_date: '2026-04-18',
+          photo_object_key: 'skin-journal/user-1/to-entry/photo.webp',
+          analysis_status: 'completed',
+          analysis_observations: {
+            schema_version: '1.2',
+            model_version: 'test-model',
+            image_quality: {
+              face_detected: true,
+              lighting_quality: 'good',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: [],
+              needs_retake: false,
+              quality_score: 0.9,
+              excluded_from_trends_reason: null,
+            },
+            per_angle_quality: [],
+            detected_concerns: [
+              {
+                concern: 'acne',
+                severity: 'moderate',
+                locations: ['chin'],
+                confidence: 0.76,
+                change_from_previous: 'worsened',
+                change_confidence: 0.7,
+              },
+            ],
+            reaction_signals: {
+              reaction_detected: true,
+              reaction_severity: 'moderate',
+              indicators: ['redness_spike'],
+              confidence: 0.75,
+            },
+            barrier_signs: {
+              barrier_compromise: true,
+              indicators: ['flaking'],
+            },
+            overall_assessment: 'Later photo.',
+            overall_change_from_previous: 'worsened',
+            user_visible_message: 'Later photo.',
+            safety_flags: {
+              urgent_review_recommended: false,
+              doctor_follow_up_recommended: false,
+              reasons: [],
+            },
+            should_flag_for_doctor: false,
+          },
+        }),
+      );
+
+    const result = await service.getCompare(
+      'user-1',
+      '2026-04-10',
+      '2026-04-18',
+    );
+
+    expect(result.delta.bullets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'photo_concern_worsened',
+          tone: 'warn',
+          analysis_concern: 'acne',
+          from_severity: 'mild',
+          to_severity: 'moderate',
+        }),
+        expect.objectContaining({
+          code: 'reaction_signal_increased',
+          tone: 'warn',
+          from_severity: 'none',
+          to_severity: 'moderate',
+        }),
+        expect.objectContaining({
+          code: 'barrier_signal_worsened',
+          tone: 'warn',
+        }),
+      ]),
+    );
+  });
+
+  it('explains when photo compare is limited by image quality', async () => {
+    entries.findOne
+      .mockResolvedValueOnce(
+        entry({
+          id: 'from-entry',
+          entry_date: '2026-04-10',
+          photo_object_key: 'skin-journal/user-1/from-entry/photo.webp',
+          analysis_status: 'completed',
+          analysis_observations: {
+            schema_version: '1.2',
+            model_version: 'test-model',
+            image_quality: {
+              face_detected: true,
+              lighting_quality: 'poor',
+              framing_quality: 'good',
+              blur_detected: false,
+              issues: ['too_dark'],
+              needs_retake: true,
+              quality_score: 0.3,
+              excluded_from_trends_reason: 'poor_lighting',
+            },
+            per_angle_quality: [],
+            detected_concerns: [],
+            reaction_signals: {
+              reaction_detected: false,
+              reaction_severity: 'none',
+              indicators: [],
+              confidence: 0.1,
+            },
+            barrier_signs: { barrier_compromise: false, indicators: [] },
+            overall_assessment: 'Too dark.',
+            overall_change_from_previous: 'not_comparable',
+            user_visible_message: 'Too dark.',
+            safety_flags: {
+              urgent_review_recommended: false,
+              doctor_follow_up_recommended: false,
+              reasons: [],
+            },
+            should_flag_for_doctor: false,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        entry({
+          id: 'to-entry',
+          entry_date: '2026-04-18',
+          photo_object_key: 'skin-journal/user-1/to-entry/photo.webp',
+          analysis_status: 'completed',
+          analysis_observations: null,
+        }),
+      );
+
+    const result = await service.getCompare(
+      'user-1',
+      '2026-04-10',
+      '2026-04-18',
+    );
+
+    expect(result.delta.bullets).toEqual([
+      expect.objectContaining({
+        code: 'not_comparable',
+        tone: 'warn',
+        reason: 'poor_lighting',
+      }),
+    ]);
   });
 });

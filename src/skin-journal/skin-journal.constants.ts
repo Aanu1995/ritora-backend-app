@@ -222,6 +222,41 @@ export type AnalysisSafetyReason =
   | 'cracking_or_open_skin_appearance'
   | 'possible_infection_signs';
 
+export const PhotoReferenceQualityStatusValue = {
+  GoodReference: 'good_reference',
+  LimitedReference: 'limited_reference',
+  NotTrendSafe: 'not_trend_safe',
+} as const;
+
+export type PhotoReferenceQualityStatus =
+  (typeof PhotoReferenceQualityStatusValue)[keyof typeof PhotoReferenceQualityStatusValue];
+
+export type PhotoReferenceQualityReason =
+  | 'no_photo'
+  | 'analysis_pending'
+  | 'analysis_failed'
+  | 'analysis_unavailable'
+  | 'face_missing'
+  | 'needs_retake'
+  | 'poor_lighting'
+  | 'poor_framing'
+  | 'blur'
+  | 'quality_limited'
+  | 'reaction_day'
+  | 'not_comparable';
+
+export interface PhotoReferenceQuality {
+  status: PhotoReferenceQualityStatus;
+  reasons: PhotoReferenceQualityReason[];
+  quality_score: number | null;
+}
+
+export interface AnalysisComparisonReference {
+  entry_id: string;
+  entry_date: string;
+  quality: PhotoReferenceQuality;
+}
+
 export type AnalysisConcern =
   | 'acne'
   | 'hyperpigmentation'
@@ -280,7 +315,18 @@ export type CompareDeltaCode =
   | 'rating_improved'
   | 'rating_worsened'
   | 'reaction_cleared'
+  | 'reaction_signal_increased'
+  | 'reaction_signal_reduced'
+  | 'barrier_signal_worsened'
+  | 'barrier_signal_improved'
+  | 'photo_concern_improved'
+  | 'photo_concern_worsened'
+  | 'photo_concern_new'
+  | 'photo_concern_cleared'
+  | 'not_comparable'
   | 'no_major_change';
+
+export type CompareDeltaSeverity = 'none' | 'mild' | 'moderate' | 'severe';
 
 export interface CompareDeltaBullet {
   code: CompareDeltaCode;
@@ -288,6 +334,11 @@ export interface CompareDeltaBullet {
   concern?: ConcernKey;
   from_rating?: number;
   to_rating?: number;
+  analysis_concern?: AnalysisConcern;
+  from_severity?: CompareDeltaSeverity;
+  to_severity?: CompareDeltaSeverity;
+  reason?: PhotoReferenceQualityReason;
+  confidence?: number | null;
 }
 
 export const SKIN_JOURNAL_LOCAL_DIR = 'uploads/skin-journal';
@@ -439,6 +490,7 @@ export interface AnalysisAngleQuality {
 export interface AnalysisObservations {
   schema_version: '1.0' | '1.1' | '1.2';
   model_version: string;
+  comparison_reference?: AnalysisComparisonReference | null;
   image_quality: {
     face_detected: boolean;
     lighting_quality: 'poor' | 'fair' | 'good' | 'excellent';

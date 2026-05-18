@@ -147,9 +147,17 @@ import {
   AnalysisEntryContext,
   AnalysisSkinContext,
   CompareDeltaBullet,
+  CompareDeltaSeverity,
   ExportStatusValue,
   InsightGenerationStatusValue,
+  PhotoReferenceQualityReason,
 } from './skin-journal.constants';
+import {
+  buildAnalysisComparisonReference,
+  buildPhotoReferenceQuality,
+  selectAnalysisReferenceEntry,
+  withAnalysisComparisonReference,
+} from './skin-journal-reference-quality';
 import {
   isValidDate,
   listDatesInRange,
@@ -1567,6 +1575,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         this.skinProfiles.findOne({ where: { user_id: userId } }),
       ]);
       const skinContext = this.buildAnalysisSkinContext(skinProfile);
+      const comparisonReference = previousEntry
+        ? buildAnalysisComparisonReference(previousEntry)
+        : null;
       plannedInputImageCount =
         currentPhotos.length + (previousEntry?.photo_object_key ? 1 : 0);
       const result = await this.analysis.analyze({
@@ -1580,7 +1591,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         skinContext,
         entryContext: this.buildAnalysisEntryContext(entry),
       });
-      const obs = result.observations;
+      const obs = withAnalysisComparisonReference(
+        result.observations,
+        comparisonReference,
+      );
 
       const current = await this.entries.findOne({
         where: { id: entryId, user_id: userId },
@@ -3492,14 +3506,14 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       order: { entry_date: 'DESC' },
       take: 10,
     });
-    return (
-      candidates.find(
+    return selectAnalysisReferenceEntry(
+      candidates.filter(
         (candidate) =>
           candidate.id !== currentEntry.id &&
           candidate.entry_date < currentEntry.entry_date &&
-          !!candidate.photo_object_key &&
-          isTrendSafeBaseline(candidate.analysis_observations),
-      ) ?? null
+          !!candidate.photo_object_key,
+      ),
+      currentEntry,
     );
   }
 
@@ -3677,20 +3691,124 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         });
       }
     }
-    if (
-      (from.has_reaction_signal ||
-        from.analysis_observations?.reaction_signals?.reaction_detected) &&
-      !(
-        to.has_reaction_signal ||
-        to.analysis_observations?.reaction_signals?.reaction_detected
-      )
-    ) {
-      bullets.push({ code: 'reaction_cleared', tone: 'good' });
+
+    const qualityReason = firstCompareQualityLimitation(from, to);
+    if (qualityReason) {
+      bullets.push({
+        code: 'not_comparable',
+        tone: 'warn',
+        reason: qualityReason,
+      });
+    } else {
+      bullets.push(...this.computePhotoConcernDelta(from, to));
     }
+
+    const reactionDelta = this.computeReactionDelta(from, to);
+    if (reactionDelta) {
+      bullets.push(reactionDelta);
+    }
+
+    const barrierDelta = this.computeBarrierDelta(from, to);
+    if (barrierDelta) {
+      bullets.push(barrierDelta);
+    }
+
     if (bullets.length === 0) {
       bullets.push({ code: 'no_major_change', tone: 'neutral' });
     }
     return { bullets };
+  }
+
+  private computePhotoConcernDelta(
+    from: SkinJournalEntry,
+    to: SkinJournalEntry,
+  ): CompareDeltaBullet[] {
+    const fromConcerns = analysisConcernMap(from.analysis_observations);
+    const toConcerns = analysisConcernMap(to.analysis_observations);
+    const concerns = new Set([...fromConcerns.keys(), ...toConcerns.keys()]);
+    const bullets: CompareDeltaBullet[] = [];
+
+    for (const concern of concerns) {
+      const previous = fromConcerns.get(concern);
+      const current = toConcerns.get(concern);
+      const previousSeverity = previous?.severity ?? 'none';
+      const currentSeverity = current?.severity ?? 'none';
+      const previousRank = severityRank(previousSeverity);
+      const currentRank = severityRank(currentSeverity);
+      if (previousRank === currentRank) {
+        continue;
+      }
+
+      bullets.push({
+        code:
+          previousRank === 0
+            ? 'photo_concern_new'
+            : currentRank === 0
+              ? 'photo_concern_cleared'
+              : currentRank < previousRank
+                ? 'photo_concern_improved'
+                : 'photo_concern_worsened',
+        tone: currentRank < previousRank ? 'good' : 'warn',
+        analysis_concern: concern,
+        from_severity: previousSeverity,
+        to_severity: currentSeverity,
+        confidence: current?.confidence ?? previous?.confidence ?? null,
+      });
+    }
+
+    return bullets;
+  }
+
+  private computeReactionDelta(
+    from: SkinJournalEntry,
+    to: SkinJournalEntry,
+  ): CompareDeltaBullet | null {
+    const previous = reactionSeverity(from);
+    const current = reactionSeverity(to);
+    const previousRank = severityRank(previous);
+    const currentRank = severityRank(current);
+    if (previousRank === currentRank) {
+      return null;
+    }
+    if (previousRank > 0 && currentRank === 0) {
+      return {
+        code: 'reaction_cleared',
+        tone: 'good',
+      };
+    }
+    return {
+      code:
+        currentRank < previousRank
+          ? 'reaction_signal_reduced'
+          : 'reaction_signal_increased',
+      tone: currentRank < previousRank ? 'good' : 'warn',
+      from_severity: previous,
+      to_severity: current,
+      confidence:
+        to.analysis_observations?.reaction_signals.confidence ??
+        from.analysis_observations?.reaction_signals.confidence ??
+        null,
+    };
+  }
+
+  private computeBarrierDelta(
+    from: SkinJournalEntry,
+    to: SkinJournalEntry,
+  ): CompareDeltaBullet | null {
+    const previous =
+      from.analysis_observations?.barrier_signs.barrier_compromise;
+    const current = to.analysis_observations?.barrier_signs.barrier_compromise;
+    if (
+      previous === current ||
+      previous === undefined ||
+      current === undefined
+    ) {
+      return null;
+    }
+    return {
+      code: current ? 'barrier_signal_worsened' : 'barrier_signal_improved',
+      tone: current ? 'warn' : 'good',
+    };
   }
 
   private analysisConcernKeys(obs: AnalysisObservations): AnalysisConcern[] {
@@ -4256,17 +4374,6 @@ function photoCursorFingerprint(
   ].join(':');
 }
 
-function isTrendSafeBaseline(obs: AnalysisObservations | null): boolean {
-  if (!obs) {
-    return false;
-  }
-  return (
-    obs.image_quality.face_detected === true &&
-    obs.image_quality.needs_retake !== true &&
-    obs.image_quality.excluded_from_trends_reason == null
-  );
-}
-
 function hasAiNoFaceSignal(obs: AnalysisObservations): boolean {
   return (
     obs.image_quality.face_detected === false ||
@@ -4277,6 +4384,74 @@ function hasAiNoFaceSignal(obs: AnalysisObservations): boolean {
         quality.issues.includes('non_face_image'),
     )
   );
+}
+
+function firstCompareQualityLimitation(
+  from: SkinJournalEntry,
+  to: SkinJournalEntry,
+): PhotoReferenceQualityReason | null {
+  if (!from.analysis_observations && !to.analysis_observations) {
+    return null;
+  }
+  const fromQuality = buildPhotoReferenceQuality(from);
+  const toQuality = buildPhotoReferenceQuality(to);
+  if (fromQuality.status === 'not_trend_safe') {
+    return fromQuality.reasons[0] ?? 'not_comparable';
+  }
+  if (toQuality.status === 'not_trend_safe') {
+    return toQuality.reasons[0] ?? 'not_comparable';
+  }
+  return null;
+}
+
+function analysisConcernMap(observations: AnalysisObservations | null): Map<
+  AnalysisConcern,
+  {
+    severity: Exclude<CompareDeltaSeverity, 'none'>;
+    confidence: number;
+  }
+> {
+  const concerns = new Map<
+    AnalysisConcern,
+    {
+      severity: Exclude<CompareDeltaSeverity, 'none'>;
+      confidence: number;
+    }
+  >();
+  for (const concern of observations?.detected_concerns ?? []) {
+    if (concern.confidence < 0.55) {
+      continue;
+    }
+    const existing = concerns.get(concern.concern);
+    if (
+      !existing ||
+      severityRank(concern.severity) > severityRank(existing.severity) ||
+      concern.confidence > existing.confidence
+    ) {
+      concerns.set(concern.concern, {
+        severity: concern.severity,
+        confidence: concern.confidence,
+      });
+    }
+  }
+  return concerns;
+}
+
+function reactionSeverity(entry: SkinJournalEntry): CompareDeltaSeverity {
+  const reaction = entry.analysis_observations?.reaction_signals;
+  if (!reaction?.reaction_detected && !entry.has_reaction_signal) {
+    return 'none';
+  }
+  return reaction?.reaction_severity ?? 'moderate';
+}
+
+function severityRank(severity: CompareDeltaSeverity): number {
+  return {
+    none: 0,
+    mild: 1,
+    moderate: 2,
+    severe: 3,
+  }[severity];
 }
 
 function normalizeInsightCadence(value: unknown): InsightCadence {
