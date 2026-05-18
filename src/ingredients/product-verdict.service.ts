@@ -375,16 +375,15 @@ export class ProductVerdictService {
   private resolveBaseConfidence(
     input: ProductVerdictInput,
   ): AnalysisConfidence {
-    if (
-      input.analysis.confidence === AnalysisConfidence.Low ||
-      input.lookupConfidence === LookupConfidence.Low
-    ) {
+    if (input.analysis.confidence === AnalysisConfidence.Low) {
       return AnalysisConfidence.Low;
     }
 
     if (
       input.analysis.confidence === AnalysisConfidence.Medium ||
-      input.lookupConfidence === LookupConfidence.Medium
+      input.lookupConfidence === LookupConfidence.Medium ||
+      input.lookupConfidence === LookupConfidence.Low ||
+      input.reviewRequired
     ) {
       return AnalysisConfidence.Medium;
     }

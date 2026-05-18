@@ -317,7 +317,7 @@ describe('ProductVerdictService', () => {
     );
   });
 
-  it('downgrades the verdict when photo extraction confidence is low', () => {
+  it('keeps low photo metadata confidence at medium when ingredients are analyzable', () => {
     const verdict = service.buildVerdict({
       analysis: analysis({
         confidence: AnalysisConfidence.High,
@@ -331,9 +331,9 @@ describe('ProductVerdictService', () => {
       photosensitizingIngredients: [],
     });
 
-    expect(verdict.label).toBe(ProductCheckVerdict.UseCarefully);
-    expect(verdict.confidence).toBe(AnalysisConfidence.Low);
-    expect(verdict.reasons).toEqual(
+    expect(verdict.label).toBe(ProductCheckVerdict.GoodWithLimits);
+    expect(verdict.confidence).toBe(AnalysisConfidence.Medium);
+    expect(verdict.reasons).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: ProductCheckReasonCode.LowConfidence }),
       ]),
@@ -556,6 +556,37 @@ describe('ProductVerdictService', () => {
     });
 
     expect(notDowngraded.label).toBe(ProductCheckVerdict.AvoidForProfile);
+  });
+
+  it('does not let AI mark a supported verdict low confidence without low-confidence evidence', () => {
+    const verdict = service.buildVerdict({
+      analysis: analysis({
+        safetyScore: 100,
+      }),
+      matchedIngredientCount: 4,
+      reviewRequired: false,
+      hasSensitiveProfile: false,
+      reactionTriggerIngredients: [],
+      photosensitizingIngredients: [],
+      aiReview: {
+        status: ProductCheckAiReviewStatus.Reviewed,
+        confidence: AnalysisConfidence.Low,
+        suggestedVerdict: ProductCheckVerdict.GoodWithLimits,
+        reasonCodes: [ProductCheckReasonCode.ReviewRequired],
+        ingredientNames: [],
+        summary: 'Review product metadata, but ingredients are usable.',
+        reviewedAt: '2026-05-17T10:00:00.000Z',
+      },
+    });
+
+    expect(verdict.label).toBe(ProductCheckVerdict.GoodWithLimits);
+    expect(verdict.safetyScore).toBe(100);
+    expect(verdict.confidence).toBe(AnalysisConfidence.Medium);
+    expect(verdict.reasons).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: ProductCheckReasonCode.LowConfidence }),
+      ]),
+    );
   });
 
   it('aggregates repeated conflict-family reasons before returning the verdict', () => {

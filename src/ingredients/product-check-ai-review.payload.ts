@@ -104,7 +104,10 @@ export function sanitizeProductCheckAiReview(
     input,
     reasonCodes,
   );
-  const confidence = sanitizeConfidence(parsed.confidence);
+  const confidence = sanitizeConfidence(
+    parsed.confidence,
+    input.baselineVerdict.confidence,
+  );
   const summary =
     typeof parsed.summary === 'string'
       ? parsed.summary.trim().slice(0, MAX_SUMMARY_CHARS) || null
@@ -178,10 +181,11 @@ function sanitizeSuggestedVerdict(
 
 function sanitizeConfidence(
   confidence: AnalysisConfidence | undefined,
+  fallback: AnalysisConfidence,
 ): AnalysisConfidence {
   return confidence && PRODUCT_CHECK_REVIEW_CONFIDENCE.includes(confidence)
     ? confidence
-    : AnalysisConfidence.Low;
+    : fallback;
 }
 
 function allowedAiReviewIngredientNames(

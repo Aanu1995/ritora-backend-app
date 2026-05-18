@@ -123,6 +123,20 @@ describe('sanitizeProductCheckAiReview', () => {
       ProductCheckReasonCode.MissingPersonalContext,
     ]);
   });
+
+  it('falls back to the baseline confidence when AI confidence is missing or invalid', () => {
+    const review = sanitizeProductCheckAiReview(
+      {
+        suggestedVerdict: ProductCheckVerdict.UseCarefully,
+        reasonCodes: [ProductCheckReasonCode.MediumConflict],
+        ingredientNames: ['Citric acid'],
+        summary: 'Use with spacing because acids can stack.',
+      },
+      buildInput(),
+    );
+
+    expect(review.confidence).toBe(AnalysisConfidence.High);
+  });
 });
 
 function buildInput(): ProductCheckAiReviewInput {

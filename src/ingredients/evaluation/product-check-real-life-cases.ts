@@ -371,11 +371,11 @@ export const PHOTO_QUICK_CHECK_REAL_LIFE_CASES: readonly PhotoQuickCheckRealLife
       },
       expected: {
         verdicts: [
+          ProductCheckVerdict.GoodFit,
           ProductCheckVerdict.GoodWithLimits,
           ProductCheckVerdict.UseCarefully,
         ],
         contextSignals: [ProductCheckContextSignal.SkinProfile],
-        reasonCodes: [ProductCheckReasonCode.ReviewRequired],
         activeNames: ['Glycerin', 'Ceramides', 'Hyaluronic acid'],
         requireAiReviewed: true,
         requireAiSummary: true,

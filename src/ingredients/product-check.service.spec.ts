@@ -1,6 +1,7 @@
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import {
   LookupConfidence,
+  LookupWarningCode,
   ProductCategory,
   ShelfStatus,
 } from '../shelf/shelf.types';
@@ -147,6 +148,7 @@ describe('ProductCheckService', () => {
             displayNameEn: 'Niacinamide',
             category: 'niacinamide',
           },
+          confidence: 1,
         },
       ],
     });
@@ -385,7 +387,60 @@ describe('ProductCheckService', () => {
     ]);
     expect(verdictService.buildVerdict).toHaveBeenCalledWith(
       expect.objectContaining({
-        lookupConfidence: LookupConfidence.Low,
+        lookupConfidence: undefined,
+      }),
+    );
+  });
+
+  it('does not let Shelf metadata review flags downgrade photo Quick Check verdicts', async () => {
+    await service.checkForUser(
+      'user-1',
+      {
+        product: {
+          source: ProductCheckSource.PhotoExtraction,
+          category: ProductCategory.Moisturizer,
+          inciIngredients: ['Aqua', 'Glycerin', 'Dimethicone'],
+          lookupConfidence: LookupConfidence.Low,
+          lookupWarnings: [
+            LookupWarningCode.ReviewRequired,
+            LookupWarningCode.PartialData,
+            LookupWarningCode.AiNormalized,
+            LookupWarningCode.GuidanceUnverified,
+          ],
+          reviewRequired: true,
+        },
+      },
+      'en',
+    );
+
+    expect(verdictService.buildVerdict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookupConfidence: undefined,
+        reviewRequired: false,
+      }),
+    );
+  });
+
+  it('does not carry photo ingredient save-review warnings into Quick Check verdict inputs', async () => {
+    await service.checkForUser(
+      'user-1',
+      {
+        product: {
+          source: ProductCheckSource.PhotoExtraction,
+          category: ProductCategory.Moisturizer,
+          inciIngredients: ['Aqua', 'Glycerin', 'Dimethicone'],
+          lookupConfidence: LookupConfidence.Low,
+          lookupWarnings: [LookupWarningCode.IngredientsUnverified],
+          reviewRequired: true,
+        },
+      },
+      'en',
+    );
+
+    expect(verdictService.buildVerdict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookupConfidence: undefined,
+        reviewRequired: false,
       }),
     );
   });
@@ -611,6 +666,54 @@ describe('ProductCheckService', () => {
         analysis: expect.objectContaining({
           confidence: AnalysisConfidence.High,
         }),
+      }),
+    );
+  });
+
+  it('uses product-check confidence metrics for complete INCI lists with partial catalog coverage', async () => {
+    matchingService.matchProduct.mockReturnValue({
+      totalTokens: 25,
+      resolvedTokens: 1,
+      unresolvedTokens: ['Aqua', 'Cetearyl Alcohol', 'Dimethicone'],
+      matchedIngredients: [
+        {
+          ingredient: {
+            slug: 'glycerin',
+            displayNameEn: 'Glycerin',
+            category: 'humectant',
+          },
+          confidence: 1,
+        },
+      ],
+    });
+
+    await service.checkForUser(
+      'user-1',
+      {
+        product: {
+          source: ProductCheckSource.IngredientPaste,
+          brand: 'CeraVe',
+          name: 'Moisturising Lotion',
+          category: ProductCategory.Moisturizer,
+          inciIngredients: [
+            'Aqua',
+            'Glycerin',
+            'Caprylic/Capric Triglyceride',
+            'Cetearyl Alcohol',
+            'Dimethicone',
+            'Phenoxyethanol',
+          ],
+        },
+      },
+      'en',
+    );
+
+    expect(verdictService.buildVerdict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        analysis: expect.objectContaining({
+          confidence: AnalysisConfidence.Medium,
+        }),
+        matchedIngredientCount: 1,
       }),
     );
   });

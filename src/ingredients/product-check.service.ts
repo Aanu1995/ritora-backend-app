@@ -2,10 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
-import { ShelfStatus } from '../shelf/shelf.types';
+import { LookupConfidence, ShelfStatus } from '../shelf/shelf.types';
 import type { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { AnalysisService } from './analysis.service';
-import { resolveAnalysisConfidence } from './analysis.constants';
 import { CheckProductDto } from './dto/check-product.dto';
 import {
   AnalysisSeverity,
@@ -20,10 +19,12 @@ import {
   type ProductCheckAiReviewPort,
 } from './product-check-ai-review.port';
 import { ProductCheckContextService } from './product-check-context.service';
+import { resolveProductCheckConfidence } from './product-check-confidence';
 import { ProductCheckPurchaseGuidanceService } from './product-check-purchase-guidance.service';
 import { ProductCheckReactionEvidenceService } from './product-check-reaction-evidence.service';
 import {
   ProductCheckPersonalizationLevel,
+  ProductCheckSource,
   type ProductCheckResponse,
 } from './product-check.types';
 import {
@@ -109,12 +110,7 @@ export class ProductCheckService {
         focusProductId: CHECKED_PRODUCT_ID,
       }),
     ]);
-    const checkedProductConfidence = resolveAnalysisConfidence(
-      match.totalTokens,
-      match.resolvedTokens,
-      match.totalTokens > 0 ? 1 : 0,
-      match.resolvedTokens > 0 ? 1 : 0,
-    );
+    const checkedProductConfidence = resolveProductCheckConfidence(match);
     const checkedProductAnalysis = this.toCheckedProductAnalysis(analysis);
     const enrichedAnalysis = {
       ...checkedProductAnalysis,
@@ -135,14 +131,14 @@ export class ProductCheckService {
     const verdictInput = {
       analysis: enrichedAnalysis,
       matchedIngredientCount: match.matchedIngredients.length,
-      lookupConfidence: dto.product.lookupConfidence,
+      lookupConfidence: this.resolveQuickCheckLookupConfidence(dto.product),
       hasPersonalContext:
         context.level === ProductCheckPersonalizationLevel.Personalized,
       hasReactionContext: hasReactionContext(context),
       recentJournalReactionCount: context.recentJournalReactionCount,
       recentSuggestionReactionCount: context.recentSuggestionReactionCount,
       reactionEvidenceCount: reactionEvidence.length,
-      reviewRequired: Boolean(dto.product.reviewRequired),
+      reviewRequired: this.requiresIngredientReview(dto.product),
       hasSensitiveProfile: this.hasSensitiveProfile(skinProfile),
       reactionTriggerIngredients,
       photosensitizingIngredients: this.findPhotosensitizingIngredients(match),
@@ -369,5 +365,25 @@ export class ProductCheckService {
           matched.ingredient.requiresSpf === true,
       ),
     );
+  }
+
+  private resolveQuickCheckLookupConfidence(
+    product: CheckProductDto['product'],
+  ): LookupConfidence | undefined {
+    if (product.source !== ProductCheckSource.PhotoExtraction) {
+      return product.lookupConfidence;
+    }
+
+    return undefined;
+  }
+
+  private requiresIngredientReview(
+    product: CheckProductDto['product'],
+  ): boolean {
+    if (product.source !== ProductCheckSource.PhotoExtraction) {
+      return Boolean(product.reviewRequired);
+    }
+
+    return false;
   }
 }

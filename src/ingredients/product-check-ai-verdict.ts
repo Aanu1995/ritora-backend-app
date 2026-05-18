@@ -49,6 +49,16 @@ export function applyAiReviewConfidence(
     return baseConfidence;
   }
 
+  if (
+    review.confidence === AnalysisConfidence.Low &&
+    baseConfidence !== AnalysisConfidence.Low &&
+    !review.reasonCodes.includes(ProductCheckReasonCode.LowConfidence)
+  ) {
+    return baseConfidence === AnalysisConfidence.High
+      ? AnalysisConfidence.Medium
+      : baseConfidence;
+  }
+
   return CONFIDENCE_ORDER[review.confidence] < CONFIDENCE_ORDER[baseConfidence]
     ? review.confidence
     : baseConfidence;
