@@ -8,7 +8,7 @@ export class CreateNotificationTables1714300000000 implements MigrationInterface
         "user_id" varchar(26) NOT NULL,
         "photo_reminder_local_time" time NOT NULL DEFAULT '08:00',
         "photo_reminder_enabled" boolean NOT NULL DEFAULT true,
-        "channels" jsonb NOT NULL DEFAULT '["in_app","email"]'::jsonb,
+        "channels" jsonb NOT NULL DEFAULT '["in_app"]'::jsonb,
         "reaction_alerts_enabled" boolean NOT NULL DEFAULT true,
         "simplification_alerts_enabled" boolean NOT NULL DEFAULT true,
         "insight_alerts_enabled" boolean NOT NULL DEFAULT true,

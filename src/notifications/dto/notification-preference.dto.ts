@@ -10,9 +10,12 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  DEFAULT_NOTIFICATION_CHANNELS,
+  NOTIFICATION_CHANNEL_VALUES,
   NotificationChannel,
+  NotificationChannelValue,
   UserNotificationPreference,
 } from '../entities/user-notification-preference.entity';
 import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
@@ -50,11 +53,31 @@ export class UpdatePreferencesDto {
   @IsOptional()
   @IsArray()
   @ArrayUnique()
-  @IsIn(['email', 'in_app', 'push'], { each: true })
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
   channels?: NotificationChannel[];
 
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  reaction_alert_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() reaction_alerts_enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  simplification_alert_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() simplification_alerts_enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  insight_alert_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() insight_alerts_enabled?: boolean;
   @IsOptional()
   @IsIn(INSIGHT_CADENCE_VALUES)
@@ -73,13 +96,53 @@ export class UpdatePreferencesDto {
   @Matches(HHMM_PATTERN)
   insight_digest_local_time?: string;
 
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  wrapped_alert_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() wrapped_alerts_enabled?: boolean;
   @IsOptional() @IsBoolean() photo_tutorial_completed?: boolean;
 
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  suggestion_ready_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() suggestion_ready_enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  smart_pick_ready_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() smart_pick_ready_enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  slot_start_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() slot_start_enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  recording_reminder_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() recording_reminder_enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(NOTIFICATION_CHANNEL_VALUES, { each: true })
+  product_expiry_alert_channels?: NotificationChannel[];
+
   @IsOptional() @IsBoolean() product_expiry_alerts_enabled?: boolean;
 
   @EmptyStringToUndefined()
@@ -121,11 +184,20 @@ export class PreferencesResponseDto {
   @ApiProperty({ type: [String] })
   channels: NotificationChannel[];
 
+  @ApiPropertyOptional({ type: [String] })
+  reaction_alert_channels: NotificationChannel[];
+
   @ApiProperty()
   reaction_alerts_enabled: boolean;
 
+  @ApiPropertyOptional({ type: [String] })
+  simplification_alert_channels: NotificationChannel[];
+
   @ApiProperty()
   simplification_alerts_enabled: boolean;
+
+  @ApiPropertyOptional({ type: [String] })
+  insight_alert_channels: NotificationChannel[];
 
   @ApiProperty()
   insight_alerts_enabled: boolean;
@@ -142,20 +214,38 @@ export class PreferencesResponseDto {
   @ApiProperty()
   insight_digest_local_time: string;
 
+  @ApiPropertyOptional({ type: [String] })
+  wrapped_alert_channels: NotificationChannel[];
+
   @ApiProperty()
   wrapped_alerts_enabled: boolean;
+
+  @ApiPropertyOptional({ type: [String] })
+  suggestion_ready_channels: NotificationChannel[];
 
   @ApiProperty()
   suggestion_ready_enabled: boolean;
 
+  @ApiPropertyOptional({ type: [String] })
+  smart_pick_ready_channels: NotificationChannel[];
+
   @ApiProperty()
   smart_pick_ready_enabled: boolean;
+
+  @ApiPropertyOptional({ type: [String] })
+  slot_start_channels: NotificationChannel[];
 
   @ApiProperty()
   slot_start_enabled: boolean;
 
+  @ApiPropertyOptional({ type: [String] })
+  recording_reminder_channels: NotificationChannel[];
+
   @ApiProperty()
   recording_reminder_enabled: boolean;
+
+  @ApiPropertyOptional({ type: [String] })
+  product_expiry_alert_channels: NotificationChannel[];
 
   @ApiProperty()
   product_expiry_alerts_enabled: boolean;
@@ -191,9 +281,24 @@ export class PreferencesResponseDto {
       '00:00',
     );
     dto.photo_reminder_enabled = p.photo_reminder_enabled;
-    dto.channels = p.channels;
+    dto.channels = normalizeChannels(p.channels, DEFAULT_NOTIFICATION_CHANNELS);
+    dto.reaction_alert_channels = normalizeSpecificChannels(
+      p.reaction_alert_channels,
+      dto.channels,
+      dto.channels,
+    );
     dto.reaction_alerts_enabled = p.reaction_alerts_enabled;
+    dto.simplification_alert_channels = normalizeSpecificChannels(
+      p.simplification_alert_channels,
+      dto.channels,
+      dto.channels,
+    );
     dto.simplification_alerts_enabled = p.simplification_alerts_enabled;
+    dto.insight_alert_channels = normalizeSpecificChannels(
+      p.insight_alert_channels,
+      dto.channels,
+      dto.channels,
+    );
     dto.insight_alerts_enabled = p.insight_alerts_enabled;
     dto.insight_cadence = normalizeInsightCadence(p.insight_cadence);
     dto.insight_digest_day = normalizeInsightDigestDay(p.insight_digest_day);
@@ -201,11 +306,41 @@ export class PreferencesResponseDto {
       p.insight_digest_local_time,
       INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
     );
+    dto.wrapped_alert_channels = normalizeSpecificChannels(
+      p.wrapped_alert_channels,
+      dto.channels,
+      dto.channels,
+    );
     dto.wrapped_alerts_enabled = p.wrapped_alerts_enabled;
+    dto.suggestion_ready_channels = normalizeSpecificChannels(
+      p.suggestion_ready_channels,
+      dto.channels,
+      dto.channels,
+    );
     dto.suggestion_ready_enabled = p.suggestion_ready_enabled;
+    dto.smart_pick_ready_channels = normalizeSpecificChannels(
+      p.smart_pick_ready_channels,
+      [NotificationChannelValue.InApp],
+      dto.channels,
+    );
     dto.smart_pick_ready_enabled = p.smart_pick_ready_enabled ?? false;
+    dto.slot_start_channels = normalizeSpecificChannels(
+      p.slot_start_channels,
+      dto.channels,
+      dto.channels,
+    );
     dto.slot_start_enabled = p.slot_start_enabled;
+    dto.recording_reminder_channels = normalizeSpecificChannels(
+      p.recording_reminder_channels,
+      dto.channels,
+      dto.channels,
+    );
     dto.recording_reminder_enabled = p.recording_reminder_enabled;
+    dto.product_expiry_alert_channels = normalizeSpecificChannels(
+      p.product_expiry_alert_channels,
+      [NotificationChannelValue.InApp, NotificationChannelValue.Push],
+      dto.channels,
+    );
     dto.product_expiry_alerts_enabled = p.product_expiry_alerts_enabled ?? true;
     dto.product_expiry_notice_days = normalizeProductExpiryNoticeDays(
       p.product_expiry_notice_days,
@@ -217,6 +352,34 @@ export class PreferencesResponseDto {
     dto.photo_tutorial_completed = p.photo_tutorial_completed;
     return dto;
   }
+}
+
+function normalizeChannels(
+  value: NotificationChannel[] | null | undefined,
+  fallback: NotificationChannel[],
+): NotificationChannel[] {
+  const source = Array.isArray(value) ? value : fallback;
+  const allowed = new Set<NotificationChannel>(NOTIFICATION_CHANNEL_VALUES);
+  const seen = new Set<NotificationChannel>();
+  return source.filter((channel) => {
+    if (!allowed.has(channel) || seen.has(channel)) return false;
+    seen.add(channel);
+    return true;
+  });
+}
+
+function normalizeSpecificChannels(
+  value: NotificationChannel[] | null | undefined,
+  fallback: NotificationChannel[],
+  globalChannels: NotificationChannel[],
+): NotificationChannel[] {
+  const normalized = normalizeChannels(value, fallback);
+  if (globalChannels.includes(NotificationChannelValue.Push)) {
+    return normalized;
+  }
+  return normalized.filter(
+    (channel) => channel !== NotificationChannelValue.Push,
+  );
 }
 
 function normalizeInsightCadence(

@@ -22,7 +22,12 @@ import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../skin-journal/skin-journal
 import { User } from '../users/entities/user.entity';
 import { InAppNotification } from './entities/in-app-notification.entity';
 import { ScheduledNotification } from './entities/scheduled-notification.entity';
-import { UserNotificationPreference } from './entities/user-notification-preference.entity';
+import {
+  DEFAULT_NOTIFICATION_CHANNELS,
+  NotificationChannel,
+  NotificationChannelValue,
+  UserNotificationPreference,
+} from './entities/user-notification-preference.entity';
 import { PushNotificationsService } from './push-notifications.service';
 import { NotificationResponseDto } from './dto/notification-response.dto';
 import {
@@ -57,8 +62,10 @@ import {
   isUniqueConstraintError,
   notificationCursorFingerprint,
   NOTIFICATION_READ_BUCKET_SQL,
+  hasNotificationSpecificChannels,
   requiresNotificationInApp,
   requiresNotificationPush,
+  resolveNotificationChannels,
   runPhotoReminderSweep,
   runProductExpiryAlertSweep,
   runReadNotificationRetentionSweep,
@@ -262,15 +269,25 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
+    const channels = resolveNotificationChannels(prefs, params.kind);
+    const hasSpecificChannels = hasNotificationSpecificChannels(
+      prefs,
+      params.kind,
+    );
+    const globalPushEnabled = prefs.channels.includes(
+      NotificationChannelValue.Push,
+    );
     const sendInApp =
-      prefs.channels.includes('in_app') ||
-      requiresNotificationInApp(params.kind);
+      channels.includes(NotificationChannelValue.InApp) ||
+      (!hasSpecificChannels && requiresNotificationInApp(params.kind));
     const sendEmail =
-      prefs.channels.includes('email') && canSendNotificationEmail(params.kind);
+      channels.includes(NotificationChannelValue.Email) &&
+      canSendNotificationEmail(params.kind);
     const sendPush =
-      params.forcePush ||
-      requiresNotificationPush(params.kind) ||
-      prefs.channels.includes('push');
+      globalPushEnabled &&
+      (channels.includes(NotificationChannelValue.Push) ||
+        (!hasSpecificChannels &&
+          (params.forcePush || requiresNotificationPush(params.kind))));
     if (!sendInApp && !sendEmail && !sendPush) {
       return null;
     }
@@ -449,21 +466,30 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (!prefs) {
       prefs = this.preferences.create({
         user_id: userId,
-        channels: ['in_app', 'email'],
+        channels: [...DEFAULT_NOTIFICATION_CHANNELS],
+        reaction_alert_channels: null,
         photo_reminder_enabled: true,
         photo_reminder_local_time: SKIN_JOURNAL_REMINDER_DEFAULT_TIME,
         reaction_alerts_enabled: true,
+        simplification_alert_channels: null,
         simplification_alerts_enabled: true,
+        insight_alert_channels: null,
         insight_alerts_enabled: true,
         ai_polished_insights_enabled: true,
         insight_cadence: INSIGHT_CADENCE_DEFAULT,
         insight_digest_day: INSIGHT_DIGEST_DAY_DEFAULT,
         insight_digest_local_time: INSIGHT_DIGEST_LOCAL_TIME_DEFAULT,
+        wrapped_alert_channels: null,
         wrapped_alerts_enabled: true,
+        suggestion_ready_channels: null,
         suggestion_ready_enabled: true,
+        smart_pick_ready_channels: null,
         smart_pick_ready_enabled: false,
+        slot_start_channels: null,
         slot_start_enabled: true,
+        recording_reminder_channels: null,
         recording_reminder_enabled: true,
+        product_expiry_alert_channels: null,
         product_expiry_alerts_enabled: true,
         product_expiry_notice_days: PRODUCT_EXPIRY_NOTICE_DAYS_DEFAULT,
         suggestion_lead_time_minutes: 120,
@@ -555,12 +581,22 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     prefetchedUser?: User | null,
   ): Promise<User | null> {
     if (prefetchedUser) return prefetchedUser;
+    const channels = resolveNotificationChannels(prefs, params.kind);
+    const hasSpecificChannels = hasNotificationSpecificChannels(
+      prefs,
+      params.kind,
+    );
+    const globalPushEnabled = prefs.channels.includes(
+      NotificationChannelValue.Push,
+    );
     const willEmail =
-      prefs.channels.includes('email') && canSendNotificationEmail(params.kind);
+      channels.includes(NotificationChannelValue.Email) &&
+      canSendNotificationEmail(params.kind);
     const willPush =
-      params.forcePush ||
-      requiresNotificationPush(params.kind) ||
-      prefs.channels.includes('push');
+      globalPushEnabled &&
+      (channels.includes(NotificationChannelValue.Push) ||
+        (!hasSpecificChannels &&
+          (params.forcePush || requiresNotificationPush(params.kind))));
     if (!prefs.quiet_hours_enabled && !willEmail && !willPush) {
       return null;
     }
@@ -613,41 +649,54 @@ function applyEmailUnsubscribePreference(
 ): boolean {
   switch (kind) {
     case 'photo_reminder':
-      return disablePreference(prefs, 'photo_reminder_enabled');
+      return removeEmailChannel(prefs, 'channels');
     case 'suggestion_ready':
-      return disablePreference(prefs, 'suggestion_ready_enabled');
+      return removeEmailChannel(prefs, 'suggestion_ready_channels');
     case 'slot_start':
-      return disablePreference(prefs, 'slot_start_enabled');
+      return removeEmailChannel(prefs, 'slot_start_channels');
     case 'recording_reminder':
-      return disablePreference(prefs, 'recording_reminder_enabled');
+      return removeEmailChannel(prefs, 'recording_reminder_channels');
     case 'simplification_started':
-      return disablePreference(prefs, 'simplification_alerts_enabled');
+      return removeEmailChannel(prefs, 'simplification_alert_channels');
     case 'insight_ready':
     case 'doctor_referral':
-      return disablePreference(prefs, 'insight_alerts_enabled');
+      return removeEmailChannel(prefs, 'insight_alert_channels');
     case 'wrapped_ready':
-      return disablePreference(prefs, 'wrapped_alerts_enabled');
+      return removeEmailChannel(prefs, 'wrapped_alert_channels');
     case 'reaction_detected':
       return false;
   }
 }
 
-function disablePreference(
+function removeEmailChannel(
   prefs: UserNotificationPreference,
-  key: keyof Pick<
-    UserNotificationPreference,
-    | 'photo_reminder_enabled'
-    | 'suggestion_ready_enabled'
-    | 'slot_start_enabled'
-    | 'recording_reminder_enabled'
-    | 'simplification_alerts_enabled'
-    | 'insight_alerts_enabled'
-    | 'wrapped_alerts_enabled'
-  >,
+  key: NotificationEmailChannelPreferenceKey,
 ): boolean {
-  if (prefs[key] === false) {
+  const current = normalizeEmailUnsubscribeChannels(prefs[key], prefs.channels);
+  const next = current.filter(
+    (channel) => channel !== NotificationChannelValue.Email,
+  );
+  if (next.length === current.length) {
     return false;
   }
-  prefs[key] = false;
+  prefs[key] = next;
   return true;
+}
+
+type NotificationEmailChannelPreferenceKey = keyof Pick<
+  UserNotificationPreference,
+  | 'channels'
+  | 'suggestion_ready_channels'
+  | 'slot_start_channels'
+  | 'recording_reminder_channels'
+  | 'simplification_alert_channels'
+  | 'insight_alert_channels'
+  | 'wrapped_alert_channels'
+>;
+
+function normalizeEmailUnsubscribeChannels(
+  value: NotificationChannel[] | null | undefined,
+  fallback: NotificationChannel[],
+): NotificationChannel[] {
+  return Array.isArray(value) ? value : fallback;
 }

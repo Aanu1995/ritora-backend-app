@@ -39,7 +39,12 @@ import {
   ScheduledNotificationStatus,
   ScheduledNotificationStatusValue,
 } from './entities/scheduled-notification.entity';
-import { UserNotificationPreference } from './entities/user-notification-preference.entity';
+import {
+  DEFAULT_NOTIFICATION_CHANNELS,
+  NOTIFICATION_CHANNEL_VALUES,
+  NotificationChannel,
+  UserNotificationPreference,
+} from './entities/user-notification-preference.entity';
 import { UpdatePreferencesDto } from './dto/notification-preference.dto';
 import {
   isReminderDue,
@@ -413,10 +418,16 @@ export function applyPreferenceUpdates(
   if (dto.photo_reminder_enabled !== undefined)
     prefs.photo_reminder_enabled = dto.photo_reminder_enabled;
   if (dto.channels !== undefined) prefs.channels = dto.channels;
+  if (dto.reaction_alert_channels !== undefined)
+    prefs.reaction_alert_channels = dto.reaction_alert_channels;
   if (dto.reaction_alerts_enabled !== undefined)
     prefs.reaction_alerts_enabled = dto.reaction_alerts_enabled;
+  if (dto.simplification_alert_channels !== undefined)
+    prefs.simplification_alert_channels = dto.simplification_alert_channels;
   if (dto.simplification_alerts_enabled !== undefined)
     prefs.simplification_alerts_enabled = dto.simplification_alerts_enabled;
+  if (dto.insight_alert_channels !== undefined)
+    prefs.insight_alert_channels = dto.insight_alert_channels;
   if (dto.insight_alerts_enabled !== undefined)
     prefs.insight_alerts_enabled = dto.insight_alerts_enabled;
   if (dto.insight_cadence !== undefined)
@@ -425,18 +436,30 @@ export function applyPreferenceUpdates(
     prefs.insight_digest_day = dto.insight_digest_day;
   if (dto.insight_digest_local_time !== undefined)
     prefs.insight_digest_local_time = dto.insight_digest_local_time;
+  if (dto.wrapped_alert_channels !== undefined)
+    prefs.wrapped_alert_channels = dto.wrapped_alert_channels;
   if (dto.wrapped_alerts_enabled !== undefined)
     prefs.wrapped_alerts_enabled = dto.wrapped_alerts_enabled;
   if (dto.photo_tutorial_completed !== undefined)
     prefs.photo_tutorial_completed = dto.photo_tutorial_completed;
+  if (dto.suggestion_ready_channels !== undefined)
+    prefs.suggestion_ready_channels = dto.suggestion_ready_channels;
   if (dto.suggestion_ready_enabled !== undefined)
     prefs.suggestion_ready_enabled = dto.suggestion_ready_enabled;
+  if (dto.smart_pick_ready_channels !== undefined)
+    prefs.smart_pick_ready_channels = dto.smart_pick_ready_channels;
   if (dto.smart_pick_ready_enabled !== undefined)
     prefs.smart_pick_ready_enabled = dto.smart_pick_ready_enabled;
+  if (dto.slot_start_channels !== undefined)
+    prefs.slot_start_channels = dto.slot_start_channels;
   if (dto.slot_start_enabled !== undefined)
     prefs.slot_start_enabled = dto.slot_start_enabled;
+  if (dto.recording_reminder_channels !== undefined)
+    prefs.recording_reminder_channels = dto.recording_reminder_channels;
   if (dto.recording_reminder_enabled !== undefined)
     prefs.recording_reminder_enabled = dto.recording_reminder_enabled;
+  if (dto.product_expiry_alert_channels !== undefined)
+    prefs.product_expiry_alert_channels = dto.product_expiry_alert_channels;
   if (dto.product_expiry_alerts_enabled !== undefined)
     prefs.product_expiry_alerts_enabled = dto.product_expiry_alerts_enabled;
   if (dto.product_expiry_notice_days !== undefined)
@@ -449,6 +472,26 @@ export function applyPreferenceUpdates(
     prefs.quiet_hours_start = dto.quiet_hours_start;
   if (dto.quiet_hours_end !== undefined)
     prefs.quiet_hours_end = dto.quiet_hours_end;
+}
+
+export function resolveNotificationChannels(
+  prefs: UserNotificationPreference,
+  kind: NotificationKind,
+): NotificationChannel[] {
+  return normalizeNotificationChannels(
+    notificationSpecificChannels(prefs, kind),
+    normalizeNotificationChannels(
+      prefs.channels,
+      DEFAULT_NOTIFICATION_CHANNELS,
+    ),
+  );
+}
+
+export function hasNotificationSpecificChannels(
+  prefs: UserNotificationPreference,
+  kind: NotificationKind,
+): boolean {
+  return notificationSpecificChannels(prefs, kind) != null;
 }
 
 async function maybeDispatchPhotoReminder(
@@ -574,6 +617,41 @@ export function clampInteger(value: number, min: number, max: number): number {
 
 function subtractDays(value: Date, days: number): Date {
   return new Date(value.getTime() - days * DAY_MS);
+}
+
+function notificationSpecificChannels(
+  prefs: UserNotificationPreference,
+  kind: NotificationKind,
+): NotificationChannel[] | null {
+  if (kind === 'photo_reminder') return prefs.channels;
+  if (kind === 'reaction_detected') return prefs.reaction_alert_channels;
+  if (kind === 'simplification_started')
+    return prefs.simplification_alert_channels;
+  if (kind === 'insight_ready' || kind === 'doctor_referral')
+    return prefs.insight_alert_channels;
+  if (kind === 'wrapped_ready') return prefs.wrapped_alert_channels;
+  if (kind === 'suggestion_ready') return prefs.suggestion_ready_channels;
+  if (kind === 'smart_pick_ready') return prefs.smart_pick_ready_channels;
+  if (kind === 'slot_start') return prefs.slot_start_channels;
+  if (kind === 'recording_reminder') return prefs.recording_reminder_channels;
+  if (kind === 'product_nearing_expiry' || kind === 'product_expired') {
+    return prefs.product_expiry_alert_channels;
+  }
+  return null;
+}
+
+function normalizeNotificationChannels(
+  value: NotificationChannel[] | null | undefined,
+  fallback: NotificationChannel[],
+): NotificationChannel[] {
+  const source = Array.isArray(value) ? value : fallback;
+  const allowed = new Set<NotificationChannel>(NOTIFICATION_CHANNEL_VALUES);
+  const seen = new Set<NotificationChannel>();
+  return source.filter((channel) => {
+    if (!allowed.has(channel) || seen.has(channel)) return false;
+    seen.add(channel);
+    return true;
+  });
 }
 
 export function isUniqueConstraintError(error: unknown): boolean {

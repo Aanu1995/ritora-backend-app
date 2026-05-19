@@ -191,16 +191,21 @@ describe('NotificationsService', () => {
 
     await service.unsubscribeNotificationEmail('signed-token');
 
-    expect(prefs.photo_reminder_enabled).toBe(false);
+    expect(prefs.photo_reminder_enabled).toBe(true);
+    expect(prefs.channels).toEqual(['in_app']);
     expect(preferences.save).toHaveBeenCalledWith(
-      expect.objectContaining({ photo_reminder_enabled: false }),
+      expect.objectContaining({
+        photo_reminder_enabled: true,
+        channels: ['in_app'],
+      }),
     );
   });
 
-  it('unsubscribes shared insight preferences for doctor referral email tokens', async () => {
+  it('unsubscribes only insight email channels for doctor referral email tokens', async () => {
     const prefs = {
       user_id: 'user-1',
       channels: ['in_app', 'email'],
+      insight_alert_channels: ['in_app', 'email'],
       photo_reminder_enabled: true,
       reaction_alerts_enabled: true,
       simplification_alerts_enabled: true,
@@ -227,9 +232,13 @@ describe('NotificationsService', () => {
 
     await service.unsubscribeNotificationEmail('signed-token');
 
-    expect(prefs.insight_alerts_enabled).toBe(false);
+    expect(prefs.insight_alerts_enabled).toBe(true);
+    expect(prefs.insight_alert_channels).toEqual(['in_app']);
     expect(preferences.save).toHaveBeenCalledWith(
-      expect.objectContaining({ insight_alerts_enabled: false }),
+      expect.objectContaining({
+        insight_alerts_enabled: true,
+        insight_alert_channels: ['in_app'],
+      }),
     );
   });
 
@@ -424,6 +433,23 @@ describe('NotificationsService', () => {
     expect(result.channels).toEqual([]);
   });
 
+  it('creates new notification preferences with email disabled by default', async () => {
+    preferences.findOne.mockResolvedValue(null);
+    preferences.save.mockImplementation(async (value) => value);
+
+    const result = await service.getPreferences('new-user');
+
+    expect(preferences.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'new-user',
+        channels: ['in_app'],
+      }),
+    );
+    expect(result.channels).toEqual(['in_app']);
+    expect(result.suggestion_ready_channels).toEqual(['in_app']);
+    expect(result.reaction_alert_channels).toEqual(['in_app']);
+  });
+
   it('persists suggestion and quiet-hour preferences from the API', async () => {
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
@@ -448,8 +474,11 @@ describe('NotificationsService', () => {
 
     await service.updatePreferences('user-1', {
       suggestion_ready_enabled: false,
+      suggestion_ready_channels: ['in_app'],
       slot_start_enabled: false,
+      slot_start_channels: ['email'],
       recording_reminder_enabled: false,
+      recording_reminder_channels: ['in_app', 'push'],
       suggestion_lead_time_minutes: 360,
       quiet_hours_enabled: true,
       quiet_hours_start: '21:00',
@@ -459,8 +488,11 @@ describe('NotificationsService', () => {
     expect(preferences.save).toHaveBeenCalledWith(
       expect.objectContaining({
         suggestion_ready_enabled: false,
+        suggestion_ready_channels: ['in_app'],
         slot_start_enabled: false,
+        slot_start_channels: ['email'],
         recording_reminder_enabled: false,
+        recording_reminder_channels: ['in_app', 'push'],
         suggestion_lead_time_minutes: 360,
         quiet_hours_enabled: true,
         quiet_hours_start: '21:00',
@@ -535,12 +567,57 @@ describe('NotificationsService', () => {
 
     const result = await service.updatePreferences('user-1', {
       smart_pick_ready_enabled: true,
+      smart_pick_ready_channels: ['in_app', 'push'],
     });
 
     expect(preferences.save).toHaveBeenCalledWith(
-      expect.objectContaining({ smart_pick_ready_enabled: true }),
+      expect.objectContaining({
+        smart_pick_ready_enabled: true,
+        smart_pick_ready_channels: ['in_app', 'push'],
+      }),
     );
     expect(result.smart_pick_ready_enabled).toBe(true);
+    expect(result.smart_pick_ready_channels).toEqual(['in_app']);
+  });
+
+  it('returns per-notification channels with legacy channels as the fallback', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      reaction_alert_channels: ['email'],
+      simplification_alert_channels: null,
+      insight_alert_channels: ['in_app', 'email'],
+      wrapped_alert_channels: ['push'],
+      suggestion_ready_channels: ['in_app', 'push'],
+      slot_start_channels: ['email'],
+      recording_reminder_channels: ['in_app'],
+      smart_pick_ready_channels: null,
+      product_expiry_alert_channels: ['push'],
+      photo_reminder_local_time: '08:00:00',
+      photo_reminder_enabled: true,
+      reaction_alerts_enabled: true,
+      simplification_alerts_enabled: true,
+      insight_alerts_enabled: true,
+      ai_polished_insights_enabled: true,
+      wrapped_alerts_enabled: true,
+      smart_pick_ready_enabled: false,
+      product_expiry_alerts_enabled: true,
+      product_expiry_notice_days: 14,
+      photo_tutorial_completed: false,
+    });
+
+    const result = await service.getPreferences('user-1');
+
+    expect(result.channels).toEqual(['in_app']);
+    expect(result.reaction_alert_channels).toEqual(['email']);
+    expect(result.simplification_alert_channels).toEqual(['in_app']);
+    expect(result.insight_alert_channels).toEqual(['in_app', 'email']);
+    expect(result.wrapped_alert_channels).toEqual([]);
+    expect(result.suggestion_ready_channels).toEqual(['in_app']);
+    expect(result.slot_start_channels).toEqual(['email']);
+    expect(result.recording_reminder_channels).toEqual(['in_app']);
+    expect(result.smart_pick_ready_channels).toEqual(['in_app']);
+    expect(result.product_expiry_alert_channels).toEqual([]);
   });
 
   it('normalizes database time values to HH:mm for the preferences API', async () => {
@@ -583,6 +660,61 @@ describe('NotificationsService', () => {
     expect(pushNotifications.sendNotificationPush).not.toHaveBeenCalled();
   });
 
+  it('uses notification-specific channels when dispatching emails', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app', 'email'],
+      suggestion_ready_channels: ['in_app'],
+      suggestion_ready_enabled: true,
+      quiet_hours_enabled: false,
+    });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      email: 'a@example.com',
+      preferred_language: 'en',
+    });
+
+    await service.dispatch({
+      userId: 'user-1',
+      kind: 'suggestion_ready',
+      titleKey: 'notificationsPage.kinds.suggestion_ready.title',
+      bodyKey: 'notificationsPage.kinds.suggestion_ready.body',
+    });
+
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        kind: 'suggestion_ready',
+      }),
+    );
+    expect(mailService.sendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('does not send notification-specific push when the global push channel is off', async () => {
+    preferences.findOne.mockResolvedValue({
+      user_id: 'user-1',
+      channels: ['in_app'],
+      suggestion_ready_channels: ['in_app', 'push'],
+      suggestion_ready_enabled: true,
+      quiet_hours_enabled: false,
+    });
+
+    await service.dispatch({
+      userId: 'user-1',
+      kind: 'suggestion_ready',
+      titleKey: 'notificationsPage.kinds.suggestion_ready.title',
+      bodyKey: 'notificationsPage.kinds.suggestion_ready.body',
+    });
+
+    expect(notifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        kind: 'suggestion_ready',
+      }),
+    );
+    expect(pushNotifications.sendNotificationPush).not.toHaveBeenCalled();
+  });
+
   it('does not create Smart Picks notifications when the optional gate is disabled', async () => {
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
@@ -605,7 +737,7 @@ describe('NotificationsService', () => {
   it('sends product expiry notifications through push and never email', async () => {
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
-      channels: ['in_app', 'email'],
+      channels: ['in_app', 'email', 'push'],
       product_expiry_alerts_enabled: true,
       quiet_hours_enabled: false,
     });
@@ -638,7 +770,7 @@ describe('NotificationsService', () => {
   it('keeps a product expiry in-app dedupe record even when global in-app is disabled', async () => {
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
-      channels: [],
+      channels: ['push'],
       product_expiry_alerts_enabled: true,
       quiet_hours_enabled: false,
     });
@@ -689,7 +821,7 @@ describe('NotificationsService', () => {
     );
     preferences.findOne.mockResolvedValue({
       user_id: 'user-1',
-      channels: ['in_app', 'email'],
+      channels: ['in_app', 'email', 'push'],
       product_expiry_alerts_enabled: true,
       product_expiry_notice_days: 14,
       quiet_hours_enabled: false,

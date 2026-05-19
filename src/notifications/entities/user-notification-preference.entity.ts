@@ -19,7 +19,22 @@ import {
   type InsightCadence,
 } from '../notifications.constants';
 
-export type NotificationChannel = 'email' | 'in_app' | 'push';
+export const NotificationChannelValue = {
+  Email: 'email',
+  InApp: 'in_app',
+  Push: 'push',
+} as const;
+
+export type NotificationChannel =
+  (typeof NotificationChannelValue)[keyof typeof NotificationChannelValue];
+
+export const NOTIFICATION_CHANNEL_VALUES = Object.values(
+  NotificationChannelValue,
+);
+
+export const DEFAULT_NOTIFICATION_CHANNELS: NotificationChannel[] = [
+  NotificationChannelValue.InApp,
+];
 
 @Entity('user_notification_preferences')
 export class UserNotificationPreference {
@@ -35,14 +50,23 @@ export class UserNotificationPreference {
   @Column({ type: 'boolean', default: true })
   photo_reminder_enabled: boolean;
 
-  @Column({ type: 'jsonb', default: () => '\'["in_app","email"]\'::jsonb' })
+  @Column({ type: 'jsonb', default: () => '\'["in_app"]\'::jsonb' })
   channels: NotificationChannel[];
+
+  @Column({ type: 'jsonb', nullable: true })
+  reaction_alert_channels: NotificationChannel[] | null;
 
   @Column({ type: 'boolean', default: true })
   reaction_alerts_enabled: boolean;
 
+  @Column({ type: 'jsonb', nullable: true })
+  simplification_alert_channels: NotificationChannel[] | null;
+
   @Column({ type: 'boolean', default: true })
   simplification_alerts_enabled: boolean;
+
+  @Column({ type: 'jsonb', nullable: true })
+  insight_alert_channels: NotificationChannel[] | null;
 
   @Column({ type: 'boolean', default: true })
   insight_alerts_enabled: boolean;
@@ -59,20 +83,38 @@ export class UserNotificationPreference {
   @Column({ type: 'time', default: INSIGHT_DIGEST_LOCAL_TIME_DEFAULT })
   insight_digest_local_time: string;
 
+  @Column({ type: 'jsonb', nullable: true })
+  wrapped_alert_channels: NotificationChannel[] | null;
+
   @Column({ type: 'boolean', default: true })
   wrapped_alerts_enabled: boolean;
+
+  @Column({ type: 'jsonb', nullable: true })
+  suggestion_ready_channels: NotificationChannel[] | null;
 
   @Column({ type: 'boolean', default: true })
   suggestion_ready_enabled: boolean;
 
+  @Column({ type: 'jsonb', nullable: true })
+  smart_pick_ready_channels: NotificationChannel[] | null;
+
   @Column({ type: 'boolean', default: false })
   smart_pick_ready_enabled: boolean;
+
+  @Column({ type: 'jsonb', nullable: true })
+  slot_start_channels: NotificationChannel[] | null;
 
   @Column({ type: 'boolean', default: true })
   slot_start_enabled: boolean;
 
+  @Column({ type: 'jsonb', nullable: true })
+  recording_reminder_channels: NotificationChannel[] | null;
+
   @Column({ type: 'boolean', default: true })
   recording_reminder_enabled: boolean;
+
+  @Column({ type: 'jsonb', nullable: true })
+  product_expiry_alert_channels: NotificationChannel[] | null;
 
   @Column({ type: 'boolean', default: true })
   product_expiry_alerts_enabled: boolean;
