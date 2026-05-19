@@ -22,6 +22,7 @@ const repo = () => ({
   delete: jest.fn().mockResolvedValue({ affected: 0 }),
   find: jest.fn().mockResolvedValue([]),
   findOne: jest.fn().mockResolvedValue(null),
+  exists: jest.fn().mockResolvedValue(false),
   save: jest.fn(async (data) => data),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
   count: jest.fn().mockResolvedValue(0),
@@ -308,6 +309,38 @@ describe('NotificationsService', () => {
     expect(notificationQb.take).toHaveBeenCalledWith(3);
     expect(result.items.map((item) => item.id)).toEqual(['unread-1', 'read-1']);
     expect(result.nextCursor).toEqual(expect.any(String));
+  });
+
+  it('marks an unread notification read with a single conditional update', async () => {
+    notifications.update.mockResolvedValue({ affected: 1 });
+
+    await service.markRead('user-1', 'notification-1');
+
+    expect(notifications.update).toHaveBeenCalledWith(
+      {
+        id: 'notification-1',
+        user_id: 'user-1',
+        read_at: expect.objectContaining({ _type: 'isNull' }),
+      },
+      { read_at: expect.any(Date) },
+    );
+    expect(notifications.findOne).not.toHaveBeenCalled();
+    expect(notifications.save).not.toHaveBeenCalled();
+  });
+
+  it('checks existence only when mark-read did not update a row', async () => {
+    notifications.update.mockResolvedValue({ affected: 0 });
+    notifications.exists.mockResolvedValue(false);
+
+    await expect(
+      service.markRead('user-1', 'missing-notification'),
+    ).rejects.toThrow('Notification not found');
+
+    expect(notifications.exists).toHaveBeenCalledWith({
+      where: { id: 'missing-notification', user_id: 'user-1' },
+    });
+    expect(notifications.findOne).not.toHaveBeenCalled();
+    expect(notifications.save).not.toHaveBeenCalled();
   });
 
   it('purges old read notifications without touching unread or recent rows', async () => {

@@ -127,6 +127,55 @@ describe('ApplicationTrackingService', () => {
     expect(txLogRepo.findOne).not.toHaveBeenCalled();
   });
 
+  it('starts independent post-record refresh work without waiting for the regeneration queue', async () => {
+    const savedLog = applicationLog({ id: 'log-1', editCount: 0 });
+    const savedItems = [applicationItem({ id: 'item-1', status: 'skipped' })];
+    let resolveReactive!: () => void;
+    const reactivePromise = new Promise<void>((resolve) => {
+      resolveReactive = resolve;
+    });
+    reactiveRegeneration.queueAfterApplicationChange.mockReturnValueOnce(
+      reactivePromise,
+    );
+    logRepo.findOne.mockResolvedValue(null);
+    validation.loadSuggestionForRecord.mockResolvedValue(suggestion());
+    validation.resolveTarget.mockResolvedValue({
+      slotId: 'slot-1',
+      targetDate: '2026-05-04',
+      targetTime: '08:00',
+      daypart: 'morning',
+    });
+    validation.buildItemDrafts.mockResolvedValue([draftItem('skipped')]);
+    txLogRepo.create.mockImplementation(
+      (value) => ({ ...savedLog, ...value }) as ApplicationLog,
+    );
+    txLogRepo.save.mockResolvedValue(savedLog);
+    txItemRepo.create.mockImplementation(
+      (value) => ({ ...savedItems[0], ...value }) as ApplicationLogItem,
+    );
+    mockSaveArray(txItemRepo).mockResolvedValue(savedItems);
+    txVersionRepo.create.mockImplementation(
+      (value) => value as ApplicationLogVersion,
+    );
+    txVersionRepo.save.mockResolvedValue({} as ApplicationLogVersion);
+
+    const recordPromise = service.record(user(), {
+      suggestionInstanceId: 'suggestion-1',
+      targetDate: '2026-05-04',
+      items: [itemInput('skipped')],
+    });
+
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(
+        skinJournal.markProductOrRoutineInsightsDirty,
+      ).toHaveBeenCalledWith('user-1');
+    } finally {
+      resolveReactive();
+      await recordPromise;
+    }
+  });
+
   it('rejects duplicate records for the same suggestion', async () => {
     validation.loadSuggestionForRecord.mockResolvedValue(suggestion());
     logRepo.findOne.mockResolvedValue(applicationLog({ id: 'existing-log' }));

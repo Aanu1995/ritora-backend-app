@@ -31,6 +31,7 @@ describe('SuggestionScheduler', () => {
     jest.clearAllMocks();
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T04:00:00.000Z'));
     routineBreakService.getActiveUserIds.mockResolvedValue(new Set());
+    suggestionRepo.find.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -54,7 +55,6 @@ describe('SuggestionScheduler', () => {
     preferenceRepo.find.mockResolvedValue([
       { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
     ] as UserNotificationPreference[]);
-    suggestionRepo.findOne.mockResolvedValue(null);
     suggestionRepo.create.mockImplementation(
       (value) => value as SuggestionInstance,
     );
@@ -79,7 +79,19 @@ describe('SuggestionScheduler', () => {
         take: expect.any(Number),
       }),
     );
-    expect(suggestionRepo.save).toHaveBeenCalledWith(
+    expect(suggestionRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          user_id: expect.objectContaining({ _type: 'in' }),
+          slot_id: expect.objectContaining({ _type: 'in' }),
+          target_date: expect.objectContaining({ _type: 'in' }),
+          generation_status: expect.objectContaining({ _type: 'not' }),
+        },
+        select: ['id', 'user_id', 'slot_id', 'target_date'],
+      }),
+    );
+    expect(suggestionRepo.findOne).not.toHaveBeenCalled();
+    expect(suggestionRepo.save).toHaveBeenCalledWith([
       expect.objectContaining({
         user_id: 'user-1',
         slot_id: 'slot-1',
@@ -87,7 +99,7 @@ describe('SuggestionScheduler', () => {
         generation_status: 'pending',
         visible_at: new Date('2026-04-29T06:00:00.000Z'),
       }),
-    );
+    ]);
     expect(jobRepo.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         id: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
@@ -165,9 +177,14 @@ describe('SuggestionScheduler', () => {
     preferenceRepo.find.mockResolvedValue([
       { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
     ] as UserNotificationPreference[]);
-    suggestionRepo.findOne.mockResolvedValue({
-      id: 'pending-1',
-    } as SuggestionInstance);
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'pending-1',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+      } as SuggestionInstance,
+    ]);
     jobRepo.insert.mockRejectedValue(
       Object.assign(new Error('duplicate key'), { code: '23505' }),
     );
@@ -176,6 +193,8 @@ describe('SuggestionScheduler', () => {
 
     expect(result.enqueued).toBe(0);
     expect(jobRepo.insert).toHaveBeenCalledTimes(1);
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(suggestionRepo.findOne).not.toHaveBeenCalled();
     expect(jobRepo.update).not.toHaveBeenCalled();
   });
 
@@ -201,7 +220,7 @@ describe('SuggestionScheduler', () => {
     const result = await scheduler.runOnce();
 
     expect(result.enqueued).toBe(0);
-    expect(suggestionRepo.findOne).not.toHaveBeenCalled();
+    expect(suggestionRepo.find).not.toHaveBeenCalled();
     expect(suggestionRepo.save).not.toHaveBeenCalled();
     expect(jobRepo.insert).not.toHaveBeenCalled();
   });

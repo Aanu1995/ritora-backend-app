@@ -69,7 +69,7 @@ describe('SuggestionOnDemandService', () => {
       regenerationCountToday: 0,
       estimatedCostTodayUsd: 0,
     });
-    inventoryRepo.count.mockResolvedValue(2);
+    inventoryRepo.exists.mockResolvedValue(true);
     suggestionRepo.count.mockResolvedValue(0);
     suggestionRepo.findOne.mockResolvedValue(null);
     txSuggestionRepo.create.mockImplementation(
@@ -149,6 +149,10 @@ describe('SuggestionOnDemandService', () => {
         generationStatus: 'generating',
       }),
     );
+    expect(inventoryRepo.exists).toHaveBeenCalledWith({
+      where: { user_id: 'user-1', status: 'active' },
+    });
+    expect(inventoryRepo.count).not.toHaveBeenCalled();
     expect(observability.record).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'on_demand_requested',
@@ -326,7 +330,7 @@ describe('SuggestionOnDemandService', () => {
       regenerationCountToday: 0,
       estimatedCostTodayUsd: 0,
     });
-    inventoryRepo.count.mockResolvedValue(0);
+    inventoryRepo.exists.mockResolvedValue(false);
 
     await expect(
       service.create(user(), null, {
@@ -389,6 +393,7 @@ function repo<T extends ObjectLiteral>() {
   return {
     count: jest.fn(),
     create: jest.fn((value) => value),
+    exists: jest.fn(),
     findOne: jest.fn(),
     insert: jest.fn(),
     update: jest.fn(),

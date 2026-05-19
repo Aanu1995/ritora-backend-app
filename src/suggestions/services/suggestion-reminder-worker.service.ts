@@ -95,6 +95,15 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
         generation_status: SuggestionGenerationStatus.Ready,
         target_date: Between(fromDate, toDate),
       },
+      select: [
+        'id',
+        'user_id',
+        'slot_id',
+        'request_source',
+        'target_date',
+        'target_time',
+        'generation_status',
+      ],
     });
 
     if (readySuggestions.length === 0) {
@@ -113,23 +122,23 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
     const userIds = Array.from(
       new Set(scheduledSuggestions.map((suggestion) => suggestion.user_id)),
     );
-    const users = await this.userRepo.find({
-      where: { id: In(userIds) },
-    });
-    const usersById = new Map(users.map((u) => [u.id, u]));
-    const activeBreakUserIds = await this.routineBreakService.getActiveUserIds(
-      userIds,
-      now,
-    );
-
     const suggestionIds = scheduledSuggestions.map(
       (suggestion) => suggestion.id,
     );
-    const logs = await this.applicationLogRepo.find({
-      where: {
-        suggestion_instance_id: In(suggestionIds),
-      },
-    });
+    const [users, activeBreakUserIds, logs] = await Promise.all([
+      this.userRepo.find({
+        where: { id: In(userIds) },
+        select: ['id', 'time_zone'],
+      }),
+      this.routineBreakService.getActiveUserIds(userIds, now),
+      this.applicationLogRepo.find({
+        where: {
+          suggestion_instance_id: In(suggestionIds),
+        },
+        select: ['suggestion_instance_id'],
+      }),
+    ]);
+    const usersById = new Map(users.map((u) => [u.id, u]));
     const loggedSuggestionIds = new Set(
       logs.map((log) => log.suggestion_instance_id).filter(Boolean) as string[],
     );

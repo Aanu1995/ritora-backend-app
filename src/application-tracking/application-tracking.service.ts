@@ -91,9 +91,7 @@ export class ApplicationTrackingService {
       target,
       itemDrafts,
     );
-    await this.reactiveRegeneration.queueAfterApplicationChange(user, response);
-    await this.markInsightInputsDirty(user.id);
-    this.scheduleSmartPicksPreparation(user.id);
+    await this.runPostApplicationChangeWork(user, response);
     return response;
   }
 
@@ -200,10 +198,19 @@ export class ApplicationTrackingService {
         this.productImageOptions(),
       );
     });
-    await this.reactiveRegeneration.queueAfterApplicationChange(user, response);
-    await this.markInsightInputsDirty(user.id);
-    this.scheduleSmartPicksPreparation(user.id);
+    await this.runPostApplicationChangeWork(user, response);
     return response;
+  }
+
+  private async runPostApplicationChangeWork(
+    user: User,
+    response: ApplicationLogResponseDto,
+  ): Promise<void> {
+    await Promise.all([
+      this.reactiveRegeneration.queueAfterApplicationChange(user, response),
+      this.markInsightInputsDirty(user.id),
+    ]);
+    this.scheduleSmartPicksPreparation(user.id);
   }
 
   private scheduleSmartPicksPreparation(userId: string): void {

@@ -10,6 +10,7 @@ type MockRepo<T> = {
   count: jest.Mock<Promise<number>, [unknown?]>;
   create: jest.Mock<T, [Partial<T>]>;
   delete: jest.Mock<Promise<void>, [unknown]>;
+  exists: jest.Mock<Promise<boolean>, [unknown?]>;
   find: jest.Mock<Promise<T[]>, [unknown?]>;
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
   remove: jest.Mock<Promise<void>, [T]>;
@@ -21,6 +22,7 @@ function createRepo<T>(): MockRepo<T> {
     count: jest.fn().mockResolvedValue(0),
     create: jest.fn((value: Partial<T>) => value as T),
     delete: jest.fn().mockResolvedValue(undefined),
+    exists: jest.fn().mockResolvedValue(false),
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
     remove: jest.fn().mockResolvedValue(undefined),
@@ -66,7 +68,7 @@ describe('ScheduleService', () => {
     slotsRepository = createRepo<ScheduleSlot>();
     stepsRepository = createRepo<RoutineStep>();
     productsRepository = createRepo<InventoryProduct>();
-    productsRepository.count.mockResolvedValue(1);
+    productsRepository.exists.mockResolvedValue(true);
     coordinator = {
       handleSlotChanged: jest.fn().mockResolvedValue(undefined),
       handleSlotRemoved: jest.fn().mockResolvedValue(undefined),
@@ -102,7 +104,7 @@ describe('ScheduleService', () => {
   });
 
   it('rejects schedule creation until the user has at least one shelf product', async () => {
-    productsRepository.count.mockResolvedValue(0);
+    productsRepository.exists.mockResolvedValue(false);
 
     await expect(
       service.createSlot('user-1', {
@@ -117,10 +119,17 @@ describe('ScheduleService', () => {
     });
 
     expect(slotsRepository.save).not.toHaveBeenCalled();
+    expect(productsRepository.exists).toHaveBeenCalledWith({
+      where: {
+        user_id: 'user-1',
+        status: expect.objectContaining({ _type: 'not' }),
+      },
+    });
+    expect(productsRepository.count).not.toHaveBeenCalled();
   });
 
   it('rejects schedule step edits until the user has at least one shelf product', async () => {
-    productsRepository.count.mockResolvedValue(0);
+    productsRepository.exists.mockResolvedValue(false);
     slotsRepository.findOne.mockResolvedValue(buildSlot());
 
     await expect(

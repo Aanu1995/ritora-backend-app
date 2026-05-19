@@ -208,13 +208,19 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async markRead(userId: string, id: string): Promise<void> {
-    const notif = await this.notifications.findOne({
+    const result = await this.notifications.update(
+      { id, user_id: userId, read_at: IsNull() },
+      { read_at: new Date() },
+    );
+    if ((result.affected ?? 0) > 0) {
+      return;
+    }
+
+    const exists = await this.notifications.exists({
       where: { id, user_id: userId },
     });
-    if (!notif) throw new NotFoundException('Notification not found');
-    if (!notif.read_at) {
-      notif.read_at = new Date();
-      await this.notifications.save(notif);
+    if (!exists) {
+      throw new NotFoundException('Notification not found');
     }
   }
 

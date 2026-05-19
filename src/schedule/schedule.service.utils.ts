@@ -234,10 +234,10 @@ export async function assertUserHasSchedulableProduct(
   productsRepository: Repository<InventoryProduct>,
   userId: string,
 ): Promise<void> {
-  const productCount = await productsRepository.count({
+  const hasProduct = await productsRepository.exists({
     where: { user_id: userId, status: Not(ShelfStatus.Archived) },
   });
-  if (productCount === 0) throw scheduleRequiresProduct();
+  if (!hasProduct) throw scheduleRequiresProduct();
 }
 
 export async function replaceRoutineSteps(

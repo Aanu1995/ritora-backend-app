@@ -48,6 +48,13 @@ const SCHEDULER_DAYS_OF_WEEK = [
   'sat',
 ] as const;
 
+type EligibleScheduleCandidate = {
+  slot: ScheduleSlot;
+  user: User;
+  targetDate: string;
+  visibleAt: Date;
+};
+
 /**
  * Scans every active user's schedule and inserts a generation job only
  * when the slot's visibility window has opened. Idempotent thanks to the
@@ -133,6 +140,7 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
       where: { user_id: In(userIds) },
     });
     const prefsById = new Map(prefs.map((pref) => [pref.user_id, pref]));
+    const candidates: EligibleScheduleCandidate[] = [];
 
     for (const slot of slots) {
       if (activeBreakUserIds.has(slot.user_id)) continue;
@@ -165,27 +173,34 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
         // routine after a break, outage, or delayed scheduler run.
         if (slotInstant.getTime() <= now.getTime()) continue;
 
-        try {
-          await this.ensurePendingSuggestion(slot, targetDate, visibleAt);
-          const inserted = await insertSuggestionGenerationJob(this.jobRepo, {
-            user_id: user.id,
-            slot_id: slot.id,
-            target_date: targetDate,
-            target_time: slot.slot_time,
-            visible_at: visibleAt,
-            status: SuggestionGenerationJobStatus.Queued,
-            attempt_count: 0,
-            run_after: visibleAt,
-            last_error: null,
-          });
-          if (inserted) enqueued += 1;
-        } catch (error) {
-          this.logger.warn(
-            `Failed to enqueue job for user ${user.id}, slot ${slot.id}, date ${targetDate}: ${
-              error instanceof Error ? error.message : 'unknown error'
-            }`,
-          );
-        }
+        candidates.push({ slot, user, targetDate, visibleAt });
+      }
+    }
+
+    if (candidates.length === 0) return 0;
+    await this.ensurePendingSuggestions(candidates);
+
+    for (const candidate of candidates) {
+      const { slot, user, targetDate, visibleAt } = candidate;
+      try {
+        const inserted = await insertSuggestionGenerationJob(this.jobRepo, {
+          user_id: user.id,
+          slot_id: slot.id,
+          target_date: targetDate,
+          target_time: slot.slot_time,
+          visible_at: visibleAt,
+          status: SuggestionGenerationJobStatus.Queued,
+          attempt_count: 0,
+          run_after: visibleAt,
+          last_error: null,
+        });
+        if (inserted) enqueued += 1;
+      } catch (error) {
+        this.logger.warn(
+          `Failed to enqueue job for user ${user.id}, slot ${slot.id}, date ${targetDate}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
       }
     }
 
@@ -206,55 +221,73 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
     return this.slotRepo.find(options);
   }
 
-  private async ensurePendingSuggestion(
-    slot: ScheduleSlot,
-    targetDate: string,
-    visibleAt: Date,
+  private async ensurePendingSuggestions(
+    candidates: readonly EligibleScheduleCandidate[],
   ): Promise<void> {
-    const existing = await this.suggestionRepo.findOne({
+    const existing = await this.suggestionRepo.find({
       where: {
-        user_id: slot.user_id,
-        slot_id: slot.id,
-        target_date: targetDate,
+        user_id: In(uniqueValues(candidates.map(({ user }) => user.id))),
+        slot_id: In(uniqueValues(candidates.map(({ slot }) => slot.id))),
+        target_date: In(
+          uniqueValues(candidates.map(({ targetDate }) => targetDate)),
+        ),
         generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
+      select: ['id', 'user_id', 'slot_id', 'target_date'],
     });
-    if (existing) return;
-    await this.suggestionRepo.save(
-      this.suggestionRepo.create({
-        user_id: slot.user_id,
-        slot_id: slot.id,
-        request_source: SuggestionRequestSource.Scheduled,
-        request_id: null,
-        request_context: null,
-        target_date: targetDate,
-        target_time: slot.slot_time,
-        daypart: deriveSuggestionDaypart(slot.slot_time),
-        mode:
-          slot.mode === SlotModeValue.Manual
-            ? SuggestionMode.Manual
-            : SuggestionMode.Ai,
-        generation_status: SuggestionGenerationStatus.Pending,
-        visible_at: visibleAt,
-        generated_at: null,
-        ai_model: null,
-        ai_prompt_version: null,
-        ai_input_tokens: null,
-        ai_output_tokens: null,
-        ai_total_tokens: null,
-        ai_estimated_cost_usd: null,
-        ai_duration_ms: null,
-        ai_explanation: null,
-        generation_context: null,
-        gap_recommendations: null,
-        safety_flags: null,
-        has_reaction_signal: false,
-        simplified_for_reaction: false,
-        supersedes_id: null,
-        ai_error: null,
-        ai_retry_count: 0,
-      }),
+    const existingKeys = new Set(
+      existing.map((suggestion) =>
+        scheduleCandidateKey(
+          suggestion.user_id,
+          suggestion.slot_id ?? '',
+          suggestion.target_date,
+        ),
+      ),
     );
+    const pending = candidates
+      .filter(
+        ({ slot, user, targetDate }) =>
+          !existingKeys.has(scheduleCandidateKey(user.id, slot.id, targetDate)),
+      )
+      .map(({ slot, user, targetDate, visibleAt }) =>
+        this.suggestionRepo.create({
+          user_id: user.id,
+          slot_id: slot.id,
+          request_source: SuggestionRequestSource.Scheduled,
+          request_id: null,
+          request_context: null,
+          target_date: targetDate,
+          target_time: slot.slot_time,
+          daypart: deriveSuggestionDaypart(slot.slot_time),
+          mode:
+            slot.mode === SlotModeValue.Manual
+              ? SuggestionMode.Manual
+              : SuggestionMode.Ai,
+          generation_status: SuggestionGenerationStatus.Pending,
+          visible_at: visibleAt,
+          generated_at: null,
+          ai_model: null,
+          ai_prompt_version: null,
+          ai_input_tokens: null,
+          ai_output_tokens: null,
+          ai_total_tokens: null,
+          ai_estimated_cost_usd: null,
+          ai_duration_ms: null,
+          ai_explanation: null,
+          generation_context: null,
+          gap_recommendations: null,
+          safety_flags: null,
+          has_reaction_signal: false,
+          simplified_for_reaction: false,
+          supersedes_id: null,
+          ai_error: null,
+          ai_retry_count: 0,
+        }),
+      );
+
+    if (pending.length > 0) {
+      await this.suggestionRepo.save(pending);
+    }
   }
 
   private scheduleNext(delayMs: number): void {
@@ -279,6 +312,18 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
     }, delayMs);
     this.timer.unref?.();
   }
+}
+
+function scheduleCandidateKey(
+  userId: string,
+  slotId: string,
+  targetDate: string,
+): string {
+  return `${userId}:${slotId}:${targetDate}`;
+}
+
+function uniqueValues(values: readonly string[]): string[] {
+  return Array.from(new Set(values));
 }
 
 function matchesDayOfWeek(targetDate: string, dayOfWeek: string): boolean {

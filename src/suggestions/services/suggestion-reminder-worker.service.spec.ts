@@ -76,6 +76,15 @@ describe('SuggestionReminderWorker', () => {
           generation_status: 'ready',
           target_date: expect.any(Object),
         }),
+        select: [
+          'id',
+          'user_id',
+          'slot_id',
+          'request_source',
+          'target_date',
+          'target_time',
+          'generation_status',
+        ],
       }),
     );
     expect(slotRepo.find).toHaveBeenCalledWith(
@@ -84,8 +93,21 @@ describe('SuggestionReminderWorker', () => {
           id: expect.objectContaining({ _value: ['slot-1'] }),
           deleted_at: expect.objectContaining({ _type: 'isNull' }),
         }),
+        select: ['id', 'user_id'],
       }),
     );
+    expect(userRepo.find).toHaveBeenCalledWith({
+      where: { id: expect.objectContaining({ _value: ['user-1'] }) },
+      select: ['id', 'time_zone'],
+    });
+    expect(applicationLogRepo.find).toHaveBeenCalledWith({
+      where: {
+        suggestion_instance_id: expect.objectContaining({
+          _value: ['suggestion-1'],
+        }),
+      },
+      select: ['suggestion_instance_id'],
+    });
     expect(notifications.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'slot_start',

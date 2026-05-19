@@ -336,14 +336,25 @@ export class SuggestionOnDemandService {
     targetDate: string,
     now: Date,
   ): Promise<void> {
-    const countToday = await this.suggestionRepo.count({
-      where: {
-        user_id: userId,
-        request_source: SuggestionRequestSource.OnDemand,
-        target_date: targetDate,
-        generation_status: Not(SuggestionGenerationStatus.Superseded),
-      },
-    });
+    const [countToday, latest] = await Promise.all([
+      this.suggestionRepo.count({
+        where: {
+          user_id: userId,
+          request_source: SuggestionRequestSource.OnDemand,
+          target_date: targetDate,
+          generation_status: Not(SuggestionGenerationStatus.Superseded),
+        },
+      }),
+      this.suggestionRepo.findOne({
+        where: {
+          user_id: userId,
+          request_source: SuggestionRequestSource.OnDemand,
+          generation_status: Not(SuggestionGenerationStatus.Superseded),
+        },
+        select: ['id', 'created_at'],
+        order: { created_at: 'DESC' },
+      }),
+    ]);
     if (countToday >= SUGGESTION_ON_DEMAND_DAILY_USER_LIMIT) {
       throw new HttpException(
         'Daily quick suggestion limit reached. Try again tomorrow.',
@@ -351,15 +362,6 @@ export class SuggestionOnDemandService {
       );
     }
 
-    const latest = await this.suggestionRepo.findOne({
-      where: {
-        user_id: userId,
-        request_source: SuggestionRequestSource.OnDemand,
-        generation_status: Not(SuggestionGenerationStatus.Superseded),
-      },
-      select: ['id', 'created_at'],
-      order: { created_at: 'DESC' },
-    });
     const latestCreatedAt = latest?.created_at?.getTime();
     if (
       typeof latestCreatedAt === 'number' &&
@@ -374,10 +376,10 @@ export class SuggestionOnDemandService {
   }
 
   private async assertShelfHasActiveProducts(userId: string): Promise<void> {
-    const activeProductCount = await this.inventoryRepo.count({
+    const hasActiveProducts = await this.inventoryRepo.exists({
       where: { user_id: userId, status: ShelfStatus.Active },
     });
-    if (activeProductCount > 0) return;
+    if (hasActiveProducts) return;
     throw new BadRequestException(
       'Add at least one active shelf product before requesting a suggestion.',
     );
