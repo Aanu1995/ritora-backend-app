@@ -54,6 +54,7 @@ describe('configureApp', () => {
   it('configures middleware, cors, prefix, validation, filters, and swagger', () => {
     const { app, disable, expressUse } = createApp();
     const configService = createConfigService({
+      ADMIN_WEB_APP_URL: 'http://localhost:3002',
       CORS_ORIGINS: 'http://localhost:3000, https://ritora.com',
       NODE_ENV: 'development',
       SWAGGER_ENABLED: true,
@@ -67,7 +68,11 @@ describe('configureApp', () => {
 
     expect(app.use).toHaveBeenCalledTimes(2);
     expect(app.enableCors).toHaveBeenCalledWith({
-      origin: ['http://localhost:3000', 'https://ritora.com'],
+      origin: [
+        'http://localhost:3000',
+        'https://ritora.com',
+        'http://localhost:3002',
+      ],
       credentials: true,
       methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: [

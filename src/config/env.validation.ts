@@ -3,6 +3,7 @@ import Joi, { type CustomHelpers } from 'joi';
 const COOKIE_DOMAIN_PATTERN =
   /^(?:\.[a-z0-9-]+(?:\.[a-z0-9-]+)*|localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)*)$/i;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
+const HEX_64_PATTERN = /^[a-f0-9]{64}$/i;
 
 const environmentSecret = Joi.when('NODE_ENV', {
   is: 'production',
@@ -217,6 +218,35 @@ export const envValidationSchema = Joi.object({
     .allow('')
     .required()
     .custom(validateCorsOrigins, 'CORS origin validation'),
+
+  ADMIN_ROOT_EMAIL: Joi.string().trim().email({ tlds: false }).required(),
+  ADMIN_ROOT_SETUP_TOKEN_HASH: Joi.string()
+    .trim()
+    .allow('')
+    .pattern(HEX_64_PATTERN)
+    .required(),
+  ADMIN_ROOT_SETUP_TOKEN: Joi.string().valid('').optional().strip(),
+  ADMIN_ROOT_SETUP_EXPIRY: Joi.string()
+    .trim()
+    .pattern(/^\d+[smhd]$/)
+    .required(),
+  ADMIN_COOKIE_REFRESH_NAME: Joi.string().trim().min(1).required(),
+  ADMIN_INVITATION_EXPIRY: Joi.string()
+    .trim()
+    .pattern(/^\d+[smhd]$/)
+    .required(),
+  ADMIN_WEB_APP_URL: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string()
+      .trim()
+      .uri({ scheme: ['https'] })
+      .required(),
+    otherwise: Joi.string()
+      .trim()
+      .uri({ scheme: ['http', 'https'] })
+      .allow('')
+      .required(),
+  }),
 
   JWT_SECRET: Joi.when('NODE_ENV', {
     is: 'production',

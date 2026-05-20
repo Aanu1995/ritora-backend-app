@@ -327,6 +327,8 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    this.assertUserNotRestricted(user);
+
     if (!user.email_verified) {
       throw new ForbiddenException({
         code: 'EMAIL_NOT_VERIFIED',
@@ -398,6 +400,7 @@ export class AuthService {
     );
 
     if (existingProviderUser) {
+      this.assertUserNotRestricted(existingProviderUser);
       await this.cancelAccountDeletionOnAccess(existingProviderUser);
       const authUser =
         (await this.usersService.findByIdForAuth(existingProviderUser.id)) ??
@@ -422,6 +425,7 @@ export class AuthService {
     );
 
     if (existingEmailUser) {
+      this.assertUserNotRestricted(existingEmailUser);
       const linkedSubject = providerConfig.readSubject(existingEmailUser);
       if (linkedSubject && linkedSubject !== profile.providerSubject) {
         throw new ConflictException(
@@ -528,6 +532,8 @@ export class AuthService {
     ) {
       throw new UnauthorizedException('Invalid refresh token');
     }
+
+    this.assertUserNotRestricted(session.user);
 
     const newSecret = randomBytes(32).toString('hex');
     const newSecretHash = this.sha256(newSecret);
@@ -1269,6 +1275,15 @@ export class AuthService {
         ...(!privacyPolicyAccepted ? { privacyPolicyAccepted: [message] } : {}),
       },
     });
+  }
+
+  private assertUserNotRestricted(user: User): void {
+    if (user.account_restricted_at) {
+      throw new ForbiddenException({
+        code: 'ACCOUNT_RESTRICTED',
+        message: 'Account restricted',
+      });
+    }
   }
 
   private async findUserByField(

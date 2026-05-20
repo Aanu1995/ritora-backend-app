@@ -250,6 +250,9 @@ describe('AuthService', () => {
       account_deletion_cancel_token_consumed_at: null,
       account_deletion_confirm_token_hash: null,
       account_deletion_confirm_expires: null,
+      account_restricted_at: null,
+      account_restricted_by_admin_id: null,
+      account_restriction_reason: null,
       preferred_language: 'en',
       google_subject: null,
       apple_subject: null,
@@ -394,6 +397,21 @@ describe('AuthService', () => {
     it('rejects unverified users before creating a session', async () => {
       const res = mockRes();
       usersService.findByEmailForAuth.mockResolvedValue(fakeUser());
+
+      await expect(
+        service.login('test@example.com', 'Password1', asResponse(res)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('rejects restricted users before creating a session', async () => {
+      const res = mockRes();
+      usersService.findByEmailForAuth.mockResolvedValue(
+        fakeUser({
+          account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+          email_verified: true,
+        }),
+      );
 
       await expect(
         service.login('test@example.com', 'Password1', asResponse(res)),
@@ -776,6 +794,30 @@ describe('AuthService', () => {
       await expect(
         service.refreshTokens('01SESSION.fakesecret', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects restricted users before rotating refresh tokens', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+      });
+
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        user,
+      });
+
+      await expect(
+        service.refreshTokens(`01SESSION.${secret}`, asResponse(res)),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
     });
   });
 

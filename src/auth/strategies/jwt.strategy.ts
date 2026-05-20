@@ -50,7 +50,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     }
 
     const user = await this.usersService.findById(payload.sub);
-    if (!user) {
+    if (!user || user.account_restricted_at) {
       throw new UnauthorizedException();
     }
     return {

@@ -88,6 +88,17 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   account_deletion_confirm_expires: Date | null;
 
+  @Index('idx_users_account_restricted_at')
+  @Column({ type: 'timestamptz', nullable: true })
+  account_restricted_at: Date | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  account_restriction_reason: string | null;
+
+  @Index('idx_users_account_restricted_by_admin_id')
+  @Column({ type: 'varchar', length: 26, nullable: true })
+  account_restricted_by_admin_id: string | null;
+
   @Column({ type: 'varchar', length: 5, default: 'en' })
   preferred_language: string;
 

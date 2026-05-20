@@ -214,6 +214,7 @@ const EMAIL_LIST_MAX_ITEMS = 12;
 @Injectable()
 export class MailService {
   private readonly webAppUrl: string;
+  private readonly adminWebAppUrl: string;
   private readonly apiPublicUrl: string;
   private readonly authFrom: string;
   private readonly notificationFrom: string;
@@ -232,6 +233,9 @@ export class MailService {
     private readonly unsubscribeTokens: MailUnsubscribeTokenService,
   ) {
     this.webAppUrl = this.configService.getOrThrow<string>('WEB_APP_URL');
+    this.adminWebAppUrl =
+      this.configService.get<string>('ADMIN_WEB_APP_URL')?.trim() ||
+      this.webAppUrl;
     this.apiPublicUrl = this.resolveApiPublicUrl();
     this.apiKey = this.configService.getOrThrow<string>('RESEND_API_KEY');
     const authMailFrom = this.configService.getOrThrow<string>('MAIL_FROM');
@@ -310,6 +314,81 @@ export class MailService {
       from: this.authFrom,
       to: email,
       subject: translate(language, 'mail.subject.passwordReset'),
+      html,
+    });
+  }
+
+  async sendAdminInvitationEmail(
+    email: string,
+    token: string,
+    invitedByName: string,
+    language: AppLanguage,
+  ): Promise<void> {
+    const safeInvitedByName = safeHtmlText(invitedByName, 'Ritora');
+    const inviteUrl = this.buildAdminPathActionUrl('reset-password', token);
+    const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
+      firstName: safeInvitedByName,
+      resetUrl: inviteUrl,
+      logoUrl: EMAIL_LOGO_URL,
+      previewText: translate(language, 'mail.adminInvitation.previewText'),
+      title: translate(language, 'mail.adminInvitation.title'),
+      intro: translate(language, 'mail.adminInvitation.intro', {
+        invitedByName: safeInvitedByName,
+      }),
+      ctaLabel: translate(language, 'mail.adminInvitation.ctaLabel'),
+      expiryNote: translate(language, 'mail.adminInvitation.expiry'),
+      fallbackIntro: translate(language, 'mail.passwordReset.fallbackIntro'),
+      unexpectedTitle: translate(
+        language,
+        'mail.adminInvitation.unexpectedTitle',
+      ),
+      unexpectedBody: translate(
+        language,
+        'mail.adminInvitation.unexpectedBody',
+      ),
+      footerLine: translate(language, 'mail.adminInvitation.footerLine'),
+    });
+
+    await this.sendEmail({
+      from: this.authFrom,
+      to: email,
+      subject: translate(language, 'mail.subject.adminInvitation'),
+      html,
+    });
+  }
+
+  async sendAdminPasswordResetEmail(
+    email: string,
+    token: string,
+    name: string,
+    language: AppLanguage,
+  ): Promise<void> {
+    const safeName = safeHtmlText(name);
+    const resetUrl = this.buildAdminPathActionUrl('reset-password', token);
+    const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
+      firstName: safeName,
+      resetUrl,
+      logoUrl: EMAIL_LOGO_URL,
+      previewText: translate(language, 'mail.adminPasswordReset.previewText'),
+      title: translate(language, 'mail.adminPasswordReset.title'),
+      intro: translate(language, 'mail.adminPasswordReset.intro', {
+        firstName: safeName,
+      }),
+      ctaLabel: translate(language, 'mail.adminPasswordReset.ctaLabel'),
+      expiryNote: translate(language, 'mail.passwordReset.expiry'),
+      fallbackIntro: translate(language, 'mail.passwordReset.fallbackIntro'),
+      unexpectedTitle: translate(
+        language,
+        'mail.passwordReset.unexpectedTitle',
+      ),
+      unexpectedBody: translate(language, 'mail.passwordReset.unexpectedBody'),
+      footerLine: translate(language, 'mail.adminPasswordReset.footerLine'),
+    });
+
+    await this.sendEmail({
+      from: this.authFrom,
+      to: email,
+      subject: translate(language, 'mail.subject.adminPasswordReset'),
       html,
     });
   }
@@ -986,7 +1065,19 @@ export class MailService {
   }
 
   private buildFrontendPathActionUrl(path: string, token: string): string {
-    const base = new URL(this.webAppUrl);
+    return this.buildAppPathActionUrl(this.webAppUrl, path, token);
+  }
+
+  private buildAdminPathActionUrl(path: string, token: string): string {
+    return this.buildAppPathActionUrl(this.adminWebAppUrl, path, token);
+  }
+
+  private buildAppPathActionUrl(
+    baseUrl: string,
+    path: string,
+    token: string,
+  ): string {
+    const base = new URL(baseUrl);
     const basePath = base.pathname.replace(/\/$/, '');
     base.pathname = `${basePath}/${path}/${encodeURIComponent(token)}`;
     base.search = '';

@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { databaseConfig } from './config/database.config';
 import { AppConfigModule } from './config/app-config.module';
 import { buildPinoHttpOptions } from './observability/logging.config';
+import { AdminModule } from './admin/admin.module';
 import { AppBadgesModule } from './app-badges/app-badges.module';
 import { ApplicationTrackingModule } from './application-tracking/application-tracking.module';
 import { AuthModule } from './auth/auth.module';
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module';
         limit: 100,
       },
     ]),
+    AdminModule,
     AppBadgesModule,
     ApplicationTrackingModule,
     HealthModule,

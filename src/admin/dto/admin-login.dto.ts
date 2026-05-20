@@ -1,0 +1,29 @@
+import { ApiProperty } from '@nestjs/swagger';
+import {
+  IsEmail,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
+
+export class AdminLoginDto {
+  @ApiProperty({ example: 'owner@ritora.app' })
+  @IsEmail({}, { message: 'validation.email.invalid' })
+  @MaxLength(255, { message: 'validation.email.maxLength' })
+  email!: string;
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(1, { message: 'validation.password.required' })
+  @MaxLength(72, { message: 'validation.password.maxLength' })
+  password!: string;
+
+  @ApiProperty({ enum: ['en', 'sv'], required: false })
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsIn(['en', 'sv'], { message: 'validation.language.unsupported' })
+  language?: string;
+}

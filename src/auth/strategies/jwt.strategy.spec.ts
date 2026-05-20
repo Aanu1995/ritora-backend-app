@@ -90,6 +90,38 @@ describe('JwtStrategy', () => {
     ).rejects.toThrow(UnauthorizedException);
   });
 
+  it('throws when the user account is restricted', async () => {
+    (sessionsRepository.findOne as jest.Mock).mockResolvedValue({
+      id: '01SESSION',
+      user_id: '01USER',
+      expires_at: new Date(Date.now() + 60_000),
+      revoked_at: null,
+    });
+    (usersService.findById as jest.Mock).mockResolvedValue({
+      id: '01USER',
+      email: 'test@example.com',
+      preferred_language: 'en',
+      time_zone: 'Europe/Stockholm',
+      account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+    });
+
+    const strategy = new JwtStrategy(
+      configService,
+      usersService,
+      sessionsRepository,
+    );
+
+    await expect(
+      strategy.validate({
+        sub: '01USER',
+        email: 'test@example.com',
+        sid: '01SESSION',
+        iss: 'ritora',
+        aud: 'ritora-web',
+      }),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
   it('throws when the session is revoked or missing', async () => {
     (sessionsRepository.findOne as jest.Mock).mockResolvedValue(null);
 

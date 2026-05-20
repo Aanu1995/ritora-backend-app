@@ -52,6 +52,24 @@ describe('OriginCheckGuard', () => {
     ).toBe(true);
   });
 
+  it('allows the configured admin web app origin', () => {
+    const configService = createConfigService({
+      ADMIN_WEB_APP_URL: 'http://localhost:3002',
+      CORS_ORIGINS: '',
+      WEB_APP_URL: 'http://localhost:3000',
+    });
+    const guard = new OriginCheckGuard(configService);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          origin: 'http://localhost:3002',
+          referer: undefined,
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it('rejects disallowed origins', () => {
     const configService = createConfigService({
       CORS_ORIGINS: '',

@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogueModule } from '../catalogue/catalogue.module';
+import { OriginCheckGuard } from '../common/guards/origin-check.guard';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { SkinJournalModule } from '../skin-journal/skin-journal.module';
@@ -63,6 +64,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     AppleStrategy,
     GoogleStrategy,
     JwtStrategy,
+    OriginCheckGuard,
   ],
   exports: [AuthService, AccountDeletionSchedulerService],
 })

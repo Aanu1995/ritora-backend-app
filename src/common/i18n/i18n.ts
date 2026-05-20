@@ -25,6 +25,9 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'messages.auth.forgotPassword.success':
       'If the email is registered, a reset link has been sent',
     'messages.auth.resetPassword.success': 'Password reset successfully',
+    'messages.adminAuth.forgotPassword.success':
+      'If the email is registered, a reset link has been sent',
+    'messages.adminAuth.resetPassword.success': 'Password reset successfully',
     'messages.auth.logout.success': 'Logged out',
     'messages.auth.logoutAll.success': 'All sessions revoked',
     'messages.auth.deleteAccount.success': 'Account deleted',
@@ -35,6 +38,8 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Account deletion has been cancelled',
     'mail.subject.verification': 'Verify your Ritora account',
     'mail.subject.passwordReset': 'Reset your Ritora password',
+    'mail.subject.adminInvitation': 'You have been invited to Ritora Admin',
+    'mail.subject.adminPasswordReset': 'Reset your Ritora admin password',
     'mail.subject.accountDeletionConfirm':
       'Confirm deletion of your Ritora account',
     'mail.subject.accountDeletionScheduled':
@@ -72,6 +77,27 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'You can ignore this email and your current password will keep working. Ritora will never ask for your password by email.',
     'mail.passwordReset.footerLine':
       'Sent from Ritora. If you ever have questions about your account, the team is at support@getritora.com.',
+    'mail.adminInvitation.previewText':
+      'Set your Ritora Admin password to accept your invitation.',
+    'mail.adminInvitation.title': 'Accept your Ritora Admin invitation',
+    'mail.adminInvitation.intro':
+      '{{invitedByName}} invited you to help manage Ritora. Set a password to accept the invitation.',
+    'mail.adminInvitation.ctaLabel': 'Set admin password',
+    'mail.adminInvitation.expiry':
+      'This invitation works for the next 7 days and can only be used once.',
+    'mail.adminInvitation.unexpectedTitle': 'Not expecting this?',
+    'mail.adminInvitation.unexpectedBody':
+      'Ignore this email if you were not expecting access. Ritora will never ask for your password by email.',
+    'mail.adminInvitation.footerLine':
+      'Sent from Ritora for internal account safety. Questions? Write to support@getritora.com.',
+    'mail.adminPasswordReset.previewText':
+      'Reset your Ritora Admin password. This link works for the next hour.',
+    'mail.adminPasswordReset.title': 'Reset your admin password',
+    'mail.adminPasswordReset.intro':
+      'Hi {{firstName}}, we got a request to reset your Ritora Admin password.',
+    'mail.adminPasswordReset.ctaLabel': 'Pick a new password',
+    'mail.adminPasswordReset.footerLine':
+      'Sent from Ritora for internal account safety. Questions? Write to support@getritora.com.',
     'mail.accountDeletion.confirm.previewText':
       'Tap to confirm you want to delete your Ritora account. The link expires in one hour.',
     'mail.accountDeletion.confirm.badgeLabel': 'Action needed',
@@ -359,11 +385,20 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'errors.auth.expiredResetToken': 'Reset token has expired',
     'errors.auth.invalidPassword': 'Invalid password',
     'errors.auth.noRefreshToken': 'No refresh token',
+    'errors.auth.accountRestricted':
+      'This account has been restricted. Contact support if you believe this is a mistake.',
     'validation.email.invalid': 'Enter a valid email address',
+    'validation.email.maxLength':
+      'Email address must be 255 characters or fewer',
     'validation.password.minLength':
       'Password must be at least 8 characters long',
+    'validation.password.required': 'Enter your password',
+    'validation.password.maxLength': 'Password must be 72 characters or fewer',
     'validation.password.strong':
       'Password must contain at least one uppercase letter, one lowercase letter, and one number',
+    'validation.reason.required': 'Enter an audit reason',
+    'validation.reason.maxLength':
+      'Audit reason must be 500 characters or fewer',
     'validation.token.hex64': 'Token must be a 64-character hexadecimal string',
     'validation.language.unsupported': 'Choose English or Swedish',
     'validation.name.required': 'This field is required',
@@ -378,6 +413,9 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'messages.auth.forgotPassword.success':
       'Om e-postadressen är registrerad har en återställningslänk skickats',
     'messages.auth.resetPassword.success': 'Lösenordet har återställts',
+    'messages.adminAuth.forgotPassword.success':
+      'Om e-postadressen är registrerad har en återställningslänk skickats',
+    'messages.adminAuth.resetPassword.success': 'Lösenordet har återställts',
     'messages.auth.logout.success': 'Du har loggats ut',
     'messages.auth.logoutAll.success': 'Alla sessioner har avslutats',
     'messages.auth.deleteAccount.success': 'Kontot har raderats',
@@ -388,6 +426,8 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'messages.auth.deleteAccount.cancelled': 'Kontoraderingen har avbrutits',
     'mail.subject.verification': 'Verifiera ditt Ritora-konto',
     'mail.subject.passwordReset': 'Återställ ditt Ritora-lösenord',
+    'mail.subject.adminInvitation': 'Du har bjudits in till Ritora Admin',
+    'mail.subject.adminPasswordReset': 'Återställ ditt Ritora Admin-lösenord',
     'mail.subject.accountDeletionConfirm':
       'Bekräfta radering av ditt Ritora-konto',
     'mail.subject.accountDeletionScheduled':
@@ -425,6 +465,27 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Du kan ignorera det här mejlet så fortsätter ditt nuvarande lösenord att fungera. Ritora kommer aldrig att be om ditt lösenord via e-post.',
     'mail.passwordReset.footerLine':
       'Skickat från Ritora. Om du har frågor om ditt konto finns vi på support@getritora.com.',
+    'mail.adminInvitation.previewText':
+      'Välj ett Ritora Admin-lösenord för att acceptera inbjudan.',
+    'mail.adminInvitation.title': 'Acceptera din Ritora Admin-inbjudan',
+    'mail.adminInvitation.intro':
+      '{{invitedByName}} har bjudit in dig att hjälpa till att hantera Ritora. Välj ett lösenord för att acceptera inbjudan.',
+    'mail.adminInvitation.ctaLabel': 'Välj adminlösenord',
+    'mail.adminInvitation.expiry':
+      'Inbjudan fungerar i 7 dagar och kan bara användas en gång.',
+    'mail.adminInvitation.unexpectedTitle': 'Förväntade du dig inte detta?',
+    'mail.adminInvitation.unexpectedBody':
+      'Ignorera mejlet om du inte förväntade dig åtkomst. Ritora kommer aldrig att be om ditt lösenord via e-post.',
+    'mail.adminInvitation.footerLine':
+      'Skickat från Ritora för intern kontosäkerhet. Frågor? Skriv till support@getritora.com.',
+    'mail.adminPasswordReset.previewText':
+      'Återställ ditt Ritora Admin-lösenord. Länken fungerar i en timme.',
+    'mail.adminPasswordReset.title': 'Återställ ditt adminlösenord',
+    'mail.adminPasswordReset.intro':
+      'Hej {{firstName}}, vi har fått en begäran om att återställa ditt Ritora Admin-lösenord.',
+    'mail.adminPasswordReset.ctaLabel': 'Välj ett nytt lösenord',
+    'mail.adminPasswordReset.footerLine':
+      'Skickat från Ritora för intern kontosäkerhet. Frågor? Skriv till support@getritora.com.',
     'mail.accountDeletion.confirm.previewText':
       'Tryck för att bekräfta att du vill radera ditt Ritora-konto. Länken gäller i en timme.',
     'mail.accountDeletion.confirm.badgeLabel': 'Åtgärd krävs',
@@ -707,11 +768,20 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'errors.auth.expiredResetToken': 'Återställningstoken har gått ut',
     'errors.auth.invalidPassword': 'Ogiltigt lösenord',
     'errors.auth.noRefreshToken': 'Ingen uppdateringstoken hittades',
+    'errors.auth.accountRestricted':
+      'Det här kontot har begränsats. Kontakta support om du tror att detta är ett misstag.',
     'validation.email.invalid': 'Ange en giltig e-postadress',
+    'validation.email.maxLength': 'E-postadressen får vara högst 255 tecken',
     'validation.password.minLength':
       'Lösenordet måste vara minst 8 tecken långt',
+    'validation.password.required': 'Ange ditt lösenord',
+    'validation.password.maxLength':
+      'Lösenordet får vara högst 72 tecken långt',
     'validation.password.strong':
       'Lösenordet måste innehålla minst en versal, en gemen och en siffra',
+    'validation.reason.required': 'Ange en granskningsorsak',
+    'validation.reason.maxLength':
+      'Granskningsorsaken får vara högst 500 tecken',
     'validation.token.hex64':
       'Token måste vara en hexadecimal sträng med 64 tecken',
     'validation.language.unsupported': 'Välj engelska eller svenska',
@@ -721,6 +791,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
 };
 
 const codeKeyMap: Record<string, string> = {
+  ACCOUNT_RESTRICTED: 'errors.auth.accountRestricted',
   EMAIL_NOT_VERIFIED: 'errors.auth.emailNotVerified',
   SCHEDULE_CUSTOM_LABEL_REQUIRED: 'errors.schedule.customLabelRequired',
   SCHEDULE_MOVE_CONFLICT: 'errors.schedule.moveConflict',
@@ -773,8 +844,13 @@ const messageKeyMap: Record<string, string> = {
   'Invalid password': 'errors.auth.invalidPassword',
   'No refresh token': 'errors.auth.noRefreshToken',
   'validation.email.invalid': 'validation.email.invalid',
+  'validation.email.maxLength': 'validation.email.maxLength',
   'validation.password.minLength': 'validation.password.minLength',
+  'validation.password.required': 'validation.password.required',
+  'validation.password.maxLength': 'validation.password.maxLength',
   'validation.password.strong': 'validation.password.strong',
+  'validation.reason.required': 'validation.reason.required',
+  'validation.reason.maxLength': 'validation.reason.maxLength',
   'validation.token.hex64': 'validation.token.hex64',
   'validation.language.unsupported': 'validation.language.unsupported',
   'validation.name.required': 'validation.name.required',

@@ -31,7 +31,14 @@ function developmentEnv(
     DATABASE_SSL: false,
     DATABASE_LOGGING: false,
     DATABASE_SSL_REJECT_UNAUTHORIZED: false,
-    CORS_ORIGINS: 'http://localhost:3000',
+    CORS_ORIGINS: 'http://localhost:3000,http://localhost:3002',
+    ADMIN_ROOT_EMAIL: 'owner@ritora.app',
+    ADMIN_ROOT_SETUP_EXPIRY: '24h',
+    ADMIN_ROOT_SETUP_TOKEN_HASH:
+      'ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb',
+    ADMIN_COOKIE_REFRESH_NAME: 'ritora_admin_refresh',
+    ADMIN_INVITATION_EXPIRY: '7d',
+    ADMIN_WEB_APP_URL: 'http://localhost:3002',
     JWT_SECRET: 'dev-jwt-secret-change-me',
     JWT_REFRESH_SECRET: 'dev-refresh-secret-change-me',
     JWT_ACCESS_EXPIRY: '15m',
@@ -125,6 +132,9 @@ function productionEnv(
     DATABASE_SSL: true,
     DATABASE_SSL_REJECT_UNAUTHORIZED: true,
     CORS_ORIGINS: 'https://app.ritora.com',
+    ADMIN_ROOT_EMAIL: 'owner@ritora.app',
+    ADMIN_ROOT_SETUP_TOKEN_HASH: 'a'.repeat(64),
+    ADMIN_WEB_APP_URL: 'https://admin.ritora.com',
     JWT_SECRET: 'a'.repeat(32),
     JWT_REFRESH_SECRET: 'b'.repeat(32),
     COOKIE_DOMAIN: 'ritora.com',
@@ -196,7 +206,7 @@ describe('envValidationSchema', () => {
     expect(result.error).toBeUndefined();
     expect(result.value).toMatchObject({
       API_PORT: 3001,
-      CORS_ORIGINS: 'http://localhost:3000',
+      CORS_ORIGINS: 'http://localhost:3000,http://localhost:3002',
       DATABASE_SSL_REJECT_UNAUTHORIZED: false,
       OTEL_ENABLED: false,
       OTEL_SERVICE_NAME: 'ritora-backend-api',
@@ -248,6 +258,56 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error?.message).toContain('WEB_PUSH_VAPID_PUBLIC_KEY');
+  });
+
+  it('requires the root admin email in every environment', () => {
+    const result = validateEnv(
+      developmentEnv({
+        ADMIN_ROOT_EMAIL: '',
+      }),
+    );
+
+    expect(result.error?.message).toContain('ADMIN_ROOT_EMAIL');
+  });
+
+  it('allows the root setup token hash to be removed after production bootstrap', () => {
+    const result = validateEnv(
+      productionEnv({
+        ADMIN_ROOT_SETUP_TOKEN_HASH: '',
+      }),
+    );
+
+    expect(result.error).toBeUndefined();
+  });
+
+  it('rejects raw root setup tokens in every environment', () => {
+    const result = validateEnv(
+      developmentEnv({
+        ADMIN_ROOT_SETUP_TOKEN: 'b'.repeat(64),
+      }),
+    );
+
+    expect(result.error?.message).toContain('ADMIN_ROOT_SETUP_TOKEN');
+  });
+
+  it('rejects malformed root setup token hashes', () => {
+    const result = validateEnv(
+      developmentEnv({
+        ADMIN_ROOT_SETUP_TOKEN_HASH: 'not-a-sha256-hash',
+      }),
+    );
+
+    expect(result.error?.message).toContain('ADMIN_ROOT_SETUP_TOKEN_HASH');
+  });
+
+  it('rejects malformed root admin emails', () => {
+    const result = validateEnv(
+      developmentEnv({
+        ADMIN_ROOT_EMAIL: 'not-an-email',
+      }),
+    );
+
+    expect(result.error?.message).toContain('ADMIN_ROOT_EMAIL');
   });
 
   it('requires one-click unsubscribe signing config in production', () => {

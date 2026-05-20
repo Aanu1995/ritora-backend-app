@@ -15,10 +15,13 @@ function parseCorsOrigins(configService: ConfigService): string[] {
   const configuredOrigins =
     configService.getOrThrow<string>('CORS_ORIGINS').trim() ||
     configService.getOrThrow<string>('WEB_APP_URL');
+  const adminWebAppUrl = configService.get<string>('ADMIN_WEB_APP_URL')?.trim();
 
   return Array.from(
     new Set(
-      configuredOrigins
+      [configuredOrigins, adminWebAppUrl]
+        .filter((value): value is string => Boolean(value))
+        .join(',')
         .split(',')
         .map((origin) => origin.trim())
         .filter(Boolean)

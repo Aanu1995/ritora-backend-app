@@ -23,9 +23,14 @@ export class OriginCheckGuard implements CanActivate {
     const configuredOrigins =
       this.configService.getOrThrow<string>('CORS_ORIGINS').trim() ||
       this.configService.getOrThrow<string>('WEB_APP_URL');
+    const adminWebAppUrl = this.configService
+      .get<string>('ADMIN_WEB_APP_URL')
+      ?.trim();
 
     this.allowedOrigins = new Set(
-      configuredOrigins
+      [configuredOrigins, adminWebAppUrl]
+        .filter((value): value is string => Boolean(value))
+        .join(',')
         .split(',')
         .map((origin) => origin.trim())
         .filter(Boolean)

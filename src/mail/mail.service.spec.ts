@@ -49,6 +49,7 @@ describe('MailService', () => {
     } as unknown as Resend;
 
     const configValues: Record<string, string> = {
+      ADMIN_WEB_APP_URL: 'http://localhost:3002',
       WEB_APP_URL: 'http://localhost:3000',
       API_PUBLIC_URL: 'http://localhost:3001/api/v1',
       MAIL_FROM: 'onboarding@resend.dev',
@@ -117,6 +118,52 @@ describe('MailService', () => {
       'http://localhost:3000/reset-password/token-456',
     );
     expect(payload.html).toContain('Jane');
+  });
+
+  it('sends admin invitation emails to the admin web app', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendAdminInvitationEmail(
+      'ops@example.com',
+      'token-admin-invite',
+      'Root Admin',
+      'en',
+    );
+
+    const payload = getSentEmailPayload(sendEmail);
+
+    expect(payload.subject).toBe('You have been invited to Ritora Admin');
+    expect(payload.html).toContain(
+      'http://localhost:3002/reset-password/token-admin-invite',
+    );
+    expect(payload.html).toContain('Root Admin invited you');
+  });
+
+  it('sends admin password reset emails to the admin web app', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendAdminPasswordResetEmail(
+      'ops@example.com',
+      'token-admin-reset',
+      'Ops Lead',
+      'en',
+    );
+
+    const payload = getSentEmailPayload(sendEmail);
+
+    expect(payload.subject).toBe('Reset your Ritora admin password');
+    expect(payload.html).toContain(
+      'http://localhost:3002/reset-password/token-admin-reset',
+    );
+    expect(payload.html).toContain('Ops Lead');
   });
 
   it('sends account deletion confirmation emails with a confirmation url', async () => {
@@ -212,6 +259,7 @@ describe('MailService', () => {
 
   it('throws when RESEND_API_KEY is missing', async () => {
     const configValues: Record<string, string> = {
+      ADMIN_WEB_APP_URL: 'http://localhost:3002',
       WEB_APP_URL: 'http://localhost:3000',
       API_PUBLIC_URL: 'http://localhost:3001/api/v1',
       MAIL_FROM: 'onboarding@resend.dev',
