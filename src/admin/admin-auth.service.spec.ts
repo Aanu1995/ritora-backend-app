@@ -115,6 +115,25 @@ function createAdminAccount(
   };
 }
 
+function createAdminSession(
+  overrides: Partial<AdminSession> = {},
+): AdminSession {
+  return {
+    admin: createAdminAccount(),
+    admin_id: 'admin-root',
+    created_at: new Date('2026-05-20T10:00:00.000Z'),
+    expires_at: new Date(Date.now() + 60_000),
+    generateId: jest.fn(),
+    id: 'session-1',
+    ip_address: '127.0.0.1',
+    last_used_at: new Date('2026-05-20T10:30:00.000Z'),
+    refresh_token_hash: sha256ForTest('refresh-secret'),
+    revoked_at: null,
+    user_agent: 'Jest Browser',
+    ...overrides,
+  };
+}
+
 function createAdminAccountsQueryBuilderMock(
   accounts: AdminAccount[],
   total = accounts.length,
@@ -176,6 +195,7 @@ function createService(
     if (entity === AdminAuditLog) return auditLogsRepository;
     throw new Error('Unexpected transaction repository');
   });
+  const query = jest.fn();
   Object.defineProperty(accountsRepository, 'manager', {
     configurable: true,
     value: {
@@ -183,8 +203,9 @@ function createService(
         async (
           operation: (manager: {
             getRepository: typeof getRepository;
+            query: typeof query;
           }) => Promise<unknown>,
-        ) => operation({ getRepository }),
+        ) => operation({ getRepository, query }),
       ),
     },
   });
@@ -369,6 +390,267 @@ describe('AdminAuthService', () => {
         user_agent: 'Jest',
       }),
     );
+  });
+
+  it('revokes previous active admin sessions before issuing a new login session', async () => {
+    const passwordHash = await hash('RootAdmin123!', 4);
+    const account = createAdminAccount({ password_hash: passwordHash });
+    const accountFindOne = jest
+      .fn<Promise<AdminAccount | null>, []>()
+      .mockResolvedValueOnce(account)
+      .mockResolvedValueOnce(account);
+    const sessionUpdate = jest.fn();
+    const sessionSave = jest.fn(async (value: AdminSession) => value);
+    const service = createService({
+      accountsRepository: {
+        findOne: accountFindOne,
+        save: jest.fn(async (value: AdminAccount) => value),
+      },
+      sessionsRepository: {
+        save: sessionSave,
+        update: sessionUpdate,
+      },
+    });
+
+    await service.login(
+      'owner@ritora.app',
+      'RootAdmin123!',
+      createResponse(),
+      '127.0.0.1',
+      'Jest',
+    );
+
+    expect(sessionUpdate).toHaveBeenCalledWith(
+      { admin_id: 'admin-root', revoked_at: expect.any(Object) },
+      { revoked_at: expect.any(Date) },
+    );
+    expect(sessionUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+      sessionSave.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('does not issue a new session if the admin is no longer active while logging in', async () => {
+    const passwordHash = await hash('RootAdmin123!', 4);
+    const account = createAdminAccount({ password_hash: passwordHash });
+    const sessionUpdate = jest.fn();
+    const sessionSave = jest.fn();
+    const response = createResponse();
+    const service = createService({
+      accountsRepository: {
+        findOne: jest
+          .fn<Promise<AdminAccount | null>, []>()
+          .mockResolvedValueOnce(account)
+          .mockResolvedValueOnce(null),
+        save: jest.fn(),
+      },
+      sessionsRepository: {
+        save: sessionSave,
+        update: sessionUpdate,
+      },
+    });
+
+    await expect(
+      service.login('owner@ritora.app', 'RootAdmin123!', response),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(sessionUpdate).not.toHaveBeenCalled();
+    expect(sessionSave).not.toHaveBeenCalled();
+    expect(response.cookie).not.toHaveBeenCalled();
+  });
+
+  it('loads the single active admin session with masked IPs and current-session marker', async () => {
+    const findOne = jest.fn(async () =>
+      createAdminSession({ id: 'session-current' }),
+    );
+    const service = createService({
+      sessionsRepository: { findOne },
+    });
+
+    await expect(
+      service.listSessions({
+        email: 'owner@ritora.app',
+        id: 'admin-root',
+        name: 'Root Admin',
+        role: AdminAccountRole.Root,
+        sessionId: 'session-current',
+        status: AdminAccountStatus.Active,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        current: true,
+        id: 'session-current',
+        ipAddress: '127.0.0.0',
+      }),
+    ]);
+    expect(findOne).toHaveBeenCalledWith({
+      order: { last_used_at: 'DESC' },
+      where: { admin_id: 'admin-root', revoked_at: expect.any(Object) },
+    });
+  });
+
+  it('omits expired admin sessions from session inspection', async () => {
+    const service = createService({
+      sessionsRepository: {
+        findOne: jest.fn(async () =>
+          createAdminSession({
+            expires_at: new Date(Date.now() - 60_000),
+            id: 'session-expired',
+          }),
+        ),
+      },
+    });
+
+    await expect(
+      service.listSessions({
+        email: 'owner@ritora.app',
+        id: 'admin-root',
+        name: 'Root Admin',
+        role: AdminAccountRole.Root,
+        sessionId: 'session-current',
+        status: AdminAccountStatus.Active,
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it('locks and rotates the active admin refresh session', async () => {
+    const response = createResponse();
+    const session = createAdminSession({
+      refresh_token_hash: sha256ForTest('refresh-secret'),
+    });
+    const sessionFindOne = jest.fn(async () => session);
+    const accountFindOne = jest.fn(async () => createAdminAccount());
+    const save = jest.fn(async (value: AdminSession) => value);
+    const service = createService({
+      accountsRepository: {
+        findOne: accountFindOne,
+      },
+      sessionsRepository: {
+        findOne: sessionFindOne,
+        save,
+      },
+    });
+
+    await expect(
+      service.refreshTokens(
+        'session-1.refresh-secret',
+        response,
+        '127.0.0.1',
+        'Jest',
+      ),
+    ).resolves.toEqual({ accessToken: 'admin-access-token' });
+
+    expect(sessionFindOne).toHaveBeenCalledWith({
+      lock: { mode: 'pessimistic_write' },
+      where: { id: 'session-1' },
+    });
+    expect(accountFindOne).toHaveBeenCalledWith({
+      where: {
+        deleted_at: expect.any(Object),
+        id: 'admin-root',
+        status: AdminAccountStatus.Active,
+      },
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ip_address: '127.0.0.1',
+        last_used_at: expect.any(Date),
+        user_agent: 'Jest',
+      }),
+    );
+    expect(session.refresh_token_hash).not.toBe(
+      sha256ForTest('refresh-secret'),
+    );
+    expect(response.cookie).toHaveBeenCalledWith(
+      'ritora_admin_refresh',
+      expect.stringMatching(/^session-1\.[a-f0-9]{64}$/),
+      expect.objectContaining({ httpOnly: true }),
+    );
+  });
+
+  it('rejects forged admin refresh tokens without rotating the session', async () => {
+    const response = createResponse();
+    const save = jest.fn();
+    const service = createService({
+      accountsRepository: {
+        findOne: jest.fn(async () => createAdminAccount()),
+      },
+      sessionsRepository: {
+        findOne: jest.fn(async () =>
+          createAdminSession({
+            refresh_token_hash: sha256ForTest('real-secret'),
+          }),
+        ),
+        save,
+      },
+    });
+
+    await expect(
+      service.refreshTokens('session-1.forged-secret', response),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(save).not.toHaveBeenCalled();
+    expect(response.cookie).not.toHaveBeenCalled();
+  });
+
+  it('logs out only when the refresh token secret matches and records an audit event', async () => {
+    const response = createResponse();
+    const session = createAdminSession({
+      admin: createAdminAccount(),
+      refresh_token_hash: sha256ForTest('refresh-secret'),
+    });
+    const save = jest.fn(async (value: AdminSession) => value);
+    const auditSave = jest.fn(async (value: AdminAuditLog) => value);
+    const service = createService({
+      auditLogsRepository: { save: auditSave },
+      sessionsRepository: {
+        findOne: jest.fn(async () => session),
+        save,
+      },
+    });
+
+    await service.logout('session-1.refresh-secret', response, {
+      ip: '127.0.0.1',
+      userAgent: 'Jest',
+    });
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ revoked_at: expect.any(Date) }),
+    );
+    expect(auditSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AdminLoggedOut,
+        actor_admin_id: 'admin-root',
+        actor_session_id: 'session-1',
+        reason: 'Admin signed out',
+        target_admin_id: 'admin-root',
+      }),
+    );
+    expect(response.clearCookie).toHaveBeenCalledWith(
+      'ritora_admin_refresh',
+      expect.objectContaining({ path: '/api/v1/admin/auth' }),
+    );
+  });
+
+  it('does not revoke a session when the refresh token secret is invalid', async () => {
+    const response = createResponse();
+    const save = jest.fn();
+    const service = createService({
+      sessionsRepository: {
+        findOne: jest.fn(async () =>
+          createAdminSession({
+            refresh_token_hash: sha256ForTest('real-secret'),
+          }),
+        ),
+        save,
+      },
+    });
+
+    await service.logout('session-1.forged-secret', response, {
+      ip: '127.0.0.1',
+      userAgent: 'Jest',
+    });
+
+    expect(save).not.toHaveBeenCalled();
+    expect(response.clearCookie).toHaveBeenCalled();
   });
 
   it('returns product-operation permissions for active non-root admin logins', async () => {

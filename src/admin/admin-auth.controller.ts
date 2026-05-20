@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
@@ -13,14 +14,20 @@ import { ConfigService } from '@nestjs/config';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { OriginCheckGuard } from '../common/guards/origin-check.guard';
 import { normalizeLanguage, translate } from '../common/i18n/i18n';
 import { AdminAuthService } from './admin-auth.service';
+import { AdminJwtAuthGuard } from './admin-jwt-auth.guard';
 import { AdminForgotPasswordDto } from './dto/admin-forgot-password.dto';
 import { AdminLoginDto } from './dto/admin-login.dto';
 import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
-import type { AdminAuthResponse } from './admin.types';
+import type {
+  AdminAuthenticatedUser,
+  AdminAuthResponse,
+  AdminSessionResponse,
+} from './admin.types';
 
 const adminAuthThrottle = (limit: number) => ({
   default: {
@@ -137,6 +144,15 @@ export class AdminAuthController {
     };
   }
 
+  @Get('sessions')
+  @UseGuards(AdminJwtAuthGuard)
+  @ApiOkResponse({ type: Array })
+  listSessions(
+    @CurrentUser() user: AdminAuthenticatedUser,
+  ): Promise<AdminSessionResponse[]> {
+    return this.adminAuthService.listSessions(user);
+  }
+
   @Post('logout')
   @UseGuards(OriginCheckGuard)
   @HttpCode(HttpStatus.OK)
@@ -148,6 +164,10 @@ export class AdminAuthController {
     await this.adminAuthService.logout(
       getCookieValue(req, this.adminCookieRefreshName),
       res,
+      {
+        ip: req.ip,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
     );
     return { message: translate('en', 'messages.auth.logout.success') };
   }

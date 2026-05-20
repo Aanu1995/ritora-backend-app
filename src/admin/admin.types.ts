@@ -68,6 +68,15 @@ export type AdminAuthResponse = {
   member: AdminMemberResponse;
 };
 
+export type AdminSessionResponse = {
+  id: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  current: boolean;
+};
+
 export type AdminPaginationMeta = {
   hasNextPage: boolean;
   hasPreviousPage: boolean;

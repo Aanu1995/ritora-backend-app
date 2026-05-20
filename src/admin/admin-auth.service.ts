@@ -20,6 +20,7 @@ import { ulid } from 'ulid';
 import { type AppLanguage } from '../common/i18n/i18n';
 import {
   expiresFromDuration,
+  isAfterNow,
   isBeforeNow,
   nowDate,
   toIsoString,
@@ -28,6 +29,7 @@ import {
 import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
 import {
+  maskIpAddress,
   sanitizeIpAddress,
   sanitizeUserAgent,
 } from '../auth/auth-session.utils';
@@ -43,10 +45,12 @@ import {
 import { AdminSession } from './entities/admin-session.entity';
 import {
   AdminPermission,
+  type AdminAuthenticatedUser,
   type AdminAuthResponse,
   type AdminListQuery,
   type AdminMemberListResponse,
   type AdminMemberResponse,
+  type AdminSessionResponse,
 } from './admin.types';
 import { buildPaginationMeta, normalizePagination } from './admin-pagination';
 
@@ -62,6 +66,11 @@ type AdminAuditContext = {
   ip?: string;
   reason: string;
   sessionId: string;
+  userAgent?: string;
+};
+
+type AdminLogoutContext = {
+  ip?: string;
   userAgent?: string;
 };
 
@@ -184,9 +193,8 @@ export class AdminAuthService implements OnModuleInit {
     }
 
     account.last_login_at = nowDate();
-    await this.accountsRepository.save(account);
 
-    const { accessToken } = await this.createSession(
+    const { accessToken, authenticatedAccount } = await this.createSession(
       account,
       res,
       ip,
@@ -195,7 +203,7 @@ export class AdminAuthService implements OnModuleInit {
 
     return {
       accessToken,
-      member: this.toMemberResponse(account),
+      member: this.toMemberResponse(authenticatedAccount),
     };
   }
 
@@ -210,57 +218,101 @@ export class AdminAuthService implements OnModuleInit {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    const session = await this.sessionsRepository.findOne({
-      where: { id: parsed.sessionId },
-      relations: ['admin'],
-    });
+    const refreshResult = await this.runAdminMutation(
+      async ({ accountsRepository, sessionsRepository }) => {
+        const session = await sessionsRepository.findOne({
+          lock: { mode: 'pessimistic_write' },
+          where: { id: parsed.sessionId },
+        });
 
-    if (!session || session.revoked_at || isBeforeNow(session.expires_at)) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
+        if (!session || session.revoked_at || isBeforeNow(session.expires_at)) {
+          throw new UnauthorizedException('Invalid refresh token');
+        }
 
-    if (
-      !session.admin ||
-      session.admin.deleted_at ||
-      session.admin.status !== AdminAccountStatus.Active
-    ) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
+        const account = await accountsRepository.findOne({
+          where: {
+            deleted_at: IsNull(),
+            id: session.admin_id,
+            status: AdminAccountStatus.Active,
+          },
+        });
 
-    const secretHash = this.sha256(parsed.secret);
-    if (
-      !this.timingSafeCompare(
-        Buffer.from(secretHash, 'hex'),
-        Buffer.from(session.refresh_token_hash, 'hex'),
-      )
-    ) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
+        if (!account) {
+          throw new UnauthorizedException('Invalid refresh token');
+        }
 
-    const newSecret = randomBytes(32).toString('hex');
-    session.refresh_token_hash = this.sha256(newSecret);
-    session.last_used_at = nowDate();
-    session.ip_address = sanitizeIpAddress(ip) ?? session.ip_address;
-    session.user_agent = sanitizeUserAgent(userAgent) ?? session.user_agent;
-    await this.sessionsRepository.save(session);
+        if (!this.isRefreshSecretValid(session, parsed.secret)) {
+          throw new UnauthorizedException('Invalid refresh token');
+        }
 
-    this.setRefreshCookie(res, `${session.id}.${newSecret}`);
+        const newSecret = randomBytes(32).toString('hex');
+        session.refresh_token_hash = this.sha256(newSecret);
+        session.last_used_at = nowDate();
+        session.ip_address = sanitizeIpAddress(ip) ?? session.ip_address;
+        session.user_agent = sanitizeUserAgent(userAgent) ?? session.user_agent;
+        await sessionsRepository.save(session);
+
+        return {
+          accessToken: this.generateAccessToken(account, session.id),
+          refreshToken: `${session.id}.${newSecret}`,
+        };
+      },
+    );
+
+    this.setRefreshCookie(res, refreshResult.refreshToken);
 
     return {
-      accessToken: this.generateAccessToken(session.admin, session.id),
+      accessToken: refreshResult.accessToken,
     };
   }
 
   async logout(
     refreshTokenRaw: string | undefined,
     res: Response,
+    context: AdminLogoutContext = {},
   ): Promise<void> {
     const parsed = this.parseRefreshToken(refreshTokenRaw);
 
     if (parsed) {
-      await this.sessionsRepository.update(
-        { id: parsed.sessionId, revoked_at: IsNull() },
-        { revoked_at: nowDate() },
+      await this.runAdminMutation(
+        async ({ auditLogsRepository, sessionsRepository }) => {
+          const session = await sessionsRepository.findOne({
+            where: { id: parsed.sessionId },
+            relations: ['admin'],
+          });
+
+          if (
+            !session ||
+            session.revoked_at ||
+            isBeforeNow(session.expires_at) ||
+            !session.admin ||
+            session.admin.deleted_at ||
+            session.admin.status !== AdminAccountStatus.Active ||
+            !this.isRefreshSecretValid(session, parsed.secret)
+          ) {
+            return;
+          }
+
+          session.revoked_at = nowDate();
+          await sessionsRepository.save(session);
+          await this.writeAdminAuditLog(
+            {
+              action: AdminAuditAction.AdminLoggedOut,
+              actor: session.admin,
+              context: {
+                ip: context.ip,
+                reason: 'Admin signed out',
+                sessionId: session.id,
+                userAgent: context.userAgent,
+              },
+              metadata: {
+                sessionId: session.id,
+              },
+              targetAdminId: session.admin.id,
+            },
+            auditLogsRepository,
+          );
+        },
       );
     }
 
@@ -406,6 +458,21 @@ export class AdminAuthService implements OnModuleInit {
       admins: accounts.map((account) => this.toMemberResponse(account)),
       ...buildPaginationMeta(total, pagination),
     };
+  }
+
+  async listSessions(
+    currentAdmin: AdminAuthenticatedUser,
+  ): Promise<AdminSessionResponse[]> {
+    const session = await this.sessionsRepository.findOne({
+      where: { admin_id: currentAdmin.id, revoked_at: IsNull() },
+      order: { last_used_at: 'DESC' },
+    });
+
+    if (!session || !isAfterNow(session.expires_at)) {
+      return [];
+    }
+
+    return [this.toSessionResponse(session, currentAdmin.sessionId)];
   }
 
   async createAdmin(
@@ -773,27 +840,63 @@ export class AdminAuthService implements OnModuleInit {
     res: Response,
     ip?: string,
     userAgent?: string,
-  ): Promise<{ accessToken: string }> {
+  ): Promise<{ accessToken: string; authenticatedAccount: AdminAccount }> {
     const sessionId = ulid();
     const secret = randomBytes(32).toString('hex');
     const refreshToken = `${sessionId}.${secret}`;
-    const session = this.sessionsRepository.create({
-      admin_id: account.id,
-      expires_at: expiresFromDuration(this.jwtRefreshExpiry),
-      id: sessionId,
-      ip_address: sanitizeIpAddress(ip),
-      last_used_at: nowDate(),
-      refresh_token_hash: this.sha256(secret),
-      revoked_at: null,
-      user_agent: sanitizeUserAgent(userAgent),
-    });
 
-    await this.sessionsRepository.save(session);
+    const sessionResult = await this.accountsRepository.manager.transaction(
+      async (
+        manager,
+      ): Promise<{
+        accessToken: string;
+        authenticatedAccount: AdminAccount;
+      }> => {
+        const accountsRepository = manager.getRepository(AdminAccount);
+        const sessionsRepository = manager.getRepository(AdminSession);
+        const activeAccount = await accountsRepository.findOne({
+          lock: { mode: 'pessimistic_write' },
+          where: {
+            deleted_at: IsNull(),
+            id: account.id,
+            status: AdminAccountStatus.Active,
+          },
+        });
+
+        if (!activeAccount) {
+          throw new UnauthorizedException('Invalid credentials');
+        }
+
+        activeAccount.last_login_at = account.last_login_at;
+        await accountsRepository.save(activeAccount);
+        await sessionsRepository.update(
+          { admin_id: account.id, revoked_at: IsNull() },
+          { revoked_at: nowDate() },
+        );
+
+        const session = sessionsRepository.create({
+          admin_id: account.id,
+          expires_at: expiresFromDuration(this.jwtRefreshExpiry),
+          id: sessionId,
+          ip_address: sanitizeIpAddress(ip),
+          last_used_at: nowDate(),
+          refresh_token_hash: this.sha256(secret),
+          revoked_at: null,
+          user_agent: sanitizeUserAgent(userAgent),
+        });
+
+        await sessionsRepository.save(session);
+
+        return {
+          accessToken: this.generateAccessToken(activeAccount, sessionId),
+          authenticatedAccount: activeAccount,
+        };
+      },
+    );
+
     this.setRefreshCookie(res, refreshToken);
 
-    return {
-      accessToken: this.generateAccessToken(account, sessionId),
-    };
+    return sessionResult;
   }
 
   private generateAccessToken(
@@ -845,6 +948,20 @@ export class AdminAuthService implements OnModuleInit {
       { admin_id: adminId, revoked_at: IsNull() },
       { revoked_at: nowDate() },
     );
+  }
+
+  private toSessionResponse(
+    session: AdminSession,
+    currentSessionId: string,
+  ): AdminSessionResponse {
+    return {
+      createdAt: toIsoString(session.created_at),
+      current: session.id === currentSessionId,
+      id: session.id,
+      ipAddress: maskIpAddress(session.ip_address),
+      lastUsedAt: toIsoString(session.last_used_at),
+      userAgent: session.user_agent,
+    };
   }
 
   private toMemberResponse(account: AdminAccount): AdminMemberResponse {
@@ -973,6 +1090,14 @@ export class AdminAuthService implements OnModuleInit {
       return false;
     }
     return timingSafeEqual(left, right);
+  }
+
+  private isRefreshSecretValid(session: AdminSession, secret: string): boolean {
+    const secretHash = this.sha256(secret);
+    return this.timingSafeCompare(
+      Buffer.from(secretHash, 'hex'),
+      Buffer.from(session.refresh_token_hash, 'hex'),
+    );
   }
 
   private async sendInvitationEmailOrLogFailure(

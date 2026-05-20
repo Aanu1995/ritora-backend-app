@@ -12,6 +12,9 @@ export enum AdminAuditAction {
   AdminInvited = 'admin_invited',
   AdminInvitationResent = 'admin_invitation_resent',
   AdminDeleted = 'admin_deleted',
+  AdminLoggedOut = 'admin_logged_out',
+  AdminSessionRevoked = 'admin_session_revoked',
+  AdminSessionsRevoked = 'admin_sessions_revoked',
   UserRestricted = 'user_restricted',
   UserUnrestricted = 'user_unrestricted',
 }
