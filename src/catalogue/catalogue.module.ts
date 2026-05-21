@@ -8,9 +8,15 @@ import { CatalogueService } from './catalogue.service';
 import { CatalogueSourceRule } from './entities/catalogue-source-rule.entity';
 import { OfficialPageProvider } from './official-page.provider';
 import { OpenAiExtractorProvider } from './openai-extractor.provider';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CatalogueSourceRule])],
+  imports: [
+    PlatformGlobalRestrictionsModule,
+    UsersModule,
+    TypeOrmModule.forFeature([CatalogueSourceRule]),
+  ],
   controllers: [CatalogueController],
   providers: [
     CataloguePhotoProcessorService,

@@ -366,6 +366,31 @@ export class UsersService {
     return result.affected ?? 0;
   }
 
+  async clearExpiredAccountRestriction(
+    id: string,
+    now = new Date(),
+  ): Promise<boolean> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_restricted_at: null,
+        account_restricted_by_admin_id: null,
+        account_restriction_capabilities: null,
+        account_restriction_expires_at: null,
+        account_restriction_internal_note: null,
+        account_restriction_reason: null,
+        account_restriction_user_message: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('account_restricted_at IS NOT NULL')
+      .andWhere('account_restriction_expires_at IS NOT NULL')
+      .andWhere('account_restriction_expires_at <= :now', { now })
+      .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
   async remove(id: string): Promise<void> {
     const user = await this.findByIdOrFail(id);
     await this.usersRepository.manager.transaction(async (manager) => {

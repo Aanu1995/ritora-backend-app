@@ -7,6 +7,7 @@ import { ApplicationLogItem } from '../application-tracking/entities/application
 import { ApplicationLogVersion } from '../application-tracking/entities/application-log-version.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
 import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
@@ -17,6 +18,7 @@ import { SuggestionObservabilityEvent } from '../suggestions/entities/suggestion
 import { SuggestionStep } from '../suggestions/entities/suggestion-step.entity';
 import { SuggestionObservabilityService } from '../suggestions/services/suggestion-observability.service';
 import { User } from '../users/entities/user.entity';
+import { UsersModule } from '../users/users.module';
 import { SmartPickGenerationJob } from './entities/smart-pick-generation-job.entity';
 import { SmartPickProductSuggestion } from './entities/smart-pick-product-suggestion.entity';
 import { SmartPickSnapshot } from './entities/smart-pick-snapshot.entity';
@@ -36,6 +38,8 @@ import { SmartPicksController } from './smart-picks.controller';
     ConfigModule,
     EnvironmentIntelligenceModule,
     NotificationsModule,
+    PlatformGlobalRestrictionsModule,
+    UsersModule,
     TypeOrmModule.forFeature([
       SmartPickSnapshot,
       SmartPickProductSuggestion,

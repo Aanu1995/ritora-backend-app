@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
+import { PlatformGlobalRestrictionCapability } from '../../platform-controls/platform-global-restrictions';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import {
   SUGGESTION_AI_DAILY_USER_COST_LIMIT_USD,
@@ -12,7 +14,8 @@ import {
 export type SuggestionAiUsageBlockReason =
   | 'daily_generation_limit'
   | 'daily_regeneration_limit'
-  | 'daily_cost_limit';
+  | 'daily_cost_limit'
+  | 'platform_global_restriction';
 
 export interface SuggestionAiUsageDecision {
   allowed: boolean;
@@ -33,12 +36,27 @@ export class SuggestionAiUsageGuard {
   constructor(
     @InjectRepository(SuggestionInstance)
     private readonly suggestionRepo: Repository<SuggestionInstance>,
+    private readonly platformRestrictions: PlatformGlobalRestrictionsService,
   ) {}
 
   async evaluate(
     userId: string,
     now = new Date(),
   ): Promise<SuggestionAiUsageDecision> {
+    if (
+      await this.platformRestrictions.isCapabilityDisabled(
+        PlatformGlobalRestrictionCapability.DisableAiGeneration,
+      )
+    ) {
+      return {
+        allowed: false,
+        blockedReason: 'platform_global_restriction',
+        estimatedCostTodayUsd: 0,
+        generationCountToday: 0,
+        regenerationCountToday: 0,
+      };
+    }
+
     const start = new Date(now);
     start.setUTCHours(0, 0, 0, 0);
     const row = await this.suggestionRepo

@@ -9,6 +9,9 @@ import {
   ShelfStatus,
 } from '../shelf/shelf.types';
 import { User } from '../users/entities/user.entity';
+import { UserRestrictionEnforcementService } from '../users/user-restriction-enforcement.service';
+import { UserRestrictionCapability } from '../users/user-restrictions';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { InAppNotification } from './entities/in-app-notification.entity';
 import { ScheduledNotification } from './entities/scheduled-notification.entity';
@@ -115,6 +118,13 @@ describe('NotificationsService', () => {
   const mailService = { sendNotificationEmail: jest.fn() };
   const unsubscribeTokens = { verifyToken: jest.fn() };
   const pushNotifications = { sendNotificationPush: jest.fn() };
+  const restrictionEnforcement = {
+    isCapabilityRestricted: jest.fn(),
+    isCapabilityRestrictedForUser: jest.fn(),
+  };
+  const platformRestrictions = {
+    isCapabilityDisabled: jest.fn(),
+  };
 
   beforeEach(async () => {
     notifications = repo();
@@ -130,6 +140,12 @@ describe('NotificationsService', () => {
     unsubscribeTokens.verifyToken.mockClear();
     pushNotifications.sendNotificationPush.mockClear();
     pushNotifications.sendNotificationPush.mockResolvedValue(undefined);
+    restrictionEnforcement.isCapabilityRestricted.mockClear();
+    restrictionEnforcement.isCapabilityRestricted.mockResolvedValue(false);
+    restrictionEnforcement.isCapabilityRestrictedForUser.mockClear();
+    restrictionEnforcement.isCapabilityRestrictedForUser.mockReturnValue(false);
+    platformRestrictions.isCapabilityDisabled.mockClear();
+    platformRestrictions.isCapabilityDisabled.mockResolvedValue(false);
 
     const module = await Test.createTestingModule({
       providers: [
@@ -155,10 +171,34 @@ describe('NotificationsService', () => {
         { provide: MailService, useValue: mailService },
         { provide: MailUnsubscribeTokenService, useValue: unsubscribeTokens },
         { provide: PushNotificationsService, useValue: pushNotifications },
+        {
+          provide: UserRestrictionEnforcementService,
+          useValue: restrictionEnforcement,
+        },
+        {
+          provide: PlatformGlobalRestrictionsService,
+          useValue: platformRestrictions,
+        },
       ],
     }).compile();
 
     service = module.get(NotificationsService);
+  });
+
+  it('drops notification dispatch before preference lookup when globally disabled', async () => {
+    platformRestrictions.isCapabilityDisabled.mockResolvedValue(true);
+
+    await expect(
+      service.dispatch({
+        bodyKey: 'notifications.photoReminder.body',
+        kind: 'photo_reminder',
+        titleKey: 'notifications.photoReminder.title',
+        userId: 'user-1',
+      }),
+    ).resolves.toBeNull();
+
+    expect(preferences.findOne).not.toHaveBeenCalled();
+    expect(notifications.save).not.toHaveBeenCalled();
   });
 
   it('unsubscribes photo reminders from a signed email token', async () => {
@@ -861,6 +901,15 @@ describe('NotificationsService', () => {
         deepLink: '/shelf/product-1',
       }),
     );
+    expect(
+      restrictionEnforcement.isCapabilityRestrictedForUser,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'user-1' }),
+      UserRestrictionCapability.DisableNotifications,
+    );
+    expect(
+      restrictionEnforcement.isCapabilityRestricted,
+    ).not.toHaveBeenCalled();
   });
 
   it('keeps product expiry alerts immediate during quiet hours', async () => {

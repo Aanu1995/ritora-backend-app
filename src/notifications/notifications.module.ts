@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { MailModule } from '../mail/mail.module';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { User } from '../users/entities/user.entity';
+import { UsersModule } from '../users/users.module';
 import { InAppNotification } from './entities/in-app-notification.entity';
 import { PushNotificationDelivery } from './entities/push-notification-delivery.entity';
 import { PushNotificationSubscription } from './entities/push-notification-subscription.entity';
@@ -16,6 +18,8 @@ import { PushNotificationsService } from './push-notifications.service';
 @Module({
   imports: [
     MailModule,
+    PlatformGlobalRestrictionsModule,
+    UsersModule,
     TypeOrmModule.forFeature([
       InAppNotification,
       PushNotificationDelivery,

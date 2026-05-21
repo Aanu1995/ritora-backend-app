@@ -34,6 +34,7 @@ export const AnalysisFailureCodeValue = {
   PhotoPreflightRejected: 'photo_preflight_rejected',
   PayloadTooLarge: 'payload_too_large',
   CostLimitExceeded: 'cost_limit_exceeded',
+  PlatformGlobalRestriction: 'platform_global_restriction',
   ConfigurationError: 'configuration_error',
   InvalidPhotoInput: 'invalid_photo_input',
   Unknown: 'unknown',

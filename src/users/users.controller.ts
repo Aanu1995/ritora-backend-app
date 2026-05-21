@@ -9,6 +9,8 @@ import { UpdateUserLanguageDto } from './dto/update-user-language.dto';
 import { UpdateUserTimeZoneDto } from './dto/update-user-time-zone.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
+import { User } from './entities/user.entity';
+import { UserCapabilitySnapshotService } from './user-capability-snapshot.service';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -17,6 +19,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
+    private readonly capabilitySnapshot: UserCapabilitySnapshotService,
   ) {}
 
   @Get('me')
@@ -24,11 +27,11 @@ export class UsersController {
   async getMe(@CurrentUser('id') userId: string): Promise<UserResponseDto> {
     const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
-      return UserResponseDto.fromEntity(
+      return this.toUserResponse(
         await this.usersService.findByIdOrFail(userId),
       );
     }
-    return UserResponseDto.fromEntity(user, Boolean(user.password_hash));
+    return this.toUserResponse(user, Boolean(user.password_hash));
   }
 
   @Patch('me')
@@ -43,7 +46,7 @@ export class UsersController {
     });
 
     const authUser = await this.usersService.findByIdForAuth(userId);
-    return UserResponseDto.fromEntity(user, Boolean(authUser?.password_hash));
+    return this.toUserResponse(user, Boolean(authUser?.password_hash));
   }
 
   @Patch('me/language')
@@ -65,7 +68,7 @@ export class UsersController {
     );
 
     const authUser = await this.usersService.findByIdForAuth(userId);
-    return UserResponseDto.fromEntity(user, Boolean(authUser?.password_hash));
+    return this.toUserResponse(user, Boolean(authUser?.password_hash));
   }
 
   @Patch('me/time-zone')
@@ -77,6 +80,17 @@ export class UsersController {
     const user = await this.usersService.updateTimeZone(userId, dto.timeZone);
 
     const authUser = await this.usersService.findByIdForAuth(userId);
-    return UserResponseDto.fromEntity(user, Boolean(authUser?.password_hash));
+    return this.toUserResponse(user, Boolean(authUser?.password_hash));
+  }
+
+  private async toUserResponse(
+    user: User,
+    hasPassword?: boolean,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.fromEntity(
+      user,
+      hasPassword,
+      await this.capabilitySnapshot.buildForUser(user),
+    );
   }
 }

@@ -14,12 +14,16 @@ import {
   type NotificationEmailKind,
 } from '../mail/mail.constants';
 import { MailUnsubscribeTokenService } from '../mail/mail-unsubscribe-token.service';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { normalizeLanguage } from '../common/i18n/i18n';
 import { type PaginatedResult } from '../common/utils/cursor-pagination';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../skin-journal/skin-journal.constants';
 import { User } from '../users/entities/user.entity';
+import { UserRestrictionEnforcementService } from '../users/user-restriction-enforcement.service';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import { InAppNotification } from './entities/in-app-notification.entity';
 import { ScheduledNotification } from './entities/scheduled-notification.entity';
 import {
@@ -102,6 +106,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     private readonly mailService: MailService,
     private readonly unsubscribeTokens: MailUnsubscribeTokenService,
     private readonly pushNotifications: PushNotificationsService,
+    private readonly restrictionEnforcement: UserRestrictionEnforcementService,
+    private readonly platformRestrictions: PlatformGlobalRestrictionsService,
   ) {}
 
   onModuleInit(): void {
@@ -256,6 +262,14 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   async dispatch(
     params: DispatchNotificationParams,
   ): Promise<InAppNotification | null> {
+    if (
+      await this.platformRestrictions.isCapabilityDisabled(
+        PlatformGlobalRestrictionCapability.DisableNotifications,
+      )
+    ) {
+      return null;
+    }
+
     const prefs = await this.ensurePreferences(params.userId);
     return this.dispatchWithPreferences(params, prefs);
   }
@@ -265,6 +279,19 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     prefs: UserNotificationPreference,
     user?: User | null,
   ): Promise<InAppNotification | null> {
+    const notificationsRestricted = user
+      ? this.restrictionEnforcement.isCapabilityRestrictedForUser(
+          user,
+          UserRestrictionCapability.DisableNotifications,
+        )
+      : await this.restrictionEnforcement.isCapabilityRestricted(
+          params.userId,
+          UserRestrictionCapability.DisableNotifications,
+        );
+    if (notificationsRestricted) {
+      return null;
+    }
+
     if (!isNotificationKindEnabled(prefs, params.kind)) {
       return null;
     }

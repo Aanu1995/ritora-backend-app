@@ -4,7 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  IsNull,
+  Repository,
+  type ValueTransformer,
+} from 'typeorm';
+import { ulid } from 'ulid';
 import { AuthSession } from '../auth/entities/auth-session.entity';
 import {
   sanitizeIpAddress,
@@ -12,6 +19,13 @@ import {
 } from '../auth/auth-session.utils';
 import { toIsoString, toNullableIsoString } from '../common/utils/date';
 import { isPostgresUniqueConstraintError } from '../common/utils/database-errors';
+import { encryptedNullableStringFieldTransformer } from '../skin-profile/skin-profile-field-encryption';
+import {
+  isPlatformGlobalRestrictionCapability,
+  PLATFORM_GLOBAL_RESTRICTION_CAPABILITIES,
+  PlatformGlobalRestrictionCapability,
+} from '../platform-controls/platform-global-restrictions';
+import { platformGlobalRestrictionInternalNoteTransformer } from '../platform-controls/entities/platform-global-restriction.entity';
 import {
   AnalysisJobStatusValue,
   AnalysisStatusValue,
@@ -44,6 +58,9 @@ import {
   type AdminAuthenticatedUser,
   type AdminMemberResponse,
   type AdminOverviewResponse,
+  type AdminPlatformGlobalRestrictionListResponse,
+  type AdminPlatformGlobalRestrictionResponse,
+  AdminUserAccountStatus,
   type AdminUserDetailResponse,
   type AdminUserListQuery,
   type AdminUserListResponse,
@@ -54,6 +71,13 @@ import {
   type AdminUserResponse,
   AdminUserRestrictionFilter,
 } from './admin.types';
+import {
+  getEffectiveUserRestrictionCapabilities,
+  hasActiveUserRestrictionCapability,
+  isUserRestrictionActive,
+  normalizeUserRestrictionCapabilities,
+  UserRestrictionCapability,
+} from '../users/user-restrictions';
 import { buildPaginationMeta, normalizePagination } from './admin-pagination';
 import {
   AdminAccount,
@@ -74,6 +98,16 @@ import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-in
 
 type QueryRow = Record<string, unknown>;
 
+const ENCRYPTED_STRING_PREFIX = 'ritora:v1:';
+const userRestrictionInternalNoteTransformer =
+  encryptedNullableStringFieldTransformer(
+    'users.account_restriction_internal_note',
+  );
+const userRestrictionMessageTransformer =
+  encryptedNullableStringFieldTransformer(
+    'users.account_restriction_user_message',
+  );
+
 type AdminRequestContext = {
   ip?: string;
   sessionId: string;
@@ -82,6 +116,18 @@ type AdminRequestContext = {
 
 type AdminUserAuditContext = AdminRequestContext & {
   reason: string;
+};
+
+type AdminUserRestrictionContext = AdminUserAuditContext & {
+  capabilities?: readonly UserRestrictionCapability[];
+  expiresAt?: string | null;
+  internalNote?: string | null;
+  userMessage?: string | null;
+};
+
+type AdminPlatformGlobalRestrictionEnableContext = AdminUserAuditContext & {
+  expiresAt?: string | null;
+  internalNote?: string | null;
 };
 
 type AdminUserMutationRepositories = {
@@ -389,6 +435,10 @@ function toNullableIso(value: unknown): string | null {
   return null;
 }
 
+function toDateLike(value: unknown): Date | string | null {
+  return value instanceof Date || typeof value === 'string' ? value : null;
+}
+
 function toStringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
@@ -398,12 +448,43 @@ function toNullableString(value: unknown): string | null {
   return text || null;
 }
 
+function toNullableRestrictionText(
+  value: unknown,
+  transformer: ValueTransformer,
+): string | null {
+  const text = toNullableString(value);
+  if (!text) {
+    return null;
+  }
+
+  if (!text.startsWith(ENCRYPTED_STRING_PREFIX)) {
+    return text;
+  }
+
+  try {
+    const decrypted: unknown = transformer.from(text);
+    return typeof decrypted === 'string' && decrypted.trim()
+      ? decrypted.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function toBooleanValue(value: unknown): boolean {
   if (typeof value === 'boolean') {
     return value;
   }
 
   return value === 'true';
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === 'string');
 }
 
 function escapeLikePattern(value: string): string {
@@ -828,6 +909,10 @@ export class AdminService {
               SELECT COUNT(*)
               FROM users
               WHERE account_restricted_at IS NOT NULL
+                AND (
+                  account_restriction_expires_at IS NULL
+                  OR account_restriction_expires_at > now()
+                )
             )::int AS active_restrictions,
             (
               SELECT COUNT(*)
@@ -838,6 +923,7 @@ export class AdminService {
               SELECT COUNT(*)
               FROM user_data_access_logs, bounds
               WHERE created_at >= bounds.since_day
+                AND event_type = 'data_accessed'
             )::int AS sensitive_access_events_24h,
             (
               SELECT COUNT(*)
@@ -1325,9 +1411,18 @@ export class AdminService {
     }
 
     if (query.restriction === AdminUserRestrictionFilter.Restricted) {
-      whereClauses.push('users.account_restricted_at IS NOT NULL');
+      whereClauses.push(`(
+        users.account_restricted_at IS NOT NULL
+        AND (
+          users.account_restriction_expires_at IS NULL
+          OR users.account_restriction_expires_at > now()
+        )
+      )`);
     } else if (query.restriction === AdminUserRestrictionFilter.Unrestricted) {
-      whereClauses.push('users.account_restricted_at IS NULL');
+      whereClauses.push(`(
+        users.account_restricted_at IS NULL
+        OR users.account_restriction_expires_at <= now()
+      )`);
     }
 
     params.push(pagination.limit);
@@ -1336,7 +1431,23 @@ export class AdminService {
     const offsetIndex = params.length;
     const queryResult: unknown = await this.dataSource.query(
       `
-        WITH filtered_users AS (
+        WITH expired_user_restrictions AS (
+          UPDATE users
+          SET
+            account_restricted_at = NULL,
+            account_restriction_reason = NULL,
+            account_restricted_by_admin_id = NULL,
+            account_restriction_capabilities = NULL,
+            account_restriction_expires_at = NULL,
+            account_restriction_internal_note = NULL,
+            account_restriction_user_message = NULL,
+            updated_at = now()
+          WHERE account_restricted_at IS NOT NULL
+            AND account_restriction_expires_at IS NOT NULL
+            AND account_restriction_expires_at <= now()
+          RETURNING id
+        ),
+        filtered_users AS (
           SELECT
             users.id,
             users.email,
@@ -1347,7 +1458,11 @@ export class AdminService {
             users.time_zone,
             users.account_deletion_scheduled_for,
             users.account_restricted_at,
+            users.account_restriction_capabilities,
+            users.account_restriction_expires_at,
+            NULL::text AS account_restriction_internal_note,
             users.account_restriction_reason,
+            NULL::text AS account_restriction_user_message,
             users.account_restricted_by_admin_id,
             users.created_at,
             users.updated_at
@@ -1397,6 +1512,23 @@ export class AdminService {
     const sinceDay = new Date(Date.now() - DAY_MS);
     const row = await this.queryOne(
       `
+        WITH expired_user_restrictions AS (
+          UPDATE users
+          SET
+            account_restricted_at = NULL,
+            account_restriction_reason = NULL,
+            account_restricted_by_admin_id = NULL,
+            account_restriction_capabilities = NULL,
+            account_restriction_expires_at = NULL,
+            account_restriction_internal_note = NULL,
+            account_restriction_user_message = NULL,
+            updated_at = now()
+          WHERE id = $1
+            AND account_restricted_at IS NOT NULL
+            AND account_restriction_expires_at IS NOT NULL
+            AND account_restriction_expires_at <= now()
+          RETURNING id
+        )
         SELECT
           users.id,
           users.email,
@@ -1407,7 +1539,11 @@ export class AdminService {
           users.time_zone,
           users.account_deletion_scheduled_for,
           users.account_restricted_at,
+          users.account_restriction_capabilities,
+          users.account_restriction_expires_at,
+          users.account_restriction_internal_note,
           users.account_restriction_reason,
+          users.account_restriction_user_message,
           users.account_restricted_by_admin_id,
           users.created_at,
           users.updated_at,
@@ -1472,6 +1608,7 @@ export class AdminService {
             FROM user_data_access_logs
             WHERE user_data_access_logs.user_id = users.id
               AND user_data_access_logs.created_at >= $5
+              AND user_data_access_logs.event_type = 'data_accessed'
           )::int AS sensitive_access_events_24h
         FROM users
         LEFT JOIN LATERAL (
@@ -1964,7 +2101,7 @@ export class AdminService {
   async restrictUser(
     actor: AdminAuthenticatedUser,
     userId: string,
-    context: AdminUserAuditContext,
+    context: AdminUserRestrictionContext,
   ): Promise<AdminUserResponse> {
     const reason = this.normalizeAuditReason(context.reason);
 
@@ -1973,22 +2110,57 @@ export class AdminService {
         repositories.usersRepository,
         userId,
       );
+      const capabilities = this.normalizeRestrictionCapabilities(
+        context.capabilities,
+      );
+      const expiresAt = this.normalizeRestrictionExpiry(context.expiresAt);
+      const internalNote = this.normalizeRestrictionText(
+        context.internalNote,
+        'Admin restriction internal note is required',
+        1000,
+        8,
+      );
+      const userMessage = this.normalizeOptionalRestrictionText(
+        context.userMessage,
+        'Admin restriction user message is too long',
+        500,
+      );
+      const shouldRevokeSessions =
+        capabilities.includes(UserRestrictionCapability.DisableLogin) ||
+        capabilities.includes(UserRestrictionCapability.ForceLogout);
       const restrictedAt = new Date();
 
       user.account_restricted_at = restrictedAt;
       user.account_restriction_reason = reason;
       user.account_restricted_by_admin_id = actor.id;
+      user.account_restriction_capabilities = capabilities;
+      user.account_restriction_expires_at = expiresAt;
+      user.account_restriction_internal_note = internalNote;
+      user.account_restriction_user_message = userMessage;
+      if (
+        capabilities.includes(
+          UserRestrictionCapability.ForceEmailReverification,
+        )
+      ) {
+        user.email_verified = false;
+      }
       const savedUser = await repositories.usersRepository.save(user);
 
-      await repositories.sessionsRepository.update(
-        { revoked_at: IsNull(), user_id: user.id },
-        { revoked_at: restrictedAt },
-      );
+      if (shouldRevokeSessions) {
+        await repositories.sessionsRepository.update(
+          { revoked_at: IsNull(), user_id: user.id },
+          { revoked_at: restrictedAt },
+        );
+      }
+
       await this.writeUserAuditLog(repositories.auditLogsRepository, {
         action: AdminAuditAction.UserRestricted,
         actor,
         context: { ...context, reason },
         metadata: {
+          capabilities,
+          expiresAt: expiresAt ? expiresAt.toISOString() : null,
+          revokedSessions: shouldRevokeSessions,
           userEmail: savedUser.email,
         },
         targetUserId: savedUser.id,
@@ -2014,6 +2186,10 @@ export class AdminService {
       user.account_restricted_at = null;
       user.account_restriction_reason = null;
       user.account_restricted_by_admin_id = null;
+      user.account_restriction_capabilities = null;
+      user.account_restriction_expires_at = null;
+      user.account_restriction_internal_note = null;
+      user.account_restriction_user_message = null;
       const savedUser = await repositories.usersRepository.save(user);
 
       await this.writeUserAuditLog(repositories.auditLogsRepository, {
@@ -2027,6 +2203,196 @@ export class AdminService {
       });
 
       return this.toAdminUserResponse(savedUser);
+    });
+  }
+
+  async listPlatformGlobalRestrictions(
+    now = new Date(),
+  ): Promise<AdminPlatformGlobalRestrictionListResponse> {
+    const rows = toQueryRows(
+      await this.dataSource.query(
+        `
+          WITH expired_restrictions AS (
+            UPDATE platform_global_restrictions
+            SET
+              disabled_at = expires_at,
+              disabled_by_admin_id = NULL,
+              disable_reason = 'Expired automatically',
+              updated_at = now()
+            WHERE disabled_at IS NULL
+              AND expires_at IS NOT NULL
+              AND expires_at <= now()
+            RETURNING id
+          )
+          SELECT
+            restrictions.id,
+            restrictions.capability,
+            restrictions.reason,
+            restrictions.enabled_by_admin_id,
+            restrictions.enabled_at,
+            restrictions.expires_at,
+            enabled_admin.email AS enabled_by_admin_email,
+            enabled_admin.name AS enabled_by_admin_name
+          FROM platform_global_restrictions restrictions
+          LEFT JOIN admin_accounts enabled_admin
+            ON enabled_admin.id = restrictions.enabled_by_admin_id
+          WHERE restrictions.disabled_at IS NULL
+            AND (restrictions.expires_at IS NULL OR restrictions.expires_at > now())
+          ORDER BY restrictions.enabled_at DESC, restrictions.id DESC
+        `,
+        [],
+      ),
+    );
+    const rowByCapability = new Map(
+      rows
+        .filter((row) =>
+          isPlatformGlobalRestrictionCapability(toStringValue(row.capability)),
+        )
+        .map((row) => [toStringValue(row.capability), row]),
+    );
+
+    return {
+      generatedAt: now.toISOString(),
+      restrictions: PLATFORM_GLOBAL_RESTRICTION_CAPABILITIES.map((capability) =>
+        this.toPlatformGlobalRestrictionResponse(
+          capability,
+          rowByCapability.get(capability) ?? null,
+        ),
+      ),
+    };
+  }
+
+  async enablePlatformGlobalRestriction(
+    actor: AdminAuthenticatedUser,
+    capability: PlatformGlobalRestrictionCapability,
+    context: AdminPlatformGlobalRestrictionEnableContext,
+  ): Promise<AdminPlatformGlobalRestrictionResponse> {
+    this.assertPlatformGlobalRestrictionCapability(capability);
+    const reason = this.normalizeAuditReason(context.reason);
+    const internalNote = this.normalizeRestrictionText(
+      context.internalNote,
+      'Admin restriction internal note is required',
+      1000,
+      8,
+    );
+    const expiresAt = this.normalizeRestrictionExpiry(context.expiresAt);
+    const restrictionId = ulid();
+
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockPlatformGlobalRestrictionCapability(manager, capability);
+
+      await manager.query(
+        `
+          UPDATE platform_global_restrictions
+          SET
+            disabled_at = now(),
+            disabled_by_admin_id = $1,
+            disable_reason = $2,
+            updated_at = now()
+          WHERE capability = $3
+            AND disabled_at IS NULL
+        `,
+        [actor.id, 'Superseded by a newer global restriction', capability],
+      );
+
+      const rows = toQueryRows(
+        await manager.query(
+          `
+            INSERT INTO platform_global_restrictions (
+              id,
+              capability,
+              reason,
+              internal_note,
+              enabled_by_admin_id,
+              enabled_at,
+              expires_at
+            )
+            VALUES ($1, $2, $3, $4, $5, now(), $6)
+            RETURNING
+              id,
+              capability,
+              reason,
+              enabled_by_admin_id,
+              enabled_at,
+              expires_at
+          `,
+          [
+            restrictionId,
+            capability,
+            reason,
+            platformGlobalRestrictionInternalNoteTransformer.to(internalNote),
+            actor.id,
+            expiresAt,
+          ],
+        ),
+      );
+      const row = rows[0] ?? {};
+
+      await this.writeUserAuditLog(manager.getRepository(AdminAuditLog), {
+        action: AdminAuditAction.PlatformGlobalRestrictionEnabled,
+        actor,
+        context: { ...context, reason },
+        metadata: {
+          capability,
+          expiresAt: expiresAt ? expiresAt.toISOString() : null,
+          restrictionId,
+        },
+        targetUserId: null,
+      });
+
+      return this.toPlatformGlobalRestrictionResponse(capability, {
+        ...row,
+        enabled_by_admin_email: actor.email,
+        enabled_by_admin_name: actor.name,
+      });
+    });
+  }
+
+  async disablePlatformGlobalRestriction(
+    actor: AdminAuthenticatedUser,
+    capability: PlatformGlobalRestrictionCapability,
+    context: AdminUserAuditContext,
+  ): Promise<AdminPlatformGlobalRestrictionResponse> {
+    this.assertPlatformGlobalRestrictionCapability(capability);
+    const reason = this.normalizeAuditReason(context.reason);
+
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockPlatformGlobalRestrictionCapability(manager, capability);
+
+      const rows = toQueryRows(
+        await manager.query(
+          `
+            UPDATE platform_global_restrictions
+            SET
+              disabled_at = now(),
+              disabled_by_admin_id = $1,
+              disable_reason = $2,
+              updated_at = now()
+            WHERE capability = $3
+              AND disabled_at IS NULL
+              AND (expires_at IS NULL OR expires_at > now())
+            RETURNING id, capability
+          `,
+          [actor.id, reason, capability],
+        ),
+      );
+
+      if (rows.length === 0) {
+        throw new NotFoundException('Global platform restriction not found');
+      }
+
+      await this.writeUserAuditLog(manager.getRepository(AdminAuditLog), {
+        action: AdminAuditAction.PlatformGlobalRestrictionDisabled,
+        actor,
+        context: { ...context, reason },
+        metadata: {
+          capability,
+          restrictionId: toNullableString(rows[0]?.id),
+        },
+        targetUserId: null,
+      });
+
+      return this.toPlatformGlobalRestrictionResponse(capability, null);
     });
   }
 
@@ -2208,7 +2574,6 @@ export class AdminService {
       failedExportCount,
       jobHealth,
       pendingDeletionCount,
-      sensitiveAccessEvents24h,
     });
     const endpointHealth = toEndpointHealth(row.endpoint_health);
 
@@ -2432,7 +2797,6 @@ export class AdminService {
     failedExportCount: number;
     jobHealth: AdminOverviewResponse['jobHealth'];
     pendingDeletionCount: number;
-    sensitiveAccessEvents24h: number;
   }): AdminOverviewResponse['alerts'] {
     const alerts: AdminOverviewResponse['alerts'] = [];
     const delayedJob = input.jobHealth.find(
@@ -2469,15 +2833,6 @@ export class AdminService {
       });
     }
 
-    if (input.sensitiveAccessEvents24h > 0) {
-      alerts.push({
-        id: 'sensitive-access-events',
-        severity: AdminAlertSeverity.Info,
-        title: 'Sensitive access recorded',
-        description: `${input.sensitiveAccessEvents24h} sensitive data access events were logged in the last 24 hours.`,
-      });
-    }
-
     return alerts;
   }
 
@@ -2502,6 +2857,7 @@ export class AdminService {
             SELECT COUNT(*)
             FROM user_data_access_logs
             WHERE created_at >= $2
+              AND event_type = 'data_accessed'
           )::int AS sensitive_access_events_24h
       `,
       [ExportStatusValue.Failed, sinceDay],
@@ -3083,7 +3439,28 @@ export class AdminService {
   }
 
   private toAdminUserResponse(user: User | QueryRow): AdminUserResponse {
+    const restrictionUser = {
+      account_restricted_at: toDateLike(
+        'account_restricted_at' in user ? user.account_restricted_at : null,
+      ),
+      account_restriction_capabilities: toStringArray(
+        'account_restriction_capabilities' in user
+          ? user.account_restriction_capabilities
+          : null,
+      ),
+      account_restriction_expires_at: toDateLike(
+        'account_restriction_expires_at' in user
+          ? user.account_restriction_expires_at
+          : null,
+      ),
+    };
+    const hasActiveRestriction = isUserRestrictionActive(restrictionUser);
+    const restrictionCapabilities = hasActiveRestriction
+      ? getEffectiveUserRestrictionCapabilities(restrictionUser)
+      : [];
+
     return {
+      accountStatus: this.toAdminUserAccountStatus(user, restrictionUser),
       accountDeletionScheduledFor: toNullableIso(
         'account_deletion_scheduled_for' in user
           ? user.account_deletion_scheduled_for
@@ -3101,24 +3478,87 @@ export class AdminService {
       ),
       lastName: toStringValue(user.last_name),
       preferredLanguage: toStringValue(user.preferred_language),
-      restrictedAt: toNullableIso(
-        'account_restricted_at' in user ? user.account_restricted_at : null,
-      ),
-      restrictedByAdminId: toNullableString(
-        'account_restricted_by_admin_id' in user
-          ? user.account_restricted_by_admin_id
-          : null,
-      ),
-      restrictionReason: toNullableString(
-        'account_restriction_reason' in user
-          ? user.account_restriction_reason
-          : null,
-      ),
+      restrictedAt: hasActiveRestriction
+        ? toNullableIso(
+            'account_restricted_at' in user ? user.account_restricted_at : null,
+          )
+        : null,
+      restrictedByAdminId: hasActiveRestriction
+        ? toNullableString(
+            'account_restricted_by_admin_id' in user
+              ? user.account_restricted_by_admin_id
+              : null,
+          )
+        : null,
+      restrictionCapabilities,
+      restrictionExpiresAt: hasActiveRestriction
+        ? toNullableIso(
+            'account_restriction_expires_at' in user
+              ? user.account_restriction_expires_at
+              : null,
+          )
+        : null,
+      restrictionInternalNote: hasActiveRestriction
+        ? toNullableRestrictionText(
+            'account_restriction_internal_note' in user
+              ? user.account_restriction_internal_note
+              : null,
+            userRestrictionInternalNoteTransformer,
+          )
+        : null,
+      restrictionReason: hasActiveRestriction
+        ? toNullableString(
+            'account_restriction_reason' in user
+              ? user.account_restriction_reason
+              : null,
+          )
+        : null,
+      restrictionUserMessage: hasActiveRestriction
+        ? toNullableRestrictionText(
+            'account_restriction_user_message' in user
+              ? user.account_restriction_user_message
+              : null,
+            userRestrictionMessageTransformer,
+          )
+        : null,
       timeZone: toNullableString('time_zone' in user ? user.time_zone : null),
       updatedAt:
         toNullableIso('updated_at' in user ? user.updated_at : null) ??
         toIsoString(new Date()),
     };
+  }
+
+  private toAdminUserAccountStatus(
+    user: User | QueryRow,
+    restrictionUser: {
+      account_restricted_at: Date | string | null;
+      account_restriction_capabilities: string[];
+      account_restriction_expires_at: Date | string | null;
+    },
+  ): AdminUserAccountStatus {
+    const deletionScheduledFor = toNullableIso(
+      'account_deletion_scheduled_for' in user
+        ? user.account_deletion_scheduled_for
+        : null,
+    );
+    if (deletionScheduledFor) {
+      return AdminUserAccountStatus.PendingDeletion;
+    }
+
+    if (!isUserRestrictionActive(restrictionUser)) {
+      return AdminUserAccountStatus.Active;
+    }
+
+    if (
+      hasActiveUserRestrictionCapability(
+        restrictionUser,
+        UserRestrictionCapability.DisableLogin,
+      )
+    ) {
+      return AdminUserAccountStatus.Suspended;
+    }
+
+    return AdminUserAccountStatus.Restricted;
   }
 
   private toAdminUserNoteResponse(
@@ -3202,6 +3642,130 @@ export class AdminService {
     const trimmed = reason.trim();
     if (!trimmed) {
       throw new BadRequestException('Admin audit reason is required');
+    }
+
+    return trimmed;
+  }
+
+  private normalizeRestrictionCapabilities(
+    capabilities: readonly UserRestrictionCapability[] | null | undefined,
+  ): UserRestrictionCapability[] {
+    const normalized = normalizeUserRestrictionCapabilities(capabilities);
+    if (normalized.length === 0) {
+      throw new BadRequestException(
+        'At least one account restriction control is required',
+      );
+    }
+
+    return normalized;
+  }
+
+  private normalizeRestrictionExpiry(
+    expiresAt: string | null | undefined,
+  ): Date | null {
+    if (!expiresAt) {
+      return null;
+    }
+
+    const date = new Date(expiresAt);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Restriction expiry is invalid');
+    }
+
+    if (date.getTime() <= Date.now()) {
+      throw new BadRequestException('Restriction expiry must be in the future');
+    }
+
+    return date;
+  }
+
+  private assertPlatformGlobalRestrictionCapability(
+    capability: PlatformGlobalRestrictionCapability,
+  ): void {
+    if (!isPlatformGlobalRestrictionCapability(capability)) {
+      throw new BadRequestException('Global restriction capability is invalid');
+    }
+  }
+
+  private async lockPlatformGlobalRestrictionCapability(
+    manager: EntityManager,
+    capability: PlatformGlobalRestrictionCapability,
+  ): Promise<void> {
+    await manager.query(
+      `
+        SELECT pg_advisory_xact_lock(
+          hashtext('ritora_platform_global_restriction'),
+          hashtext($1)
+        )
+      `,
+      [capability],
+    );
+  }
+
+  private toPlatformGlobalRestrictionResponse(
+    capability: PlatformGlobalRestrictionCapability,
+    row: QueryRow | null,
+  ): AdminPlatformGlobalRestrictionResponse {
+    if (!row) {
+      return {
+        active: false,
+        capability,
+        enabledAt: null,
+        enabledByAdmin: null,
+        expiresAt: null,
+        id: null,
+        reason: null,
+      };
+    }
+
+    const adminId = toNullableString(row.enabled_by_admin_id);
+    return {
+      active: true,
+      capability,
+      enabledAt: toNullableIso(row.enabled_at),
+      enabledByAdmin: adminId
+        ? {
+            email: toStringValue(row.enabled_by_admin_email),
+            id: adminId,
+            name: toStringValue(row.enabled_by_admin_name),
+          }
+        : null,
+      expiresAt: toNullableIso(row.expires_at),
+      id: toNullableString(row.id),
+      reason: toNullableString(row.reason),
+    };
+  }
+
+  private normalizeRestrictionText(
+    value: string | null | undefined,
+    requiredMessage: string,
+    maxLength: number,
+    minLength: number,
+  ): string {
+    const trimmed = value?.trim().replace(/\s+/g, ' ') ?? '';
+    if (trimmed.length < minLength) {
+      throw new BadRequestException(requiredMessage);
+    }
+
+    if (trimmed.length > maxLength) {
+      throw new BadRequestException('Admin restriction text is too long');
+    }
+
+    return trimmed;
+  }
+
+  private normalizeOptionalRestrictionText(
+    value: string | null | undefined,
+    maxLengthMessage: string,
+    maxLength: number,
+  ): string | null {
+    const trimmed = value?.trim().replace(/\s+/g, ' ') ?? '';
+    if (!trimmed) {
+      return null;
+    }
+
+    if (trimmed.length > maxLength) {
+      throw new BadRequestException(maxLengthMessage);
     }
 
     return trimmed;

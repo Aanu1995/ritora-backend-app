@@ -18,9 +18,11 @@ import { User } from '../users/entities/user.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
 import { UsersModule } from '../users/users.module';
 import { SkinJournalController } from './skin-journal.controller';
+import { SkinJournalPhotoUploadRestrictionGuard } from './skin-journal-photo-upload-restriction.guard';
 import { SkinJournalService } from './skin-journal.service';
 import { SkinJournalPhotoStorageService } from './services/skin-journal-photo-storage.service';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
@@ -35,6 +37,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
 @Module({
   imports: [
     NotificationsModule,
+    PlatformGlobalRestrictionsModule,
     SmartPicksModule,
     UsersModule,
     TypeOrmModule.forFeature([
@@ -60,6 +63,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
   controllers: [SkinJournalController],
   providers: [
     SkinJournalService,
+    SkinJournalPhotoUploadRestrictionGuard,
     SkinJournalPhotoStorageService,
     SkinJournalAnalysisService,
     SkinJournalPhotoInterpretationService,

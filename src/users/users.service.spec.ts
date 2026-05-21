@@ -278,6 +278,59 @@ describe('UsersService', () => {
     });
   });
 
+  describe('clearExpiredAccountRestriction', () => {
+    it('clears expired account restriction fields without deleting audit history', async () => {
+      const execute = jest.fn().mockResolvedValue({ affected: 1 });
+      const queryBuilder = {
+        andWhere: jest.fn(),
+        execute,
+        set: jest.fn(),
+        update: jest.fn(),
+        where: jest.fn(),
+      };
+      queryBuilder.update.mockReturnValue(queryBuilder);
+      queryBuilder.set.mockReturnValue(queryBuilder);
+      queryBuilder.where.mockReturnValue(queryBuilder);
+      queryBuilder.andWhere.mockReturnValue(queryBuilder);
+      repo.createQueryBuilder.mockReturnValue(queryBuilder as never);
+      const now = new Date('2026-05-21T10:00:00.000Z');
+
+      const cleared = await service.clearExpiredAccountRestriction(
+        '01USER',
+        now,
+      );
+
+      expect(cleared).toBe(true);
+      expect(queryBuilder.update).toHaveBeenCalledWith(User);
+      expect(queryBuilder.set).toHaveBeenCalledWith({
+        account_restricted_at: null,
+        account_restricted_by_admin_id: null,
+        account_restriction_capabilities: null,
+        account_restriction_expires_at: null,
+        account_restriction_internal_note: null,
+        account_restriction_reason: null,
+        account_restriction_user_message: null,
+      });
+      expect(queryBuilder.where).toHaveBeenCalledWith('id = :id', {
+        id: '01USER',
+      });
+      expect(queryBuilder.andWhere).toHaveBeenNthCalledWith(
+        1,
+        'account_restricted_at IS NOT NULL',
+      );
+      expect(queryBuilder.andWhere).toHaveBeenNthCalledWith(
+        2,
+        'account_restriction_expires_at IS NOT NULL',
+      );
+      expect(queryBuilder.andWhere).toHaveBeenNthCalledWith(
+        3,
+        'account_restriction_expires_at <= :now',
+        { now },
+      );
+      expect(execute).toHaveBeenCalled();
+    });
+  });
+
   describe('updateProfile', () => {
     it('trims first and last name before saving', async () => {
       const existing = {

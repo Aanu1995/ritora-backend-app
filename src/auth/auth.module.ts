@@ -14,6 +14,7 @@ import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-acti
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { AuthController } from './auth.controller';
 import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
 import { AuthService } from './auth.service';
@@ -49,6 +50,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       InventoryProduct,
     ]),
     CatalogueModule,
+    PlatformGlobalRestrictionsModule,
     UsersModule,
     MailModule,
     SkinJournalModule,

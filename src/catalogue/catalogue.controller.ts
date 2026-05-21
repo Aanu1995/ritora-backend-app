@@ -3,6 +3,7 @@ import {
   Controller,
   Post,
   UploadedFiles,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
@@ -18,6 +19,11 @@ import type { UploadedCatalogueImage } from './catalogue-photo.types';
 import { parseHeroImageIndex } from './catalogue-photo.utils';
 import { CatalogueService } from './catalogue.service';
 import { ResolvedLookupResponseDto } from './dto/resolved-lookup-response.dto';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 
 const catalogueThrottle = {
   default: {
@@ -33,6 +39,12 @@ export class CatalogueController {
 
   @Post('extract-from-images')
   @Throttle(catalogueThrottle)
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableImageUpload,
+    UserRestrictionCapability.DisableProductExtraction,
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @UseInterceptors(
     FilesInterceptor(CATALOGUE_PHOTO_UPLOAD_FIELD, CATALOGUE_PHOTO_MAX_IMAGES, {
       limits: {

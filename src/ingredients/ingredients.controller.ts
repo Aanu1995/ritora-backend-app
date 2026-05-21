@@ -5,12 +5,18 @@ import {
   HttpStatus,
   Post,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { normalizeLanguage, resolveRequestLanguage } from '../common/i18n/i18n';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import { AnalyzeProductsDto } from './dto/analyze-products.dto';
 import { CheckProductDto } from './dto/check-product.dto';
 import { ProductCompareProductsDto } from './dto/compare-products.dto';
@@ -42,6 +48,10 @@ export class IngredientsController {
   @Post('analyze')
   @HttpCode(HttpStatus.OK)
   @Throttle(analyzeThrottle)
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOkResponse({ description: 'Ingredient analysis result' })
   analyze(
     @CurrentUser('id') userId: string,
@@ -58,6 +68,10 @@ export class IngredientsController {
   @Post('check-product')
   @HttpCode(HttpStatus.OK)
   @Throttle(analyzeThrottle)
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOkResponse({ description: 'Ephemeral product check result' })
   checkProduct(
     @CurrentUser('id') userId: string,
@@ -74,6 +88,10 @@ export class IngredientsController {
   @Post('compare-products')
   @HttpCode(HttpStatus.OK)
   @Throttle(analyzeThrottle)
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOkResponse({ description: 'Ephemeral product comparison result' })
   compareProducts(
     @CurrentUser('id') userId: string,

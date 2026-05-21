@@ -2,6 +2,7 @@ import { Logger, Module, type OnApplicationBootstrap } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApplicationLogItem } from '../application-tracking/entities/application-log-item.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
@@ -37,6 +38,7 @@ import { TranslationService } from './translation.service';
 
 @Module({
   imports: [
+    PlatformGlobalRestrictionsModule,
     TypeOrmModule.forFeature([
       InventoryProduct,
       ApplicationLogItem,

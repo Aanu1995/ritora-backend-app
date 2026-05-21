@@ -10,12 +10,18 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { readTimeZoneHeaderFromRequest } from '../common/timezone/timezone-header.utils';
 import { User } from '../users/entities/user.entity';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import {
   SuggestionAiConsentResponseDto,
   UpdateSuggestionAiConsentDto,
@@ -73,6 +79,10 @@ export class SuggestionsController {
 
   @Post('on-demand')
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOperation({ summary: 'Queue an on-demand skincare suggestion' })
   async createOnDemandSuggestion(
     @CurrentUser() user: User,
@@ -84,6 +94,10 @@ export class SuggestionsController {
 
   @Post('on-demand/:id/retry')
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOperation({ summary: 'Retry a failed on-demand skincare suggestion' })
   async retryOnDemandSuggestion(
     @CurrentUser() user: User,
@@ -252,6 +266,10 @@ export class SuggestionsController {
 
   @Post(':id/regenerate')
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOperation({
     summary: 'Supersede the current suggestion and queue a fresh generation',
   })

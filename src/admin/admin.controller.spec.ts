@@ -8,6 +8,7 @@ import {
   AdminAccountRole,
   AdminAccountStatus,
 } from './entities/admin-account.entity';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import { AdminUserRestrictionFilter } from './admin.types';
 import { AdminAuditAction } from './entities/admin-audit-log.entity';
 import { AdminOperationalIncidentSeverity } from './entities/admin-operational-incident.entity';
@@ -487,7 +488,16 @@ describe('AdminController', () => {
     await controller.restrictUser(
       user,
       '01USER',
-      { reason: 'Suspicious automated activity' },
+      {
+        capabilities: [
+          UserRestrictionCapability.DisableAiGeneration,
+          UserRestrictionCapability.ForceLogout,
+        ],
+        expiresAt: '2099-06-20T09:00:00.000Z',
+        internalNote: 'Observed abnormal AI generation volume.',
+        reason: 'Suspicious automated activity',
+        userMessage: 'Some account actions are temporarily unavailable.',
+      },
       request as never,
     );
     await controller.unrestrictUser(
@@ -498,9 +508,16 @@ describe('AdminController', () => {
     );
 
     expect(service.restrictUser).toHaveBeenCalledWith(user, '01USER', {
+      capabilities: [
+        UserRestrictionCapability.DisableAiGeneration,
+        UserRestrictionCapability.ForceLogout,
+      ],
+      expiresAt: '2099-06-20T09:00:00.000Z',
+      internalNote: 'Observed abnormal AI generation volume.',
       ip: '127.0.0.1',
       reason: 'Suspicious automated activity',
       sessionId: 'session-1',
+      userMessage: 'Some account actions are temporarily unavailable.',
       userAgent: 'Jest',
     });
     expect(service.unrestrictUser).toHaveBeenCalledWith(user, '01USER', {

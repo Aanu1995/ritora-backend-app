@@ -1,7 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { SkinJournalController } from './skin-journal.controller';
 import { SkinJournalService } from './skin-journal.service';
 import { todayInTimeZone } from './skin-journal.utils';
+import { UserRestrictionEnforcementService } from '../users/user-restriction-enforcement.service';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
 
 const mockSkinJournalService = () => ({
   getToday: jest.fn(),
@@ -13,14 +16,28 @@ const mockSkinJournalService = () => ({
   upsertEntryForResolvedDate: jest.fn(),
 });
 
+const mockRestrictionEnforcement = () => ({
+  assertAllAllowed: jest.fn(),
+});
+
+const mockPlatformRestrictions = () => ({
+  assertAllAllowed: jest.fn(),
+});
+
 describe('SkinJournalController', () => {
   let controller: SkinJournalController;
   let service: ReturnType<typeof mockSkinJournalService>;
+  let restrictions: ReturnType<typeof mockRestrictionEnforcement>;
+  let platformRestrictions: ReturnType<typeof mockPlatformRestrictions>;
 
   beforeEach(() => {
     service = mockSkinJournalService();
+    restrictions = mockRestrictionEnforcement();
+    platformRestrictions = mockPlatformRestrictions();
     controller = new SkinJournalController(
       service as unknown as SkinJournalService,
+      restrictions as unknown as UserRestrictionEnforcementService,
+      platformRestrictions as unknown as PlatformGlobalRestrictionsService,
     );
   });
 
@@ -215,6 +232,17 @@ describe('SkinJournalController', () => {
     });
   });
 
+  it('guards multipart journal uploads before file parsing can run', () => {
+    const guards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      SkinJournalController.prototype.upsertToday,
+    ) as readonly unknown[] | undefined;
+
+    expect(guards?.map((guard) => readGuardName(guard))).toContain(
+      'SkinJournalPhotoUploadRestrictionGuard',
+    );
+  });
+
   it('passes the private operations token to the queue operations endpoint', async () => {
     service.getAnalysisQueueOperations.mockResolvedValue({ alerts: [] });
 
@@ -236,3 +264,11 @@ describe('SkinJournalController', () => {
     });
   });
 });
+
+function readGuardName(guard: unknown): string {
+  if (typeof guard !== 'function') {
+    return '';
+  }
+
+  return guard.name;
+}

@@ -11,6 +11,8 @@ import {
   type AdminAiCostFeatureFilter,
   type AdminAiCostPeriod,
 } from './admin-ai-cost.types';
+import { UserRestrictionCapability } from '../users/user-restrictions';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 
 export {
   AdminAiCostFeatureFilter,
@@ -107,6 +109,25 @@ export type AdminSessionResponse = {
   createdAt: string;
   lastUsedAt: string;
   current: boolean;
+};
+
+export type AdminPlatformGlobalRestrictionResponse = {
+  active: boolean;
+  capability: PlatformGlobalRestrictionCapability;
+  enabledAt: string | null;
+  enabledByAdmin: {
+    email: string;
+    id: string;
+    name: string;
+  } | null;
+  expiresAt: string | null;
+  id: string | null;
+  reason: string | null;
+};
+
+export type AdminPlatformGlobalRestrictionListResponse = {
+  generatedAt: string;
+  restrictions: AdminPlatformGlobalRestrictionResponse[];
 };
 
 export type AdminMfaStatusResponse = {
@@ -251,6 +272,15 @@ export enum AdminUserRestrictionFilter {
   Unrestricted = 'unrestricted',
 }
 
+export enum AdminUserAccountStatus {
+  Active = 'active',
+  Monitored = 'monitored',
+  Restricted = 'restricted',
+  Suspended = 'suspended',
+  PendingDeletion = 'pending_deletion',
+  Deleted = 'deleted',
+}
+
 export type AdminUserListQuery = {
   limit?: number;
   page?: number;
@@ -297,10 +327,15 @@ export type AdminUserResponse = {
   createdAt: string;
   updatedAt: string;
   lastActiveAt: string | null;
+  accountStatus: AdminUserAccountStatus;
   accountDeletionScheduledFor: string | null;
   restrictedAt: string | null;
   restrictedByAdminId: string | null;
+  restrictionCapabilities: UserRestrictionCapability[];
+  restrictionExpiresAt: string | null;
+  restrictionInternalNote: string | null;
   restrictionReason: string | null;
+  restrictionUserMessage: string | null;
 };
 
 export type AdminUserListResponse = AdminPaginationMeta & {

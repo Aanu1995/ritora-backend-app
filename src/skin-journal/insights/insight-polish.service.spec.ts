@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import type { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { InsightPolishService } from './insight-polish.service';
 import { KnowledgeBaseService } from './knowledge-base/knowledge-base.service';
 import { SKIN_JOURNAL_INSIGHT_POLISH_TIMEOUT_MS } from '../skin-journal.constants';
@@ -87,6 +88,30 @@ describe('InsightPolishService', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     jest.restoreAllMocks();
+  });
+
+  it('returns local candidates without calling OpenAI while global AI is disabled', async () => {
+    global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+    const platformRestrictions = {
+      isCapabilityDisabled: jest.fn().mockResolvedValue(true),
+    } as unknown as PlatformGlobalRestrictionsService;
+    const service = new InsightPolishService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        INSIGHTS_AI_MODEL: 'gpt-5.2',
+      }),
+      new KnowledgeBaseService(),
+      platformRestrictions,
+    );
+
+    const result = await service.polishWithUsage([candidate()], {
+      locale: 'en',
+      aiPolishEnabled: true,
+    });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result.usage).toBeNull();
+    expect(result.candidates).toHaveLength(1);
   });
 
   it('calls OpenAI with structured outputs, store disabled, and no PII payload', async () => {

@@ -1,4 +1,5 @@
 import { ObjectLiteral, Repository } from 'typeorm';
+import { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SUGGESTION_AI_DAILY_USER_REGENERATION_LIMIT } from '../suggestions.constants';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
@@ -6,10 +7,17 @@ import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 describe('SuggestionAiUsageGuard', () => {
   const suggestionRepo = repo<SuggestionInstance>();
   const queryBuilder = usageQueryBuilder();
-  const service = new SuggestionAiUsageGuard(suggestionRepo);
+  const platformRestrictions = {
+    isCapabilityDisabled: jest.fn().mockResolvedValue(false),
+  } as unknown as jest.Mocked<PlatformGlobalRestrictionsService>;
+  const service = new SuggestionAiUsageGuard(
+    suggestionRepo,
+    platformRestrictions,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    platformRestrictions.isCapabilityDisabled.mockResolvedValue(false);
     suggestionRepo.createQueryBuilder.mockReturnValue(queryBuilder as never);
   });
 
@@ -44,6 +52,20 @@ describe('SuggestionAiUsageGuard', () => {
         blockedReason: 'daily_regeneration_limit',
       }),
     );
+  });
+
+  it('blocks AI generation before querying cost tables when the platform kill switch is active', async () => {
+    platformRestrictions.isCapabilityDisabled.mockResolvedValue(true);
+
+    await expect(service.evaluate('user-1')).resolves.toEqual({
+      allowed: false,
+      blockedReason: 'platform_global_restriction',
+      estimatedCostTodayUsd: 0,
+      generationCountToday: 0,
+      regenerationCountToday: 0,
+    });
+
+    expect(suggestionRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 });
 

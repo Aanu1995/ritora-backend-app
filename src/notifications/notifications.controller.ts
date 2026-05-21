@@ -9,10 +9,16 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import { NotificationsService } from './notifications.service';
 import {
   PreferencesResponseDto,
@@ -58,6 +64,10 @@ export class NotificationsController {
   }
 
   @Patch('preferences')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableNotifications,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOkResponse({ type: PreferencesResponseDto })
   async updatePreferences(
     @CurrentUser('id') userId: string,
@@ -93,6 +103,10 @@ export class NotificationsController {
   }
 
   @Post('push/subscriptions')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableNotifications,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOkResponse({ type: PushSubscriptionResponseDto })
   async upsertPushSubscription(
     @CurrentUser('id') userId: string,

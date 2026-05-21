@@ -21,6 +21,8 @@ export enum AdminAuditAction {
   AdminMfaRecoveryCodeUsed = 'admin_mfa_recovery_code_used',
   OperationalIncidentCreated = 'operational_incident_created',
   OperationalIncidentResolved = 'operational_incident_resolved',
+  PlatformGlobalRestrictionEnabled = 'platform_global_restriction_enabled',
+  PlatformGlobalRestrictionDisabled = 'platform_global_restriction_disabled',
   UserNoteCreated = 'user_note_created',
   UserRestricted = 'user_restricted',
   UserUnrestricted = 'user_unrestricted',

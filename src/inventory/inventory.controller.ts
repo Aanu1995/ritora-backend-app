@@ -12,6 +12,7 @@ import {
   Post,
   Query,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
@@ -26,6 +27,11 @@ import {
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { createValidationException } from '../common/validation/validation-exception';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
@@ -67,6 +73,10 @@ export class InventoryController {
   }
 
   @Post('with-image')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableImageUpload,
+  )
+  @UseGuards(UserRestrictionGuard)
   @UseInterceptors(
     FileInterceptor(CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD, {
       limits: {
@@ -112,6 +122,10 @@ export class InventoryController {
   }
 
   @Post('upload-image')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableImageUpload,
+  )
+  @UseGuards(UserRestrictionGuard)
   @UseInterceptors(
     FileInterceptor(CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD, {
       limits: {
@@ -176,6 +190,10 @@ export class InventoryController {
   }
 
   @Post(':id/upload-image')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableImageUpload,
+  )
+  @UseGuards(UserRestrictionGuard)
   @UseInterceptors(
     FileInterceptor(CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD, {
       limits: {

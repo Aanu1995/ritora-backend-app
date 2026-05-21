@@ -11,6 +11,7 @@ import {
   AdminAuditAction,
   AdminAuditLog,
 } from './entities/admin-audit-log.entity';
+import { encryptedNullableStringFieldTransformer } from '../skin-profile/skin-profile-field-encryption';
 import {
   AdminOperationalIncident,
   AdminOperationalIncidentSeverity,
@@ -19,8 +20,19 @@ import {
 import { AdminUserNote } from './entities/admin-user-note.entity';
 import { AdminJobStatus, AdminUserRestrictionFilter } from './admin.types';
 import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
+import { UserRestrictionCapability } from '../users/user-restrictions';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 
 type RepositoryMock = Record<string, unknown>;
+
+const restrictionInternalNoteTransformer =
+  encryptedNullableStringFieldTransformer(
+    'users.account_restriction_internal_note',
+  );
+const restrictionUserMessageTransformer =
+  encryptedNullableStringFieldTransformer(
+    'users.account_restriction_user_message',
+  );
 
 function createAdminDataSourceMock(options: {
   auditLogsRepository?: Partial<RepositoryMock>;
@@ -95,7 +107,11 @@ function fakeUser(overrides: Partial<User> = {}): User {
     account_deletion_scheduled_for: null,
     account_restricted_at: null,
     account_restricted_by_admin_id: null,
+    account_restriction_capabilities: null,
+    account_restriction_expires_at: null,
+    account_restriction_internal_note: null,
     account_restriction_reason: null,
+    account_restriction_user_message: null,
     apple_subject: null,
     canonical_email: 'jane@example.com',
     consents: [],
@@ -529,6 +545,11 @@ describe('AdminService', () => {
         }),
       ]),
     );
+    expect(result.alerts).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'sensitive-access-events' }),
+      ]),
+    );
     expect(result.compliance).toEqual({
       failedExportCount: 2,
       pendingDeletionCount: 1,
@@ -542,6 +563,7 @@ describe('AdminService', () => {
     expect(metricsSql).toContain('ai_estimated_cost_usd IS NOT NULL');
     expect(metricsSql).toContain('product_check_ai_review_metrics');
     expect(metricsSql).toContain('skin_journal_insight_generation_runs');
+    expect(metricsSql).toContain("event_type = 'data_accessed'");
     expect(metricsSql).not.toContain(
       "FROM product_analytics_events\n              WHERE event_type = 'skin_profile_created'",
     );
@@ -703,11 +725,16 @@ describe('AdminService', () => {
       expect.arrayContaining(['%jane\\_\\%%', 25, 25]),
     );
     const sql = String(query.mock.calls[0]?.[0]);
-    expect(sql).toContain('WITH filtered_users AS');
+    expect(sql).toContain('WITH expired_user_restrictions AS');
+    expect(sql).toContain('UPDATE users');
+    expect(sql).toContain('account_restriction_expires_at <= now()');
+    expect(sql).toContain('filtered_users AS');
     expect(sql).toContain('OFFSET');
     expect(sql).toContain("ESCAPE '\\'");
     expect(sql).toContain('LEFT JOIN LATERAL');
     expect(sql).toContain('ORDER BY auth_sessions.last_used_at DESC');
+    expect(sql).toContain('NULL::text AS account_restriction_internal_note');
+    expect(sql).toContain('NULL::text AS account_restriction_user_message');
     expect(sql).not.toContain('GROUP BY');
     expect(result).toEqual({
       hasNextPage: false,
@@ -719,6 +746,7 @@ describe('AdminService', () => {
       users: [
         {
           accountDeletionScheduledFor: null,
+          accountStatus: 'suspended',
           createdAt: '2026-05-01T10:00:00.000Z',
           email: 'jane@example.com',
           emailVerified: true,
@@ -729,7 +757,14 @@ describe('AdminService', () => {
           preferredLanguage: 'en',
           restrictedAt: '2026-05-20T09:00:00.000Z',
           restrictedByAdminId: 'admin-root',
+          restrictionCapabilities: [
+            UserRestrictionCapability.DisableLogin,
+            UserRestrictionCapability.ForceLogout,
+          ],
+          restrictionExpiresAt: null,
+          restrictionInternalNote: null,
           restrictionReason: 'Suspicious automated activity',
+          restrictionUserMessage: null,
           timeZone: 'Europe/Stockholm',
           updatedAt: '2026-05-20T09:00:00.000Z',
         },
@@ -761,15 +796,229 @@ describe('AdminService', () => {
     });
   });
 
+  it('lists every platform-wide restriction capability with active state only from active rows', async () => {
+    const query = jest.fn().mockResolvedValueOnce([
+      {
+        capability: PlatformGlobalRestrictionCapability.DisableAiGeneration,
+        enabled_at: '2026-05-21T08:00:00.000Z',
+        enabled_by_admin_email: 'owner@ritora.app',
+        enabled_by_admin_id: 'admin-root',
+        enabled_by_admin_name: 'Root Admin',
+        expires_at: null,
+        id: 'restriction-1',
+        reason: 'Compromised API key response',
+      },
+    ]);
+    const service = new AdminService({ query } as unknown as DataSource);
+
+    await expect(service.listPlatformGlobalRestrictions()).resolves.toEqual({
+      generatedAt: expect.any(String),
+      restrictions: expect.arrayContaining([
+        expect.objectContaining({
+          active: true,
+          capability: PlatformGlobalRestrictionCapability.DisableAiGeneration,
+          enabledByAdmin: {
+            email: 'owner@ritora.app',
+            id: 'admin-root',
+            name: 'Root Admin',
+          },
+          reason: 'Compromised API key response',
+        }),
+        expect.objectContaining({
+          active: false,
+          capability:
+            PlatformGlobalRestrictionCapability.DisableAccountCreation,
+          reason: null,
+        }),
+      ]),
+    });
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain('WITH expired_restrictions AS');
+    expect(sql).toContain('UPDATE platform_global_restrictions');
+    expect(sql).toContain("disable_reason = 'Expired automatically'");
+    expect(sql).toContain('disabled_at IS NULL');
+    expect(sql).toContain('expires_at > now()');
+    expect(sql).not.toContain('internal_note');
+  });
+
+  it('enables and disables platform-wide restrictions transactionally with audit logs', async () => {
+    const auditLogsRepository = {
+      create: jest.fn(
+        (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+      ),
+      save: jest.fn(async (value: AdminAuditLog) => value),
+    };
+    const managerQuery = jest
+      .fn<Promise<Array<Record<string, unknown>>>, [string, unknown[]?]>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          capability: PlatformGlobalRestrictionCapability.DisableAiGeneration,
+          enabled_at: '2026-05-21T09:00:00.000Z',
+          enabled_by_admin_id: 'admin-root',
+          expires_at: null,
+          id: 'restriction-1',
+          reason: 'Emergency model credential rotation',
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          capability: PlatformGlobalRestrictionCapability.DisableAiGeneration,
+          id: 'restriction-1',
+        },
+      ]);
+    const transaction = jest.fn(
+      async (
+        operation: (manager: {
+          getRepository: (entity: unknown) => typeof auditLogsRepository;
+          query: typeof managerQuery;
+        }) => Promise<unknown>,
+      ) =>
+        operation({
+          getRepository: () => auditLogsRepository,
+          query: managerQuery,
+        }),
+    );
+    const service = new AdminService({
+      transaction,
+    } as unknown as DataSource);
+    const actor = {
+      email: 'owner@ritora.app',
+      id: 'admin-root',
+      name: 'Root Admin',
+      role: AdminAccountRole.Root,
+      sessionId: 'session-1',
+      status: AdminAccountStatus.Active,
+    };
+    const context = {
+      ip: '127.0.0.1',
+      reason: 'Emergency model credential rotation',
+      sessionId: 'session-1',
+      userAgent: 'Safari',
+    };
+
+    await expect(
+      service.enablePlatformGlobalRestriction(
+        actor,
+        PlatformGlobalRestrictionCapability.DisableAiGeneration,
+        {
+          ...context,
+          expiresAt: null,
+          internalNote: 'OpenAI credential compromise reported by provider.',
+        },
+      ),
+    ).resolves.toMatchObject({
+      active: true,
+      capability: PlatformGlobalRestrictionCapability.DisableAiGeneration,
+    });
+    await expect(
+      service.disablePlatformGlobalRestriction(
+        actor,
+        PlatformGlobalRestrictionCapability.DisableAiGeneration,
+        {
+          ...context,
+          reason: 'Credential rotation completed and verified',
+        },
+      ),
+    ).resolves.toMatchObject({
+      active: false,
+      capability: PlatformGlobalRestrictionCapability.DisableAiGeneration,
+    });
+
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(managerQuery.mock.calls[0]?.[0]).toContain('pg_advisory_xact_lock');
+    expect(managerQuery.mock.calls[3]?.[0]).toContain('pg_advisory_xact_lock');
+    expect(managerQuery.mock.calls[2]?.[0]).toContain(
+      'INSERT INTO platform_global_restrictions',
+    );
+    expect(String(managerQuery.mock.calls[2]?.[1]?.[3])).toContain(
+      'ritora:v1:',
+    );
+    expect(managerQuery.mock.calls[4]?.[0]).toContain(
+      'UPDATE platform_global_restrictions',
+    );
+    expect(auditLogsRepository.save).toHaveBeenCalledTimes(2);
+    expect(auditLogsRepository.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        action: AdminAuditAction.PlatformGlobalRestrictionEnabled,
+        metadata: expect.objectContaining({
+          capability: PlatformGlobalRestrictionCapability.DisableAiGeneration,
+        }),
+        target_admin_id: null,
+        target_user_id: null,
+      }),
+    );
+    expect(JSON.stringify(auditLogsRepository.create.mock.calls)).not.toContain(
+      'OpenAI credential compromise',
+    );
+  });
+
+  it('does not surface expired account restrictions as active controls', async () => {
+    const query = jest.fn().mockResolvedValueOnce([
+      {
+        account_deletion_scheduled_for: null,
+        account_restricted_at: '2026-05-20T09:00:00.000Z',
+        account_restricted_by_admin_id: 'admin-root',
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableLogin,
+        ],
+        account_restriction_expires_at: '2026-05-20T10:00:00.000Z',
+        account_restriction_reason: 'Expired fraud review',
+        created_at: '2026-05-01T10:00:00.000Z',
+        email: 'jane@example.com',
+        email_verified: true,
+        first_name: 'Jane',
+        id: '01USER',
+        last_active_at: '2026-05-20T08:00:00.000Z',
+        last_name: 'Doe',
+        preferred_language: 'en',
+        time_zone: 'Europe/Stockholm',
+        total_count: '1',
+        updated_at: '2026-05-20T09:00:00.000Z',
+      },
+    ]);
+    const service = new AdminService(createAdminDataSourceMock({ query }));
+
+    const result = await service.listUsers();
+
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain('WITH expired_user_restrictions AS');
+    expect(sql).toContain('UPDATE users');
+    expect(result.users[0]).toMatchObject({
+      accountStatus: 'active',
+      restrictedAt: null,
+      restrictedByAdminId: null,
+      restrictionCapabilities: [],
+      restrictionExpiresAt: null,
+      restrictionReason: null,
+    });
+  });
+
   it('returns a deeper user detail without exposing encrypted profile fields', async () => {
+    const encryptedInternalNote = restrictionInternalNoteTransformer.to(
+      'Observed repeated automated AI generation.',
+    );
+    const encryptedUserMessage = restrictionUserMessageTransformer.to(
+      'Some account actions are temporarily unavailable.',
+    );
     const query = jest
       .fn<Promise<Array<Record<string, unknown>>>, [string, unknown[]?]>()
       .mockResolvedValueOnce([
         {
           account_deletion_scheduled_for: null,
-          account_restricted_at: null,
-          account_restricted_by_admin_id: null,
-          account_restriction_reason: null,
+          account_restricted_at: '2026-05-20T09:00:00.000Z',
+          account_restricted_by_admin_id: 'admin-root',
+          account_restriction_capabilities: [
+            UserRestrictionCapability.DisableAiGeneration,
+          ],
+          account_restriction_expires_at: '2099-06-20T09:00:00.000Z',
+          account_restriction_internal_note: encryptedInternalNote,
+          account_restriction_reason: 'Suspicious automated activity',
+          account_restriction_user_message: encryptedUserMessage,
           active_session_count: '2',
           analysis_completed_count: '8',
           analysis_failed_count: '1',
@@ -819,6 +1068,11 @@ describe('AdminService', () => {
 
     const result = await service.getUser('01USER');
 
+    const detailSql = String(query.mock.calls[0]?.[0]);
+    expect(detailSql).toContain('WITH expired_user_restrictions AS');
+    expect(detailSql).toContain('WHERE id = $1');
+    expect(detailSql).toContain('account_restriction_expires_at <= now()');
+    expect(detailSql).toContain("event_type = 'data_accessed'");
     expect(query).toHaveBeenNthCalledWith(1, expect.any(String), [
       '01USER',
       'completed',
@@ -841,7 +1095,15 @@ describe('AdminService', () => {
       failedExportCount: 0,
       sensitiveAccessEvents24h: 1,
     });
+    expect(result.restrictionInternalNote).toBe(
+      'Observed repeated automated AI generation.',
+    );
+    expect(result.restrictionUserMessage).toBe(
+      'Some account actions are temporarily unavailable.',
+    );
     expect(result.recentAuditLogs).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain(String(encryptedInternalNote));
+    expect(JSON.stringify(result)).not.toContain(String(encryptedUserMessage));
     expect(JSON.stringify(result)).not.toContain('date_of_birth');
     expect(JSON.stringify(result)).not.toContain('sex_at_birth');
   });
@@ -1144,6 +1406,9 @@ describe('AdminService', () => {
       pendingDeletionCount: 2,
       sensitiveAccessEvents24h: 3,
     });
+    expect(String(query.mock.calls[1]?.[0])).toContain(
+      "event_type = 'data_accessed'",
+    );
     expect(result.backendHealth).toEqual({
       checkedAt: '2026-05-20T10:00:00.000Z',
       components: expect.arrayContaining([
@@ -1502,7 +1767,7 @@ describe('AdminService', () => {
     expect(auditCreate).not.toHaveBeenCalled();
   });
 
-  it('restricts a user, revokes active sessions, and writes an admin audit log atomically', async () => {
+  it('restricts a user with selected controls, revokes sessions when requested, and writes an admin audit log atomically', async () => {
     const user = fakeUser();
     const save = jest.fn(async (value: User) => value);
     const sessionUpdate = jest.fn();
@@ -1531,9 +1796,18 @@ describe('AdminService', () => {
       },
       '01USER',
       {
+        capabilities: [
+          UserRestrictionCapability.DisableAiGeneration,
+          UserRestrictionCapability.ForceLogout,
+        ],
+        expiresAt: '2099-06-20T09:00:00.000Z',
+        internalNote:
+          'Observed abnormal AI generation volume from this account.',
         ip: '127.0.0.1',
         reason: 'Suspicious automated activity',
         sessionId: 'admin-session',
+        userMessage:
+          'Some account actions are temporarily unavailable while we review activity.',
         userAgent: 'Jest',
       },
     );
@@ -1543,7 +1817,16 @@ describe('AdminService', () => {
       expect.objectContaining({
         account_restricted_at: expect.any(Date),
         account_restricted_by_admin_id: 'admin-root',
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableAiGeneration,
+          UserRestrictionCapability.ForceLogout,
+        ],
+        account_restriction_expires_at: new Date('2099-06-20T09:00:00.000Z'),
+        account_restriction_internal_note:
+          'Observed abnormal AI generation volume from this account.',
         account_restriction_reason: 'Suspicious automated activity',
+        account_restriction_user_message:
+          'Some account actions are temporarily unavailable while we review activity.',
       }),
     );
     expect(sessionUpdate).toHaveBeenCalledWith(
@@ -1555,18 +1838,73 @@ describe('AdminService', () => {
         action: AdminAuditAction.UserRestricted,
         actor_admin_id: 'admin-root',
         actor_session_id: 'admin-session',
+        metadata: {
+          capabilities: [
+            UserRestrictionCapability.DisableAiGeneration,
+            UserRestrictionCapability.ForceLogout,
+          ],
+          expiresAt: '2099-06-20T09:00:00.000Z',
+          revokedSessions: true,
+          userEmail: 'jane@example.com',
+        },
         reason: 'Suspicious automated activity',
         target_user_id: '01USER',
       }),
     );
     expect(result.restrictedAt).toEqual(expect.any(String));
+    expect(result.restrictionCapabilities).toEqual([
+      UserRestrictionCapability.DisableAiGeneration,
+      UserRestrictionCapability.ForceLogout,
+    ]);
+    expect(result.restrictionExpiresAt).toBe('2099-06-20T09:00:00.000Z');
+  });
+
+  it('does not revoke sessions for restrictions that keep app access available', async () => {
+    const user = fakeUser();
+    const sessionUpdate = jest.fn();
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        sessionsRepository: { update: sessionUpdate },
+        usersRepository: {
+          findOne: jest.fn(async () => user),
+        },
+      }),
+    );
+
+    await service.restrictUser(
+      {
+        email: 'owner@ritora.app',
+        id: 'admin-root',
+        name: 'Root Admin',
+        role: AdminAccountRole.Root,
+        sessionId: 'admin-session',
+        status: AdminAccountStatus.Active,
+      },
+      '01USER',
+      {
+        capabilities: [UserRestrictionCapability.DisableNotifications],
+        internalNote: 'Notifications are paused during support review.',
+        ip: '127.0.0.1',
+        reason: 'Notification abuse review',
+        sessionId: 'admin-session',
+        userAgent: 'Jest',
+      },
+    );
+
+    expect(sessionUpdate).not.toHaveBeenCalled();
   });
 
   it('unrestricts a user and keeps an audit trail', async () => {
     const user = fakeUser({
       account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
       account_restricted_by_admin_id: 'admin-root',
+      account_restriction_capabilities: [
+        UserRestrictionCapability.DisableLogin,
+      ],
+      account_restriction_expires_at: new Date('2099-06-20T09:00:00.000Z'),
+      account_restriction_internal_note: 'Manual review note.',
       account_restriction_reason: 'Suspicious automated activity',
+      account_restriction_user_message: 'Account is being reviewed.',
     });
     const save = jest.fn(async (value: User) => value);
     const auditCreate = jest.fn(
@@ -1602,7 +1940,11 @@ describe('AdminService', () => {
       expect.objectContaining({
         account_restricted_at: null,
         account_restricted_by_admin_id: null,
+        account_restriction_capabilities: null,
+        account_restriction_expires_at: null,
+        account_restriction_internal_note: null,
         account_restriction_reason: null,
+        account_restriction_user_message: null,
       }),
     );
     expect(auditCreate).toHaveBeenCalledWith(

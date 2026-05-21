@@ -16,6 +16,7 @@ import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserNotificationPreference } from '../notifications/entities/user-notification-preference.entity';
 import { ScheduledNotification } from '../notifications/entities/scheduled-notification.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { User } from '../users/entities/user.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
@@ -85,6 +86,7 @@ import { SuggestionsController } from './suggestions.controller';
     IngredientsModule,
     EnvironmentIntelligenceModule,
     NotificationsModule,
+    PlatformGlobalRestrictionsModule,
     UsersModule,
   ],
   providers: [

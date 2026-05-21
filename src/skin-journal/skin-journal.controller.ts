@@ -11,6 +11,7 @@ import {
   Query,
   Res,
   UploadedFiles,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -19,7 +20,16 @@ import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AllowBrowserCache } from '../common/decorators/http-cache.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
+import { UserRestrictionEnforcementService } from '../users/user-restriction-enforcement.service';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import { SkinJournalService } from './skin-journal.service';
+import { SkinJournalPhotoUploadRestrictionGuard } from './skin-journal-photo-upload-restriction.guard';
 import { UpsertEntryDto } from './dto/upsert-entry.dto';
 import { JournalEntryResponseDto } from './dto/journal-entry-response.dto';
 import { CalendarResponseDto } from './dto/calendar-response.dto';
@@ -67,7 +77,11 @@ const INSIGHT_WINDOWS: ReadonlySet<InsightWindow> = new Set([
 @ApiTags('skin-journal')
 @Controller('skin-journal')
 export class SkinJournalController {
-  constructor(private readonly service: SkinJournalService) {}
+  constructor(
+    private readonly service: SkinJournalService,
+    private readonly restrictionEnforcement: UserRestrictionEnforcementService,
+    private readonly platformRestrictions: PlatformGlobalRestrictionsService,
+  ) {}
 
   private resolveInsightWindow(value: string | undefined): InsightWindow {
     if (!value || value.trim() === '') {
@@ -176,6 +190,7 @@ export class SkinJournalController {
   }
 
   @Post('today')
+  @UseGuards(SkinJournalPhotoUploadRestrictionGuard)
   @UseInterceptors(
     FileFieldsInterceptor(
       [
@@ -197,11 +212,23 @@ export class SkinJournalController {
     @Body() body: UpsertEntryDto,
   ) {
     const tz = timeZone || requestTimeZone || 'UTC';
+    const photos = normalizeUploadedPhotoAngles(files);
+    if (Object.keys(photos).length > 0) {
+      await this.platformRestrictions.assertAllAllowed([
+        PlatformGlobalRestrictionCapability.DisableImageUpload,
+        PlatformGlobalRestrictionCapability.DisableAiGeneration,
+      ]);
+      await this.restrictionEnforcement.assertAllAllowed(userId, [
+        UserRestrictionCapability.DisableImageUpload,
+        UserRestrictionCapability.DisableAiGeneration,
+      ]);
+    }
+
     return this.service.upsertEntryForResolvedDate({
       userId,
       targetDate: todayInTimeZone(tz),
       timeZone: tz,
-      photos: normalizeUploadedPhotoAngles(files),
+      photos,
       body,
     });
   }
@@ -225,6 +252,10 @@ export class SkinJournalController {
   }
 
   @Post('entries/:id/analyze/retry')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   async retryAnalysis(
     @CurrentUser('id') userId: string,
     @Param('id') id: string,

@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { ulid } from 'ulid';
 import { encryptedNullableStringFieldTransformer } from '../../skin-profile/skin-profile-field-encryption';
+import { UserRestrictionCapability } from '../user-restrictions';
 import { UserConsent } from './user-consent.entity';
 import { UserDataAccessLog } from './user-data-access-log.entity';
 
@@ -98,6 +99,31 @@ export class User {
   @Index('idx_users_account_restricted_by_admin_id')
   @Column({ type: 'varchar', length: 26, nullable: true })
   account_restricted_by_admin_id: string | null;
+
+  @Column({ type: 'varchar', array: true, nullable: true })
+  account_restriction_capabilities: UserRestrictionCapability[] | null;
+
+  @Index('idx_users_account_restriction_expires_at')
+  @Column({ type: 'timestamptz', nullable: true })
+  account_restriction_expires_at: Date | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer(
+      'account_restriction_internal_note',
+    ),
+  })
+  account_restriction_internal_note: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer(
+      'account_restriction_user_message',
+    ),
+  })
+  account_restriction_user_message: string | null;
 
   @Column({ type: 'varchar', length: 5, default: 'en' })
   preferred_language: string;

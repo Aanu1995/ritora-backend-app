@@ -21,12 +21,17 @@ import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-acti
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import { createDefaultUserCapabilities } from '../users/dto/user-capabilities.dto';
+import { UserCapabilitySnapshotService } from '../users/user-capability-snapshot.service';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import {
   UserConsentType,
   UserDataAccessPurpose,
 } from '../users/user-consent.constants';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { AuthSession } from './entities/auth-session.entity';
 import { AuthService } from './auth.service';
 import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
@@ -87,6 +92,8 @@ describe('AuthService', () => {
   let dataAccessLogService: Record<string, jest.Mock>;
   let cataloguePhotoStorageService: Record<string, jest.Mock>;
   let accountDeletionScheduler: Record<string, jest.Mock>;
+  let platformRestrictions: Record<string, jest.Mock>;
+  let capabilitySnapshot: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     usersService = {
@@ -116,6 +123,7 @@ describe('AuthService', () => {
       clearExpiredAccountDeletionCancellationReceipts: jest
         .fn()
         .mockResolvedValue(0),
+      clearExpiredAccountRestriction: jest.fn().mockResolvedValue(false),
     };
 
     jwtService = {
@@ -174,6 +182,14 @@ describe('AuthService', () => {
       scheduleFinalization: jest.fn().mockResolvedValue(undefined),
       cancelFinalization: jest.fn().mockResolvedValue(undefined),
     };
+    platformRestrictions = {
+      assertAllowed: jest.fn().mockResolvedValue(undefined),
+    };
+    capabilitySnapshot = {
+      buildForUser: jest
+        .fn()
+        .mockResolvedValue(createDefaultUserCapabilities()),
+    };
     const skinJournalService = {
       exportAllDataForAccount: jest.fn().mockResolvedValue(null),
       deleteAllMediaForUser: jest.fn().mockResolvedValue(undefined),
@@ -215,6 +231,14 @@ describe('AuthService', () => {
           useValue: accountDeletionScheduler,
         },
         {
+          provide: PlatformGlobalRestrictionsService,
+          useValue: platformRestrictions,
+        },
+        {
+          provide: UserCapabilitySnapshotService,
+          useValue: capabilitySnapshot,
+        },
+        {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string) => mockConfigValues[key]),
@@ -252,7 +276,11 @@ describe('AuthService', () => {
       account_deletion_confirm_expires: null,
       account_restricted_at: null,
       account_restricted_by_admin_id: null,
+      account_restriction_capabilities: null,
+      account_restriction_expires_at: null,
+      account_restriction_internal_note: null,
       account_restriction_reason: null,
+      account_restriction_user_message: null,
       preferred_language: 'en',
       google_subject: null,
       apple_subject: null,
@@ -290,6 +318,36 @@ describe('AuthService', () => {
         'en',
       );
       expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(platformRestrictions.assertAllowed).toHaveBeenCalledWith(
+        PlatformGlobalRestrictionCapability.DisableAccountCreation,
+      );
+    });
+
+    it('blocks password account creation while the global signup control is active', async () => {
+      platformRestrictions.assertAllowed.mockRejectedValue(
+        new ForbiddenException({
+          capability:
+            PlatformGlobalRestrictionCapability.DisableAccountCreation,
+          code: 'PLATFORM_GLOBAL_RESTRICTION_ACTIVE',
+          message: 'Platform feature temporarily disabled',
+        }),
+      );
+
+      await expect(
+        service.register({
+          email: 'test@example.com',
+          password: 'Password1',
+          firstName: 'Jane',
+          lastName: 'Doe',
+          preferredLanguage: 'en',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(usersService.findByEmail).not.toHaveBeenCalled();
+      expect(usersService.create).not.toHaveBeenCalled();
+      expect(mailService.sendVerificationEmail).not.toHaveBeenCalled();
     });
 
     it('rejects duplicate email', async () => {
@@ -409,6 +467,9 @@ describe('AuthService', () => {
       usersService.findByEmailForAuth.mockResolvedValue(
         fakeUser({
           account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+          account_restriction_capabilities: [
+            UserRestrictionCapability.DisableLogin,
+          ],
           email_verified: true,
         }),
       );
@@ -417,6 +478,52 @@ describe('AuthService', () => {
         service.login('test@example.com', 'Password1', asResponse(res)),
       ).rejects.toThrow(ForbiddenException);
       expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('allows login when a non-login restriction is active', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableNotifications,
+        ],
+        email_verified: true,
+      });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
+      sessionsRepo.save.mockImplementation(async (session) => ({
+        ...session,
+        id: '01SESSION',
+      }));
+
+      await expect(
+        service.login('test@example.com', 'Password1', asResponse(res)),
+      ).resolves.toMatchObject({
+        user: expect.objectContaining({ id: user.id }),
+      });
+    });
+
+    it('soft-clears an expired login restriction before creating a session', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableLogin,
+        ],
+        account_restriction_expires_at: new Date('2026-05-20T10:00:00.000Z'),
+        email_verified: true,
+      });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
+
+      await expect(
+        service.login('test@example.com', 'Password1', asResponse(res)),
+      ).resolves.toMatchObject({
+        user: expect.objectContaining({ id: user.id }),
+      });
+      expect(usersService.clearExpiredAccountRestriction).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(sessionsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
     });
   });
 
@@ -469,6 +576,39 @@ describe('AuthService', () => {
       });
       expect(consentsRepo.save).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalled();
+      expect(platformRestrictions.assertAllowed).toHaveBeenCalledWith(
+        PlatformGlobalRestrictionCapability.DisableAccountCreation,
+      );
+    });
+
+    it('blocks new Google account creation while allowing existing-account paths to be checked first', async () => {
+      const res = mockRes();
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+      platformRestrictions.assertAllowed.mockRejectedValue(
+        new ForbiddenException({
+          capability:
+            PlatformGlobalRestrictionCapability.DisableAccountCreation,
+          code: 'PLATFORM_GLOBAL_RESTRICTION_ACTIVE',
+          message: 'Platform feature temporarily disabled',
+        }),
+      );
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: true,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(usersService.createGoogleUser).not.toHaveBeenCalled();
+      expect(consentsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
     });
 
     it('requires legal consent before creating a new Google user', async () => {
@@ -801,6 +941,9 @@ describe('AuthService', () => {
       const secret = 'a'.repeat(64);
       const user = fakeUser({
         account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableLogin,
+        ],
       });
 
       sessionsRepo.findOne.mockResolvedValue({
@@ -818,6 +961,67 @@ describe('AuthService', () => {
 
       expect(sessionsRepo.save).not.toHaveBeenCalled();
       expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('allows refresh when the active restriction does not disable login', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableAiGeneration,
+        ],
+      });
+
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        user,
+      });
+      sessionsRepo.save.mockImplementation(async (session) => session);
+
+      await expect(
+        service.refreshTokens(`01SESSION.${secret}`, asResponse(res)),
+      ).resolves.toMatchObject({
+        accessToken: expect.any(String),
+        preferredLanguage: user.preferred_language,
+      });
+    });
+
+    it('soft-clears an expired login restriction before rotating refresh tokens', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableLogin,
+        ],
+        account_restriction_expires_at: new Date('2026-05-20T10:00:00.000Z'),
+      });
+
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        user,
+      });
+
+      await expect(
+        service.refreshTokens(`01SESSION.${secret}`, asResponse(res)),
+      ).resolves.toMatchObject({
+        accessToken: expect.any(String),
+        preferredLanguage: user.preferred_language,
+      });
+      expect(usersService.clearExpiredAccountRestriction).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(sessionsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
     });
   });
 

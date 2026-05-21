@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
 import {
@@ -10,6 +10,8 @@ import {
   readFeatureOpenAiModel,
 } from '../../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import { PlatformGlobalRestrictionCapability } from '../../platform-controls/platform-global-restrictions';
+import { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { estimateCost } from '../../suggestions/services/suggestion-ai-contract';
 import {
   SKIN_JOURNAL_INSIGHT_PROMPT_VERSION,
@@ -133,6 +135,8 @@ export class InsightPolishService {
   constructor(
     private readonly configService: ConfigService,
     private readonly knowledgeBase: KnowledgeBaseService,
+    @Optional()
+    private readonly platformRestrictions?: PlatformGlobalRestrictionsService,
   ) {}
 
   async polish(
@@ -148,6 +152,12 @@ export class InsightPolishService {
     options: PolishOptions,
   ): Promise<InsightPolishRunResult> {
     if (!this.shouldRun(options) || candidates.length === 0) {
+      return {
+        candidates: this.dropUnverifiedAiSourcedCandidates(candidates),
+        usage: null,
+      };
+    }
+    if (await this.isAiGenerationDisabled()) {
       return {
         candidates: this.dropUnverifiedAiSourcedCandidates(candidates),
         usage: null,
@@ -480,6 +490,14 @@ export class InsightPolishService {
         INSIGHTS_AI_MODEL_ENV_KEY,
         SKIN_JOURNAL_INSIGHTS_DEFAULT_MODEL,
       ) ?? SKIN_JOURNAL_INSIGHTS_DEFAULT_MODEL
+    );
+  }
+
+  private async isAiGenerationDisabled(): Promise<boolean> {
+    return Boolean(
+      await this.platformRestrictions?.isCapabilityDisabled(
+        PlatformGlobalRestrictionCapability.DisableAiGeneration,
+      ),
     );
   }
 }

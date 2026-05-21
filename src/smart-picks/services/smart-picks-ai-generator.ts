@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import { PlatformGlobalRestrictionCapability } from '../../platform-controls/platform-global-restrictions';
+import { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { estimateCost } from '../../suggestions/services/suggestion-ai-contract';
 import { SuggestionEvidenceSourceId } from '../../suggestions/suggestions.constants';
 import { mergeEvidenceSourceIds } from '../../suggestions/services/suggestion-evidence-sources';
@@ -38,6 +40,7 @@ const SMART_PICKS_STARTER_TREATMENT_CONFIDENCES = [
 export const SmartPicksAiProviderSkippedReason = {
   MissingApiKey: 'missing_api_key',
   NoGaps: 'no_gaps',
+  PlatformGlobalRestriction: 'platform_global_restriction',
 } as const;
 
 export type SmartPicksAiProviderSkippedReason =
@@ -206,7 +209,11 @@ type OpenAiResponsePayload = {
 export class SmartPicksAiGenerator {
   private readonly logger = new Logger(SmartPicksAiGenerator.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional()
+    private readonly platformRestrictions?: PlatformGlobalRestrictionsService,
+  ) {}
 
   async generatePlan(
     context: SmartPicksContext,
@@ -217,6 +224,18 @@ export class SmartPicksAiGenerator {
   async generatePlanWithDiagnostics(
     context: SmartPicksContext,
   ): Promise<SmartPicksAiPlanGenerationResult> {
+    if (await this.isAiGenerationDisabled()) {
+      return {
+        plan: null,
+        diagnostics: {
+          ...basePlanDiagnostics(),
+          missingPlan: true,
+          providerSkippedReason:
+            SmartPicksAiProviderSkippedReason.PlatformGlobalRestriction,
+        },
+      };
+    }
+
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     const model =
       readFeatureOpenAiModel(
@@ -316,6 +335,10 @@ export class SmartPicksAiGenerator {
   async assessStarterTreatment(
     context: SmartPicksContext,
   ): Promise<SmartPicksStarterTreatmentAssessment | null> {
+    if (await this.isAiGenerationDisabled()) {
+      return null;
+    }
+
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     const model =
       readFeatureOpenAiModel(
@@ -406,6 +429,13 @@ export class SmartPicksAiGenerator {
         SmartPicksAiProviderSkippedReason.NoGaps,
       );
     }
+    if (await this.isAiGenerationDisabled()) {
+      return emptyGenerationResult(
+        gaps.length,
+        SmartPicksAiProviderSkippedReason.PlatformGlobalRestriction,
+      );
+    }
+
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     const model =
       readFeatureOpenAiModel(
@@ -480,6 +510,14 @@ export class SmartPicksAiGenerator {
       );
       return failedGenerationResult(gaps.length);
     }
+  }
+
+  private async isAiGenerationDisabled(): Promise<boolean> {
+    return Boolean(
+      await this.platformRestrictions?.isCapabilityDisabled(
+        PlatformGlobalRestrictionCapability.DisableAiGeneration,
+      ),
+    );
   }
 }
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   readFeatureOpenAiModel,
@@ -10,6 +10,8 @@ import {
   extractOutputText,
   type OpenAiResponsePayload,
 } from '../../catalogue/openai-extraction.utils';
+import { PlatformGlobalRestrictionCapability } from '../../platform-controls/platform-global-restrictions';
+import { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { SkinJournalPhotoStorageService } from './skin-journal-photo-storage.service';
 import type {
   AnalysisChangeDirection,
@@ -334,6 +336,8 @@ export class SkinJournalAnalysisService {
   constructor(
     private readonly configService: ConfigService,
     private readonly photoStorage: SkinJournalPhotoStorageService,
+    @Optional()
+    private readonly platformRestrictions?: PlatformGlobalRestrictionsService,
   ) {}
 
   async analyze(params: {
@@ -359,6 +363,8 @@ export class SkinJournalAnalysisService {
         false,
       );
     }
+    await this.assertAiGenerationAllowed();
+
     if (this.shouldUseMockAnalysis()) {
       return {
         observations: this.mockAnalysis(params.entryId, currentPhotoInputs),
@@ -381,6 +387,7 @@ export class SkinJournalAnalysisService {
         false,
       );
     }
+
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
       throw new SkinJournalAnalysisError(
@@ -419,6 +426,8 @@ export class SkinJournalAnalysisService {
     const photos: AnalysisPhotoInput[] = [
       { angle, object_key: 'evaluation-fixture' },
     ];
+    await this.assertAiGenerationAllowed();
+
     if (this.shouldUseMockAnalysis()) {
       return {
         observations: this.mockAnalysis(params.fixtureId, photos),
@@ -433,6 +442,7 @@ export class SkinJournalAnalysisService {
         },
       };
     }
+
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
       throw new SkinJournalAnalysisError(
@@ -688,6 +698,24 @@ export class SkinJournalAnalysisService {
     const outputCost =
       ((usage.output_tokens ?? 0) / 1_000_000) * outputCostPerMillion;
     return Number((inputCost + outputCost).toFixed(6));
+  }
+
+  private async isAiGenerationDisabled(): Promise<boolean> {
+    return Boolean(
+      await this.platformRestrictions?.isCapabilityDisabled(
+        PlatformGlobalRestrictionCapability.DisableAiGeneration,
+      ),
+    );
+  }
+
+  private async assertAiGenerationAllowed(): Promise<void> {
+    if (await this.isAiGenerationDisabled()) {
+      throw new SkinJournalAnalysisError(
+        AnalysisFailureCodeValue.PlatformGlobalRestriction,
+        'Skin Journal AI analysis is temporarily disabled.',
+        false,
+      );
+    }
   }
 
   private readNumericConfig(key: string, fallback: number): number {

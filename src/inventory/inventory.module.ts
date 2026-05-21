@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogueModule } from '../catalogue/catalogue.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UsersModule } from '../users/users.module';
@@ -13,6 +14,7 @@ import { InventoryProduct } from './entities/inventory-product.entity';
   imports: [
     CatalogueModule,
     NotificationsModule,
+    PlatformGlobalRestrictionsModule,
     SmartPicksModule,
     UsersModule,
     TypeOrmModule.forFeature([InventoryProduct, SkinProfile]),

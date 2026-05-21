@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import type { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { ProductCategory, ShelfStatus } from '../../shelf/shelf.types';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { SuggestionEvidenceSourceId } from '../../suggestions/suggestions.constants';
@@ -28,6 +29,30 @@ describe('SmartPicksAiGenerator', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     jest.restoreAllMocks();
+  });
+
+  it('skips OpenAI calls while global AI generation is disabled', async () => {
+    global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+    const platformRestrictions = {
+      isCapabilityDisabled: jest.fn().mockResolvedValue(true),
+    } as unknown as PlatformGlobalRestrictionsService;
+    const generator = new SmartPicksAiGenerator(
+      configService(),
+      platformRestrictions,
+    );
+
+    const result = await generator.generateWithDiagnostics(context(), gaps());
+    const plan = await generator.generatePlanWithDiagnostics(context());
+    const starterTreatment = await generator.assessStarterTreatment(context());
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result.diagnostics.providerSkippedReason).toBe(
+      SmartPicksAiProviderSkippedReason.PlatformGlobalRestriction,
+    );
+    expect(plan.diagnostics.providerSkippedReason).toBe(
+      SmartPicksAiProviderSkippedReason.PlatformGlobalRestriction,
+    );
+    expect(starterTreatment).toBeNull();
   });
 
   it('sanitizes AI product picks before persistence or display', async () => {

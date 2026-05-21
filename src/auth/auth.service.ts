@@ -36,7 +36,14 @@ import type { SkinJournalExportPayload } from '../skin-journal/skin-journal.cons
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserCapabilitySnapshotService } from '../users/user-capability-snapshot.service';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import {
+  clearUserRestrictionState,
+  hasActiveUserRestrictionCapability,
+  isUserRestrictionExpired,
+  UserRestrictionCapability,
+} from '../users/user-restrictions';
 import {
   UserConsentType,
   UserDataAccessPurpose,
@@ -44,6 +51,8 @@ import {
 import { UsersService } from '../users/users.service';
 import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { sanitizeIpAddress, sanitizeUserAgent } from './auth-session.utils';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
@@ -219,6 +228,8 @@ export class AuthService {
     private readonly skinJournalService: SkinJournalService,
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
     private readonly accountDeletionScheduler: AccountDeletionSchedulerService,
+    private readonly platformRestrictions: PlatformGlobalRestrictionsService,
+    private readonly capabilitySnapshot: UserCapabilitySnapshotService,
   ) {
     this.jwtAccessExpiry = configService.getOrThrow('JWT_ACCESS_EXPIRY');
     this.jwtRefreshExpiry = configService.getOrThrow('JWT_REFRESH_EXPIRY');
@@ -258,6 +269,10 @@ export class AuthService {
     },
     ip?: string,
   ): Promise<RegisterResponseDto> {
+    await this.platformRestrictions.assertAllowed(
+      PlatformGlobalRestrictionCapability.DisableAccountCreation,
+    );
+
     if (!dto.termsAccepted || !dto.privacyPolicyAccepted) {
       const message = 'You must accept the terms of service and privacy policy';
 
@@ -306,7 +321,7 @@ export class AuthService {
 
     return new RegisterResponseDto(
       'Verify your email to activate your account',
-      UserResponseDto.fromEntity(user),
+      await this.toUserResponse(user),
     );
   }
 
@@ -327,6 +342,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    await this.clearExpiredAccountRestrictionIfNeeded(user);
     this.assertUserNotRestricted(user);
 
     if (!user.email_verified) {
@@ -340,7 +356,7 @@ export class AuthService {
 
     const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
-    return new AuthResponseDto(accessToken, UserResponseDto.fromEntity(user));
+    return new AuthResponseDto(accessToken, await this.toUserResponse(user));
   }
 
   async loginWithGoogle(
@@ -400,6 +416,7 @@ export class AuthService {
     );
 
     if (existingProviderUser) {
+      await this.clearExpiredAccountRestrictionIfNeeded(existingProviderUser);
       this.assertUserNotRestricted(existingProviderUser);
       await this.cancelAccountDeletionOnAccess(existingProviderUser);
       const authUser =
@@ -413,7 +430,7 @@ export class AuthService {
       );
       return new AuthResponseDto(
         accessToken,
-        UserResponseDto.fromEntity(
+        await this.toUserResponse(
           existingProviderUser,
           Boolean(authUser.password_hash),
         ),
@@ -425,6 +442,7 @@ export class AuthService {
     );
 
     if (existingEmailUser) {
+      await this.clearExpiredAccountRestrictionIfNeeded(existingEmailUser);
       this.assertUserNotRestricted(existingEmailUser);
       const linkedSubject = providerConfig.readSubject(existingEmailUser);
       if (linkedSubject && linkedSubject !== profile.providerSubject) {
@@ -455,13 +473,16 @@ export class AuthService {
 
       return new AuthResponseDto(
         accessToken,
-        UserResponseDto.fromEntity(linkedUser, Boolean(authUser.password_hash)),
+        await this.toUserResponse(linkedUser, Boolean(authUser.password_hash)),
       );
     }
 
     this.assertLegalConsent(
       options.termsAccepted,
       options.privacyPolicyAccepted,
+    );
+    await this.platformRestrictions.assertAllowed(
+      PlatformGlobalRestrictionCapability.DisableAccountCreation,
     );
 
     const createdUser = await providerConfig.createUser({
@@ -486,7 +507,7 @@ export class AuthService {
 
     return new AuthResponseDto(
       accessToken,
-      UserResponseDto.fromEntity(createdUser),
+      await this.toUserResponse(createdUser),
     );
   }
 
@@ -533,6 +554,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
+    await this.clearExpiredAccountRestrictionIfNeeded(session.user);
     this.assertUserNotRestricted(session.user);
 
     const newSecret = randomBytes(32).toString('hex');
@@ -695,7 +717,7 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException();
     }
-    return UserResponseDto.fromEntity(user);
+    return this.toUserResponse(user);
   }
 
   async getSessions(userId: string): Promise<SessionResponseDto[]> {
@@ -707,6 +729,17 @@ export class AuthService {
     return sessions
       .filter((s) => isAfterNow(s.expires_at))
       .map((session) => SessionResponseDto.fromEntity(session));
+  }
+
+  private async toUserResponse(
+    user: User,
+    hasPassword?: boolean,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.fromEntity(
+      user,
+      hasPassword,
+      await this.capabilitySnapshot.buildForUser(user),
+    );
   }
 
   async exportData(
@@ -761,7 +794,7 @@ export class AuthService {
     }
 
     return {
-      user: UserResponseDto.fromEntity(user),
+      user: await this.toUserResponse(user),
       skinProfile: skinProfile
         ? SkinProfileResponseDto.fromEntity(skinProfile, {
             hasHealthContextConsent: activeConsentTypes.has(
@@ -1278,12 +1311,28 @@ export class AuthService {
   }
 
   private assertUserNotRestricted(user: User): void {
-    if (user.account_restricted_at) {
+    if (
+      hasActiveUserRestrictionCapability(
+        user,
+        UserRestrictionCapability.DisableLogin,
+      )
+    ) {
       throw new ForbiddenException({
         code: 'ACCOUNT_RESTRICTED',
         message: 'Account restricted',
       });
     }
+  }
+
+  private async clearExpiredAccountRestrictionIfNeeded(
+    user: User,
+  ): Promise<void> {
+    if (!isUserRestrictionExpired(user)) {
+      return;
+    }
+
+    await this.usersService.clearExpiredAccountRestriction(user.id);
+    clearUserRestrictionState(user);
   }
 
   private async findUserByField(

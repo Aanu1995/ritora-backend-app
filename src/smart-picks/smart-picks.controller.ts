@@ -9,6 +9,7 @@ import {
   Patch,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
@@ -20,6 +21,11 @@ import {
   resolveRequestLanguage,
 } from '../common/i18n/i18n';
 import { User } from '../users/entities/user.entity';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import {
   SmartPicksOverviewQueryDto,
   SmartPicksOverviewResponseDto,
@@ -39,6 +45,10 @@ export class SmartPicksController {
   ) {}
 
   @Get('overview')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOperation({ summary: 'Smart Picks gap overview' })
   async getOverview(
     @CurrentUser() user: User,
@@ -79,6 +89,10 @@ export class SmartPicksController {
   }
 
   @Patch('budget')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableAiGeneration,
+  )
+  @UseGuards(UserRestrictionGuard)
   @ApiOperation({ summary: 'Update Smart Picks active budget tier' })
   async updateBudget(
     @CurrentUser() user: User,

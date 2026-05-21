@@ -5,6 +5,8 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
+import { createDefaultUserCapabilities } from './dto/user-capabilities.dto';
+import { UserCapabilitySnapshotService } from './user-capability-snapshot.service';
 
 const mockUsersService = () => ({
   findByIdOrFail: jest.fn(),
@@ -21,14 +23,24 @@ const mockRes = () => ({
 describe('UsersController', () => {
   let controller: UsersController;
   let usersService: ReturnType<typeof mockUsersService>;
+  let capabilitySnapshot: { buildForUser: jest.Mock };
 
   beforeEach(async () => {
     usersService = mockUsersService();
+    capabilitySnapshot = {
+      buildForUser: jest
+        .fn()
+        .mockResolvedValue(createDefaultUserCapabilities()),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UsersController],
       providers: [
         { provide: UsersService, useValue: usersService },
+        {
+          provide: UserCapabilitySnapshotService,
+          useValue: capabilitySnapshot,
+        },
         {
           provide: ConfigService,
           useValue: {

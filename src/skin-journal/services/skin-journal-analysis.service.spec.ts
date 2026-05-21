@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
+import type { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { SkinJournalAnalysisService } from './skin-journal-analysis.service';
 import { SkinJournalPhotoStorageService } from './skin-journal-photo-storage.service';
 import {
@@ -187,6 +188,37 @@ describe('SkinJournalAnalysisService', () => {
 
   afterAll(() => {
     process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it('does not call OpenAI while global AI generation is disabled', async () => {
+    global.fetch = jest.fn() as jest.MockedFunction<typeof fetch>;
+    const platformRestrictions = {
+      isCapabilityDisabled: jest.fn().mockResolvedValue(true),
+    } as unknown as PlatformGlobalRestrictionsService;
+    const service = new SkinJournalAnalysisService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'skin-photo-model',
+        OPENAI_MODEL: 'fallback-model',
+      }),
+      photoStorage,
+      platformRestrictions,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: ['redness'],
+        priorAnalysis: null,
+      }),
+    ).rejects.toMatchObject({
+      code: AnalysisFailureCodeValue.PlatformGlobalRestriction,
+      retryable: false,
+    });
+    expect(photoStorage.readPhotoBuffer).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('calls OpenAI Responses with strict JSON schema and store disabled', async () => {

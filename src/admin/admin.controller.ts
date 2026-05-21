@@ -35,7 +35,15 @@ import {
   CreateOperationalIncidentDto,
   ResolveOperationalIncidentDto,
 } from './dto/admin-operational-incident.dto';
-import { AdminUserRestrictionDto } from './dto/admin-user-restriction.dto';
+import {
+  AdminPlatformGlobalRestrictionParamDto,
+  DisablePlatformGlobalRestrictionDto,
+  EnablePlatformGlobalRestrictionDto,
+} from './dto/admin-platform-global-restriction.dto';
+import {
+  AdminUserRestrictionDto,
+  AdminUserUnrestrictionDto,
+} from './dto/admin-user-restriction.dto';
 import type {
   AdminAuthenticatedUser,
   AdminAiCostByUserListResponse,
@@ -46,6 +54,8 @@ import type {
   AdminOperationalIncidentResponse,
   AdminOperationsMonitoringResponse,
   AdminOverviewResponse,
+  AdminPlatformGlobalRestrictionListResponse,
+  AdminPlatformGlobalRestrictionResponse,
   AdminUserDetailResponse,
   AdminUserListResponse,
   AdminUserNoteListResponse,
@@ -180,9 +190,13 @@ export class AdminController {
     @Req() req: Request,
   ): Promise<AdminUserResponse> {
     return this.adminService.restrictUser(user, id, {
+      capabilities: dto.capabilities,
+      expiresAt: dto.expiresAt,
+      internalNote: dto.internalNote,
       ip: req.ip,
       reason: dto.reason,
       sessionId: user.sessionId,
+      userMessage: dto.userMessage,
       userAgent: getHeaderValue(req.headers, 'user-agent'),
     });
   }
@@ -192,7 +206,7 @@ export class AdminController {
   unrestrictUser(
     @CurrentUser() user: AdminAuthenticatedUser,
     @Param('id') id: string,
-    @Body() dto: AdminUserRestrictionDto,
+    @Body() dto: AdminUserUnrestrictionDto,
     @Req() req: Request,
   ): Promise<AdminUserResponse> {
     return this.adminService.unrestrictUser(user, id, {
@@ -201,6 +215,53 @@ export class AdminController {
       sessionId: user.sessionId,
       userAgent: getHeaderValue(req.headers, 'user-agent'),
     });
+  }
+
+  @Get('platform/restrictions')
+  listPlatformGlobalRestrictions(): Promise<AdminPlatformGlobalRestrictionListResponse> {
+    return this.adminService.listPlatformGlobalRestrictions();
+  }
+
+  @Post('platform/restrictions/:capability')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  enablePlatformGlobalRestriction(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param() params: AdminPlatformGlobalRestrictionParamDto,
+    @Body() dto: EnablePlatformGlobalRestrictionDto,
+    @Req() req: Request,
+  ): Promise<AdminPlatformGlobalRestrictionResponse> {
+    return this.adminService.enablePlatformGlobalRestriction(
+      user,
+      params.capability,
+      {
+        expiresAt: dto.expiresAt,
+        internalNote: dto.internalNote,
+        ip: req.ip,
+        reason: dto.reason,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Delete('platform/restrictions/:capability')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  disablePlatformGlobalRestriction(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param() params: AdminPlatformGlobalRestrictionParamDto,
+    @Body() dto: DisablePlatformGlobalRestrictionDto,
+    @Req() req: Request,
+  ): Promise<AdminPlatformGlobalRestrictionResponse> {
+    return this.adminService.disablePlatformGlobalRestriction(
+      user,
+      params.capability,
+      {
+        ip: req.ip,
+        reason: dto.reason,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
   }
 
   @Get('admins')
