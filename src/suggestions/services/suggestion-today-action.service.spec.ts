@@ -185,6 +185,9 @@ describe('SuggestionTodayActionService', () => {
         action: 'saved',
       }),
     );
+    expect(smartPickSnapshotRepo.findOne).toHaveBeenCalledWith({
+      where: { user_id: 'user-1', inputs_hash: 'hash-1' },
+    });
     expect(observability.record).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'smart_pick_user_feedback',
@@ -222,9 +225,7 @@ describe('SuggestionTodayActionService', () => {
     skinProfileRepo.findOne.mockResolvedValue({
       allow_smart_picks: true,
     } as SkinProfile);
-    smartPickSnapshotRepo.findOne.mockResolvedValue({
-      inputs_hash: 'new-hash',
-    } as SmartPickSnapshot);
+    smartPickSnapshotRepo.findOne.mockResolvedValue(null);
     productSuggestionRepo.findOne.mockResolvedValue(
       smartPickProductSuggestion({ inputs_hash: 'old-hash' }),
     );
@@ -236,6 +237,9 @@ describe('SuggestionTodayActionService', () => {
         action: 'saved',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+    expect(smartPickSnapshotRepo.findOne).toHaveBeenCalledWith({
+      where: { user_id: 'user-1', inputs_hash: 'old-hash' },
+    });
     expect(gapActionRepo.save).not.toHaveBeenCalled();
   });
 

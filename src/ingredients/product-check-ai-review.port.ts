@@ -3,6 +3,7 @@ import type { AnalysisResult, ProductForAnalysis } from './ingredients.types';
 import type {
   ProductCheckAiReview,
   ProductCheckContextSummary,
+  ProductCheckSource,
   ProductCheckReactionEvidence,
   ProductCheckVerdictResult,
 } from './product-check.types';
@@ -13,6 +14,8 @@ export const PRODUCT_CHECK_AI_REVIEW_PORT = Symbol(
 
 export type ProductCheckAiReviewInput = {
   language: AppLanguage;
+  source: ProductCheckSource;
+  userId: string;
   product: ProductForAnalysis;
   analysis: AnalysisResult;
   context: ProductCheckContextSummary;

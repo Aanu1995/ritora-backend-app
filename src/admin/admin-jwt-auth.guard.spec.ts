@@ -15,6 +15,15 @@ type GuardRequest = {
   user?: unknown;
 };
 
+type AdminSessionLookupRow = {
+  account_email: string;
+  account_id: string;
+  account_name: string;
+  account_role: AdminAccountRole;
+  account_status: AdminAccountStatus;
+  session_id: string;
+};
+
 function createContext(request: GuardRequest): ExecutionContext {
   return {
     switchToHttp: () => ({
@@ -37,6 +46,12 @@ function createAccount(overrides: Partial<AdminAccount> = {}): AdminAccount {
     invitation_expires_at: null,
     invitation_token_hash: null,
     last_login_at: null,
+    mfa_enabled_at: null,
+    mfa_last_used_time_step: null,
+    mfa_pending_expires_at: null,
+    mfa_pending_totp_secret: null,
+    mfa_recovery_code_hashes: null,
+    mfa_totp_secret: null,
     name: 'Root Admin',
     password_hash: null,
     password_reset_expires: null,
@@ -69,33 +84,43 @@ function createGuard(
   const jwtService = {
     verifyAsync: jest.fn(async () => options.payload),
   } as unknown as JwtService;
-  const accountsRepository = {
-    findOne: jest.fn(async () => options.account ?? createAccount()),
-  } as unknown as Repository<AdminAccount>;
+  const account = options.account ?? createAccount();
+  const session =
+    options.session === undefined
+      ? ({
+          admin_id: 'admin-root',
+          expires_at: new Date(Date.now() + 60_000),
+          id: 'session-1',
+          revoked_at: null,
+        } as AdminSession)
+      : options.session;
+  const lookupRows: AdminSessionLookupRow[] =
+    account && session
+      ? [
+          {
+            account_email: account.email,
+            account_id: account.id,
+            account_name: account.name,
+            account_role: account.role,
+            account_status: account.status,
+            session_id: session.id,
+          },
+        ]
+      : [];
+  const query = jest.fn(async () => lookupRows);
   const sessionsRepository = {
-    findOne: jest.fn(async () =>
-      options.session === undefined
-        ? ({
-            admin_id: 'admin-root',
-            expires_at: new Date(Date.now() + 60_000),
-            id: 'session-1',
-            revoked_at: null,
-          } as AdminSession)
-        : options.session,
-    ),
+    query,
   } as unknown as Repository<AdminSession>;
 
-  return new AdminJwtAuthGuard(
-    configService,
-    jwtService,
-    accountsRepository,
-    sessionsRepository,
-  );
+  return {
+    guard: new AdminJwtAuthGuard(configService, jwtService, sessionsRepository),
+    query,
+  };
 }
 
 describe('AdminJwtAuthGuard', () => {
   it('attaches the active admin account to the request', async () => {
-    const guard = createGuard({
+    const { guard, query } = createGuard({
       payload: {
         aud: 'ritora-web',
         email: 'owner@ritora.app',
@@ -116,10 +141,14 @@ describe('AdminJwtAuthGuard', () => {
       role: AdminAccountRole.Root,
       sessionId: 'session-1',
     });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('admin_session.expires_at > now()'),
+      ['session-1', 'admin-root', AdminAccountStatus.Active],
+    );
   });
 
   it('rejects missing bearer tokens', async () => {
-    const guard = createGuard();
+    const { guard } = createGuard();
 
     await expect(
       guard.canActivate(createContext({ headers: {} })),
@@ -127,7 +156,7 @@ describe('AdminJwtAuthGuard', () => {
   });
 
   it('rejects non-admin JWT payloads', async () => {
-    const guard = createGuard({
+    const { guard } = createGuard({
       payload: {
         sid: 'session-1',
         sub: 'admin-root',
@@ -143,7 +172,7 @@ describe('AdminJwtAuthGuard', () => {
   });
 
   it('rejects revoked sessions', async () => {
-    const guard = createGuard({
+    const { guard } = createGuard({
       payload: {
         sid: 'session-1',
         sub: 'admin-root',

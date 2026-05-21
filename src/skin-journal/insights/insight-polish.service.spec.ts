@@ -133,10 +133,11 @@ describe('InsightPolishService', () => {
       new KnowledgeBaseService(),
     );
 
-    const [polished] = await service.polish([candidate()], {
+    const result = await service.polishWithUsage([candidate()], {
       locale: 'en',
       aiPolishEnabled: true,
     });
+    const [polished] = result.candidates;
 
     const [, init] = (global.fetch as jest.Mock).mock.calls[0];
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
@@ -166,6 +167,14 @@ describe('InsightPolishService', () => {
       'Your breakouts look calmer this month.',
     );
     expect(polished.metadata.source).toBe('ai_polished');
+    expect(result.usage).toEqual({
+      durationMs: expect.any(Number),
+      estimatedCostUsd: 0.000042,
+      inputTokens: 120,
+      model: 'gpt-5.2',
+      outputTokens: 40,
+      totalTokens: 160,
+    });
   });
 
   it('falls back to deterministic templates when AI output contains banned language', async () => {

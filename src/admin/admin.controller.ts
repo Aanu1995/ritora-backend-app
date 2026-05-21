@@ -19,22 +19,37 @@ import { AdminAuthService } from './admin-auth.service';
 import { AdminJwtAuthGuard } from './admin-jwt-auth.guard';
 import { AdminRootGuard } from './admin-root.guard';
 import { AdminService } from './admin.service';
+import { AdminAiCostUserListQueryDto } from './dto/admin-ai-cost-user-list-query.dto';
 import { AdminAuditLogQueryDto } from './dto/admin-audit-log-query.dto';
 import { AdminListQueryDto } from './dto/admin-list-query.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { DeleteAdminDto } from './dto/delete-admin.dto';
 import { ResendAdminInvitationDto } from './dto/resend-admin-invitation.dto';
 import { AdminUserListQueryDto } from './dto/admin-user-list-query.dto';
+import {
+  AdminUserNoteListQueryDto,
+  CreateAdminUserNoteDto,
+} from './dto/admin-user-note.dto';
+import {
+  AdminOperationalIncidentListQueryDto,
+  CreateOperationalIncidentDto,
+  ResolveOperationalIncidentDto,
+} from './dto/admin-operational-incident.dto';
 import { AdminUserRestrictionDto } from './dto/admin-user-restriction.dto';
 import type {
   AdminAuthenticatedUser,
+  AdminAiCostByUserListResponse,
   AdminAuditLogListResponse,
   AdminMemberListResponse,
   AdminMemberResponse,
+  AdminOperationalIncidentListResponse,
+  AdminOperationalIncidentResponse,
   AdminOperationsMonitoringResponse,
   AdminOverviewResponse,
   AdminUserDetailResponse,
   AdminUserListResponse,
+  AdminUserNoteListResponse,
+  AdminUserNoteResponse,
   AdminUserResponse,
 } from './admin.types';
 
@@ -66,6 +81,13 @@ export class AdminController {
     return this.adminService.getOverview();
   }
 
+  @Get('metrics/ai-cost/users')
+  listAiCostByUsers(
+    @Query() query: AdminAiCostUserListQueryDto,
+  ): Promise<AdminAiCostByUserListResponse> {
+    return this.adminService.listAiCostByUsers(query);
+  }
+
   @Get('users')
   listUsers(
     @Query() query: AdminUserListQueryDto,
@@ -78,6 +100,29 @@ export class AdminController {
     return this.adminService.getUser(id);
   }
 
+  @Get('users/:id/notes')
+  listUserNotes(
+    @Param('id') id: string,
+    @Query() query: AdminUserNoteListQueryDto,
+  ): Promise<AdminUserNoteListResponse> {
+    return this.adminService.listUserNotes(id, query);
+  }
+
+  @Post('users/:id/notes')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  createUserNote(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: CreateAdminUserNoteDto,
+    @Req() req: Request,
+  ): Promise<AdminUserNoteResponse> {
+    return this.adminService.createUserNote(user, id, dto, {
+      ip: req.ip,
+      sessionId: user.sessionId,
+      userAgent: getHeaderValue(req.headers, 'user-agent'),
+    });
+  }
+
   @Get('audit-logs')
   listAuditLogs(
     @Query() query: AdminAuditLogQueryDto,
@@ -88,6 +133,42 @@ export class AdminController {
   @Get('operations/monitoring')
   getOperationsMonitoring(): Promise<AdminOperationsMonitoringResponse> {
     return this.adminService.getOperationsMonitoring();
+  }
+
+  @Get('operations/incidents')
+  listOperationalIncidents(
+    @Query() query: AdminOperationalIncidentListQueryDto,
+  ): Promise<AdminOperationalIncidentListResponse> {
+    return this.adminService.listOperationalIncidents(query);
+  }
+
+  @Post('operations/incidents')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  createOperationalIncident(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: CreateOperationalIncidentDto,
+    @Req() req: Request,
+  ): Promise<AdminOperationalIncidentResponse> {
+    return this.adminService.createOperationalIncident(user, dto, {
+      ip: req.ip,
+      sessionId: user.sessionId,
+      userAgent: getHeaderValue(req.headers, 'user-agent'),
+    });
+  }
+
+  @Post('operations/incidents/:id/resolve')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  resolveOperationalIncident(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ResolveOperationalIncidentDto,
+    @Req() req: Request,
+  ): Promise<AdminOperationalIncidentResponse> {
+    return this.adminService.resolveOperationalIncident(user, id, dto, {
+      ip: req.ip,
+      sessionId: user.sessionId,
+      userAgent: getHeaderValue(req.headers, 'user-agent'),
+    });
   }
 
   @Post('users/:id/restrictions')

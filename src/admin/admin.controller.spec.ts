@@ -10,6 +10,8 @@ import {
 } from './entities/admin-account.entity';
 import { AdminUserRestrictionFilter } from './admin.types';
 import { AdminAuditAction } from './entities/admin-audit-log.entity';
+import { AdminOperationalIncidentSeverity } from './entities/admin-operational-incident.entity';
+import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
 
 function getRouteGuards(methodName: keyof AdminController): unknown[] {
   const method = AdminController.prototype[methodName] as object;
@@ -21,14 +23,33 @@ describe('AdminController', () => {
   it('keeps admin-account routes root-only while product-user routes use the authenticated admin guard', () => {
     expect(getRouteGuards('listUsers')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('getUser')).not.toContain(AdminRootGuard);
+    expect(getRouteGuards('listUserNotes')).not.toContain(AdminRootGuard);
+    expect(getRouteGuards('createUserNote')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('listAuditLogs')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('getOperationsMonitoring')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('listAiCostByUsers')).not.toContain(AdminRootGuard);
+    expect(getRouteGuards('listOperationalIncidents')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('createOperationalIncident')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('resolveOperationalIncident')).not.toContain(
       AdminRootGuard,
     );
     expect(getRouteGuards('restrictUser')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('unrestrictUser')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('restrictUser')).toContain(OriginCheckGuard);
     expect(getRouteGuards('unrestrictUser')).toContain(OriginCheckGuard);
+    expect(getRouteGuards('createUserNote')).toContain(OriginCheckGuard);
+    expect(getRouteGuards('createOperationalIncident')).toContain(
+      OriginCheckGuard,
+    );
+    expect(getRouteGuards('resolveOperationalIncident')).toContain(
+      OriginCheckGuard,
+    );
     expect(getRouteGuards('listAdmins')).toContain(AdminRootGuard);
     expect(getRouteGuards('createAdmin')).toContain(AdminRootGuard);
     expect(getRouteGuards('createAdmin')).toContain(OriginCheckGuard);
@@ -124,6 +145,47 @@ describe('AdminController', () => {
     });
   });
 
+  it('passes per-user AI cost queries to the admin service for all admins', async () => {
+    const service = {
+      listAiCostByUsers: jest.fn(async () => ({
+        hasNextPage: false,
+        hasPreviousPage: false,
+        limit: 10,
+        page: 1,
+        total: 0,
+        totalPages: 0,
+        users: [],
+      })),
+    } as unknown as AdminService;
+    const authService = {} as unknown as AdminAuthService;
+    const controller = new AdminController(service, authService);
+
+    await expect(
+      controller.listAiCostByUsers({
+        feature: 'quick_check',
+        limit: 10,
+        page: 1,
+        period: 'today',
+        query: 'jane',
+      }),
+    ).resolves.toEqual({
+      hasNextPage: false,
+      hasPreviousPage: false,
+      limit: 10,
+      page: 1,
+      total: 0,
+      totalPages: 0,
+      users: [],
+    });
+    expect(service.listAiCostByUsers).toHaveBeenCalledWith({
+      feature: 'quick_check',
+      limit: 10,
+      page: 1,
+      period: 'today',
+      query: 'jane',
+    });
+  });
+
   it('passes user detail requests to the admin service for all admins', async () => {
     const service = {
       getUser: jest.fn(async () => ({
@@ -137,6 +199,62 @@ describe('AdminController', () => {
       id: '01USER',
     });
     expect(service.getUser).toHaveBeenCalledWith('01USER');
+  });
+
+  it('passes internal user note requests with audit context for all admins', async () => {
+    const service = {
+      createUserNote: jest.fn(async () => ({ id: 'note-1' })),
+      listUserNotes: jest.fn(async () => ({
+        hasNextPage: false,
+        hasPreviousPage: false,
+        limit: 10,
+        notes: [],
+        page: 1,
+        total: 0,
+        totalPages: 0,
+      })),
+    } as unknown as AdminService;
+    const authService = {} as unknown as AdminAuthService;
+    const controller = new AdminController(service, authService);
+    const user = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Admin',
+      role: AdminAccountRole.Admin,
+      sessionId: 'session-1',
+      status: AdminAccountStatus.Active,
+    };
+    const request = {
+      headers: { 'user-agent': 'Jest' },
+      ip: '127.0.0.1',
+    };
+
+    await expect(
+      controller.listUserNotes('01USER', { limit: 10, page: 1 }),
+    ).resolves.toMatchObject({ notes: [] });
+    await expect(
+      controller.createUserNote(
+        user,
+        '01USER',
+        { body: 'Escalated for failed export follow-up.' },
+        request as never,
+      ),
+    ).resolves.toEqual({ id: 'note-1' });
+
+    expect(service.listUserNotes).toHaveBeenCalledWith('01USER', {
+      limit: 10,
+      page: 1,
+    });
+    expect(service.createUserNote).toHaveBeenCalledWith(
+      user,
+      '01USER',
+      { body: 'Escalated for failed export follow-up.' },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
   });
 
   it('passes audit log queries to the admin service', async () => {
@@ -181,6 +299,16 @@ describe('AdminController', () => {
   it('passes operational monitoring requests to the admin service', async () => {
     const service = {
       getOperationsMonitoring: jest.fn(async () => ({
+        backendHealth: {
+          checkedAt: '2026-05-20T10:00:00.000Z',
+          components: [],
+          status: 'healthy',
+        },
+        compliance: {
+          failedExportCount: 0,
+          pendingDeletionCount: 0,
+          sensitiveAccessEvents24h: 0,
+        },
         generatedAt: '2026-05-20T10:00:00.000Z',
         jobHealth: [],
         workItems: [],
@@ -190,11 +318,109 @@ describe('AdminController', () => {
     const controller = new AdminController(service, authService);
 
     await expect(controller.getOperationsMonitoring()).resolves.toEqual({
+      backendHealth: {
+        checkedAt: '2026-05-20T10:00:00.000Z',
+        components: [],
+        status: 'healthy',
+      },
+      compliance: {
+        failedExportCount: 0,
+        pendingDeletionCount: 0,
+        sensitiveAccessEvents24h: 0,
+      },
       generatedAt: '2026-05-20T10:00:00.000Z',
       jobHealth: [],
       workItems: [],
     });
     expect(service.getOperationsMonitoring).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes operational incident triage requests with audit context', async () => {
+    const service = {
+      createOperationalIncident: jest.fn(async () => ({ id: 'incident-1' })),
+      listOperationalIncidents: jest.fn(async () => ({
+        hasNextPage: false,
+        hasPreviousPage: false,
+        incidents: [],
+        limit: 10,
+        page: 1,
+        total: 0,
+        totalPages: 0,
+      })),
+      resolveOperationalIncident: jest.fn(async () => ({ id: 'incident-1' })),
+    } as unknown as AdminService;
+    const authService = {} as unknown as AdminAuthService;
+    const controller = new AdminController(service, authService);
+    const user = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Admin',
+      role: AdminAccountRole.Admin,
+      sessionId: 'session-1',
+      status: AdminAccountStatus.Active,
+    };
+    const request = {
+      headers: { 'user-agent': 'Jest' },
+      ip: '127.0.0.1',
+    };
+
+    await expect(
+      controller.listOperationalIncidents({
+        limit: 10,
+        page: 1,
+        status: AdminOperationalIncidentStatusFilter.Open,
+      }),
+    ).resolves.toMatchObject({ incidents: [] });
+    await controller.createOperationalIncident(
+      user,
+      {
+        description: 'Journal analysis has failed repeatedly.',
+        severity: AdminOperationalIncidentSeverity.Critical,
+        sourceId: 'job-1',
+        sourceType: 'journal-analysis',
+        targetUserId: '01USER',
+        title: 'Journal analysis failed',
+      },
+      request as never,
+    );
+    await controller.resolveOperationalIncident(
+      user,
+      'incident-1',
+      { resolutionSummary: 'Provider recovered and the queue drained.' },
+      request as never,
+    );
+
+    expect(service.listOperationalIncidents).toHaveBeenCalledWith({
+      limit: 10,
+      page: 1,
+      status: 'open',
+    });
+    expect(service.createOperationalIncident).toHaveBeenCalledWith(
+      user,
+      {
+        description: 'Journal analysis has failed repeatedly.',
+        severity: AdminOperationalIncidentSeverity.Critical,
+        sourceId: 'job-1',
+        sourceType: 'journal-analysis',
+        targetUserId: '01USER',
+        title: 'Journal analysis failed',
+      },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
+    expect(service.resolveOperationalIncident).toHaveBeenCalledWith(
+      user,
+      'incident-1',
+      { resolutionSummary: 'Provider recovered and the queue drained.' },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
   });
 
   it('passes admin search queries to the root-only auth service', async () => {

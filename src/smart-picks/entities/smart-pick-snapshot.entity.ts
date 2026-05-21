@@ -80,6 +80,21 @@ export class SmartPickSnapshot {
   @Column({ type: 'timestamptz' })
   generated_at: Date;
 
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  ai_model: string | null;
+
+  @Column({ type: 'integer', nullable: true })
+  ai_input_tokens: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  ai_output_tokens: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  ai_total_tokens: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  ai_estimated_cost_usd: number | null;
+
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: User;

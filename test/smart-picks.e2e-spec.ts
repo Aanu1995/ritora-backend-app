@@ -29,6 +29,13 @@ import {
 const ORIGIN = 'http://localhost:3000';
 const SMART_PICK_POLL_ATTEMPTS = 20;
 const SMART_PICK_POLL_DELAY_MS = 25;
+const emptyAiUsageDiagnostics = {
+  estimatedCostUsd: null,
+  inputTokens: null,
+  model: null,
+  outputTokens: null,
+  totalTokens: null,
+};
 const TEST_USER = {
   email: 'smart-picks@example.com',
   password: 'TestPass1',
@@ -104,6 +111,7 @@ describe('Smart Picks (e2e)', () => {
             missingPickCount: Math.max(0, gaps.length - picks.size),
             providerFailed: false,
             providerSkippedReason: null,
+            ...emptyAiUsageDiagnostics,
           },
         };
       },
@@ -407,6 +415,7 @@ function generatedPlan(): SmartPicksAiPlanGenerationResult {
       providerFailed: false,
       providerSkippedReason: null,
       missingPlan: false,
+      ...emptyAiUsageDiagnostics,
     },
   };
 }

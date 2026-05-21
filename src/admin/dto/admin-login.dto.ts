@@ -4,6 +4,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -20,6 +21,13 @@ export class AdminLoginDto {
   @MinLength(1, { message: 'validation.password.required' })
   @MaxLength(72, { message: 'validation.password.maxLength' })
   password!: string;
+
+  @ApiProperty({ required: false })
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9A-Za-z\s-]{6,32}$/, { message: 'validation.mfa.code' })
+  mfaCode?: string;
 
   @ApiProperty({ enum: ['en', 'sv'], required: false })
   @EmptyStringToUndefined()

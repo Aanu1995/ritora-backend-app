@@ -217,12 +217,9 @@ export class SuggestionTodayActionService {
       );
     }
     const currentSnapshot = await this.smartPickSnapshotRepo.findOne({
-      where: { user_id: user.id },
+      where: { user_id: user.id, inputs_hash: suggestion.inputs_hash },
     });
-    if (
-      currentSnapshot &&
-      currentSnapshot.inputs_hash !== suggestion.inputs_hash
-    ) {
+    if (!currentSnapshot) {
       throw new BadRequestException('Smart Pick product suggestion is stale.');
     }
     const existing = await this.gapActionRepo.findOne({

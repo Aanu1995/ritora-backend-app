@@ -324,6 +324,8 @@ describe('ProductCheckService', () => {
     expect(aiReviewProvider.review).toHaveBeenCalledWith(
       expect.objectContaining({
         language: 'en',
+        source: ProductCheckSource.IngredientPaste,
+        userId: 'user-1',
         product: expect.objectContaining({
           id: 'checked-product',
           inciIngredients: ['Niacinamide'],

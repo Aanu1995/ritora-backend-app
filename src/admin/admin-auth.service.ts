@@ -44,10 +44,21 @@ import {
 } from './entities/admin-audit-log.entity';
 import { AdminSession } from './entities/admin-session.entity';
 import {
+  buildTotpUri,
+  formatTotpSecret,
+  generateRecoveryCodes,
+  generateTotpSecret,
+  normalizeRecoveryCode,
+  verifyTotpCode,
+} from './admin-totp';
+import {
   AdminPermission,
   type AdminAuthenticatedUser,
-  type AdminAuthResponse,
+  type AdminLoginResponse,
   type AdminListQuery,
+  type AdminMfaEnableResponse,
+  type AdminMfaSetupResponse,
+  type AdminMfaStatusResponse,
   type AdminMemberListResponse,
   type AdminMemberResponse,
   type AdminSessionResponse,
@@ -71,6 +82,12 @@ type AdminAuditContext = {
 
 type AdminLogoutContext = {
   ip?: string;
+  userAgent?: string;
+};
+
+type AdminSecurityContext = {
+  ip?: string;
+  sessionId: string;
   userAgent?: string;
 };
 
@@ -100,9 +117,36 @@ const ADMIN_LIST_SELECT_COLUMNS = [
   'admin.created_by_admin_id',
   'admin.accepted_at',
   'admin.last_login_at',
+  'admin.mfa_enabled_at',
   'admin.created_at',
   'admin.updated_at',
 ] as const;
+const ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS = [
+  'id',
+  'email',
+  'canonical_email',
+  'name',
+  'role',
+  'status',
+  'password_hash',
+  'invitation_token_hash',
+  'invitation_expires_at',
+  'password_reset_token_hash',
+  'password_reset_expires',
+  'mfa_totp_secret',
+  'mfa_pending_totp_secret',
+  'mfa_pending_expires_at',
+  'mfa_enabled_at',
+  'mfa_last_used_time_step',
+  'mfa_recovery_code_hashes',
+  'created_by_admin_id',
+  'accepted_at',
+  'last_login_at',
+  'deleted_at',
+  'created_at',
+  'updated_at',
+] as const;
+const ADMIN_MFA_SETUP_EXPIRY_MS = 10 * 60 * 1000;
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
@@ -175,7 +219,8 @@ export class AdminAuthService implements OnModuleInit {
     res: Response,
     ip?: string,
     userAgent?: string,
-  ): Promise<AdminAuthResponse> {
+    mfaCode?: string,
+  ): Promise<AdminLoginResponse> {
     const account = await this.findAccountForAuth(email);
 
     if (
@@ -192,6 +237,10 @@ export class AdminAuthService implements OnModuleInit {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (this.isMfaEnabled(account) && !mfaCode?.trim()) {
+      return { mfaRequired: true };
+    }
+
     account.last_login_at = nowDate();
 
     const { accessToken, authenticatedAccount } = await this.createSession(
@@ -199,6 +248,7 @@ export class AdminAuthService implements OnModuleInit {
       res,
       ip,
       userAgent,
+      mfaCode,
     );
 
     return {
@@ -475,6 +525,279 @@ export class AdminAuthService implements OnModuleInit {
     return [this.toSessionResponse(session, currentAdmin.sessionId)];
   }
 
+  async getMfaStatus(
+    currentAdmin: AdminAuthenticatedUser,
+  ): Promise<AdminMfaStatusResponse> {
+    const account = await this.accountsRepository.findOne({
+      select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
+      where: {
+        deleted_at: IsNull(),
+        id: currentAdmin.id,
+        status: AdminAccountStatus.Active,
+      },
+    });
+
+    if (!account) {
+      throw new UnauthorizedException();
+    }
+
+    return this.toMfaStatusResponse(account);
+  }
+
+  async startMfaSetup(
+    currentAdmin: AdminAuthenticatedUser,
+    currentPassword: string,
+  ): Promise<AdminMfaSetupResponse> {
+    const secret = generateTotpSecret();
+    const expiresAt = new Date(nowDate().getTime() + ADMIN_MFA_SETUP_EXPIRY_MS);
+
+    const account = await this.runAdminMutation(
+      async ({ accountsRepository }) => {
+        const lockedAccount = await accountsRepository.findOne({
+          lock: { mode: 'pessimistic_write' },
+          select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
+          where: {
+            deleted_at: IsNull(),
+            id: currentAdmin.id,
+            status: AdminAccountStatus.Active,
+          },
+        });
+
+        if (!lockedAccount) {
+          throw new UnauthorizedException();
+        }
+
+        await this.assertCurrentPassword(lockedAccount, currentPassword);
+
+        if (this.isMfaEnabled(lockedAccount)) {
+          throw new ConflictException('MFA is already enabled');
+        }
+
+        lockedAccount.mfa_pending_totp_secret = secret;
+        lockedAccount.mfa_pending_expires_at = expiresAt;
+        await accountsRepository.save(lockedAccount);
+        return lockedAccount;
+      },
+    );
+
+    return {
+      expiresAt: toIsoString(expiresAt),
+      manualEntryKey: formatTotpSecret(secret),
+      otpauthUri: buildTotpUri({ email: account.email, secret }),
+      secret,
+    };
+  }
+
+  async enableMfa(
+    currentAdmin: AdminAuthenticatedUser,
+    code: string,
+    context: AdminSecurityContext,
+  ): Promise<AdminMfaEnableResponse> {
+    const recoveryCodes = generateRecoveryCodes();
+
+    const account = await this.runAdminMutation(
+      async ({ accountsRepository, auditLogsRepository }) => {
+        const lockedAccount = await accountsRepository.findOne({
+          lock: { mode: 'pessimistic_write' },
+          select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
+          where: {
+            deleted_at: IsNull(),
+            id: currentAdmin.id,
+            status: AdminAccountStatus.Active,
+          },
+        });
+
+        if (!lockedAccount) {
+          throw new UnauthorizedException();
+        }
+        if (this.isMfaEnabled(lockedAccount)) {
+          throw new ConflictException('MFA is already enabled');
+        }
+        if (
+          !lockedAccount.mfa_pending_totp_secret ||
+          !lockedAccount.mfa_pending_expires_at ||
+          isBeforeNow(lockedAccount.mfa_pending_expires_at)
+        ) {
+          throw new BadRequestException('MFA setup has expired');
+        }
+
+        const verification = verifyTotpCode(
+          lockedAccount.mfa_pending_totp_secret,
+          code,
+        );
+        if (!verification) {
+          throw new UnauthorizedException('Invalid MFA code');
+        }
+
+        lockedAccount.mfa_totp_secret = lockedAccount.mfa_pending_totp_secret;
+        lockedAccount.mfa_enabled_at = nowDate();
+        lockedAccount.mfa_last_used_time_step = String(verification.timeStep);
+        lockedAccount.mfa_recovery_code_hashes = recoveryCodes.map((value) =>
+          this.sha256(normalizeRecoveryCode(value)),
+        );
+        lockedAccount.mfa_pending_totp_secret = null;
+        lockedAccount.mfa_pending_expires_at = null;
+        await accountsRepository.save(lockedAccount);
+
+        await this.writeAdminAuditLog(
+          {
+            action: AdminAuditAction.AdminMfaEnabled,
+            actor: currentAdmin,
+            context: {
+              ip: context.ip,
+              reason: 'Admin enabled multi-factor authentication',
+              sessionId: context.sessionId,
+              userAgent: context.userAgent,
+            },
+            metadata: {
+              recoveryCodesIssued: recoveryCodes.length,
+            },
+            targetAdminId: currentAdmin.id,
+          },
+          auditLogsRepository,
+        );
+
+        return lockedAccount;
+      },
+    );
+
+    return {
+      ...this.toMfaStatusResponse(account),
+      recoveryCodes,
+    };
+  }
+
+  async disableMfa(
+    currentAdmin: AdminAuthenticatedUser,
+    currentPassword: string,
+    code: string,
+    context: AdminSecurityContext,
+  ): Promise<AdminMfaStatusResponse> {
+    const account = await this.runAdminMutation(
+      async ({ accountsRepository, auditLogsRepository }) => {
+        const lockedAccount = await accountsRepository.findOne({
+          lock: { mode: 'pessimistic_write' },
+          select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
+          where: {
+            deleted_at: IsNull(),
+            id: currentAdmin.id,
+            status: AdminAccountStatus.Active,
+          },
+        });
+
+        if (!lockedAccount) {
+          throw new UnauthorizedException();
+        }
+
+        await this.assertCurrentPassword(lockedAccount, currentPassword);
+
+        if (!this.isMfaEnabled(lockedAccount)) {
+          return lockedAccount;
+        }
+
+        await this.verifyAndApplyMfaCode(lockedAccount, code, {
+          auditLogsRepository,
+          ip: context.ip,
+          sessionId: currentAdmin.sessionId,
+          userAgent: context.userAgent,
+        });
+
+        lockedAccount.mfa_totp_secret = null;
+        lockedAccount.mfa_enabled_at = null;
+        lockedAccount.mfa_last_used_time_step = null;
+        lockedAccount.mfa_recovery_code_hashes = null;
+        lockedAccount.mfa_pending_totp_secret = null;
+        lockedAccount.mfa_pending_expires_at = null;
+        await accountsRepository.save(lockedAccount);
+
+        await this.writeAdminAuditLog(
+          {
+            action: AdminAuditAction.AdminMfaDisabled,
+            actor: currentAdmin,
+            context: {
+              ip: context.ip,
+              reason: 'Admin disabled multi-factor authentication',
+              sessionId: context.sessionId,
+              userAgent: context.userAgent,
+            },
+            metadata: {},
+            targetAdminId: currentAdmin.id,
+          },
+          auditLogsRepository,
+        );
+
+        return lockedAccount;
+      },
+    );
+
+    return this.toMfaStatusResponse(account);
+  }
+
+  async regenerateMfaRecoveryCodes(
+    currentAdmin: AdminAuthenticatedUser,
+    currentPassword: string,
+    code: string,
+    context: AdminSecurityContext,
+  ): Promise<AdminMfaEnableResponse> {
+    const recoveryCodes = generateRecoveryCodes();
+
+    const account = await this.runAdminMutation(
+      async ({ accountsRepository, auditLogsRepository }) => {
+        const lockedAccount = await accountsRepository.findOne({
+          lock: { mode: 'pessimistic_write' },
+          select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
+          where: {
+            deleted_at: IsNull(),
+            id: currentAdmin.id,
+            status: AdminAccountStatus.Active,
+          },
+        });
+
+        if (!lockedAccount || !this.isMfaEnabled(lockedAccount)) {
+          throw new BadRequestException('MFA is not enabled');
+        }
+
+        await this.assertCurrentPassword(lockedAccount, currentPassword);
+        await this.verifyAndApplyMfaCode(lockedAccount, code, {
+          auditLogsRepository,
+          ip: context.ip,
+          sessionId: currentAdmin.sessionId,
+          userAgent: context.userAgent,
+        });
+
+        lockedAccount.mfa_recovery_code_hashes = recoveryCodes.map((value) =>
+          this.sha256(normalizeRecoveryCode(value)),
+        );
+        await accountsRepository.save(lockedAccount);
+
+        await this.writeAdminAuditLog(
+          {
+            action: AdminAuditAction.AdminMfaRecoveryCodesRotated,
+            actor: currentAdmin,
+            context: {
+              ip: context.ip,
+              reason: 'Admin regenerated MFA recovery codes',
+              sessionId: context.sessionId,
+              userAgent: context.userAgent,
+            },
+            metadata: {
+              recoveryCodesIssued: recoveryCodes.length,
+            },
+            targetAdminId: currentAdmin.id,
+          },
+          auditLogsRepository,
+        );
+
+        return lockedAccount;
+      },
+    );
+
+    return {
+      ...this.toMfaStatusResponse(account),
+      recoveryCodes,
+    };
+  }
+
   async createAdmin(
     currentAdmin: AdminActor,
     input: CreateAdminInput,
@@ -718,25 +1041,7 @@ export class AdminAuthService implements OnModuleInit {
 
     const existing = await this.accountsRepository.findOne({
       where: { canonical_email: canonicalEmail },
-      select: [
-        'id',
-        'email',
-        'canonical_email',
-        'name',
-        'role',
-        'status',
-        'password_hash',
-        'invitation_token_hash',
-        'invitation_expires_at',
-        'password_reset_token_hash',
-        'password_reset_expires',
-        'created_by_admin_id',
-        'accepted_at',
-        'last_login_at',
-        'deleted_at',
-        'created_at',
-        'updated_at',
-      ],
+      select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
     });
 
     if (
@@ -813,25 +1118,7 @@ export class AdminAuthService implements OnModuleInit {
   ): Promise<AdminAccount | null> {
     return this.accountsRepository.findOne({
       where: { canonical_email: this.canonicalizeEmail(email) },
-      select: [
-        'id',
-        'email',
-        'canonical_email',
-        'name',
-        'role',
-        'status',
-        'password_hash',
-        'invitation_token_hash',
-        'invitation_expires_at',
-        'password_reset_token_hash',
-        'password_reset_expires',
-        'created_by_admin_id',
-        'accepted_at',
-        'last_login_at',
-        'deleted_at',
-        'created_at',
-        'updated_at',
-      ],
+      select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
     });
   }
 
@@ -840,6 +1127,7 @@ export class AdminAuthService implements OnModuleInit {
     res: Response,
     ip?: string,
     userAgent?: string,
+    mfaCode?: string,
   ): Promise<{ accessToken: string; authenticatedAccount: AdminAccount }> {
     const sessionId = ulid();
     const secret = randomBytes(32).toString('hex');
@@ -856,6 +1144,7 @@ export class AdminAuthService implements OnModuleInit {
         const sessionsRepository = manager.getRepository(AdminSession);
         const activeAccount = await accountsRepository.findOne({
           lock: { mode: 'pessimistic_write' },
+          select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
           where: {
             deleted_at: IsNull(),
             id: account.id,
@@ -868,6 +1157,17 @@ export class AdminAuthService implements OnModuleInit {
         }
 
         activeAccount.last_login_at = account.last_login_at;
+        if (this.isMfaEnabled(activeAccount)) {
+          if (!mfaCode) {
+            throw new UnauthorizedException('MFA code required');
+          }
+          await this.verifyAndApplyMfaCode(activeAccount, mfaCode, {
+            auditLogsRepository: manager.getRepository(AdminAuditLog),
+            ip,
+            sessionId,
+            userAgent,
+          });
+        }
         await accountsRepository.save(activeAccount);
         await sessionsRepository.update(
           { admin_id: account.id, revoked_at: IsNull() },
@@ -950,6 +1250,128 @@ export class AdminAuthService implements OnModuleInit {
     );
   }
 
+  private toMfaStatusResponse(account: AdminAccount): AdminMfaStatusResponse {
+    const recoveryCodesRemaining =
+      account.mfa_recovery_code_hashes?.length ?? 0;
+
+    return {
+      enabled: this.isMfaEnabled(account),
+      enabledAt: toNullableIsoString(account.mfa_enabled_at),
+      pendingSetupExpiresAt: toNullableIsoString(
+        account.mfa_pending_expires_at,
+      ),
+      recoveryCodesRemaining,
+    };
+  }
+
+  private isMfaEnabled(account: AdminAccount): boolean {
+    return Boolean(account.mfa_enabled_at);
+  }
+
+  private async assertCurrentPassword(
+    account: AdminAccount,
+    currentPassword: string,
+  ): Promise<void> {
+    if (!account.password_hash) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const valid = await compare(currentPassword, account.password_hash);
+    if (!valid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+  }
+
+  private async verifyAndApplyMfaCode(
+    account: AdminAccount,
+    code: string,
+    context: {
+      auditLogsRepository: Repository<AdminAuditLog>;
+      ip?: string;
+      sessionId: string;
+      userAgent?: string;
+    },
+  ): Promise<void> {
+    if (!this.isMfaEnabled(account) || !account.mfa_totp_secret) {
+      throw new UnauthorizedException('Invalid MFA code');
+    }
+
+    const totpVerification = verifyTotpCode(account.mfa_totp_secret, code);
+    const lastUsedTimeStep = Number(account.mfa_last_used_time_step ?? -1);
+
+    if (
+      totpVerification &&
+      Number.isFinite(lastUsedTimeStep) &&
+      totpVerification.timeStep > lastUsedTimeStep
+    ) {
+      account.mfa_last_used_time_step = String(totpVerification.timeStep);
+      return;
+    }
+
+    const recoveryCodeUsed = await this.consumeRecoveryCode(
+      account,
+      code,
+      context,
+    );
+    if (recoveryCodeUsed) {
+      return;
+    }
+
+    throw new UnauthorizedException('Invalid MFA code');
+  }
+
+  private async consumeRecoveryCode(
+    account: AdminAccount,
+    code: string,
+    context: {
+      auditLogsRepository: Repository<AdminAuditLog>;
+      ip?: string;
+      sessionId: string;
+      userAgent?: string;
+    },
+  ): Promise<boolean> {
+    const recoveryHashes = account.mfa_recovery_code_hashes ?? [];
+    if (recoveryHashes.length === 0) {
+      return false;
+    }
+
+    const normalizedHash = this.sha256(normalizeRecoveryCode(code));
+    const matchedIndex = recoveryHashes.findIndex((hashValue) =>
+      this.timingSafeCompare(
+        Buffer.from(normalizedHash, 'hex'),
+        Buffer.from(hashValue, 'hex'),
+      ),
+    );
+
+    if (matchedIndex === -1) {
+      return false;
+    }
+
+    account.mfa_recovery_code_hashes = recoveryHashes.filter(
+      (_hashValue, index) => index !== matchedIndex,
+    );
+
+    await this.writeAdminAuditLog(
+      {
+        action: AdminAuditAction.AdminMfaRecoveryCodeUsed,
+        actor: account,
+        context: {
+          ip: context.ip,
+          reason: 'Admin used an MFA recovery code',
+          sessionId: context.sessionId,
+          userAgent: context.userAgent,
+        },
+        metadata: {
+          recoveryCodesRemaining: account.mfa_recovery_code_hashes.length,
+        },
+        targetAdminId: account.id,
+      },
+      context.auditLogsRepository,
+    );
+
+    return true;
+  }
+
   private toSessionResponse(
     session: AdminSession,
     currentSessionId: string,
@@ -976,6 +1398,8 @@ export class AdminAuthService implements OnModuleInit {
           ? toIsoString(account.created_at ?? nowDate())
           : null,
       lastLoginAt: toNullableIsoString(account.last_login_at),
+      mfaEnabled: this.isMfaEnabled(account),
+      mfaEnabledAt: toNullableIsoString(account.mfa_enabled_at),
       name: account.name,
       permissions: [
         AdminPermission.MetricsRead,

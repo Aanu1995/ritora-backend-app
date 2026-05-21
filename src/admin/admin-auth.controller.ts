@@ -22,10 +22,18 @@ import { AdminAuthService } from './admin-auth.service';
 import { AdminJwtAuthGuard } from './admin-jwt-auth.guard';
 import { AdminForgotPasswordDto } from './dto/admin-forgot-password.dto';
 import { AdminLoginDto } from './dto/admin-login.dto';
+import {
+  AdminMfaChallengeDto,
+  AdminMfaEnableDto,
+  AdminMfaPasswordDto,
+} from './dto/admin-mfa.dto';
 import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
 import type {
   AdminAuthenticatedUser,
-  AdminAuthResponse,
+  AdminLoginResponse,
+  AdminMfaEnableResponse,
+  AdminMfaSetupResponse,
+  AdminMfaStatusResponse,
   AdminSessionResponse,
 } from './admin.types';
 
@@ -81,13 +89,14 @@ export class AdminAuthController {
     @Body() dto: AdminLoginDto,
     @Res({ passthrough: true }) res: Response,
     @Req() req: Request,
-  ): Promise<AdminAuthResponse> {
+  ): Promise<AdminLoginResponse> {
     return this.adminAuthService.login(
       dto.email,
       dto.password,
       res,
       req.ip,
       getHeaderValue(req.headers, 'user-agent'),
+      dto.mfaCode,
     );
   }
 
@@ -151,6 +160,88 @@ export class AdminAuthController {
     @CurrentUser() user: AdminAuthenticatedUser,
   ): Promise<AdminSessionResponse[]> {
     return this.adminAuthService.listSessions(user);
+  }
+
+  @Get('mfa')
+  @UseGuards(AdminJwtAuthGuard)
+  @ApiOkResponse({ type: Object })
+  getMfaStatus(
+    @CurrentUser() user: AdminAuthenticatedUser,
+  ): Promise<AdminMfaStatusResponse> {
+    return this.adminAuthService.getMfaStatus(user);
+  }
+
+  @Post('mfa/setup')
+  @UseGuards(OriginCheckGuard, AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Throttle(adminAuthThrottle(5))
+  @ApiOkResponse({ type: Object })
+  startMfaSetup(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: AdminMfaPasswordDto,
+  ): Promise<AdminMfaSetupResponse> {
+    return this.adminAuthService.startMfaSetup(user, dto.currentPassword);
+  }
+
+  @Post('mfa/enable')
+  @UseGuards(OriginCheckGuard, AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Throttle(adminAuthThrottle(5))
+  @ApiOkResponse({ type: Object })
+  enableMfa(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: AdminMfaEnableDto,
+    @Req() req: Request,
+  ): Promise<AdminMfaEnableResponse> {
+    return this.adminAuthService.enableMfa(user, dto.code, {
+      ip: req.ip,
+      sessionId: user.sessionId,
+      userAgent: getHeaderValue(req.headers, 'user-agent'),
+    });
+  }
+
+  @Post('mfa/recovery-codes')
+  @UseGuards(OriginCheckGuard, AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Throttle(adminAuthThrottle(5))
+  @ApiOkResponse({ type: Object })
+  regenerateMfaRecoveryCodes(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: AdminMfaChallengeDto,
+    @Req() req: Request,
+  ): Promise<AdminMfaEnableResponse> {
+    return this.adminAuthService.regenerateMfaRecoveryCodes(
+      user,
+      dto.currentPassword,
+      dto.code,
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Post('mfa/disable')
+  @UseGuards(OriginCheckGuard, AdminJwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Throttle(adminAuthThrottle(5))
+  @ApiOkResponse({ type: Object })
+  disableMfa(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: AdminMfaChallengeDto,
+    @Req() req: Request,
+  ): Promise<AdminMfaStatusResponse> {
+    return this.adminAuthService.disableMfa(
+      user,
+      dto.currentPassword,
+      dto.code,
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
   }
 
   @Post('logout')

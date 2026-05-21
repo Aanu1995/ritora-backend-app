@@ -15,6 +15,13 @@ export enum AdminAuditAction {
   AdminLoggedOut = 'admin_logged_out',
   AdminSessionRevoked = 'admin_session_revoked',
   AdminSessionsRevoked = 'admin_sessions_revoked',
+  AdminMfaEnabled = 'admin_mfa_enabled',
+  AdminMfaDisabled = 'admin_mfa_disabled',
+  AdminMfaRecoveryCodesRotated = 'admin_mfa_recovery_codes_rotated',
+  AdminMfaRecoveryCodeUsed = 'admin_mfa_recovery_code_used',
+  OperationalIncidentCreated = 'operational_incident_created',
+  OperationalIncidentResolved = 'operational_incident_resolved',
+  UserNoteCreated = 'user_note_created',
   UserRestricted = 'user_restricted',
   UserUnrestricted = 'user_unrestricted',
 }

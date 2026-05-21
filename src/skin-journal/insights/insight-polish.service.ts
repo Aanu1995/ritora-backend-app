@@ -10,6 +10,7 @@ import {
   readFeatureOpenAiModel,
 } from '../../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import { estimateCost } from '../../suggestions/services/suggestion-ai-contract';
 import {
   SKIN_JOURNAL_INSIGHT_PROMPT_VERSION,
   SKIN_JOURNAL_INSIGHT_POLISH_TIMEOUT_MS,
@@ -103,6 +104,25 @@ interface PolishOptions {
   aiPolishEnabled: boolean;
 }
 
+export interface InsightPolishUsage {
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  estimatedCostUsd: number | null;
+  durationMs: number;
+}
+
+export interface InsightPolishRunResult {
+  candidates: InsightCandidate[];
+  usage: InsightPolishUsage | null;
+}
+
+interface PolishRequestResult {
+  output: PolishOutput | null;
+  usage: InsightPolishUsage;
+}
+
 @Injectable()
 export class InsightPolishService {
   private readonly logger = new Logger(InsightPolishService.name);
@@ -119,12 +139,24 @@ export class InsightPolishService {
     candidates: InsightCandidate[],
     options: PolishOptions,
   ): Promise<InsightCandidate[]> {
+    const result = await this.polishWithUsage(candidates, options);
+    return result.candidates;
+  }
+
+  async polishWithUsage(
+    candidates: InsightCandidate[],
+    options: PolishOptions,
+  ): Promise<InsightPolishRunResult> {
     if (!this.shouldRun(options) || candidates.length === 0) {
-      return this.dropUnverifiedAiSourcedCandidates(candidates);
+      return {
+        candidates: this.dropUnverifiedAiSourcedCandidates(candidates),
+        usage: null,
+      };
     }
 
     const cacheable: InsightCandidate[] = [];
     const outputByHash = new Map<string, CachedPolishResult>();
+    let requestUsage: InsightPolishUsage | null = null;
     for (const candidate of candidates) {
       const cached = this.getCachedPolish(candidate, options.locale);
       if (cached) {
@@ -138,9 +170,12 @@ export class InsightPolishService {
     }
 
     if (cacheable.length > 0) {
-      const output = await this.requestPolish(cacheable, options.locale);
-      if (output) {
-        for (const insight of output.insights) {
+      const result = await this.requestPolish(cacheable, options.locale);
+      if (result) {
+        requestUsage = result.usage;
+      }
+      if (result?.output) {
+        for (const insight of result.output.insights) {
           const candidate = cacheable.find(
             (item) => item.metadata.facts_hash === insight.facts_hash,
           );
@@ -156,14 +191,17 @@ export class InsightPolishService {
       }
     }
 
-    return candidates
-      .map((candidate) =>
-        this.applyPolish(
-          candidate,
-          outputByHash.get(candidate.metadata.facts_hash),
-        ),
-      )
-      .filter((candidate) => this.shouldReturnCandidate(candidate));
+    return {
+      candidates: candidates
+        .map((candidate) =>
+          this.applyPolish(
+            candidate,
+            outputByHash.get(candidate.metadata.facts_hash),
+          ),
+        )
+        .filter((candidate) => this.shouldReturnCandidate(candidate)),
+      usage: requestUsage,
+    };
   }
 
   promptVersion(): string {
@@ -181,7 +219,7 @@ export class InsightPolishService {
   private async requestPolish(
     candidates: InsightCandidate[],
     locale: string,
-  ): Promise<PolishOutput | null> {
+  ): Promise<PolishRequestResult | null> {
     const startedAt = Date.now();
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
@@ -242,20 +280,31 @@ export class InsightPolishService {
       }
 
       const payload = (await response.json()) as OpenAiResponsePayload;
-      const text = extractOutputText(payload);
-      if (!text) {
-        return null;
-      }
-      const parsed = POLISH_RESPONSE_SCHEMA.safeParse(JSON.parse(text));
-      if (!parsed.success) {
-        this.logger.warn('Insight polish response failed schema validation');
-        return null;
-      }
-      this.applyRequestMetadata(candidates, {
+      const usage = this.extractUsage(payload, {
         model,
         durationMs: Date.now() - startedAt,
       });
-      return parsed.data;
+      const text = extractOutputText(payload);
+      if (!text) {
+        return { output: null, usage };
+      }
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(text);
+      } catch {
+        this.logger.warn('Insight polish response was not valid JSON');
+        return { output: null, usage };
+      }
+      const parsed = POLISH_RESPONSE_SCHEMA.safeParse(parsedJson);
+      if (!parsed.success) {
+        this.logger.warn('Insight polish response failed schema validation');
+        return { output: null, usage };
+      }
+      this.applyRequestMetadata(candidates, {
+        model,
+        durationMs: usage.durationMs,
+      });
+      return { output: parsed.data, usage };
     } catch (error) {
       this.logger.warn(
         `Insight polish failed: ${
@@ -275,6 +324,37 @@ export class InsightPolishService {
       candidate.metadata.prompt_version = this.promptVersion();
       candidate.metadata.duration_ms = metadata.durationMs;
     }
+  }
+
+  private extractUsage(
+    payload: OpenAiResponsePayload,
+    metadata: { model: string; durationMs: number },
+  ): InsightPolishUsage {
+    const usage = payload.usage;
+    const inputTokens =
+      numberOrNull(usage?.input_tokens) ?? numberOrNull(usage?.prompt_tokens);
+    const outputTokens =
+      numberOrNull(usage?.output_tokens) ??
+      numberOrNull(usage?.completion_tokens);
+    const totalTokens =
+      numberOrNull(usage?.total_tokens) ??
+      (inputTokens !== null || outputTokens !== null
+        ? (inputTokens ?? 0) + (outputTokens ?? 0)
+        : null);
+    return {
+      model: metadata.model,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      estimatedCostUsd:
+        inputTokens === null && outputTokens === null
+          ? null
+          : estimateCost({
+              input_tokens: inputTokens ?? 0,
+              output_tokens: outputTokens ?? 0,
+            }),
+      durationMs: metadata.durationMs,
+    };
   }
 
   private applyPolish(
@@ -402,4 +482,8 @@ export class InsightPolishService {
       ) ?? SKIN_JOURNAL_INSIGHTS_DEFAULT_MODEL
     );
   }
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }

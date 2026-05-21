@@ -21,6 +21,7 @@ import {
   AdminAuditLog,
 } from './entities/admin-audit-log.entity';
 import { AdminSession } from './entities/admin-session.entity';
+import { generateTotpCode } from './admin-totp';
 import { AdminAuthService } from './admin-auth.service';
 
 type RepositoryMock = Record<
@@ -102,6 +103,12 @@ function createAdminAccount(
     invitation_expires_at: null,
     invitation_token_hash: null,
     last_login_at: null,
+    mfa_enabled_at: null,
+    mfa_last_used_time_step: null,
+    mfa_pending_expires_at: null,
+    mfa_pending_totp_secret: null,
+    mfa_recovery_code_hashes: null,
+    mfa_totp_secret: null,
     name: 'Root Admin',
     password_hash:
       '$2b$04$abcdefghijklmnopqrstuu5WQz2If0sFxniq3JeiJdCzR4G9LQpQq',
@@ -373,8 +380,10 @@ describe('AdminAuthService', () => {
       'Jest',
     );
 
-    expect(result.accessToken).toBe('admin-access-token');
-    expect(result.member).toMatchObject({
+    expect('accessToken' in result ? result.accessToken : null).toBe(
+      'admin-access-token',
+    );
+    expect('member' in result ? result.member : null).toMatchObject({
       email: 'owner@ritora.app',
       role: AdminAccountRole.Root,
     });
@@ -390,6 +399,112 @@ describe('AdminAuthService', () => {
         user_agent: 'Jest',
       }),
     );
+  });
+
+  it('requires an MFA code before issuing a session for MFA-enabled admins', async () => {
+    const passwordHash = await hash('RootAdmin123!', 4);
+    const account = createAdminAccount({
+      mfa_enabled_at: new Date('2026-05-20T09:00:00.000Z'),
+      mfa_totp_secret: 'JBSWY3DPEHPK3PXP',
+      password_hash: passwordHash,
+    });
+    const response = createResponse();
+    const sessionSave = jest.fn();
+    const service = createService({
+      accountsRepository: {
+        findOne: jest.fn(async () => account),
+      },
+      sessionsRepository: {
+        save: sessionSave,
+      },
+    });
+
+    await expect(
+      service.login('owner@ritora.app', 'RootAdmin123!', response),
+    ).resolves.toEqual({ mfaRequired: true });
+
+    expect(sessionSave).not.toHaveBeenCalled();
+    expect(response.cookie).not.toHaveBeenCalled();
+  });
+
+  it('verifies MFA inside the locked login transaction before issuing a session', async () => {
+    const passwordHash = await hash('RootAdmin123!', 4);
+    const mfaAccount = createAdminAccount({
+      mfa_enabled_at: new Date('2026-05-20T09:00:00.000Z'),
+      mfa_totp_secret: 'JBSWY3DPEHPK3PXP',
+      password_hash: passwordHash,
+    });
+    const accountFindOne = jest
+      .fn<Promise<AdminAccount | null>, []>()
+      .mockResolvedValueOnce(mfaAccount)
+      .mockResolvedValueOnce(mfaAccount);
+    const sessionSave = jest.fn(async (value: AdminSession) => value);
+    const service = createService({
+      accountsRepository: {
+        findOne: accountFindOne,
+        save: jest.fn(async (value: AdminAccount) => value),
+      },
+      sessionsRepository: {
+        save: sessionSave,
+        update: jest.fn(),
+      },
+    });
+    const code = generateTotpCode('JBSWY3DPEHPK3PXP');
+
+    await expect(
+      service.login(
+        'owner@ritora.app',
+        'RootAdmin123!',
+        createResponse(),
+        '127.0.0.1',
+        'Jest',
+        code,
+      ),
+    ).resolves.toMatchObject({ accessToken: 'admin-access-token' });
+
+    expect(accountFindOne).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        lock: { mode: 'pessimistic_write' },
+      }),
+    );
+    expect(sessionSave).toHaveBeenCalled();
+    expect(Number(mfaAccount.mfa_last_used_time_step)).toBeGreaterThan(0);
+  });
+
+  it('rejects replayed MFA time steps before creating a login session', async () => {
+    const passwordHash = await hash('RootAdmin123!', 4);
+    const secret = 'JBSWY3DPEHPK3PXP';
+    const timeStep = Math.floor(Date.now() / 1000 / 30);
+    const mfaAccount = createAdminAccount({
+      mfa_enabled_at: new Date('2026-05-20T09:00:00.000Z'),
+      mfa_last_used_time_step: String(timeStep),
+      mfa_totp_secret: secret,
+      password_hash: passwordHash,
+    });
+    const sessionSave = jest.fn();
+    const service = createService({
+      accountsRepository: {
+        findOne: jest
+          .fn<Promise<AdminAccount | null>, []>()
+          .mockResolvedValueOnce(mfaAccount)
+          .mockResolvedValueOnce(mfaAccount),
+      },
+      sessionsRepository: {
+        save: sessionSave,
+      },
+    });
+
+    await expect(
+      service.login(
+        'owner@ritora.app',
+        'RootAdmin123!',
+        createResponse(),
+        undefined,
+        undefined,
+        generateTotpCode(secret, timeStep),
+      ),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(sessionSave).not.toHaveBeenCalled();
   });
 
   it('revokes previous active admin sessions before issuing a new login session', async () => {
@@ -510,6 +625,136 @@ describe('AdminAuthService', () => {
         status: AdminAccountStatus.Active,
       }),
     ).resolves.toEqual([]);
+  });
+
+  it('starts MFA setup only after current password reauthentication', async () => {
+    const passwordHash = await hash('RootAdmin123!', 4);
+    const account = createAdminAccount({ password_hash: passwordHash });
+    const save = jest.fn(async (value: AdminAccount) => value);
+    const service = createService({
+      accountsRepository: {
+        findOne: jest.fn(async () => account),
+        save,
+      },
+    });
+
+    const setup = await service.startMfaSetup(
+      {
+        email: 'owner@ritora.app',
+        id: 'admin-root',
+        name: 'Root Admin',
+        role: AdminAccountRole.Root,
+        sessionId: 'session-current',
+        status: AdminAccountStatus.Active,
+      },
+      'RootAdmin123!',
+    );
+
+    expect(setup.secret).toMatch(/^[A-Z2-7]+$/);
+    expect(setup.manualEntryKey).toContain(' ');
+    expect(setup.otpauthUri).toContain('otpauth://totp/');
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mfa_pending_expires_at: expect.any(Date),
+        mfa_pending_totp_secret: setup.secret,
+      }),
+    );
+  });
+
+  it('enables MFA from a pending secret and returns one-time recovery codes', async () => {
+    const secret = 'JBSWY3DPEHPK3PXP';
+    const account = createAdminAccount({
+      mfa_pending_expires_at: new Date(Date.now() + 60_000),
+      mfa_pending_totp_secret: secret,
+    });
+    const save = jest.fn(async (value: AdminAccount) => value);
+    const auditSave = jest.fn(async (value: AdminAuditLog) => value);
+    const service = createService({
+      accountsRepository: {
+        findOne: jest.fn(async () => account),
+        save,
+      },
+      auditLogsRepository: { save: auditSave },
+    });
+
+    const result = await service.enableMfa(
+      {
+        email: 'owner@ritora.app',
+        id: 'admin-root',
+        name: 'Root Admin',
+        role: AdminAccountRole.Root,
+        sessionId: 'session-current',
+        status: AdminAccountStatus.Active,
+      },
+      generateTotpCode(secret),
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-current',
+        userAgent: 'Jest',
+      },
+    );
+
+    expect(result.enabled).toBe(true);
+    expect(result.recoveryCodes).toHaveLength(10);
+    expect(account.mfa_totp_secret).toBe(secret);
+    expect(account.mfa_pending_totp_secret).toBeNull();
+    expect(account.mfa_recovery_code_hashes).toHaveLength(10);
+    expect(JSON.stringify(account.mfa_recovery_code_hashes)).not.toContain(
+      result.recoveryCodes[0],
+    );
+    expect(auditSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AdminMfaEnabled,
+        actor_admin_id: 'admin-root',
+        target_admin_id: 'admin-root',
+      }),
+    );
+  });
+
+  it('disables MFA only after password and second-factor verification', async () => {
+    const passwordHash = await hash('RootAdmin123!', 4);
+    const secret = 'JBSWY3DPEHPK3PXP';
+    const account = createAdminAccount({
+      mfa_enabled_at: new Date('2026-05-20T09:00:00.000Z'),
+      mfa_recovery_code_hashes: [sha256ForTest('RECOVERYCODE')],
+      mfa_totp_secret: secret,
+      password_hash: passwordHash,
+    });
+    const save = jest.fn(async (value: AdminAccount) => value);
+    const service = createService({
+      accountsRepository: {
+        findOne: jest.fn(async () => account),
+        save,
+      },
+    });
+
+    await expect(
+      service.disableMfa(
+        {
+          email: 'owner@ritora.app',
+          id: 'admin-root',
+          name: 'Root Admin',
+          role: AdminAccountRole.Root,
+          sessionId: 'session-current',
+          status: AdminAccountStatus.Active,
+        },
+        'RootAdmin123!',
+        generateTotpCode(secret),
+        { sessionId: 'session-current' },
+      ),
+    ).resolves.toEqual({
+      enabled: false,
+      enabledAt: null,
+      pendingSetupExpiresAt: null,
+      recoveryCodesRemaining: 0,
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mfa_enabled_at: null,
+        mfa_recovery_code_hashes: null,
+        mfa_totp_secret: null,
+      }),
+    );
   });
 
   it('locks and rotates the active admin refresh session', async () => {
@@ -676,7 +921,7 @@ describe('AdminAuthService', () => {
       createResponse(),
     );
 
-    expect(result.member).toMatchObject({
+    expect('member' in result ? result.member : null).toMatchObject({
       email: 'ops@ritora.app',
       permissions: [
         'metrics:read',
@@ -847,6 +1092,7 @@ describe('AdminAuthService', () => {
       'admin.created_by_admin_id',
       'admin.accepted_at',
       'admin.last_login_at',
+      'admin.mfa_enabled_at',
       'admin.created_at',
       'admin.updated_at',
     ]);

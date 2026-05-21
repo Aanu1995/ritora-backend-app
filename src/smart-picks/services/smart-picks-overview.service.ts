@@ -31,6 +31,7 @@ import { SmartPickProductSuggestion } from '../entities/smart-pick-product-sugge
 import { SmartPickSnapshot } from '../entities/smart-pick-snapshot.entity';
 import {
   SmartPicksBudgetTier,
+  type SmartPicksAiUsageMetrics,
   SmartPicksCoverage,
   SmartPicksEmptyReason,
   SmartPicksEmptyState,
@@ -273,6 +274,7 @@ export class SmartPicksOverviewService {
         context.activeProducts,
         DEFAULT_LANGUAGE,
       ),
+      aiUsage: aiUsageFromPlanDiagnostics(diagnostics),
     };
   }
 
@@ -381,6 +383,11 @@ export class SmartPicksOverviewService {
       recap_json: payload.recap,
       inputs_hash: context.inputsHash,
       generated_at: now,
+      ai_model: payload.aiUsage?.model ?? null,
+      ai_input_tokens: payload.aiUsage?.inputTokens ?? null,
+      ai_output_tokens: payload.aiUsage?.outputTokens ?? null,
+      ai_total_tokens: payload.aiUsage?.totalTokens ?? null,
+      ai_estimated_cost_usd: payload.aiUsage?.estimatedCostUsd ?? null,
     });
     return this.snapshotRepo.save(snapshot);
   }
@@ -775,7 +782,10 @@ export class SmartPicksOverviewService {
       !diagnostics.providerSkippedReason
     ) {
       this.productGenerationIssues.delete(jobKey);
-      return readyProductGenerationState();
+      return withAiUsage(
+        readyProductGenerationState(),
+        aiUsageFromDiagnostics(diagnostics),
+      );
     }
 
     const attemptedAt = new Date();
@@ -788,19 +798,26 @@ export class SmartPicksOverviewService {
       missingPickCount:
         missingPickCount > 0 ? missingPickCount : diagnostics.missingPickCount,
     });
-    return {
-      status: diagnostics.providerSkippedReason
-        ? SmartPicksProductGenerationStatus.Skipped
-        : SmartPicksProductGenerationStatus.Failed,
-      reason: productGenerationReason(diagnostics),
-      missingPickCount:
-        missingPickCount > 0 ? missingPickCount : diagnostics.missingPickCount,
-      isProcessing: false,
-      attemptedAt: toIsoString(attemptedAt),
-      retryAfter: toIsoString(
-        new Date(attemptedAt.getTime() + PRODUCT_GENERATION_RETRY_COOLDOWN_MS),
-      ),
-    };
+    return withAiUsage(
+      {
+        status: diagnostics.providerSkippedReason
+          ? SmartPicksProductGenerationStatus.Skipped
+          : SmartPicksProductGenerationStatus.Failed,
+        reason: productGenerationReason(diagnostics),
+        missingPickCount:
+          missingPickCount > 0
+            ? missingPickCount
+            : diagnostics.missingPickCount,
+        isProcessing: false,
+        attemptedAt: toIsoString(attemptedAt),
+        retryAfter: toIsoString(
+          new Date(
+            attemptedAt.getTime() + PRODUCT_GENERATION_RETRY_COOLDOWN_MS,
+          ),
+        ),
+      },
+      aiUsageFromDiagnostics(diagnostics),
+    );
   }
 
   private productGenerationJobKey(context: SmartPicksContext): string {
@@ -1143,6 +1160,7 @@ function combineGenerationDiagnostics(
     providerFailed: initial.providerFailed || retry.providerFailed,
     providerSkippedReason:
       initial.providerSkippedReason ?? retry.providerSkippedReason,
+    ...combineAiUsageDiagnostics(initial, retry),
   };
 }
 
@@ -1160,7 +1178,81 @@ function emptyGenerationDiagnostics(
     missingPickCount: requestedGapCount,
     providerFailed: false,
     providerSkippedReason: null,
+    model: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    estimatedCostUsd: null,
   };
+}
+
+function combineAiUsageDiagnostics(
+  initial: SmartPicksAiGenerationDiagnostics,
+  retry: SmartPicksAiGenerationDiagnostics,
+): SmartPicksAiUsageMetrics {
+  return {
+    estimatedCostUsd: nullableSum(
+      initial.estimatedCostUsd,
+      retry.estimatedCostUsd,
+    ),
+    inputTokens: nullableSum(initial.inputTokens, retry.inputTokens),
+    model: initial.model ?? retry.model,
+    outputTokens: nullableSum(initial.outputTokens, retry.outputTokens),
+    totalTokens: nullableSum(initial.totalTokens, retry.totalTokens),
+  };
+}
+
+function nullableSum(left: number | null, right: number | null): number | null {
+  return left === null && right === null ? null : (left ?? 0) + (right ?? 0);
+}
+
+function aiUsageFromDiagnostics(
+  diagnostics: SmartPicksAiGenerationDiagnostics,
+): SmartPicksAiUsageMetrics | undefined {
+  if (
+    diagnostics.inputTokens === null &&
+    diagnostics.outputTokens === null &&
+    diagnostics.totalTokens === null &&
+    diagnostics.estimatedCostUsd === null
+  ) {
+    return undefined;
+  }
+
+  return {
+    estimatedCostUsd: diagnostics.estimatedCostUsd,
+    inputTokens: diagnostics.inputTokens,
+    model: diagnostics.model,
+    outputTokens: diagnostics.outputTokens,
+    totalTokens: diagnostics.totalTokens,
+  };
+}
+
+function aiUsageFromPlanDiagnostics(
+  diagnostics: SmartPicksAiPlanDiagnostics,
+): SmartPicksAiUsageMetrics | undefined {
+  if (
+    diagnostics.inputTokens === null &&
+    diagnostics.outputTokens === null &&
+    diagnostics.totalTokens === null &&
+    diagnostics.estimatedCostUsd === null
+  ) {
+    return undefined;
+  }
+
+  return {
+    estimatedCostUsd: diagnostics.estimatedCostUsd,
+    inputTokens: diagnostics.inputTokens,
+    model: diagnostics.model,
+    outputTokens: diagnostics.outputTokens,
+    totalTokens: diagnostics.totalTokens,
+  };
+}
+
+function withAiUsage(
+  state: SmartPicksProductGenerationState,
+  aiUsage: SmartPicksAiUsageMetrics | undefined,
+): SmartPicksProductGenerationState {
+  return aiUsage ? { ...state, aiUsage } : state;
 }
 
 function readyProductGenerationState(): SmartPicksProductGenerationState {

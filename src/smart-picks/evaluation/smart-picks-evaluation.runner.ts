@@ -261,8 +261,29 @@ async function generateEvaluationProductPicksWithRetry(
       providerSkippedReason:
         retryResult.diagnostics.providerSkippedReason ??
         firstResult.diagnostics.providerSkippedReason,
+      model: firstResult.diagnostics.model ?? retryResult.diagnostics.model,
+      inputTokens: nullableSum(
+        firstResult.diagnostics.inputTokens,
+        retryResult.diagnostics.inputTokens,
+      ),
+      outputTokens: nullableSum(
+        firstResult.diagnostics.outputTokens,
+        retryResult.diagnostics.outputTokens,
+      ),
+      totalTokens: nullableSum(
+        firstResult.diagnostics.totalTokens,
+        retryResult.diagnostics.totalTokens,
+      ),
+      estimatedCostUsd: nullableSum(
+        firstResult.diagnostics.estimatedCostUsd,
+        retryResult.diagnostics.estimatedCostUsd,
+      ),
     },
   };
+}
+
+function nullableSum(left: number | null, right: number | null): number | null {
+  return left === null && right === null ? null : (left ?? 0) + (right ?? 0);
 }
 
 export function buildSmartPicksEvaluationReport(input: {

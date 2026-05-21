@@ -12,7 +12,9 @@ import { AdminRootGuard } from './admin-root.guard';
 import { AdminService } from './admin.service';
 import { AdminAccount } from './entities/admin-account.entity';
 import { AdminAuditLog } from './entities/admin-audit-log.entity';
+import { AdminOperationalIncident } from './entities/admin-operational-incident.entity';
 import { AdminSession } from './entities/admin-session.entity';
+import { AdminUserNote } from './entities/admin-user-note.entity';
 
 @Module({
   imports: [
@@ -26,7 +28,13 @@ import { AdminSession } from './entities/admin-session.entity';
         },
       }),
     }),
-    TypeOrmModule.forFeature([AdminAccount, AdminAuditLog, AdminSession]),
+    TypeOrmModule.forFeature([
+      AdminAccount,
+      AdminAuditLog,
+      AdminOperationalIncident,
+      AdminSession,
+      AdminUserNote,
+    ]),
     MailModule,
   ],
   controllers: [AdminAuthController, AdminController],

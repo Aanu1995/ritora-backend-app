@@ -3038,6 +3038,11 @@ function aiPlanResult(
       providerFailed: false,
       providerSkippedReason: null,
       missingPlan: false,
+      model: null,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      estimatedCostUsd: null,
     },
   };
 }
@@ -3114,6 +3119,11 @@ function aiGenerationResult(
         Math.max(0, requestedGapCount - picks.size),
       providerFailed: overrides.providerFailed ?? false,
       providerSkippedReason: overrides.providerSkippedReason ?? null,
+      model: null,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      estimatedCostUsd: null,
     },
   };
 }

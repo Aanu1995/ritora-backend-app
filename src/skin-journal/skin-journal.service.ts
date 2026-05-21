@@ -180,7 +180,10 @@ import {
   toWrappedResponseDto,
 } from './skin-journal-export.mapper';
 import { normalizeUpsertEntryBody } from './skin-journal-multipart.parser';
-import { InsightPolishService } from './insights/insight-polish.service';
+import {
+  InsightPolishService,
+  type InsightPolishUsage,
+} from './insights/insight-polish.service';
 import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.service';
 import type { InsightBlock, InsightCandidate } from './insights/insight-types';
 import type { InsightAction } from './insights/insight-types';
@@ -3012,6 +3015,11 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         data_cutoff_at: nowDate(),
         insight_count: 0,
         duration_ms: 0,
+        ai_model: null,
+        ai_input_tokens: null,
+        ai_output_tokens: null,
+        ai_total_tokens: null,
+        ai_estimated_cost_usd: null,
         completed_at: null,
         error: null,
       }),
@@ -3031,10 +3039,15 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         aiPatternEnabled,
         routineApplications,
       });
-      const polished = await this.insightPolish.polish(candidates, {
-        locale: options.locale ?? 'en',
-        aiPolishEnabled,
-      });
+      const polishResult = await this.insightPolish.polishWithUsage(
+        candidates,
+        {
+          locale: options.locale ?? 'en',
+          aiPolishEnabled,
+        },
+      );
+      this.applyInsightRunAiUsage(run, polishResult.usage);
+      const polished = polishResult.candidates;
 
       if (
         options.expectedInputSignature &&
@@ -3113,6 +3126,20 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       await this.insightRuns.save(run);
       throw error;
     }
+  }
+
+  private applyInsightRunAiUsage(
+    run: SkinJournalInsightGenerationRun,
+    usage: InsightPolishUsage | null,
+  ): void {
+    if (!usage) {
+      return;
+    }
+    run.ai_model = usage.model;
+    run.ai_input_tokens = usage.inputTokens;
+    run.ai_output_tokens = usage.outputTokens;
+    run.ai_total_tokens = usage.totalTokens;
+    run.ai_estimated_cost_usd = usage.estimatedCostUsd;
   }
 
   private async findExistingInsight(

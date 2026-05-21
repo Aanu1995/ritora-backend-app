@@ -35,7 +35,11 @@ import { SkinJournalPhotoInterpretationService } from './services/skin-journal-p
 import { SkinJournalAnalysisQueueService } from './services/skin-journal-analysis-queue.service';
 import { SkinJournalInsightQueueService } from './services/skin-journal-insight-queue.service';
 import { SkinJournalMediaRetentionService } from './services/skin-journal-media-retention.service';
-import { InsightPolishService } from './insights/insight-polish.service';
+import {
+  InsightPolishService,
+  type InsightPolishRunResult,
+} from './insights/insight-polish.service';
+import type { InsightCandidate } from './insights/insight-types';
 import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.service';
 import { SkinJournalPhotoStorageService } from './services/skin-journal-photo-storage.service';
 import {
@@ -377,8 +381,19 @@ describe('SkinJournalService', () => {
   const smartPicksPreparation = {
     scheduleForUser: jest.fn(),
   } as unknown as jest.Mocked<SmartPicksPreparationService>;
+  type InsightPolishOptions = { locale: string; aiPolishEnabled: boolean };
   const insightPolish = {
-    polish: jest.fn(async (candidates) => candidates),
+    polish: jest.fn<
+      Promise<InsightCandidate[]>,
+      [InsightCandidate[], InsightPolishOptions]
+    >(async (candidates) => candidates),
+    polishWithUsage: jest.fn<
+      Promise<InsightPolishRunResult>,
+      [InsightCandidate[], InsightPolishOptions]
+    >(async (candidates) => ({
+      candidates,
+      usage: null,
+    })),
   };
   const knowledgeBase = {
     resolveMany: jest.fn(() => []),
@@ -1720,10 +1735,56 @@ describe('SkinJournalService', () => {
       ([candidate]) => candidate.kind as string,
     );
     expect(savedKinds).toEqual(expect.arrayContaining(['ai_summary']));
-    expect(insightPolish.polish).toHaveBeenCalledWith(
+    expect(insightPolish.polishWithUsage).toHaveBeenCalledWith(
       expect.any(Array),
       expect.objectContaining({ aiPolishEnabled: true }),
     );
+  });
+
+  it('stores privacy-safe AI Insight cost metadata on the generation run', async () => {
+    const entriesForInsights = Array.from({ length: 7 }, (_, index) =>
+      entry({
+        id: `entry-${index}`,
+        entry_date: `2026-04-${String(index + 1).padStart(2, '0')}`,
+        photo_object_key: `private/photo-${index}.webp`,
+      }),
+    ).reverse();
+    entries.find.mockResolvedValue(entriesForInsights);
+    insights.findOne.mockResolvedValue(null);
+    insightPolish.polishWithUsage.mockResolvedValueOnce({
+      candidates: [],
+      usage: {
+        durationMs: 82,
+        estimatedCostUsd: 0.000057,
+        inputTokens: 180,
+        model: 'gpt-5.2',
+        outputTokens: 50,
+        totalTokens: 230,
+      },
+    });
+
+    await service.processInsightJob({
+      user_id: 'user-1',
+      trigger: 'scheduled_refresh',
+      locale: 'en',
+      input_signature: insightInputSignature(entriesForInsights),
+      attempt_count: 1,
+      max_attempts: 5,
+    } as SkinJournalInsightJob);
+
+    const savedRuns = insightRuns.save.mock.calls.map(([run]) => run);
+    expect(savedRuns.at(-1)).toEqual(
+      expect.objectContaining({
+        ai_estimated_cost_usd: 0.000057,
+        ai_input_tokens: 180,
+        ai_model: 'gpt-5.2',
+        ai_output_tokens: 50,
+        ai_total_tokens: 230,
+        status: 'completed',
+      }),
+    );
+    expect(JSON.stringify(savedRuns)).not.toContain('private/photo-');
+    expect(JSON.stringify(savedRuns)).not.toContain('complaint_note');
   });
 
   it('uses recorded routine applications as evidence for insight generation', async () => {

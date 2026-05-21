@@ -50,6 +50,21 @@ export class SkinJournalInsightGenerationRun {
   @Column({ type: 'text', nullable: true })
   error: string | null;
 
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  ai_model: string | null;
+
+  @Column({ type: 'integer', nullable: true })
+  ai_input_tokens: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  ai_output_tokens: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  ai_total_tokens: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  ai_estimated_cost_usd: number | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 

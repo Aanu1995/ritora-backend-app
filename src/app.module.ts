@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { databaseConfig } from './config/database.config';
 import { AppConfigModule } from './config/app-config.module';
 import { buildPinoHttpOptions } from './observability/logging.config';
+import { HttpRequestMetricsInterceptor } from './observability/http-request-metrics.interceptor';
 import { AdminModule } from './admin/admin.module';
 import { AppBadgesModule } from './app-badges/app-badges.module';
 import { ApplicationTrackingModule } from './application-tracking/application-tracking.module';
@@ -74,6 +75,10 @@ import { UsersModule } from './users/users.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: NoCacheInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: HttpRequestMetricsInterceptor,
     },
   ],
 })

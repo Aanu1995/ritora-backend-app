@@ -14,6 +14,7 @@ import {
   ProductCheckNextAction,
   ProductCheckPersonalizationLevel,
   ProductCheckReasonCode,
+  ProductCheckSource,
   ProductCheckTone,
   ProductCheckVerdict,
 } from './product-check.types';
@@ -142,6 +143,8 @@ describe('sanitizeProductCheckAiReview', () => {
 function buildInput(): ProductCheckAiReviewInput {
   return {
     language: 'en',
+    source: ProductCheckSource.IngredientPaste,
+    userId: 'user-1',
     product: {
       id: 'checked-product',
       brand: 'Ritora Lab',

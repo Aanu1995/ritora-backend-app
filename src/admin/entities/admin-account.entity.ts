@@ -11,7 +11,15 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ulid } from 'ulid';
+import { encryptedNullableStringFieldTransformer } from '../../skin-profile/skin-profile-field-encryption';
 import { AdminSession } from './admin-session.entity';
+
+const encryptedAdminTotpSecretTransformer =
+  encryptedNullableStringFieldTransformer('admin_accounts.mfa_totp_secret');
+const encryptedAdminPendingTotpSecretTransformer =
+  encryptedNullableStringFieldTransformer(
+    'admin_accounts.mfa_pending_totp_secret',
+  );
 
 export enum AdminAccountRole {
   Root = 'root',
@@ -72,6 +80,34 @@ export class AdminAccount {
 
   @Column({ type: 'timestamptz', nullable: true })
   password_reset_expires: Date | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    select: false,
+    transformer: encryptedAdminTotpSecretTransformer,
+  })
+  mfa_totp_secret: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    select: false,
+    transformer: encryptedAdminPendingTotpSecretTransformer,
+  })
+  mfa_pending_totp_secret: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  mfa_pending_expires_at: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  mfa_enabled_at: Date | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  mfa_last_used_time_step: string | null;
+
+  @Column({ type: 'jsonb', nullable: true, select: false })
+  mfa_recovery_code_hashes: string[] | null;
 
   @Column({ type: 'varchar', length: 26, nullable: true })
   created_by_admin_id: string | null;

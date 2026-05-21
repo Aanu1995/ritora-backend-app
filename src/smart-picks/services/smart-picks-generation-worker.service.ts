@@ -128,7 +128,7 @@ export class SmartPicksGenerationWorker
         job.inputs_hash,
       );
       if (outcome.status === SmartPicksProductGenerationStatus.Ready) {
-        await this.completeJob(job);
+        await this.completeJob(job, outcome);
         return;
       }
       await this.retryOrFailJob(job, outcome);
@@ -152,7 +152,10 @@ export class SmartPicksGenerationWorker
     }
   }
 
-  private async completeJob(job: SmartPickGenerationJob): Promise<void> {
+  private async completeJob(
+    job: SmartPickGenerationJob,
+    outcome?: SmartPicksProductGenerationState,
+  ): Promise<void> {
     const criteria = ownedRunningJobCriteria(job);
     if (!criteria) {
       this.logger.warn(
@@ -166,6 +169,11 @@ export class SmartPicksGenerationWorker
       last_error: null,
       locked_at: null,
       locked_by: null,
+      ai_model: outcome?.aiUsage?.model ?? null,
+      ai_input_tokens: outcome?.aiUsage?.inputTokens ?? null,
+      ai_output_tokens: outcome?.aiUsage?.outputTokens ?? null,
+      ai_total_tokens: outcome?.aiUsage?.totalTokens ?? null,
+      ai_estimated_cost_usd: outcome?.aiUsage?.estimatedCostUsd ?? null,
     });
     if (result.affected) {
       this.queue.scheduleDispatch();
@@ -202,6 +210,11 @@ export class SmartPicksGenerationWorker
       last_error: outcome.reason ?? 'smart_pick_generation_failed',
       locked_at: null,
       locked_by: null,
+      ai_model: outcome.aiUsage?.model ?? null,
+      ai_input_tokens: outcome.aiUsage?.inputTokens ?? null,
+      ai_output_tokens: outcome.aiUsage?.outputTokens ?? null,
+      ai_total_tokens: outcome.aiUsage?.totalTokens ?? null,
+      ai_estimated_cost_usd: outcome.aiUsage?.estimatedCostUsd ?? null,
     });
     if (result.affected) {
       this.queue.scheduleDispatch();

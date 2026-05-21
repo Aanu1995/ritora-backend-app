@@ -2,6 +2,20 @@ import {
   AdminAccountRole,
   AdminAccountStatus,
 } from './entities/admin-account.entity';
+import {
+  AdminOperationalIncidentSeverity,
+  AdminOperationalIncidentStatus,
+} from './entities/admin-operational-incident.entity';
+import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
+import {
+  type AdminAiCostFeatureFilter,
+  type AdminAiCostPeriod,
+} from './admin-ai-cost.types';
+
+export {
+  AdminAiCostFeatureFilter,
+  AdminAiCostPeriod,
+} from './admin-ai-cost.types';
 
 export const AdminRole = {
   Root: AdminAccountRole.Root,
@@ -39,6 +53,16 @@ export const AdminJobStatus = {
 export type AdminJobStatus =
   (typeof AdminJobStatus)[keyof typeof AdminJobStatus];
 
+export const AdminMetricSource = {
+  Event: 'event',
+  Proxy: 'proxy',
+  Table: 'table',
+  Unavailable: 'unavailable',
+} as const;
+
+export type AdminMetricSource =
+  (typeof AdminMetricSource)[keyof typeof AdminMetricSource];
+
 export type AdminAuthenticatedUser = {
   email: string;
   id: string;
@@ -60,6 +84,8 @@ export type AdminMemberResponse = {
   invitedAt: string | null;
   acceptedAt: string | null;
   lastLoginAt: string | null;
+  mfaEnabled: boolean;
+  mfaEnabledAt: string | null;
   createdByAdminId: string | null;
 };
 
@@ -68,6 +94,12 @@ export type AdminAuthResponse = {
   member: AdminMemberResponse;
 };
 
+export type AdminMfaRequiredResponse = {
+  mfaRequired: true;
+};
+
+export type AdminLoginResponse = AdminAuthResponse | AdminMfaRequiredResponse;
+
 export type AdminSessionResponse = {
   id: string;
   userAgent: string | null;
@@ -75,6 +107,24 @@ export type AdminSessionResponse = {
   createdAt: string;
   lastUsedAt: string;
   current: boolean;
+};
+
+export type AdminMfaStatusResponse = {
+  enabled: boolean;
+  enabledAt: string | null;
+  pendingSetupExpiresAt: string | null;
+  recoveryCodesRemaining: number;
+};
+
+export type AdminMfaSetupResponse = {
+  expiresAt: string;
+  manualEntryKey: string;
+  otpauthUri: string;
+  secret: string;
+};
+
+export type AdminMfaEnableResponse = AdminMfaStatusResponse & {
+  recoveryCodes: string[];
 };
 
 export type AdminPaginationMeta = {
@@ -110,18 +160,69 @@ export type AdminOverviewResponse = {
   metrics: {
     registeredUsers: number;
     verifiedUsers: number;
+    newSignupsToday: number;
+    newSignups7d: number;
+    newSignups30d: number;
+    dailyActiveUsers: number;
     weeklyActiveUsers: number;
+    monthlyActiveUsers: number;
     activationRate: number;
     routineAcceptanceRate: number;
     dailyCheckInRate: number;
+    productAddSuccessRate: number;
     aiSuccessRate: number;
+    todayAiCostUsd: number;
     monthToDateAiCostUsd: number;
+    criticalAlerts: number;
     activeRestrictions: number;
   };
   activationFunnel: Array<{
     stage: string;
     label: string;
     count: number;
+  }>;
+  signupTrend: Array<{
+    date: string;
+    count: number;
+  }>;
+  activeUserTrend: Array<{
+    date: string;
+    dailyActiveUsers: number;
+    weeklyActiveUsers: number;
+    monthlyActiveUsers: number;
+  }>;
+  retentionCohorts: Array<{
+    id: string;
+    label: string;
+    eligibleUsers: number;
+    retainedUsers: number;
+    rate: number;
+  }>;
+  featureAdoption: Array<{
+    id: string;
+    label: string;
+    users: number;
+    rate: number;
+  }>;
+  aiCostByFeature: Array<{
+    id: string;
+    label: string;
+    todayCostUsd: number;
+    monthToDateCostUsd: number;
+    successRate: number;
+  }>;
+  endpointHealth: Array<{
+    id: string;
+    method: string;
+    route: string;
+    requestCount: number;
+    errorRate: number;
+    p95LatencyMs: number;
+    status: AdminJobStatus;
+  }>;
+  metricSources: Array<{
+    id: string;
+    source: AdminMetricSource;
   }>;
   alerts: Array<{
     id: string;
@@ -157,6 +258,34 @@ export type AdminUserListQuery = {
   restriction?: AdminUserRestrictionFilter;
 };
 
+export type AdminAiCostUserListQuery = {
+  feature?: AdminAiCostFeatureFilter;
+  limit?: number;
+  page?: number;
+  period?: AdminAiCostPeriod;
+  query?: string;
+};
+
+export type AdminAiCostByUserFeatureResponse = {
+  id: string;
+  label: string;
+  todayCostUsd: number;
+  monthToDateCostUsd: number;
+};
+
+export type AdminAiCostByUserResponse = {
+  userId: string;
+  email: string;
+  name: string;
+  todayCostUsd: number;
+  monthToDateCostUsd: number;
+  featureCosts: AdminAiCostByUserFeatureResponse[];
+};
+
+export type AdminAiCostByUserListResponse = AdminPaginationMeta & {
+  users: AdminAiCostByUserResponse[];
+};
+
 export type AdminUserResponse = {
   id: string;
   email: string;
@@ -176,6 +305,31 @@ export type AdminUserResponse = {
 
 export type AdminUserListResponse = AdminPaginationMeta & {
   users: AdminUserResponse[];
+};
+
+export type AdminUserNoteAuthorResponse = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+export type AdminUserNoteResponse = {
+  id: string;
+  userId: string;
+  authorAdminId: string;
+  author: AdminUserNoteAuthorResponse | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminUserNoteListQuery = {
+  limit?: number;
+  page?: number;
+};
+
+export type AdminUserNoteListResponse = AdminPaginationMeta & {
+  notes: AdminUserNoteResponse[];
 };
 
 export type AdminAuditLogActorResponse = {
@@ -258,9 +412,65 @@ export type AdminOperationalWorkItemResponse = {
   updatedAt: string | null;
 };
 
+export type AdminBackendHealthComponentResponse = {
+  checkedAt: string;
+  errorRate: number | null;
+  id: string;
+  label: string;
+  latencyMs: number | null;
+  message: string;
+  p95LatencyMs: number | null;
+  requestCount: number | null;
+  status: AdminJobStatus;
+  windowMinutes: number | null;
+};
+
+export type AdminBackendHealthResponse = {
+  checkedAt: string;
+  components: AdminBackendHealthComponentResponse[];
+  status: AdminJobStatus;
+};
+
 export type AdminOperationsMonitoringResponse = {
+  backendHealth: AdminBackendHealthResponse;
   generatedAt: string;
   jobHealth: AdminOverviewResponse['jobHealth'];
   compliance: AdminOverviewResponse['compliance'];
   workItems: AdminOperationalWorkItemResponse[];
+};
+
+export type AdminOperationalIncidentActorResponse = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+export type AdminOperationalIncidentResponse = {
+  id: string;
+  title: string;
+  description: string;
+  status: AdminOperationalIncidentStatus;
+  severity: AdminOperationalIncidentSeverity;
+  sourceType: string;
+  sourceId: string;
+  targetUserId: string | null;
+  targetUserEmail: string | null;
+  createdByAdminId: string;
+  createdBy: AdminOperationalIncidentActorResponse;
+  resolvedByAdminId: string | null;
+  resolvedBy: AdminOperationalIncidentActorResponse | null;
+  resolutionSummary: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminOperationalIncidentListQuery = {
+  limit?: number;
+  page?: number;
+  status?: AdminOperationalIncidentStatusFilter;
+};
+
+export type AdminOperationalIncidentListResponse = AdminPaginationMeta & {
+  incidents: AdminOperationalIncidentResponse[];
 };

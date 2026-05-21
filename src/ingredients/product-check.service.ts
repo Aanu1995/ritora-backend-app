@@ -169,6 +169,8 @@ export class ProductCheckService {
     const baselineVerdict = this.verdictService.buildVerdict(verdictInput);
     const aiReview = await this.aiReviewProvider.review({
       language,
+      source: productInput.source,
+      userId,
       product,
       analysis: enrichedAnalysis,
       context,

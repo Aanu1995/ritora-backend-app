@@ -544,6 +544,14 @@ function expectedMinimumConsiderGapCount(
     : persona.expected.considerGapKeys.length;
 }
 
+const emptyAiUsageDiagnostics = {
+  estimatedCostUsd: null,
+  inputTokens: null,
+  model: null,
+  outputTokens: null,
+  totalTokens: null,
+};
+
 function planResult(
   plan: SmartPicksAiPlanGenerationResult['plan'] = {
     coverage: { slots: [], filled: 0, total: 0 },
@@ -571,6 +579,7 @@ function planResult(
       providerFailed: false,
       providerSkippedReason: null,
       missingPlan: false,
+      ...emptyAiUsageDiagnostics,
     },
   };
 }
@@ -607,6 +616,7 @@ function generationResult(
       missingPickCount: 0,
       providerFailed: false,
       providerSkippedReason: null,
+      ...emptyAiUsageDiagnostics,
     },
   };
 }

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import { estimateCost } from '../../suggestions/services/suggestion-ai-contract';
 import { SuggestionEvidenceSourceId } from '../../suggestions/suggestions.constants';
 import { mergeEvidenceSourceIds } from '../../suggestions/services/suggestion-evidence-sources';
 import { normalizeSuggestionGapKey } from '../../suggestions/services/suggestion-gap-actions';
@@ -53,6 +54,11 @@ export type SmartPicksAiGenerationDiagnostics = {
   missingPickCount: number;
   providerFailed: boolean;
   providerSkippedReason: SmartPicksAiProviderSkippedReason | null;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  estimatedCostUsd: number | null;
 };
 
 type RawSmartPickResponse = {
@@ -166,6 +172,11 @@ export type SmartPicksAiPlanDiagnostics = {
   providerFailed: boolean;
   providerSkippedReason: SmartPicksAiProviderSkippedReason | null;
   missingPlan: boolean;
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  estimatedCostUsd: number | null;
 };
 
 export type SmartPicksAiPlanGenerationResult = {
@@ -178,6 +189,17 @@ type SanitizePickBlockReason = 'invalid' | 'owned' | 'budget' | 'safety';
 type SanitizePickResult = {
   pick: GeneratedSmartPick | null;
   blockReason: SanitizePickBlockReason | null;
+};
+
+type OpenAiUsagePayload = {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+};
+
+type OpenAiResponsePayload = {
+  output?: { content?: { type: string; text?: string }[] }[];
+  usage?: OpenAiUsagePayload;
 };
 
 @Injectable()
@@ -252,18 +274,28 @@ export class SmartPicksAiGenerator {
         throw new Error(await openAiErrorMessage(response, 'coverage plan'));
       }
 
-      const payload = (await response.json()) as {
-        output?: { content?: { type: string; text?: string }[] }[];
-      };
+      const payload = (await response.json()) as OpenAiResponsePayload;
+      const usageDiagnostics = buildAiUsageDiagnostics(payload.usage, model);
       const rawText = extractOutputText(payload);
       if (!rawText) {
         return {
           plan: null,
-          diagnostics: { ...basePlanDiagnostics(), missingPlan: true },
+          diagnostics: {
+            ...basePlanDiagnostics(),
+            ...usageDiagnostics,
+            missingPlan: true,
+          },
         };
       }
       const parsed = JSON.parse(rawText) as RawSmartPicksPlanResponse;
-      return sanitizeSmartPicksPlan(context, parsed);
+      const sanitized = sanitizeSmartPicksPlan(context, parsed);
+      return {
+        ...sanitized,
+        diagnostics: {
+          ...sanitized.diagnostics,
+          ...usageDiagnostics,
+        },
+      };
     } catch (error) {
       this.logger.warn(
         `Smart Picks AI plan failed: ${
@@ -426,13 +458,20 @@ export class SmartPicksAiGenerator {
         throw new Error(await openAiErrorMessage(response, 'product picks'));
       }
 
-      const payload = (await response.json()) as {
-        output?: { content?: { type: string; text?: string }[] }[];
-      };
+      const payload = (await response.json()) as OpenAiResponsePayload;
+      const usageDiagnostics = buildAiUsageDiagnostics(payload.usage, model);
       const rawText = extractOutputText(payload);
-      if (!rawText) return failedGenerationResult(gaps.length);
+      if (!rawText) {
+        return withGenerationUsageDiagnostics(
+          failedGenerationResult(gaps.length),
+          usageDiagnostics,
+        );
+      }
       const parsed = JSON.parse(rawText) as RawSmartPickResponse;
-      return sanitizeGeneratedPicks(context, gaps, parsed);
+      return withGenerationUsageDiagnostics(
+        sanitizeGeneratedPicks(context, gaps, parsed),
+        usageDiagnostics,
+      );
     } catch (error) {
       this.logger.warn(
         `Smart Picks AI generation failed: ${
@@ -1851,6 +1890,11 @@ function basePlanDiagnostics(): SmartPicksAiPlanDiagnostics {
     providerFailed: false,
     providerSkippedReason: null,
     missingPlan: false,
+    model: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    estimatedCostUsd: null,
   };
 }
 
@@ -2118,6 +2162,65 @@ function baseDiagnostics(
     missingPickCount: 0,
     providerFailed: false,
     providerSkippedReason: null,
+    model: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    estimatedCostUsd: null,
+  };
+}
+
+function buildAiUsageDiagnostics(
+  usage: OpenAiUsagePayload | undefined,
+  model: string,
+): Pick<
+  SmartPicksAiGenerationDiagnostics,
+  'estimatedCostUsd' | 'inputTokens' | 'model' | 'outputTokens' | 'totalTokens'
+> {
+  const inputTokens = numberOrNull(usage?.input_tokens);
+  const outputTokens = numberOrNull(usage?.output_tokens);
+  const totalTokens =
+    numberOrNull(usage?.total_tokens) ??
+    (inputTokens !== null || outputTokens !== null
+      ? (inputTokens ?? 0) + (outputTokens ?? 0)
+      : null);
+
+  return {
+    estimatedCostUsd:
+      usage && (inputTokens !== null || outputTokens !== null)
+        ? estimateCost({
+            input_tokens: inputTokens ?? undefined,
+            output_tokens: outputTokens ?? undefined,
+          })
+        : null,
+    inputTokens,
+    model,
+    outputTokens,
+    totalTokens,
+  };
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function withGenerationUsageDiagnostics(
+  result: SmartPicksAiGenerationResult,
+  usageDiagnostics: Pick<
+    SmartPicksAiGenerationDiagnostics,
+    | 'estimatedCostUsd'
+    | 'inputTokens'
+    | 'model'
+    | 'outputTokens'
+    | 'totalTokens'
+  >,
+): SmartPicksAiGenerationResult {
+  return {
+    ...result,
+    diagnostics: {
+      ...result.diagnostics,
+      ...usageDiagnostics,
+    },
   };
 }
 

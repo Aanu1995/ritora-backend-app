@@ -137,6 +137,14 @@ export const SmartPicksProductGenerationReason = {
 export type SmartPicksProductGenerationReason =
   (typeof SmartPicksProductGenerationReason)[keyof typeof SmartPicksProductGenerationReason];
 
+export interface SmartPicksAiUsageMetrics {
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  estimatedCostUsd: number | null;
+}
+
 export interface SmartPicksProductGenerationState {
   status: SmartPicksProductGenerationStatus;
   reason: SmartPicksProductGenerationReason | null;
@@ -144,6 +152,7 @@ export interface SmartPicksProductGenerationState {
   isProcessing: boolean;
   attemptedAt: string | null;
   retryAfter: string | null;
+  aiUsage?: SmartPicksAiUsageMetrics;
 }
 
 export const SmartPicksGenerationJobStatus = {
@@ -327,6 +336,7 @@ export interface SmartPicksSnapshotPayload {
   considerGaps: SmartPicksGapSnapshot[];
   covered: SmartPicksCoveredItem[];
   redundancy: SmartPicksRedundancyGroup[];
+  aiUsage?: SmartPicksAiUsageMetrics;
 }
 
 export interface SmartPicksOverview {
