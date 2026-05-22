@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,8 +22,22 @@ import {
   ShelfSort,
   ShelfStatFilter,
   ShelfStatus,
+  DataProvenance,
   type ShelfProductSnapshot,
 } from '../shelf/shelf.types';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
+import {
+  hasCompletedEssentialSkinProfile,
+  skinProfileRequiredException,
+} from '../skin-profile/skin-profile-completion';
+import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import {
+  UserDataAccessActorType,
+  UserDataAccessPurpose,
+} from '../users/user-consent.constants';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
@@ -55,11 +71,19 @@ type InventoryCursorTuple = [string, string] | [string, string, string];
 
 @Injectable()
 export class InventoryService {
+  private readonly logger = new Logger(InventoryService.name);
+
   constructor(
     @InjectRepository(InventoryProduct)
     private readonly inventoryRepository: Repository<InventoryProduct>,
+    @InjectRepository(SkinProfile)
+    private readonly skinProfilesRepository: Repository<SkinProfile>,
     private readonly cataloguePhotoProcessorService: CataloguePhotoProcessorService,
     private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
+    private readonly dataAccessLog: UserDataAccessLogService,
+    private readonly notificationsService: NotificationsService,
+    @Optional()
+    private readonly smartPicksPreparation?: SmartPicksPreparationService,
   ) {}
 
   async list(
@@ -125,6 +149,72 @@ export class InventoryService {
     userId: string,
     dto: CreateInventoryProductDto,
   ): Promise<InventoryProductResponseDto> {
+    await this.assertSkinProfileReadyForProductCreation(userId);
+    return this.createValidatedProduct(userId, dto);
+  }
+
+  async createWithProductImage(
+    userId: string,
+    dto: CreateInventoryProductDto,
+    file: UploadedCatalogueImage,
+  ): Promise<InventoryProductResponseDto> {
+    await this.assertSkinProfileReadyForProductCreation(userId);
+    assertValidInventoryDraft(dto);
+
+    const processed =
+      await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
+        file,
+      );
+    const upload = this.cataloguePhotoStorageService.startHeroImageUpload(
+      processed,
+      userId,
+    );
+
+    const imageUrl = await this.resolveCreateImageUpload(upload);
+
+    try {
+      return await this.createValidatedProduct(userId, {
+        ...dto,
+        identity: {
+          ...dto.identity,
+          imageUrls: [imageUrl],
+        },
+      });
+    } catch (error) {
+      await upload.cleanup();
+      throw error;
+    }
+  }
+
+  private async resolveCreateImageUpload(upload: {
+    url: Promise<string | null>;
+    cleanup: () => Promise<void>;
+  }): Promise<string> {
+    try {
+      const imageUrl = await upload.url;
+      if (!imageUrl) {
+        throw new ServiceUnavailableException(
+          'Product image storage is not configured',
+        );
+      }
+
+      return imageUrl;
+    } catch (error) {
+      await upload.cleanup();
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        'Product image upload is unavailable right now',
+      );
+    }
+  }
+
+  private async createValidatedProduct(
+    userId: string,
+    dto: CreateInventoryProductDto,
+  ): Promise<InventoryProductResponseDto> {
     assertValidInventoryDraft(dto);
     const normalized = normalizeInventorySnapshot(
       toInventorySnapshotFromCreateDto(dto),
@@ -134,6 +224,8 @@ export class InventoryService {
       this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
     );
     const saved = await this.inventoryRepository.save(entity);
+    await this.evaluateProductExpiryAlerts(userId, saved);
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
   }
 
@@ -145,23 +237,25 @@ export class InventoryService {
     const product = await this.findByIdOrFail(userId, id);
     const merged = mergeInventorySnapshot(this.toSnapshot(product), dto);
     assertValidInventoryDraft(merged);
-    const normalized = normalizeInventorySnapshot(merged);
 
-    Object.assign(
-      product,
-      this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
-    );
-    const saved = await this.inventoryRepository.save(product);
+    const saved = await this.saveSnapshot(userId, product, merged);
+    await this.evaluateProductExpiryAlerts(userId, saved);
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
   }
 
-  async uploadProductImage(file: UploadedCatalogueImage): Promise<string> {
+  async uploadProductImage(
+    userId: string,
+    file: UploadedCatalogueImage,
+  ): Promise<string> {
     const processed =
       await this.cataloguePhotoProcessorService.prepareHeroImageForStorage(
         file,
       );
-    const imageUrl =
-      await this.cataloguePhotoStorageService.saveHeroImage(processed);
+    const imageUrl = await this.cataloguePhotoStorageService.saveHeroImage(
+      processed,
+      userId,
+    );
 
     if (!imageUrl) {
       throw new ServiceUnavailableException(
@@ -172,9 +266,49 @@ export class InventoryService {
     return imageUrl;
   }
 
+  async uploadAndAttachProductImage(
+    userId: string,
+    id: string,
+    file: UploadedCatalogueImage,
+  ): Promise<InventoryProductResponseDto> {
+    const product = await this.findByIdOrFail(userId, id);
+    const imageUrl = await this.uploadProductImage(userId, file);
+    const merged = mergeInventorySnapshot(this.toSnapshot(product), {
+      identity: {
+        imageUrls: [imageUrl],
+      },
+    });
+    assertValidInventoryDraft(merged);
+
+    const saved = await this.saveSnapshot(userId, product, merged);
+    this.scheduleSmartPicksPreparation(userId);
+    return this.toResponseDto(saved);
+  }
+
+  private async assertSkinProfileReadyForProductCreation(
+    userId: string,
+  ): Promise<void> {
+    const profile = await this.skinProfilesRepository.findOne({
+      where: { user_id: userId },
+      relations: ['user'],
+    });
+
+    if (!profile || !hasCompletedEssentialSkinProfile(profile)) {
+      throw skinProfileRequiredException();
+    }
+
+    await this.dataAccessLog.recordDataAccess(
+      userId,
+      getSensitiveSkinProfileConsentTypes(profile),
+      UserDataAccessPurpose.SkinProfileRead,
+      UserDataAccessActorType.System,
+    );
+  }
+
   async remove(userId: string, id: string): Promise<void> {
     const product = await this.findByIdOrFail(userId, id);
     await this.inventoryRepository.remove(product);
+    this.scheduleSmartPicksPreparation(userId);
   }
 
   async removeMany(userId: string, ids: string[]): Promise<void> {
@@ -186,6 +320,7 @@ export class InventoryService {
       user_id: userId,
       id: In(ids),
     });
+    this.scheduleSmartPicksPreparation(userId);
   }
 
   async archive(
@@ -215,6 +350,7 @@ export class InventoryService {
 
   async restoreMany(userId: string, ids: string[]): Promise<void> {
     await this.updateManyStatuses(userId, ids, ShelfStatus.Active);
+    await this.evaluateProductExpiryAlertsForIds(userId, ids);
   }
 
   async markFinishedMany(userId: string, ids: string[]): Promise<void> {
@@ -229,7 +365,52 @@ export class InventoryService {
     const product = await this.findByIdOrFail(userId, id);
     product.status = status;
     const saved = await this.inventoryRepository.save(product);
+    if (status === ShelfStatus.Active) {
+      await this.evaluateProductExpiryAlerts(userId, saved);
+    }
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
+  }
+
+  private async evaluateProductExpiryAlerts(
+    userId: string,
+    product: InventoryProduct,
+  ): Promise<void> {
+    if (product.status !== ShelfStatus.Active) {
+      return;
+    }
+    try {
+      await this.notificationsService.runProductExpiryAlertForProduct(
+        userId,
+        product.id,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Product expiry alert evaluation failed for ${product.id}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async evaluateProductExpiryAlertsForIds(
+    userId: string,
+    productIds: string[],
+  ): Promise<void> {
+    for (const productId of productIds) {
+      try {
+        await this.notificationsService.runProductExpiryAlertForProduct(
+          userId,
+          productId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Product expiry alert evaluation failed for ${productId}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      }
+    }
   }
 
   private normalizeManagedMediaRefs(
@@ -244,6 +425,21 @@ export class InventoryService {
         ),
       },
     };
+  }
+
+  private async saveSnapshot(
+    userId: string,
+    product: InventoryProduct,
+    snapshot: ShelfProductSnapshot,
+  ): Promise<InventoryProduct> {
+    const normalized = normalizeInventorySnapshot(snapshot);
+
+    Object.assign(
+      product,
+      this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
+    );
+
+    return this.inventoryRepository.save(product);
   }
 
   private toResponseDto(entity: InventoryProduct): InventoryProductResponseDto {
@@ -274,6 +470,11 @@ export class InventoryService {
         status,
       },
     );
+    this.scheduleSmartPicksPreparation(userId);
+  }
+
+  private scheduleSmartPicksPreparation(userId: string): void {
+    this.smartPicksPreparation?.scheduleForUser(userId);
   }
 
   private buildNextCursor(
@@ -567,7 +768,7 @@ export class InventoryService {
       manufacturer: product.manufacturer,
       userFields: product.user_fields,
       status: product.status,
-      provenance: product.provenance,
+      provenance: DataProvenance.PhotoLookup,
     };
   }
 

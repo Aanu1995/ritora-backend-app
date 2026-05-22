@@ -8,6 +8,7 @@ import {
   Matches,
   MinLength,
 } from 'class-validator';
+import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 
 export class RegisterDto {
   @ApiProperty({ example: 'user@example.com' })
@@ -37,6 +38,7 @@ export class RegisterDto {
   preferredLanguage!: string;
 
   @ApiProperty({ enum: ['en', 'sv'], required: false })
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn(['en', 'sv'], { message: 'validation.language.unsupported' })
   language?: string;

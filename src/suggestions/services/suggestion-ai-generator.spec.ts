@@ -1,0 +1,1077 @@
+import { ConfigService } from '@nestjs/config';
+import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import { RoutineStep } from '../../schedule/entities/routine-step.entity';
+import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
+import {
+  EnvironmentAirQualityRisk,
+  EnvironmentConfidence,
+  EnvironmentHumidityBand,
+  EnvironmentProviderName,
+  EnvironmentSeason,
+  EnvironmentStatus,
+  EnvironmentTemperatureBand,
+  EnvironmentUvRisk,
+  EnvironmentWaterHardness,
+  EnvironmentWaterSensitivity,
+} from '../../environment-intelligence/environment-intelligence.constants';
+import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
+import {
+  PreferredTimeOfDay,
+  ProductCategory,
+  ShelfStatus,
+} from '../../shelf/shelf.types';
+import {
+  SuggestionDaypart,
+  SuggestionEvidenceSourceId,
+  SuggestionMode,
+  SuggestionRequestSource,
+  SuggestionStepProvenance,
+} from '../suggestions.constants';
+import { SuggestionAiGenerator } from './suggestion-ai-generator';
+import { SuggestionGenerationInputs } from './suggestion-ai-generator';
+import { getSuggestionEvidenceSources } from './suggestion-evidence-sources';
+
+describe('SuggestionAiGenerator', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('calls OpenAI with low-temperature structured output for repeatable suggestions', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: '',
+                    body: [],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    const body = JSON.parse(
+      fetchMock.mock.calls[0]?.[1]?.body as string,
+    ) as Record<string, unknown>;
+    expect(body).toEqual(
+      expect.objectContaining({
+        model: 'gpt-4.1-mini',
+        store: false,
+        temperature: 0,
+      }),
+    );
+  });
+
+  it('uses the structured reaction context even when the journal flag has not been backfilled', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate({
+      slotId: 'slot-1',
+      requestSource: SuggestionRequestSource.Scheduled,
+      requestContext: null,
+      targetDate: '2026-04-29',
+      targetTime: '08:00',
+      daypart: SuggestionDaypart.Morning,
+      skinProfile: null,
+      shelfActiveProducts: [],
+      shelfFinishedProductIds: [],
+      routineSteps: [],
+      recentJournalEntries: [],
+      recentApplications: [],
+      aiPersonalizationAllowed: true,
+      aiPersonalizationBlockedReason: null,
+      environmentSnapshotId: null,
+      contextSummary: {
+        cacheKey: 'ctx',
+        builtAt: '2026-04-29T06:00:00.000Z',
+        targetDate: '2026-04-29',
+        targetTime: '08:00',
+        daypart: SuggestionDaypart.Morning,
+        requestSource: SuggestionRequestSource.Scheduled,
+        onDemand: null,
+        environment: null,
+        skinProfile: {
+          primaryGoal: null,
+          skinType: null,
+          sensitivityLevel: null,
+          activeConcerns: [],
+          pregnancyStatus: null,
+        },
+        reaction: {
+          hasSignal: true,
+          severity: 'moderate',
+          confidence: 0.8,
+          indicators: ['redness'],
+          affectedZones: ['cheeks'],
+          concernKeys: ['redness_inflammation'],
+          daysSinceLatestSignal: 0,
+          barrierCompromised: true,
+          photoInputImages: 3,
+          multiAnglePhotoEntries: 1,
+        },
+        routineBreak: {
+          recentlyResumed: false,
+          lastPausedFrom: null,
+          lastPausedUntil: null,
+        },
+        productScores: [],
+        applicationPatterns: {
+          days: 0,
+          daysSinceLastApplication: null,
+          conservativeRestart: true,
+          skippedByCategory: {},
+          substitutedByCategory: {},
+          addedOffShelfCount: 0,
+          editedLogCount: 0,
+          adherenceByCategory: {},
+        },
+        safetyConstraints: ['barrier_recovery_mode'],
+        governance: {
+          safetyPolicyVersion: 'test-policy',
+          safetyPolicyReviewedAt: '2026-05-04',
+          aiPersonalizationAllowed: true,
+          aiPersonalizationBlockedReason: null,
+        },
+        evidenceSources: [],
+        skippedCandidates: [],
+      },
+    } satisfies SuggestionGenerationInputs);
+
+    expect(result.hasReactionSignal).toBe(true);
+    expect(result.metadata.model).toBe('deterministic-baseline');
+    expect(result.safetyFlags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining('Recent reaction'),
+        }),
+      ]),
+    );
+  });
+
+  it('falls back when OpenAI returns a pregnancy-caution retinoid application step', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening plan',
+                    body: [],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    {
+                      stepOrder: 0,
+                      routineStepId: null,
+                      inventoryProductId: 'retinoid-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Retinol Night Serum',
+                      stepLabel: ProductCategory.Treatment,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Evening active step.',
+                      provenance: 'ai_added',
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.skinProfile = {
+      pregnancy_status: 'pregnant',
+      safety_context: { conditions: ['pregnancy'] },
+    } as unknown as SkinProfile;
+    inputs.contextSummary.skinProfile.pregnancyStatus = 'pregnant';
+    inputs.shelfActiveProducts.push(
+      product('retinoid-1', 'Retinol Night Serum', ProductCategory.Treatment),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('retinoid-1', ProductCategory.Treatment, 90, [
+        'retinoid',
+        'retinol',
+      ]),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('unsafe_pregnancy_active');
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
+      ]),
+    );
+    expect(result.safetyFlags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining('Pregnancy'),
+        }),
+      ]),
+    );
+  });
+
+  it('falls back when OpenAI omits owned SPF from a daytime suggestion', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Post workout',
+                    body: [],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    {
+                      stepOrder: 0,
+                      routineStepId: null,
+                      inventoryProductId: 'cleanser-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Soft Cleanser',
+                      stepLabel: ProductCategory.Cleanser,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Cleanse after sweating.',
+                      provenance: 'ai_added',
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Noon),
+    );
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('missing_required_daytime_spf');
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'spf-1' }),
+      ]),
+    );
+  });
+
+  it('keeps owned SPF in minimal daytime on-demand baseline suggestions', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Noon);
+    inputs.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.requestContext = {
+      intent: 'post_workout',
+      intensity: 'minimal',
+      note: 'Sweaty after gym, need something quick.',
+      activityAt: '2026-04-29T12:30:00.000Z',
+      requestedAt: '2026-04-29T13:00:00.000Z',
+    };
+
+    const result = await generator.generate(inputs);
+
+    expect(result.steps.length).toBeLessThanOrEqual(3);
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'spf-1' }),
+      ]),
+    );
+  });
+
+  it('adds deterministic high-UV evidence even when OpenAI already selects owned SPF', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Noon SPF',
+                    body: ['Use your sunscreen now.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    {
+                      stepOrder: 0,
+                      routineStepId: null,
+                      inventoryProductId: 'spf-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Daily SPF 50',
+                      stepLabel: ProductCategory.SunProtection,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Use owned SPF for noon UV.',
+                      provenance: SuggestionStepProvenance.AiAdded,
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Noon);
+    inputs.contextSummary.environment = highUvEnvironment();
+    inputs.contextSummary.evidenceSources = getSuggestionEvidenceSources([
+      SuggestionEvidenceSourceId.OpenMeteoWeather,
+      SuggestionEvidenceSourceId.AadSunscreenSelection,
+      SuggestionEvidenceSourceId.MayoDrySkinCare,
+    ]);
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.safetyFlags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining('UV is high today'),
+          sourceIds: expect.arrayContaining([
+            SuggestionEvidenceSourceId.OpenMeteoWeather,
+            SuggestionEvidenceSourceId.AadSunscreenSelection,
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it('keeps scheduled minimal beginner baseline suggestions to basics', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.skinProfile = {
+      routine_preferences: { pace: 'minimal', am_minutes: 5 },
+    } as unknown as SkinProfile;
+
+    const result = await generator.generate(inputs);
+
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'moisturizer-1',
+      'spf-1',
+    ]);
+  });
+
+  it('does not select products already marked as skipped candidates in baseline fallback', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.shelfActiveProducts.push(
+      product('retinoid-1', 'Retinol Night Serum', ProductCategory.Treatment),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('retinoid-1', ProductCategory.Treatment, 90, ['retinoid']),
+    );
+    inputs.contextSummary.skippedCandidates = [
+      {
+        productId: 'retinoid-1',
+        reason: 'Strong active should be spaced carefully tonight.',
+        sourceIds: [SuggestionEvidenceSourceId.AadRetinoidRetinol],
+      },
+    ];
+
+    const result = await generator.generate(inputs);
+
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
+      ]),
+    );
+    expect(result.explanation.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: expect.stringContaining('retinoid-1'),
+        }),
+      ]),
+    );
+  });
+
+  it('adds owned barrier support in mixed-mode fallback without changing manual product choices', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning plan',
+                    body: [],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    {
+                      stepOrder: 0,
+                      routineStepId: 'manual-cleanser-step',
+                      inventoryProductId: 'cleanser-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Soft Cleanser',
+                      stepLabel: ProductCategory.Cleanser,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Cleanse first.',
+                      provenance: SuggestionStepProvenance.UserRoutine,
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                    {
+                      stepOrder: 1,
+                      routineStepId: 'manual-spf-step',
+                      inventoryProductId: 'spf-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Daily SPF 50',
+                      stepLabel: ProductCategory.SunProtection,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Finish with SPF.',
+                      provenance: SuggestionStepProvenance.UserRoutine,
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.skinProfile = {
+      primary_goal: 'support barrier while using sunscreen',
+      current_concerns: ['dryness'],
+    } as unknown as SkinProfile;
+    inputs.contextSummary.skinProfile.primaryGoal =
+      'support barrier while using sunscreen';
+    inputs.contextSummary.skinProfile.activeConcerns = ['dryness'];
+    inputs.routineSteps = [
+      routineStep('manual-cleanser-step', 0, inputs.shelfActiveProducts[0]),
+      routineStep('manual-spf-step', 1, inputs.shelfActiveProducts[3]),
+    ];
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('missing_barrier_moisturizer');
+    expect(result.mode).toBe(SuggestionMode.Mixed);
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          routineStepId: 'manual-cleanser-step',
+          inventoryProductId: 'cleanser-1',
+          provenance: SuggestionStepProvenance.UserRoutine,
+        }),
+        expect.objectContaining({
+          routineStepId: 'manual-spf-step',
+          inventoryProductId: 'spf-1',
+          provenance: SuggestionStepProvenance.UserRoutine,
+        }),
+        expect.objectContaining({
+          routineStepId: null,
+          inventoryProductId: 'moisturizer-1',
+          provenance: SuggestionStepProvenance.AiAdded,
+        }),
+      ]),
+    );
+    expect(result.explanation.body.length).toBeGreaterThan(0);
+  });
+
+  it('filters irrelevant evening sunscreen gaps when no photosensitizing active is selected', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening barrier',
+                    body: [],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    {
+                      stepOrder: 0,
+                      routineStepId: null,
+                      inventoryProductId: 'moisturizer-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Barrier Cream',
+                      stepLabel: ProductCategory.Moisturizer,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Support the barrier tonight.',
+                      provenance: 'ai_added',
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                  ],
+                  gapRecommendations: [
+                    {
+                      ingredientOrCategory: 'Sunscreen',
+                      reason: 'No sunscreen for daytime UV protection.',
+                      budgetTier: 'starter',
+                      goalAlignment: 'Sun protection',
+                      sourceIds: [
+                        SuggestionEvidenceSourceId.AadSunscreenSelection,
+                      ],
+                    },
+                  ],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Evening),
+    );
+
+    expect(result.gapRecommendations).toEqual([]);
+  });
+
+  it('falls back when explanation copy contradicts multiple application steps', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Gentle restart',
+                    body: ['Use moisturizer only tonight.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    {
+                      stepOrder: 0,
+                      routineStepId: null,
+                      inventoryProductId: 'cleanser-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Soft Cleanser',
+                      stepLabel: ProductCategory.Cleanser,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Gentle cleanse.',
+                      provenance: 'ai_added',
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                    {
+                      stepOrder: 1,
+                      routineStepId: null,
+                      inventoryProductId: 'moisturizer-1',
+                      productBrand: 'Ava Lab',
+                      productName: 'Barrier Cream',
+                      stepLabel: ProductCategory.Moisturizer,
+                      customLabel: null,
+                      applicationMethod: null,
+                      quantity: null,
+                      waitAfterMinutes: null,
+                      explanation: 'Barrier support.',
+                      provenance: 'ai_added',
+                      chips: [],
+                      safetyWarnings: [],
+                    },
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Evening),
+    );
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('contradictory_only_copy');
+  });
+
+  it('falls back when no-shelf copy describes missing products as steps', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Start with sunscreen',
+                    body: [
+                      'Sunscreen is the main step for daytime protection.',
+                    ],
+                    perStepReasons: [
+                      {
+                        stepOrder: 1,
+                        reason:
+                          'Morning UV protection is the safest first step.',
+                      },
+                    ],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [],
+                  gapRecommendations: [
+                    {
+                      ingredientOrCategory: 'Broad-spectrum SPF 30+ sunscreen',
+                      reason: 'Needed for morning protection.',
+                      budgetTier: 'starter',
+                      goalAlignment: 'safe routine start',
+                      sourceIds: [
+                        SuggestionEvidenceSourceId.AadSunscreenSelection,
+                      ],
+                    },
+                  ],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.shelfActiveProducts = [];
+    inputs.contextSummary.productScores = [];
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('no_shelf_gap_only_copy');
+    expect(result.steps).toEqual([]);
+    expect(result.explanation.headline).toBe('No shelf steps yet');
+  });
+
+  it('falls back to source-backed AI-mode product suggestions when OpenAI is unavailable', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(result.mode).toBe('ai');
+    expect(result.metadata.model).toBe('deterministic-baseline');
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          inventoryProductId: 'cleanser-1',
+          stepLabel: ProductCategory.Cleanser,
+          provenance: 'ai_added',
+        }),
+        expect.objectContaining({
+          inventoryProductId: 'spf-1',
+          stepLabel: ProductCategory.SunProtection,
+          provenance: 'ai_added',
+        }),
+        expect.objectContaining({
+          inventoryProductId: 'serum-1',
+          stepLabel: ProductCategory.Serum,
+          provenance: 'ai_added',
+        }),
+      ]),
+    );
+    expect(result.explanation.inputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: 'Evidence',
+        }),
+      ]),
+    );
+  });
+
+  it('keeps missing sunscreen as a trusted-source gap, never an invented step', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.shelfActiveProducts = inputs.shelfActiveProducts.filter(
+      (product) => product.id !== 'spf-1',
+    );
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.filter(
+        (score) => score.productId !== 'spf-1',
+      );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepLabel: ProductCategory.SunProtection,
+        }),
+      ]),
+    );
+    expect(result.gapRecommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ingredientOrCategory: expect.stringContaining('sunscreen'),
+          sourceIds: expect.arrayContaining([
+            SuggestionEvidenceSourceId.AadSunscreenSelection,
+          ]),
+        }),
+      ]),
+    );
+  });
+});
+
+function inputsWithScoredShelfProducts(
+  daypart: SuggestionDaypart,
+): SuggestionGenerationInputs {
+  const products = [
+    product('cleanser-1', 'Soft Cleanser', ProductCategory.Cleanser),
+    product('serum-1', 'Niacinamide Serum', ProductCategory.Serum),
+    product('moisturizer-1', 'Barrier Cream', ProductCategory.Moisturizer),
+    product('spf-1', 'Daily SPF 50', ProductCategory.SunProtection),
+  ];
+  return {
+    slotId: 'slot-1',
+    requestSource: SuggestionRequestSource.Scheduled,
+    requestContext: null,
+    targetDate: '2026-04-29',
+    targetTime: daypart === SuggestionDaypart.Evening ? '20:00' : '08:00',
+    daypart,
+    skinProfile: null,
+    shelfActiveProducts: products,
+    shelfFinishedProductIds: [],
+    routineSteps: [],
+    recentJournalEntries: [],
+    recentApplications: [],
+    aiPersonalizationAllowed: true,
+    aiPersonalizationBlockedReason: null,
+    environmentSnapshotId: null,
+    contextSummary: {
+      cacheKey: 'ctx-products',
+      builtAt: '2026-04-29T06:00:00.000Z',
+      targetDate: '2026-04-29',
+      targetTime: daypart === SuggestionDaypart.Evening ? '20:00' : '08:00',
+      daypart,
+      requestSource: SuggestionRequestSource.Scheduled,
+      onDemand: null,
+      environment: null,
+      skinProfile: {
+        primaryGoal: 'barrier support',
+        skinType: null,
+        sensitivityLevel: null,
+        activeConcerns: [],
+        pregnancyStatus: null,
+      },
+      reaction: {
+        hasSignal: false,
+        severity: null,
+        confidence: null,
+        indicators: [],
+        affectedZones: [],
+        concernKeys: [],
+        daysSinceLatestSignal: null,
+        barrierCompromised: false,
+        photoInputImages: 0,
+        multiAnglePhotoEntries: 0,
+      },
+      routineBreak: {
+        recentlyResumed: false,
+        lastPausedFrom: null,
+        lastPausedUntil: null,
+      },
+      productScores: [
+        productScore('cleanser-1', ProductCategory.Cleanser, 88, []),
+        productScore('serum-1', ProductCategory.Serum, 84, ['niacinamide']),
+        productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+          'ceramide',
+        ]),
+        productScore('spf-1', ProductCategory.SunProtection, 92, ['spf']),
+      ],
+      applicationPatterns: {
+        days: 0,
+        daysSinceLastApplication: null,
+        conservativeRestart: false,
+        skippedByCategory: {},
+        substitutedByCategory: {},
+        addedOffShelfCount: 0,
+        editedLogCount: 0,
+        adherenceByCategory: {},
+      },
+      safetyConstraints: ['daytime_spf_available'],
+      governance: {
+        safetyPolicyVersion: 'test-policy',
+        safetyPolicyReviewedAt: '2026-05-04',
+        aiPersonalizationAllowed: true,
+        aiPersonalizationBlockedReason: null,
+      },
+      evidenceSources: getSuggestionEvidenceSources([
+        SuggestionEvidenceSourceId.AadSunscreenSelection,
+        SuggestionEvidenceSourceId.MayoDrySkinCare,
+      ]),
+      skippedCandidates: [],
+    },
+  };
+}
+
+function product(
+  id: string,
+  name: string,
+  category: ProductCategory,
+): InventoryProduct {
+  return {
+    id,
+    user_id: 'user-1',
+    brand: 'Ava Lab',
+    name,
+    category,
+    status: ShelfStatus.Active,
+    guidance: {
+      applicationMethod: 'fingertips',
+      quantity: 'pea-size',
+      steps: [],
+      cautions: [],
+      waitMinutes: null,
+    },
+  } as unknown as InventoryProduct;
+}
+
+function productScore(
+  productId: string,
+  category: ProductCategory,
+  suitabilityScore: number,
+  activeTags: string[],
+) {
+  return {
+    productId,
+    brand: 'Ava Lab',
+    name: productId,
+    category,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    activeTags,
+    suitabilityScore,
+    suitabilityReasons: ['matches this slot'],
+    cautionReasons: [],
+    waitMinutes: null,
+    inciQuality: 'available' as const,
+    dataQuality: 'verified' as const,
+    dataQualityWarnings: [],
+    evidenceSourceIds:
+      category === ProductCategory.SunProtection
+        ? [SuggestionEvidenceSourceId.AadSunscreenSelection]
+        : [SuggestionEvidenceSourceId.MayoDrySkinCare],
+  };
+}
+
+function routineStep(
+  id: string,
+  stepOrder: number,
+  productValue: InventoryProduct,
+): RoutineStep {
+  return {
+    id,
+    slot_id: 'slot-1',
+    step_order: stepOrder,
+    inventory_product_id: productValue.id,
+    step_label: productValue.category,
+    custom_label: null,
+    notes: null,
+    optional: false,
+    is_specialist_locked: false,
+    product: productValue,
+  } as RoutineStep;
+}
+
+function highUvEnvironment(): EnvironmentContextSummary {
+  return {
+    status: EnvironmentStatus.Available,
+    provider: EnvironmentProviderName.OpenMeteo,
+    generatedAt: '2026-04-29T06:00:00.000Z',
+    locationPersonalized: true,
+    season: EnvironmentSeason.Spring,
+    temperatureCelsius: 18,
+    temperatureBand: EnvironmentTemperatureBand.Mild,
+    humidity: 48,
+    humidityBand: EnvironmentHumidityBand.Balanced,
+    uvIndex: 9,
+    uvRisk: EnvironmentUvRisk.VeryHigh,
+    airQualityIndex: 20,
+    airQualityRisk: EnvironmentAirQualityRisk.Good,
+    pm25: null,
+    pm10: null,
+    pollenRisk: null,
+    conditionLabel: 'Clear',
+    waterHardness: EnvironmentWaterHardness.Unknown,
+    waterSensitivity: EnvironmentWaterSensitivity.None,
+    climateSensitivities: [],
+    transitionSignals: [],
+    confidence: EnvironmentConfidence.Provider,
+    stale: false,
+    sourceIds: [SuggestionEvidenceSourceId.OpenMeteoWeather],
+  };
+}

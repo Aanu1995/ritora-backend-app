@@ -12,13 +12,26 @@ import {
   Post,
   Query,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES } from '../catalogue/catalogue-photo.constants';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import {
+  CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
+  CATALOGUE_PRODUCT_DRAFT_UPLOAD_FIELD,
+  CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD,
+} from '../catalogue/catalogue-photo.constants';
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { createValidationException } from '../common/validation/validation-exception';
+import {
+  RequireUnrestrictedUserCapabilities,
+  UserRestrictionGuard,
+} from '../users/user-restriction.guard';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
@@ -59,9 +72,62 @@ export class InventoryController {
     return this.inventoryService.create(userId, dto);
   }
 
-  @Post('upload-image')
+  @Post('with-image')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableImageUpload,
+  )
+  @UseGuards(UserRestrictionGuard)
   @UseInterceptors(
-    FileInterceptor('image', {
+    FileInterceptor(CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD, {
+      limits: {
+        fileSize: CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
+        files: 1,
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: [
+        CATALOGUE_PRODUCT_DRAFT_UPLOAD_FIELD,
+        CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD,
+      ],
+      properties: {
+        [CATALOGUE_PRODUCT_DRAFT_UPLOAD_FIELD]: {
+          type: 'string',
+          description: 'JSON encoded CreateInventoryProductDto',
+        },
+        [CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD]: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  createWithImage(
+    @CurrentUser('id') userId: string,
+    @UploadedFile() file: UploadedCatalogueImage | undefined,
+    @Body(CATALOGUE_PRODUCT_DRAFT_UPLOAD_FIELD) rawProduct: string | undefined,
+  ): Promise<InventoryProductResponseDto> {
+    if (!file) {
+      throw new BadRequestException('Product image is required');
+    }
+
+    return this.inventoryService.createWithProductImage(
+      userId,
+      this.parseMultipartProductDraft(rawProduct),
+      file,
+    );
+  }
+
+  @Post('upload-image')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableImageUpload,
+  )
+  @UseGuards(UserRestrictionGuard)
+  @UseInterceptors(
+    FileInterceptor(CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD, {
       limits: {
         fileSize: CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
         files: 1,
@@ -74,7 +140,7 @@ export class InventoryController {
       type: 'object',
       required: ['image'],
       properties: {
-        image: {
+        [CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD]: {
           type: 'string',
           format: 'binary',
         },
@@ -82,15 +148,83 @@ export class InventoryController {
     },
   })
   async uploadImage(
-    @CurrentUser('id') _userId: string,
+    @CurrentUser('id') userId: string,
     @UploadedFile() file: UploadedCatalogueImage | undefined,
   ): Promise<UploadInventoryProductImageResponseDto> {
     if (!file) {
       throw new BadRequestException('Product image is required');
     }
 
-    const imageUrl = await this.inventoryService.uploadProductImage(file);
+    const imageUrl = await this.inventoryService.uploadProductImage(
+      userId,
+      file,
+    );
     return UploadInventoryProductImageResponseDto.fromImageUrl(imageUrl);
+  }
+
+  private parseMultipartProductDraft(
+    rawProduct: string | undefined,
+  ): CreateInventoryProductDto {
+    if (!rawProduct) {
+      throw new BadRequestException('Product payload is required');
+    }
+
+    let parsedProduct: unknown;
+    try {
+      parsedProduct = JSON.parse(rawProduct) as unknown;
+    } catch {
+      throw new BadRequestException('Product payload must be valid JSON');
+    }
+
+    const dto = plainToInstance(CreateInventoryProductDto, parsedProduct);
+    const errors = validateSync(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+
+    if (errors.length > 0) {
+      throw createValidationException(errors);
+    }
+
+    return dto;
+  }
+
+  @Post(':id/upload-image')
+  @RequireUnrestrictedUserCapabilities(
+    UserRestrictionCapability.DisableImageUpload,
+  )
+  @UseGuards(UserRestrictionGuard)
+  @UseInterceptors(
+    FileInterceptor(CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD, {
+      limits: {
+        fileSize: CATALOGUE_PHOTO_MAX_FILE_SIZE_BYTES,
+        files: 1,
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['image'],
+      properties: {
+        [CATALOGUE_PRODUCT_IMAGE_UPLOAD_FIELD]: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  async uploadImageToProduct(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @UploadedFile() file: UploadedCatalogueImage | undefined,
+  ): Promise<InventoryProductResponseDto> {
+    if (!file) {
+      throw new BadRequestException('Product image is required');
+    }
+
+    return this.inventoryService.uploadAndAttachProductImage(userId, id, file);
   }
 
   @Post('bulk/archive')

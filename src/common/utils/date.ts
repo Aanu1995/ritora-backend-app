@@ -38,6 +38,46 @@ export function toNullableIsoString(
   return value ? toIsoString(value) : null;
 }
 
+export function toDateOnlyString(value: DateLike): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const dateOnly = trimmed.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
+    if (dateOnly) return dateOnly;
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) return formatLocalDateOnly(parsed);
+  }
+
+  if (value instanceof Date) {
+    if (!Number.isNaN(value.getTime())) return formatLocalDateOnly(value);
+  }
+
+  if (dayjs.isDayjs(value) && value.isValid()) {
+    return value.format('YYYY-MM-DD');
+  }
+
+  throw new TypeError('Expected a valid date-only value.');
+}
+
+export function toTimeOnlyString(value: string | Date | dayjs.Dayjs): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const timeOnly = trimmed.match(/^(\d{1,2}:\d{2}(?::\d{2})?)/)?.[1];
+    if (timeOnly) return timeOnly;
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) return formatLocalTimeOnly(parsed);
+  }
+
+  if (value instanceof Date) {
+    if (!Number.isNaN(value.getTime())) return formatLocalTimeOnly(value);
+  }
+
+  if (dayjs.isDayjs(value) && value.isValid()) {
+    return value.format('HH:mm:ss');
+  }
+
+  throw new TypeError('Expected a valid time-only value.');
+}
+
 export function diffInDaysRounded(from: DateLike, to: DateLike): number {
   return Math.round(toDayjs(to).diff(toDayjs(from), 'day', true));
 }
@@ -83,4 +123,20 @@ export function expiresFromDuration(durationValue: string): Date {
     default:
       return nowUtc().add(15, 'minute').toDate();
   }
+}
+
+function formatLocalDateOnly(value: Date): string {
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, '0'),
+    String(value.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function formatLocalTimeOnly(value: Date): string {
+  return [
+    String(value.getHours()).padStart(2, '0'),
+    String(value.getMinutes()).padStart(2, '0'),
+    String(value.getSeconds()).padStart(2, '0'),
+  ].join(':');
 }

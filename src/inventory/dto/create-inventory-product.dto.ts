@@ -21,6 +21,7 @@ import {
   Quantity,
   ShelfStatus,
 } from '../../shelf/shelf.types';
+import { EmptyStringToNull } from '../../common/dto/empty-string.transforms';
 
 export class CreateCatalogueIdentityDto {
   @IsString()
@@ -70,16 +71,19 @@ export class CreateCatalogueIdentityDto {
   @IsString({ each: true })
   inciIngredients!: string[];
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsISO8601()
   inciLastConfirmedAt?: string | null;
 }
 
 export class CreateApplicationGuidanceDto {
+  @EmptyStringToNull()
   @IsOptional()
   @IsEnum(ApplicationMethod)
   applicationMethod?: ApplicationMethod | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsEnum(Quantity)
   quantity?: Quantity | null;
@@ -93,6 +97,7 @@ export class CreateApplicationGuidanceDto {
   @IsString({ each: true })
   cautions!: string[];
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsNumber()
   @Min(0)
@@ -116,10 +121,12 @@ export class CreateManufacturerInfoDto {
   @IsString()
   countryOfManufacture?: string | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsEmail()
   supportEmail?: string | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsUrl({
     protocols: ['http', 'https'],
@@ -127,6 +134,7 @@ export class CreateManufacturerInfoDto {
   })
   productUrl?: string | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsUrl({
     protocols: ['http', 'https'],
@@ -136,19 +144,23 @@ export class CreateManufacturerInfoDto {
 }
 
 export class CreateUserFieldsDto {
+  @EmptyStringToNull()
   @IsOptional()
   @IsISO8601()
   openedAt?: string | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsISO8601()
   expiresAt?: string | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsNumber()
   @Min(0)
   periodAfterOpeningMonths?: number | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsNumber()
   @Min(0)
@@ -166,6 +178,7 @@ export class CreateUserFieldsDto {
   @IsString()
   personalNotes?: string | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsEnum(PreferredTimeOfDay)
   preferredTimeOfDay?: PreferredTimeOfDay | null;
@@ -188,11 +201,13 @@ export class CreateInventoryProductDto {
   @Type(() => CreateUserFieldsDto)
   userFields!: CreateUserFieldsDto;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsEnum(ShelfStatus)
-  status?: ShelfStatus;
+  status?: ShelfStatus | null;
 
+  @EmptyStringToNull()
   @IsOptional()
   @IsEnum(DataProvenance)
-  provenance?: DataProvenance;
+  provenance?: DataProvenance | null;
 }

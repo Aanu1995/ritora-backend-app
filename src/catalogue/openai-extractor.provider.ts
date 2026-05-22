@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { readOpenAiModel } from '../common/utils/openai-config';
+import {
+  CATALOGUE_AI_MODEL_ENV_KEY,
+  readFeatureOpenAiModel,
+} from '../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
 import { isSafeExternalHttpUrl } from '../common/utils/url-security';
 import { hashBuffer, hashStableValue } from './catalogue-cache-key.utils';
 import { TimedMemoryCache } from './catalogue-memory-cache';
@@ -46,7 +50,7 @@ const REQUEST_TIMEOUT_MS = 15000;
 const PHOTO_REQUEST_TIMEOUT_MS = 45000;
 const WEB_SEARCH_REQUEST_TIMEOUT_MS = 20000;
 const OFFICIAL_DISCOVERY_REQUEST_TIMEOUT_MS = 15000;
-const DEFAULT_MODEL = 'gpt-5.5';
+const DEFAULT_MODEL = 'gpt-5.2';
 const OFFICIAL_DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000;
 
 @Injectable()
@@ -243,11 +247,15 @@ export class OpenAiExtractorProvider {
         },
         body: JSON.stringify({
           model: options.model ?? this.getModel(),
+          store: false,
           ...(options.useWebSearch
             ? { tools: [{ type: 'web_search' }], tool_choice: 'auto' }
             : {}),
           input,
           max_output_tokens: options.maxOutputTokens ?? 1200,
+          ...openAiRepeatabilityRequestOptions(
+            options.model ?? this.getModel(),
+          ),
           ...(options.reasoningEffort
             ? { reasoning: { effort: options.reasoningEffort } }
             : {}),
@@ -285,7 +293,13 @@ export class OpenAiExtractorProvider {
   }
 
   private getModel(): string {
-    return readOpenAiModel(this.configService, DEFAULT_MODEL) ?? DEFAULT_MODEL;
+    return (
+      readFeatureOpenAiModel(
+        this.configService,
+        CATALOGUE_AI_MODEL_ENV_KEY,
+        DEFAULT_MODEL,
+      ) ?? DEFAULT_MODEL
+    );
   }
 
   private getPrimaryReasoningEffort(): string | undefined {

@@ -38,9 +38,13 @@ describe('configureApp', () => {
     overrides: Record<string, boolean | string> = {},
   ) =>
     ({
-      get: jest.fn((key: string, fallback?: boolean | string) =>
-        key in overrides ? overrides[key] : fallback,
-      ),
+      get: jest.fn((key: string) => overrides[key]),
+      getOrThrow: jest.fn((key: string) => {
+        if (key in overrides) {
+          return overrides[key];
+        }
+        throw new Error(`Missing config ${key}`);
+      }),
     }) as unknown as ConfigService;
 
   afterEach(() => {
@@ -50,7 +54,9 @@ describe('configureApp', () => {
   it('configures middleware, cors, prefix, validation, filters, and swagger', () => {
     const { app, disable, expressUse } = createApp();
     const configService = createConfigService({
+      ADMIN_WEB_APP_URL: 'http://localhost:3002',
       CORS_ORIGINS: 'http://localhost:3000, https://ritora.com',
+      NODE_ENV: 'development',
       SWAGGER_ENABLED: true,
     });
     const createDocumentSpy = jest
@@ -62,7 +68,11 @@ describe('configureApp', () => {
 
     expect(app.use).toHaveBeenCalledTimes(2);
     expect(app.enableCors).toHaveBeenCalledWith({
-      origin: ['http://localhost:3000', 'https://ritora.com'],
+      origin: [
+        'http://localhost:3000',
+        'https://ritora.com',
+        'http://localhost:3002',
+      ],
       credentials: true,
       methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: [
@@ -70,6 +80,7 @@ describe('configureApp', () => {
         'Authorization',
         'Accept-Language',
         'X-Timezone',
+        'X-Time-Zone',
       ],
       maxAge: 86400,
     });
@@ -83,6 +94,10 @@ describe('configureApp', () => {
 
     expect(disable).toHaveBeenCalledWith('x-powered-by');
     expect(expressUse).toHaveBeenCalledWith('/media', expect.any(Function));
+    expect(expressUse).not.toHaveBeenCalledWith(
+      '/static/skin-journal',
+      expect.any(Function),
+    );
     expect(createDocumentSpy).toHaveBeenCalled();
     expect(setupSpy).toHaveBeenCalledWith(
       'api/docs',
@@ -94,7 +109,11 @@ describe('configureApp', () => {
 
   it('skips swagger setup when disabled', () => {
     const { app } = createApp();
-    const configService = createConfigService({ SWAGGER_ENABLED: false });
+    const configService = createConfigService({
+      CORS_ORIGINS: 'http://localhost:3000',
+      NODE_ENV: 'development',
+      SWAGGER_ENABLED: false,
+    });
     const createDocumentSpy = jest.spyOn(SwaggerModule, 'createDocument');
     const setupSpy = jest.spyOn(SwaggerModule, 'setup');
 
@@ -104,9 +123,13 @@ describe('configureApp', () => {
     expect(setupSpy).not.toHaveBeenCalled();
   });
 
-  it('skips swagger setup by default in production', () => {
+  it('skips swagger setup when production config disables it', () => {
     const { app, set } = createApp();
-    const configService = createConfigService({ NODE_ENV: 'production' });
+    const configService = createConfigService({
+      CORS_ORIGINS: 'https://ritora.com',
+      NODE_ENV: 'production',
+      SWAGGER_ENABLED: false,
+    });
     const createDocumentSpy = jest.spyOn(SwaggerModule, 'createDocument');
     const setupSpy = jest.spyOn(SwaggerModule, 'setup');
 

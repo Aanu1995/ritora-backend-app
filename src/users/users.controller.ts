@@ -9,6 +9,8 @@ import { UpdateUserLanguageDto } from './dto/update-user-language.dto';
 import { UpdateUserTimeZoneDto } from './dto/update-user-time-zone.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
+import { User } from './entities/user.entity';
+import { UserCapabilitySnapshotService } from './user-capability-snapshot.service';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -17,13 +19,19 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
+    private readonly capabilitySnapshot: UserCapabilitySnapshotService,
   ) {}
 
   @Get('me')
   @ApiOkResponse({ type: UserResponseDto })
   async getMe(@CurrentUser('id') userId: string): Promise<UserResponseDto> {
-    const user = await this.usersService.findByIdOrFail(userId);
-    return UserResponseDto.fromEntity(user);
+    const user = await this.usersService.findByIdForAuth(userId);
+    if (!user) {
+      return this.toUserResponse(
+        await this.usersService.findByIdOrFail(userId),
+      );
+    }
+    return this.toUserResponse(user, Boolean(user.password_hash));
   }
 
   @Patch('me')
@@ -37,7 +45,8 @@ export class UsersController {
       lastName: dto.lastName,
     });
 
-    return UserResponseDto.fromEntity(user);
+    const authUser = await this.usersService.findByIdForAuth(userId);
+    return this.toUserResponse(user, Boolean(authUser?.password_hash));
   }
 
   @Patch('me/language')
@@ -58,7 +67,8 @@ export class UsersController {
       normalizeLanguage(user.preferred_language),
     );
 
-    return UserResponseDto.fromEntity(user);
+    const authUser = await this.usersService.findByIdForAuth(userId);
+    return this.toUserResponse(user, Boolean(authUser?.password_hash));
   }
 
   @Patch('me/time-zone')
@@ -69,6 +79,18 @@ export class UsersController {
   ): Promise<UserResponseDto> {
     const user = await this.usersService.updateTimeZone(userId, dto.timeZone);
 
-    return UserResponseDto.fromEntity(user);
+    const authUser = await this.usersService.findByIdForAuth(userId);
+    return this.toUserResponse(user, Boolean(authUser?.password_hash));
+  }
+
+  private async toUserResponse(
+    user: User,
+    hasPassword?: boolean,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.fromEntity(
+      user,
+      hasPassword,
+      await this.capabilitySnapshot.buildForUser(user),
+    );
   }
 }

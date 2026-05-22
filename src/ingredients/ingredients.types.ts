@@ -22,8 +22,6 @@ export enum AnalysisMode {
   Multi = 'multi',
 }
 
-// ===== Multi-product analysis (kept for future Today's Suggestion integration) =====
-
 export type AnalysisConflict = {
   id: string;
   code: string;
@@ -54,8 +52,6 @@ export type LayeringStep = {
   reason: string;
 };
 
-// ===== Focus-product educational =====
-
 export type AnalysisActive = {
   slug: string;
   displayName: string;
@@ -69,13 +65,6 @@ export type AnalysisActive = {
   mitigationHint: string | null;
 };
 
-/**
- * Unified analysis response. Two modes:
- *   - `mode: 'focus'`: `actives` populated, multi-product arrays empty. Used
- *     by the Shelf product-detail educational panel.
- *   - `mode: 'multi'`: `conflicts` / `overlaps` / `layeringOrder` populated,
- *     `actives` empty. The future primitive for Today's Suggestion.
- */
 export type AnalysisResult = {
   mode: AnalysisMode;
   status: AnalysisStatus;
@@ -86,12 +75,9 @@ export type AnalysisResult = {
   overlaps: AnalysisOverlap[];
   layeringOrder: LayeringStep[];
   productsMissingInci: string[];
-  /** Engine version that produced this result. Clients bust caches when it bumps. */
   engineVersion: string;
   generatedAt: string;
 };
-
-// ===== Catalogue shapes (now DB-backed, English only) =====
 
 export enum IngredientCategory {
   Retinoid = 'retinoid',
@@ -114,11 +100,6 @@ export enum IngredientCategory {
   ChemicalSpf = 'chemical-spf',
 }
 
-/**
- * Ingredient row as consumed by the engine. Only the canonical English
- * strings live here; localisation happens at response build time via the
- * TranslationService.
- */
 export type IngredientDefinition = {
   slug: string;
   displayNameEn: string;

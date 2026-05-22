@@ -60,6 +60,13 @@ export type ExtractionResult = {
 
 export type OpenAiResponsePayload = {
   output_text?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
   output?: Array<{
     type?: string;
     content?: Array<{

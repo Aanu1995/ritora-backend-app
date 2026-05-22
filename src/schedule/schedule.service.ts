@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import {
   resolveDayOfWeekForTimeZone,
   resolveTimeZoneContext,
@@ -11,32 +11,30 @@ import { ApplyPresetDto } from './dto/apply-preset.dto';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { CreateSlotsDto } from './dto/create-slots.dto';
 import { MoveSlotDto } from './dto/move-slot.dto';
-import {
-  DAYS_OF_WEEK,
-  DayOfWeek,
-  MAX_STEPS_PER_SLOT,
-} from './dto/schedule.constants';
+import { DayOfWeek } from './dto/schedule.constants';
 import { UpdateSlotDto } from './dto/update-slot.dto';
 import { UpsertRoutineStepsDto } from './dto/upsert-routine-steps.dto';
 import { RoutineStep } from './entities/routine-step.entity';
 import { ScheduleSlot } from './entities/schedule-slot.entity';
+import { ScheduleSuggestionCoordinator } from './schedule-suggestion-coordinator.service';
 import {
-  buildRoutineStepWriteData,
+  buildEveryDaySlotsInput,
+  applySlotUpdatePatch,
+  assertUserHasSchedulableProduct,
   buildScheduleSlotData,
-  collectReferencedProductIds,
+  buildSlotInputForDay,
   getMissingDays,
-  hasMissingCustomLabel,
+  assertRoutineStepsSchedulable,
+  isUniqueConstraintError,
   type NormalizedCreateSlotsInput,
   normalizeCreateSlotsInput,
   normalizeSlotInput,
+  replaceRoutineSteps,
 } from './schedule.service.utils';
 import {
-  scheduleCustomLabelRequired,
   scheduleMoveConflict,
-  scheduleProductsNotOwned,
   scheduleSlotConflict,
   scheduleSlotNotFound,
-  scheduleTooManySteps,
 } from './schedule.errors';
 import { compareSlots, normaliseTime } from './schedule.utils';
 
@@ -50,6 +48,7 @@ export class ScheduleService {
     @InjectRepository(InventoryProduct)
     private readonly productsRepository: Repository<InventoryProduct>,
     private readonly dataSource: DataSource,
+    private readonly suggestionCoordinator: ScheduleSuggestionCoordinator,
   ) {}
 
   async getForUser(userId: string): Promise<ScheduleSlot[]> {
@@ -88,17 +87,36 @@ export class ScheduleService {
 
   async createSlot(userId: string, dto: CreateSlotDto): Promise<ScheduleSlot> {
     const slotInput = normalizeSlotInput(dto);
+    await assertUserHasSchedulableProduct(this.productsRepository, userId);
+    await assertRoutineStepsSchedulable(
+      this.productsRepository,
+      userId,
+      slotInput.steps,
+    );
     await this.assertSlotAvailable(
       userId,
       slotInput.dayOfWeek,
       slotInput.slotTime,
     );
 
-    const slot = this.slotsRepository.create(
-      buildScheduleSlotData(userId, slotInput),
-    );
-    await this.slotsRepository.save(slot);
-    return this.loadSlot(userId, slot.id);
+    try {
+      const slot = await this.dataSource.transaction(async (manager) => {
+        const slotRepository = manager.getRepository(ScheduleSlot);
+        const savedSlot = await slotRepository.save(
+          slotRepository.create(buildScheduleSlotData(userId, slotInput)),
+        );
+        await replaceRoutineSteps(
+          manager.getRepository(RoutineStep),
+          savedSlot.id,
+          slotInput.steps,
+        );
+        return savedSlot;
+      });
+      return this.loadSlot(userId, slot.id);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw scheduleSlotConflict();
+      throw error;
+    }
   }
 
   async createSlots(
@@ -106,6 +124,12 @@ export class ScheduleService {
     dto: CreateSlotsDto,
   ): Promise<ScheduleSlot[]> {
     const slotInput = normalizeCreateSlotsInput(dto);
+    await assertUserHasSchedulableProduct(this.productsRepository, userId);
+    await assertRoutineStepsSchedulable(
+      this.productsRepository,
+      userId,
+      slotInput.steps,
+    );
     const existing = await this.findExistingSlotsForTime(
       userId,
       slotInput.daysOfWeek,
@@ -114,7 +138,12 @@ export class ScheduleService {
     const existingDays = new Set(existing.map((slot) => slot.day_of_week));
     const missingDays = getMissingDays(slotInput.daysOfWeek, existingDays);
 
-    await this.createMissingSlots(userId, missingDays, slotInput);
+    try {
+      await this.createMissingSlots(userId, missingDays, slotInput);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw scheduleSlotConflict();
+      throw error;
+    }
 
     return this.getForUser(userId);
   }
@@ -123,12 +152,7 @@ export class ScheduleService {
     userId: string,
     dto: ApplyPresetDto,
   ): Promise<ScheduleSlot[]> {
-    return this.createSlots(userId, {
-      daysOfWeek: [...DAYS_OF_WEEK],
-      slotTime: dto.slotTime,
-      mode: dto.mode,
-      slotNotes: dto.slotNotes,
-    });
+    return this.createSlots(userId, buildEveryDaySlotsInput(dto));
   }
 
   async updateSlot(
@@ -137,6 +161,7 @@ export class ScheduleService {
     dto: UpdateSlotDto,
   ): Promise<ScheduleSlot> {
     const slot = await this.findOwnedSlot(userId, slotId);
+    await assertUserHasSchedulableProduct(this.productsRepository, userId);
 
     if (dto.slotTime !== undefined) {
       const nextTime = normaliseTime(dto.slotTime);
@@ -151,21 +176,24 @@ export class ScheduleService {
       }
     }
 
-    if (dto.mode !== undefined) {
-      slot.mode = dto.mode;
-    }
+    applySlotUpdatePatch(slot, dto);
 
-    if (dto.slotNotes !== undefined) {
-      slot.slot_notes = dto.slotNotes ?? null;
+    try {
+      await this.slotsRepository.save(slot);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw scheduleSlotConflict();
+      throw error;
     }
-
-    await this.slotsRepository.save(slot);
-    return this.loadSlot(userId, slot.id);
+    const updatedSlot = await this.loadSlot(userId, slot.id);
+    await this.suggestionCoordinator.handleSlotChanged(userId, updatedSlot);
+    return updatedSlot;
   }
 
   async deleteSlot(userId: string, slotId: string): Promise<void> {
     const slot = await this.findOwnedSlot(userId, slotId);
-    await this.slotsRepository.remove(slot);
+    await this.suggestionCoordinator.handleSlotRemoved(userId, slot);
+    slot.deleted_at = new Date();
+    await this.slotsRepository.save(slot);
   }
 
   async moveSlot(
@@ -174,6 +202,7 @@ export class ScheduleService {
     dto: MoveSlotDto,
   ): Promise<ScheduleSlot> {
     const slot = await this.findOwnedSlot(userId, slotId);
+    await assertUserHasSchedulableProduct(this.productsRepository, userId);
     const toTime = normaliseTime(dto.toTime);
 
     if (slot.day_of_week === dto.toDay && slot.slot_time === toTime) {
@@ -185,6 +214,7 @@ export class ScheduleService {
         user_id: userId,
         day_of_week: dto.toDay,
         slot_time: toTime,
+        deleted_at: IsNull(),
       },
     });
     if (conflict && conflict.id !== slot.id) {
@@ -193,8 +223,15 @@ export class ScheduleService {
 
     slot.day_of_week = dto.toDay;
     slot.slot_time = toTime;
-    await this.slotsRepository.save(slot);
-    return this.loadSlot(userId, slot.id);
+    try {
+      await this.slotsRepository.save(slot);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw scheduleMoveConflict();
+      throw error;
+    }
+    const updatedSlot = await this.loadSlot(userId, slot.id);
+    await this.suggestionCoordinator.handleSlotChanged(userId, updatedSlot);
+    return updatedSlot;
   }
 
   async upsertSteps(
@@ -203,16 +240,18 @@ export class ScheduleService {
     dto: UpsertRoutineStepsDto,
   ): Promise<ScheduleSlot> {
     const slot = await this.findOwnedSlot(userId, slotId);
+    await assertUserHasSchedulableProduct(this.productsRepository, userId);
 
-    if (dto.steps.length > MAX_STEPS_PER_SLOT) {
-      throw scheduleTooManySteps(MAX_STEPS_PER_SLOT);
-    }
-
-    await this.assertProductsOwned(userId, dto.steps);
-    this.assertCustomLabels(dto.steps);
+    await assertRoutineStepsSchedulable(
+      this.productsRepository,
+      userId,
+      dto.steps,
+    );
     await this.replaceSteps(slot.id, dto.steps);
 
-    return this.loadSlot(userId, slot.id);
+    const updatedSlot = await this.loadSlot(userId, slot.id);
+    await this.suggestionCoordinator.handleSlotChanged(userId, updatedSlot);
+    return updatedSlot;
   }
 
   private async findOwnedSlot(
@@ -220,7 +259,7 @@ export class ScheduleService {
     slotId: string,
   ): Promise<ScheduleSlot> {
     const slot = await this.slotsRepository.findOne({
-      where: { id: slotId, user_id: userId },
+      where: { id: slotId, user_id: userId, deleted_at: IsNull() },
     });
     if (!slot) {
       throw scheduleSlotNotFound();
@@ -236,6 +275,7 @@ export class ScheduleService {
       this.buildSlotQuery({
         id: slotId,
         user_id: userId,
+        deleted_at: IsNull(),
       }),
     );
     if (!slot) {
@@ -249,7 +289,13 @@ export class ScheduleService {
     where: FindOptionsWhere<ScheduleSlot> = {},
   ): Promise<ScheduleSlot[]> {
     return this.slotsRepository
-      .find(this.buildSlotQuery({ user_id: userId, ...where }))
+      .find(
+        this.buildSlotQuery({
+          ...where,
+          user_id: userId,
+          deleted_at: IsNull(),
+        }),
+      )
       .then((slots) => slots.sort(compareSlots));
   }
 
@@ -271,6 +317,7 @@ export class ScheduleService {
         user_id: userId,
         day_of_week: dayOfWeek,
         slot_time: slotTime,
+        deleted_at: IsNull(),
       },
     });
 
@@ -294,72 +341,29 @@ export class ScheduleService {
         repository.create(
           buildScheduleSlotData(
             userId,
-            normalizeSlotInput({
-              dayOfWeek,
-              slotTime: slotInput.slotTime,
-              mode: slotInput.mode,
-              slotNotes: slotInput.slotNotes,
-            }),
+            buildSlotInputForDay(dayOfWeek, slotInput),
           ),
         ),
       );
 
-      await repository.save(nextSlots);
+      const savedSlots = await repository.save(nextSlots);
+      const stepsRepository = manager.getRepository(RoutineStep);
+      for (const slot of savedSlots) {
+        await replaceRoutineSteps(stepsRepository, slot.id, slotInput.steps);
+      }
     });
-  }
-
-  private async assertProductsOwned(
-    userId: string,
-    steps: UpsertRoutineStepsDto['steps'],
-  ): Promise<void> {
-    const referencedProductIds = collectReferencedProductIds(steps);
-
-    if (referencedProductIds.length === 0) {
-      return;
-    }
-
-    const ownedProducts = await this.productsRepository.find({
-      where: {
-        id: In(referencedProductIds),
-        user_id: userId,
-      },
-      select: ['id'],
-    });
-    const ownedIds = new Set(ownedProducts.map((product) => product.id));
-    const foreignProductIds = referencedProductIds.filter(
-      (productId) => !ownedIds.has(productId),
-    );
-
-    if (foreignProductIds.length > 0) {
-      throw scheduleProductsNotOwned(foreignProductIds);
-    }
-  }
-
-  private assertCustomLabels(steps: UpsertRoutineStepsDto['steps']): void {
-    if (hasMissingCustomLabel(steps)) {
-      throw scheduleCustomLabelRequired();
-    }
   }
 
   private async replaceSteps(
     slotId: string,
     steps: UpsertRoutineStepsDto['steps'],
   ): Promise<void> {
-    const stepWriteData = buildRoutineStepWriteData(slotId, steps);
-
     await this.dataSource.transaction(async (manager) => {
-      const stepsRepository = manager.getRepository(RoutineStep);
-      await stepsRepository.delete({ slot_id: slotId });
-
-      if (stepWriteData.length === 0) {
-        return;
-      }
-
-      const stepEntities = stepWriteData.map((step) =>
-        stepsRepository.create(step),
+      await replaceRoutineSteps(
+        manager.getRepository(RoutineStep),
+        slotId,
+        steps,
       );
-
-      await stepsRepository.save(stepEntities);
     });
   }
 
@@ -377,6 +381,7 @@ export class ScheduleService {
         user_id: userId,
         day_of_week: In([...daysOfWeek]),
         slot_time: slotTime,
+        deleted_at: IsNull(),
       },
     });
   }

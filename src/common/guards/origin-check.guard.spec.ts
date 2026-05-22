@@ -9,15 +9,23 @@ describe('OriginCheckGuard', () => {
         getRequest: () => ({ headers }),
       }),
     }) as unknown as ExecutionContext;
+  const createConfigService = (
+    overrides: Record<string, string>,
+  ): ConfigService =>
+    ({
+      get: jest.fn((key: string) => overrides[key]),
+      getOrThrow: jest.fn((key: string) => {
+        if (key in overrides) {
+          return overrides[key];
+        }
+        throw new Error(`Missing config ${key}`);
+      }),
+    }) as unknown as ConfigService;
 
   it('allows matching origin headers', () => {
-    const configService = {
-      get: jest.fn((key: string, fallback?: string) =>
-        key === 'CORS_ORIGINS'
-          ? 'http://localhost:3000, https://ritora.com'
-          : fallback,
-      ),
-    } as unknown as ConfigService;
+    const configService = createConfigService({
+      CORS_ORIGINS: 'http://localhost:3000, https://ritora.com',
+    });
     const guard = new OriginCheckGuard(configService);
 
     expect(
@@ -28,11 +36,10 @@ describe('OriginCheckGuard', () => {
   });
 
   it('allows matching referer headers when origin is absent', () => {
-    const configService = {
-      get: jest.fn((key: string, fallback?: string) =>
-        key === 'CORS_ORIGINS' ? undefined : fallback,
-      ),
-    } as unknown as ConfigService;
+    const configService = createConfigService({
+      CORS_ORIGINS: '',
+      WEB_APP_URL: 'http://localhost:3000',
+    });
     const guard = new OriginCheckGuard(configService);
 
     expect(
@@ -45,12 +52,29 @@ describe('OriginCheckGuard', () => {
     ).toBe(true);
   });
 
-  it('rejects disallowed origins', () => {
-    const configService = {
-      get: jest.fn((key: string, fallback?: string) =>
-        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
+  it('allows the configured admin web app origin', () => {
+    const configService = createConfigService({
+      ADMIN_WEB_APP_URL: 'http://localhost:3002',
+      CORS_ORIGINS: '',
+      WEB_APP_URL: 'http://localhost:3000',
+    });
+    const guard = new OriginCheckGuard(configService);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          origin: 'http://localhost:3002',
+          referer: undefined,
+        }),
       ),
-    } as unknown as ConfigService;
+    ).toBe(true);
+  });
+
+  it('rejects disallowed origins', () => {
+    const configService = createConfigService({
+      CORS_ORIGINS: '',
+      WEB_APP_URL: 'http://localhost:3000',
+    });
     const guard = new OriginCheckGuard(configService);
 
     expect(() =>
@@ -61,11 +85,10 @@ describe('OriginCheckGuard', () => {
   });
 
   it('rejects malformed origin values', () => {
-    const configService = {
-      get: jest.fn((key: string, fallback?: string) =>
-        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
-      ),
-    } as unknown as ConfigService;
+    const configService = createConfigService({
+      CORS_ORIGINS: '',
+      WEB_APP_URL: 'http://localhost:3000',
+    });
     const guard = new OriginCheckGuard(configService);
 
     expect(() =>
@@ -76,11 +99,10 @@ describe('OriginCheckGuard', () => {
   });
 
   it('rejects cross-site browser requests before origin fallback', () => {
-    const configService = {
-      get: jest.fn((key: string, fallback?: string) =>
-        key === 'WEB_APP_URL' ? 'http://localhost:3000' : fallback,
-      ),
-    } as unknown as ConfigService;
+    const configService = createConfigService({
+      CORS_ORIGINS: '',
+      WEB_APP_URL: 'http://localhost:3000',
+    });
     const guard = new OriginCheckGuard(configService);
 
     expect(() =>

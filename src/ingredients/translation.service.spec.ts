@@ -8,6 +8,12 @@ function buildConfig(
 ): ConfigService {
   return {
     get: jest.fn((key: string) => values[key]),
+    getOrThrow: jest.fn((key: string) => {
+      if (Object.prototype.hasOwnProperty.call(values, key)) {
+        return values[key];
+      }
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 }
 
@@ -82,7 +88,8 @@ describe('TranslationService', () => {
     const service = new TranslationService(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_MODEL: 'some-model',
+        INGREDIENT_TRANSLATION_AI_MODEL: 'ingredient-translation-model',
+        OPENAI_MODEL: 'fallback-model',
         INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
       }),
       buildDataSource(),
@@ -114,6 +121,15 @@ describe('TranslationService', () => {
     const result = await service.translateMany(inputs, 'sv');
 
     expect(global.fetch).toHaveBeenCalledTimes(3);
+    const [, firstInit] = (global.fetch as jest.Mock).mock.calls[0];
+    const firstBody = JSON.parse(String(firstInit.body)) as {
+      model?: string;
+      store?: boolean;
+      temperature?: number;
+    };
+    expect(firstBody.model).toBe('ingredient-translation-model');
+    expect(firstBody.store).toBe(false);
+    expect(firstBody.temperature).toBe(0);
     expect(maxActiveRequests).toBeLessThanOrEqual(2);
     expect(result[0]).toBe('sv:Text 0');
     expect(result[1]).toBe('sv:Text 1');
@@ -126,7 +142,7 @@ describe('TranslationService', () => {
     const service = new TranslationService(
       buildConfig({
         OPENAI_API_KEY: 'sk-test',
-        OPENAI_MODEL: 'some-model',
+        INGREDIENT_TRANSLATION_AI_MODEL: 'ingredient-translation-model',
         INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
       }),
       buildDataSource(),
@@ -151,5 +167,28 @@ describe('TranslationService', () => {
     expect(result[20]).toBe('sv:Text 20');
     expect(result[21]).toBe('sv:Text 21');
     expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('falls back to OPENAI_MODEL when the ingredient translation model is missing', async () => {
+    const service = new TranslationService(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_TRANSLATION_AI_MODEL: '',
+        OPENAI_MODEL: 'fallback-model',
+        INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
+      }),
+      buildDataSource(),
+    );
+
+    global.fetch = jest.fn(
+      async (_url: string | URL | Request, init?: RequestInit) =>
+        buildTranslationResponse(readRequestedSources(init)),
+    );
+
+    await service.translateMany(['Text 0'], 'sv');
+
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(String(init.body)) as { model?: string };
+    expect(body.model).toBe('fallback-model');
   });
 });

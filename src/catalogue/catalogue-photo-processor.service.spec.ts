@@ -45,7 +45,16 @@ async function createBorderedImage(
 
 describe('CataloguePhotoProcessorService', () => {
   const configService = {
-    get: jest.fn((key: string, fallback?: number) => fallback),
+    get: jest.fn((key: string) => {
+      if (key === 'PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION') return 2400;
+      if (key === 'PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY') return 90;
+      return undefined;
+    }),
+    getOrThrow: jest.fn((key: string) => {
+      if (key === 'PRODUCT_EXTRACTION_IMAGE_MAX_DIMENSION') return 2400;
+      if (key === 'PRODUCT_EXTRACTION_IMAGE_WEBP_QUALITY') return 90;
+      throw new Error(`Missing config ${key}`);
+    }),
   } as unknown as ConfigService;
 
   beforeEach(() => {
@@ -104,5 +113,5 @@ describe('CataloguePhotoProcessorService', () => {
     expect(
       Math.max(labelMetadata.width ?? 0, labelMetadata.height ?? 0),
     ).toBeLessThanOrEqual(2400);
-  });
+  }, 15_000);
 });

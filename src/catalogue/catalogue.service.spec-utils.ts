@@ -1,5 +1,4 @@
 import { CataloguePhotoProcessorService } from './catalogue-photo-processor.service';
-import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueSourceRuleService } from './catalogue-source-rule.service';
@@ -31,7 +30,6 @@ export function createCatalogueServiceTestHarness() {
     evaluateUrl: jest.fn(),
   };
   const cataloguePhotoStorageService = {
-    saveHeroImage: jest.fn(),
     startHeroImageUpload: jest.fn(),
   };
 
@@ -57,15 +55,6 @@ export function createCatalogueServiceTestHarness() {
         },
       }),
   );
-  cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(
-    'https://signed.example.com/product-images/processed/front-photo.webp',
-  );
-  cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
-    url: Promise.resolve(
-      'https://signed.example.com/product-images/processed/front-photo.webp',
-    ),
-    cleanup: jest.fn().mockResolvedValue(undefined),
-  });
   openAiExtractorProvider.completeMissingFields.mockResolvedValue(null);
 
   return {
@@ -74,7 +63,6 @@ export function createCatalogueServiceTestHarness() {
       openAiExtractorProvider as unknown as OpenAiExtractorProvider,
       catalogueSourceRuleService as unknown as CatalogueSourceRuleService,
       cataloguePhotoProcessorService as unknown as CataloguePhotoProcessorService,
-      cataloguePhotoStorageService as unknown as CataloguePhotoStorageService,
     ),
     officialPageProvider,
     openAiExtractorProvider,

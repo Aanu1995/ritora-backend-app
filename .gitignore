@@ -20,9 +20,21 @@ coverage/
 # Logs
 *.log
 
+# Local runtime uploads
+uploads/
+src/skin-journal/analysis-evaluation/private-images/
+src/skin-journal/analysis-evaluation/reports/
+src/ingredients/evaluation/reports/*.json
+
 # OpenAPI generated spec
 openapi.json
 
 coverage/
 
 .claude
+
+src/scripts/*
+!src/scripts/start-account-deletion-worker.ts
+scripts/
+!src/scripts/
+!src/scripts/evaluate-product-compare.ts

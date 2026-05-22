@@ -203,9 +203,9 @@ export class TranslationService {
   }
 
   private getSourceLanguage(): string {
-    return (
-      this.configService.get<string>(SOURCE_LANG_ENV_KEY)?.toLowerCase() || 'en'
-    );
+    return this.configService
+      .getOrThrow<string>(SOURCE_LANG_ENV_KEY)
+      .toLowerCase();
   }
 
   private hash(text: string): string {
@@ -295,7 +295,15 @@ export class TranslationService {
   }
 
   private logStructured(payload: Record<string, unknown>): void {
-    this.logger.warn(JSON.stringify(payload));
+    const event =
+      typeof payload.event === 'string'
+        ? payload.event
+        : 'ingredient_translation_warning';
+    const message =
+      typeof payload.message === 'string'
+        ? payload.message
+        : 'Ingredient translation warning';
+    this.logger.warn(`${event}: ${message}`);
   }
 }
 

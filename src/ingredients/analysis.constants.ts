@@ -25,6 +25,10 @@ export function resolveAnalysisConfidence(
     productsWithResolvedIngredients / analyzableProductCount;
   const worst = Math.min(tokenRatio, productCoverage);
 
+  if (productCoverage === 1 && resolvedTokens >= 3 && tokenRatio >= 0.7) {
+    return AnalysisConfidence.High;
+  }
+
   if (worst >= 0.85) return AnalysisConfidence.High;
   if (worst >= 0.6) return AnalysisConfidence.Medium;
   return AnalysisConfidence.Low;

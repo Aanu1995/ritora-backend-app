@@ -8,7 +8,12 @@ import {
   Quantity,
   ShelfStatus,
 } from '../src/shelf/shelf.types';
-import { createTestApp, MockMailService, truncateTables } from './test-setup';
+import {
+  createCompletedSkinProfile,
+  createTestApp,
+  MockMailService,
+  truncateTables,
+} from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
 const TEST_USER = {
@@ -82,7 +87,7 @@ function createInventoryDraft(overrides?: {
       preferredTimeOfDay: PreferredTimeOfDay.Evening,
     },
     status: ShelfStatus.Active,
-    provenance: DataProvenance.UserEntered,
+    provenance: DataProvenance.PhotoLookup,
   };
 }
 
@@ -128,6 +133,7 @@ describe('Ingredients (e2e)', () => {
       .expect(200);
 
     accessToken = getAccessTokenFromResponse(loginResponse);
+    await createCompletedSkinProfile(app, accessToken);
 
     const retinolRes = await request(app.getHttpServer())
       .post('/api/v1/inventory/products')
@@ -283,5 +289,65 @@ describe('Ingredients (e2e)', () => {
         ),
       })
       .expect(400);
+  });
+
+  it('compares a checked product with Shelf and flags replacement-only overlap', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/ingredients/compare-products')
+      .set('Origin', ORIGIN)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        anchor: {
+          kind: 'checked_product',
+          product: {
+            source: 'ingredient_paste',
+            brand: 'New Lab',
+            name: 'Retinol Serum',
+            category: ProductCategory.Serum,
+            inciIngredients: ['Water', 'Retinol', 'Niacinamide'],
+          },
+        },
+        candidates: [
+          {
+            kind: 'shelf_product',
+            productId: retinolId,
+          },
+        ],
+      })
+      .expect(200);
+
+    expect(res.body).toMatchObject({
+      comparison: {
+        outcome: 'no_clear_winner',
+        winnerItemId: null,
+      },
+    });
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.comparison.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'already_owned' }),
+        expect.objectContaining({ code: 'replacement_only' }),
+      ]),
+    );
+  });
+
+  it('rejects compare requests for Shelf products owned by another user', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/ingredients/compare-products')
+      .set('Origin', ORIGIN)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        anchor: {
+          kind: 'shelf_product',
+          productId: retinolId,
+        },
+        candidates: [
+          {
+            kind: 'shelf_product',
+            productId: '01KCOMPAREMISSING00000001',
+          },
+        ],
+      })
+      .expect(404);
   });
 });

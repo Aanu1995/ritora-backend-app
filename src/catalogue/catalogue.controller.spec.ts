@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { UploadedCatalogueImage } from './catalogue-photo.types';
 import { CatalogueController } from './catalogue.controller';
 import { CatalogueService } from './catalogue.service';
+import { UserRestrictionCapability } from '../users/user-restrictions';
 
 const mockCatalogueService = () => ({
   extractFromImages: jest.fn(),
@@ -58,5 +59,20 @@ describe('CatalogueController', () => {
     );
 
     expect(catalogueService.extractFromImages).not.toHaveBeenCalled();
+  });
+
+  it('requires image upload, product extraction, and AI restrictions to be open before parsing uploads', () => {
+    const capabilities = Reflect.getMetadata(
+      'userRestrictionAllowedCapabilities',
+      CatalogueController.prototype.extractFromImages,
+    ) as unknown;
+
+    expect(capabilities).toEqual(
+      expect.arrayContaining([
+        UserRestrictionCapability.DisableImageUpload,
+        UserRestrictionCapability.DisableProductExtraction,
+        UserRestrictionCapability.DisableAiGeneration,
+      ]),
+    );
   });
 });

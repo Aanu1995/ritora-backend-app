@@ -58,7 +58,6 @@ export class IngredientsSeeder {
   async run(): Promise<void> {
     const payload = this.loadSeed();
     await this.dataSource.transaction(async (manager) => {
-      // Ingredients
       for (const ing of payload.ingredients) {
         await manager.query(
           `INSERT INTO ingredient_entries (
@@ -122,7 +121,6 @@ export class IngredientsSeeder {
         }
       }
 
-      // Conflict rules
       for (const rule of payload.conflictRules) {
         await manager.query(
           `INSERT INTO ingredient_conflict_rules (

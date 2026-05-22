@@ -1,6 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { toIsoString } from '../../common/utils/date';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import {
+  ProductImageUrlResolverOptions,
+  resolveInventoryProductImageUrl,
+} from '../../inventory/product-image-url-resolver';
 import { RoutineStep } from '../entities/routine-step.entity';
 
 export class RoutineStepProductSummaryDto {
@@ -38,8 +42,11 @@ export class RoutineStepProductSummaryDto {
     this.status = status;
   }
 
-  static fromEntity(product: InventoryProduct): RoutineStepProductSummaryDto {
-    const imageUrl = product.identity?.imageUrls?.[0] ?? null;
+  static fromEntity(
+    product: InventoryProduct,
+    options: ProductImageUrlResolverOptions = {},
+  ): RoutineStepProductSummaryDto {
+    const imageUrl = resolveInventoryProductImageUrl(product, options);
     return new RoutineStepProductSummaryDto(
       product.id,
       product.brand,
@@ -73,6 +80,12 @@ export class RoutineStepResponseDto {
   @ApiProperty()
   optional: boolean;
 
+  @ApiProperty({
+    description:
+      'When true, AI suggestion engine treats the step as immutable: never modified, reordered, or removed.',
+  })
+  isSpecialistLocked: boolean;
+
   @ApiProperty({ nullable: true, type: RoutineStepProductSummaryDto })
   product: RoutineStepProductSummaryDto | null;
 
@@ -90,6 +103,7 @@ export class RoutineStepResponseDto {
     customLabel: string | null,
     notes: string | null,
     optional: boolean,
+    isSpecialistLocked: boolean,
     product: RoutineStepProductSummaryDto | null,
     createdAt: string,
     updatedAt: string,
@@ -101,14 +115,18 @@ export class RoutineStepResponseDto {
     this.customLabel = customLabel;
     this.notes = notes;
     this.optional = optional;
+    this.isSpecialistLocked = isSpecialistLocked;
     this.product = product;
     this.createdAt = createdAt;
     this.updatedAt = updatedAt;
   }
 
-  static fromEntity(step: RoutineStep): RoutineStepResponseDto {
+  static fromEntity(
+    step: RoutineStep,
+    options: ProductImageUrlResolverOptions = {},
+  ): RoutineStepResponseDto {
     const product = step.product
-      ? RoutineStepProductSummaryDto.fromEntity(step.product)
+      ? RoutineStepProductSummaryDto.fromEntity(step.product, options)
       : null;
     return new RoutineStepResponseDto(
       step.id,
@@ -118,6 +136,7 @@ export class RoutineStepResponseDto {
       step.custom_label,
       step.notes,
       step.optional,
+      step.is_specialist_locked,
       product,
       toIsoString(step.created_at),
       toIsoString(step.updated_at),

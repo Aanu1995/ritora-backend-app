@@ -31,7 +31,7 @@ function isPrivateIpv4Address(hostname: string): boolean {
 }
 
 function isPrivateIpv6Address(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
   return (
     normalized === '::1' ||
@@ -42,7 +42,7 @@ function isPrivateIpv6Address(hostname: string): boolean {
 }
 
 function hasPrivateHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   const ipVersion = isIP(normalized);
 
   if (normalized === 'localhost' || normalized.endsWith('.localhost')) {
@@ -91,15 +91,6 @@ function getAllowedApiMediaOrigins(): Set<string> {
   origins.add(`http://127.0.0.1:${apiPort}`);
   origins.add(`https://localhost:${apiPort}`);
   origins.add(`https://127.0.0.1:${apiPort}`);
-
-  const configuredPublicApiUrl = process.env.PUBLIC_API_URL?.trim();
-  if (configuredPublicApiUrl) {
-    try {
-      origins.add(new URL(configuredPublicApiUrl).origin);
-    } catch {
-      void 0;
-    }
-  }
 
   return origins;
 }

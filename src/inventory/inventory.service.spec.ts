@@ -5,6 +5,14 @@ import { CataloguePhotoProcessorService } from '../catalogue/catalogue-photo-pro
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { decodeCursor } from '../common/utils/cursor-pagination';
+import { NotificationsService } from '../notifications/notifications.service';
+import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
+import {
+  SkinProfileWaterHardness,
+  SkinProfileWaterSensitivity,
+} from '../skin-profile/dto/skin-profile.constants';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { InventoryService } from './inventory.service';
 import { InventoryProduct } from './entities/inventory-product.entity';
 import {
@@ -33,6 +41,7 @@ const createMockQueryBuilder = () => ({
 const mockRepository = () => ({
   find: jest.fn(),
   findOne: jest.fn(),
+  count: jest.fn(),
   create: jest.fn().mockImplementation((data) => data),
   save: jest.fn().mockImplementation(async (data) => data),
   remove: jest.fn().mockImplementation(async (data) => data),
@@ -86,7 +95,7 @@ function createSnapshot(
       preferredTimeOfDay: null,
     },
     status: ShelfStatus.Active,
-    provenance: DataProvenance.UserEntered,
+    provenance: DataProvenance.PhotoLookup,
     ...overrides,
   };
 }
@@ -124,30 +133,95 @@ function createEntity(
   } as InventoryProduct;
 }
 
+function completeSkinProfile(
+  overrides: Partial<SkinProfile> = {},
+): SkinProfile {
+  return {
+    user_id: 'user-1',
+    skin_type: 'oily',
+    skin_tone: 'medium',
+    ethnicity: 'black',
+    current_concerns: ['acne'],
+    fitzpatrick_phototype: 'IV',
+    primary_goal: 'clear_acne',
+    allow_smart_picks: true,
+    budget_tier: 'mid',
+    concern_details: {
+      per_concern: [{ concern: 'acne', severity: 'moderate' }],
+    },
+    skin_behavior: {
+      pih_tendency: 'often',
+      melasma_tendency: 'never',
+      keloid_tendency: 'never',
+      sunscreen_habit: 'most_days',
+      sunscreen_tolerance: 'fine',
+    },
+    routine_preferences: {
+      pace: 'cautious',
+      fragrance_free: true,
+      non_comedogenic: true,
+      sunscreen_filter: 'hybrid',
+      sunscreen_finish: 'natural',
+    },
+    safety_context: {},
+    reaction_history: {},
+    active_tolerances: {},
+    lifestyle_context: {
+      water_hardness: SkinProfileWaterHardness.Unknown,
+      water_sensitivity: SkinProfileWaterSensitivity.None,
+    },
+    shopping_preferences: {},
+    hormonal_context: {},
+    user: {
+      date_of_birth: '1992-04-15',
+      sex_at_birth: 'female',
+    },
+    ...overrides,
+  } as SkinProfile;
+}
+
 describe('InventoryService', () => {
   let service: InventoryService;
   let repo: jest.Mocked<Repository<InventoryProduct>>;
+  let skinProfiles: jest.Mocked<Repository<SkinProfile>>;
   let queryBuilder: ReturnType<typeof createMockQueryBuilder>;
   const cataloguePhotoProcessorService = {
     prepareHeroImageForStorage: jest.fn(),
   };
   const cataloguePhotoStorageService = {
     saveHeroImage: jest.fn(),
+    startHeroImageUpload: jest.fn(),
     toPersistentImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
     resolvePublicImageUrls: jest.fn((imageUrls: string[]) => imageUrls),
+  };
+  const dataAccess = {
+    recordDataAccess: jest.fn().mockResolvedValue(undefined),
+  };
+  const notificationsService = {
+    runProductExpiryAlertForProduct: jest.fn().mockResolvedValue(null),
+  };
+  const smartPicksPreparation = {
+    scheduleForUser: jest.fn(),
   };
 
   beforeEach(async () => {
     queryBuilder = createMockQueryBuilder();
     cataloguePhotoProcessorService.prepareHeroImageForStorage.mockClear();
     cataloguePhotoStorageService.saveHeroImage.mockClear();
+    cataloguePhotoStorageService.startHeroImageUpload.mockReset();
     cataloguePhotoStorageService.toPersistentImageUrls.mockClear();
     cataloguePhotoStorageService.resolvePublicImageUrls.mockClear();
+    notificationsService.runProductExpiryAlertForProduct.mockClear();
+    smartPicksPreparation.scheduleForUser.mockClear();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventoryService,
         {
           provide: getRepositoryToken(InventoryProduct),
+          useFactory: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(SkinProfile),
           useFactory: mockRepository,
         },
         {
@@ -158,12 +232,21 @@ describe('InventoryService', () => {
           provide: CataloguePhotoStorageService,
           useValue: cataloguePhotoStorageService,
         },
+        { provide: UserDataAccessLogService, useValue: dataAccess },
+        { provide: NotificationsService, useValue: notificationsService },
+        {
+          provide: SmartPicksPreparationService,
+          useValue: smartPicksPreparation,
+        },
       ],
     }).compile();
 
     service = module.get<InventoryService>(InventoryService);
     repo = module.get(getRepositoryToken(InventoryProduct));
+    skinProfiles = module.get(getRepositoryToken(SkinProfile));
+    skinProfiles.findOne.mockResolvedValue(completeSkinProfile());
     repo.createQueryBuilder.mockReturnValue(queryBuilder as never);
+    dataAccess.recordDataAccess.mockClear();
   });
 
   afterEach(() => {
@@ -194,13 +277,236 @@ describe('InventoryService', () => {
     expect(createPayload).toBeDefined();
     expect(createPayload?.user_id).toBe('user-1');
     expect(createPayload?.status).toBe(ShelfStatus.Active);
-    expect(createPayload?.provenance).toBe(DataProvenance.UserEntered);
+    expect(createPayload?.provenance).toBe(DataProvenance.PhotoLookup);
     expect(createPayload?.search_document).toContain('cerave');
     expect(createPayload?.manufacturer?.brand).toBe('CeraVe');
     expect(
       cataloguePhotoStorageService.toPersistentImageUrls,
     ).toHaveBeenCalled();
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
     expect(result.id).toBe('inventory-1');
+  });
+
+  it('rejects product creation when the skin profile is missing', async () => {
+    skinProfiles.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.create('user-1', createSnapshot() as never),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'skin_profile_required',
+      }),
+    });
+
+    expect(repo.save).not.toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects product creation when the skin profile is incomplete', async () => {
+    skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile({ primary_goal: null }),
+    );
+
+    await expect(
+      service.create('user-1', createSnapshot() as never),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'skin_profile_required',
+      }),
+    });
+
+    expect(repo.save).not.toHaveBeenCalled();
+    expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
+  });
+
+  it('uploads product images without reading skin profile data', async () => {
+    skinProfiles.findOne.mockResolvedValue(null);
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const imageUrl =
+      'https://signed.example.com/product-images/processed/photo.webp';
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
+
+    const result = await service.uploadProductImage('user-1', uploadedImage);
+
+    expect(result).toBe(imageUrl);
+    expect(skinProfiles.findOne).not.toHaveBeenCalled();
+    expect(
+      cataloguePhotoProcessorService.prepareHeroImageForStorage,
+    ).toHaveBeenCalledWith(uploadedImage);
+    expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
+      processedImage,
+      'user-1',
+    );
+  });
+
+  it('creates a product and attaches its image in one save flow', async () => {
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const managedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp?Policy=test';
+    const persistedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp';
+    const signedUrl = `${persistedUrl}?Policy=fresh`;
+    const cleanup = jest.fn().mockResolvedValue(undefined);
+    const saved = createEntity('inventory-3', {
+      identity: {
+        ...createSnapshot().identity,
+        imageUrls: [persistedUrl],
+      },
+    });
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+      url: Promise.resolve(managedUrl),
+      cleanup,
+    });
+    cataloguePhotoStorageService.toPersistentImageUrls.mockReturnValueOnce([
+      persistedUrl,
+    ]);
+    cataloguePhotoStorageService.resolvePublicImageUrls.mockReturnValueOnce([
+      signedUrl,
+    ]);
+    repo.save.mockResolvedValue(saved);
+
+    const result = await service.createWithProductImage(
+      'user-1',
+      createSnapshot({
+        identity: { ...createSnapshot().identity, imageUrls: [] },
+      }) as never,
+      uploadedImage,
+    );
+
+    expect(
+      cataloguePhotoProcessorService.prepareHeroImageForStorage,
+    ).toHaveBeenCalledWith(uploadedImage);
+    expect(
+      cataloguePhotoStorageService.startHeroImageUpload,
+    ).toHaveBeenCalledWith(processedImage, 'user-1');
+    expect(
+      cataloguePhotoStorageService.toPersistentImageUrls,
+    ).toHaveBeenCalledWith([managedUrl]);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(result.identity.imageUrls).toEqual([signedUrl]);
+  });
+
+  it('cleans up an uploaded image when create-with-image persistence fails', async () => {
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const cleanup = jest.fn().mockResolvedValue(undefined);
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+      url: Promise.resolve(
+        'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp?Policy=test',
+      ),
+      cleanup,
+    });
+    repo.save.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(
+      service.createWithProductImage(
+        'user-1',
+        createSnapshot({
+          identity: { ...createSnapshot().identity, imageUrls: [] },
+        }) as never,
+        uploadedImage,
+      ),
+    ).rejects.toThrow('database unavailable');
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a clean unavailable error when create-with-image upload fails', async () => {
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const cleanup = jest.fn().mockResolvedValue(undefined);
+
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.startHeroImageUpload.mockReturnValue({
+      url: Promise.reject(new Error('s3 unavailable')),
+      cleanup,
+    });
+
+    await expect(
+      service.createWithProductImage(
+        'user-1',
+        createSnapshot({
+          identity: { ...createSnapshot().identity, imageUrls: [] },
+        }) as never,
+        uploadedImage,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        message: 'Product image upload is unavailable right now',
+      }),
+    });
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(repo.save).not.toHaveBeenCalled();
   });
 
   it('stores managed media as stable refs and re-signs them for responses', async () => {
@@ -241,6 +547,25 @@ describe('InventoryService', () => {
     expect(result.identity.imageUrls).toEqual([signedUrl]);
   });
 
+  it('evaluates product expiry alerts after product updates', async () => {
+    const entity = createEntity('inventory-1');
+    repo.findOne.mockResolvedValue(entity);
+    repo.save.mockImplementation(async (value) => value as InventoryProduct);
+
+    await service.update('user-1', 'inventory-1', {
+      userFields: {
+        expiresAt: '2026-05-01T00:00:00.000Z',
+      },
+    });
+
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
+  });
+
   it('processes and uploads a product image for edit flows', async () => {
     const uploadedImage: UploadedCatalogueImage = {
       originalname: 'product.jpg',
@@ -264,15 +589,73 @@ describe('InventoryService', () => {
     );
     cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(imageUrl);
 
-    const result = await service.uploadProductImage(uploadedImage);
+    const result = await service.uploadProductImage('user-1', uploadedImage);
 
     expect(
       cataloguePhotoProcessorService.prepareHeroImageForStorage,
     ).toHaveBeenCalledWith(uploadedImage);
     expect(cataloguePhotoStorageService.saveHeroImage).toHaveBeenCalledWith(
       processedImage,
+      'user-1',
     );
     expect(result).toBe(imageUrl);
+  });
+
+  it('uploads and attaches a product image to an existing product', async () => {
+    const entity = createEntity('inventory-1');
+    const uploadedImage: UploadedCatalogueImage = {
+      originalname: 'product.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('image'),
+      size: 5,
+    };
+    const processedImage = {
+      ...uploadedImage,
+      originalname: 'product.webp',
+      mimetype: 'image/webp',
+      width: 800,
+      height: 800,
+      size: 12,
+    };
+    const managedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp?Policy=test';
+    const persistedUrl =
+      'https://d111111abcdef8.cloudfront.net/product-images/processed/photo.webp';
+    const signedUrl = `${persistedUrl}?Policy=fresh`;
+
+    repo.findOne.mockResolvedValue(entity);
+    repo.save.mockImplementation(async (value) => value as InventoryProduct);
+    cataloguePhotoProcessorService.prepareHeroImageForStorage.mockResolvedValue(
+      processedImage,
+    );
+    cataloguePhotoStorageService.saveHeroImage.mockResolvedValue(managedUrl);
+    cataloguePhotoStorageService.toPersistentImageUrls.mockReturnValueOnce([
+      persistedUrl,
+    ]);
+    cataloguePhotoStorageService.resolvePublicImageUrls.mockReturnValueOnce([
+      signedUrl,
+    ]);
+
+    const result = await service.uploadAndAttachProductImage(
+      'user-1',
+      'inventory-1',
+      uploadedImage,
+    );
+
+    expect(
+      cataloguePhotoStorageService.toPersistentImageUrls,
+    ).toHaveBeenCalledWith([managedUrl]);
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({
+          imageUrls: [persistedUrl],
+        }),
+      }),
+    );
+    expect(result.identity.imageUrls).toEqual([signedUrl]);
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).not.toHaveBeenCalled();
   });
 
   it('archives, restores, and marks products as finished', async () => {
@@ -287,6 +670,34 @@ describe('InventoryService', () => {
     expect(archived.status).toBe(ShelfStatus.Archived);
     expect(restored.status).toBe(ShelfStatus.Active);
     expect(finished.status).toBe(ShelfStatus.FinishedUp);
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledTimes(3);
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
+  });
+
+  it('evaluates product expiry alerts after bulk restore', async () => {
+    await service.restoreMany('user-1', ['inventory-1', 'inventory-2']);
+
+    expect(repo.update).toHaveBeenCalledWith(
+      {
+        user_id: 'user-1',
+        id: expect.any(Object),
+      },
+      { status: ShelfStatus.Active },
+    );
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
+    expect(
+      notificationsService.runProductExpiryAlertForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-2');
   });
 
   it('returns paginated inventory lists with a next cursor', async () => {

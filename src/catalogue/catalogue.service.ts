@@ -13,7 +13,6 @@ import {
   refineResolvedCategory,
 } from './catalogue-resolution.utils';
 import { CataloguePhotoProcessorService } from './catalogue-photo-processor.service';
-import { CataloguePhotoStorageService } from './catalogue-photo-storage.service';
 import type {
   CataloguePhotoExtractionInput,
   UploadedCatalogueImage,
@@ -51,7 +50,6 @@ export class CatalogueService {
     private readonly openAiExtractorProvider: OpenAiExtractorProvider,
     private readonly catalogueSourceRuleService: CatalogueSourceRuleService,
     private readonly cataloguePhotoProcessorService: CataloguePhotoProcessorService,
-    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
   ) {}
 
   async extractFromImages(
@@ -64,24 +62,15 @@ export class CatalogueService {
         images,
         heroImageIndex,
       );
-    const heroImageUpload =
-      this.cataloguePhotoStorageService.startHeroImageUpload(
-        processedPhotoBatch.heroStorageImage,
-      );
 
     const photoExtraction = await this.extractProductFromPreparedPhotos(
       processedPhotoBatch.extractionInput,
-      heroImageUpload.cleanup,
     );
     if (!photoExtraction) {
       return null;
     }
 
-    const storedHeroImageUrl = await heroImageUpload.url;
-    let current = this.buildPhotoResolvedDraft(
-      photoExtraction,
-      storedHeroImageUrl,
-    );
+    let current = this.buildPhotoResolvedDraft(photoExtraction);
     current = refineResolvedCategory(current);
     const productUrl = current.manufacturer.productUrl;
 
@@ -119,29 +108,19 @@ export class CatalogueService {
 
   private async extractProductFromPreparedPhotos(
     extractionInput: CataloguePhotoExtractionInput,
-    cleanupHeroImageUpload: () => Promise<void>,
   ): Promise<ExtractionResult | null> {
-    try {
-      const photoExtraction =
-        await this.openAiExtractorProvider.extractFromImages(extractionInput);
-      if (!photoExtraction) {
-        await cleanupHeroImageUpload();
-      }
-
-      return photoExtraction;
-    } catch (error) {
-      await cleanupHeroImageUpload();
-      throw error;
-    }
+    return this.openAiExtractorProvider.extractFromImages(extractionInput);
   }
 
   private buildPhotoResolvedDraft(
     completion: ExtractionResult,
-    storedHeroImageUrl: string | null,
   ): ResolvedProductDraft {
     const identity = mergeIdentity(
-      completion.data.identity ?? {},
-      storedHeroImageUrl ? { imageUrls: [storedHeroImageUrl] } : {},
+      {
+        ...(completion.data.identity ?? {}),
+        imageUrls: undefined,
+      },
+      {},
     );
     const manufacturer = {
       brand: completion.data.identity?.brand ?? undefined,

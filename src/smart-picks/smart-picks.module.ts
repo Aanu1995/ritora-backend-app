@@ -1,0 +1,81 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { EnvironmentIntelligenceModule } from '../environment-intelligence/environment-intelligence.module';
+import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { ApplicationLogItem } from '../application-tracking/entities/application-log-item.entity';
+import { ApplicationLogVersion } from '../application-tracking/entities/application-log-version.entity';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
+import { RoutineStep } from '../schedule/entities/routine-step.entity';
+import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
+import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
+import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
+import { SuggestionObservabilityEvent } from '../suggestions/entities/suggestion-observability-event.entity';
+import { SuggestionStep } from '../suggestions/entities/suggestion-step.entity';
+import { SuggestionObservabilityService } from '../suggestions/services/suggestion-observability.service';
+import { User } from '../users/entities/user.entity';
+import { UsersModule } from '../users/users.module';
+import { SmartPickGenerationJob } from './entities/smart-pick-generation-job.entity';
+import { SmartPickProductSuggestion } from './entities/smart-pick-product-suggestion.entity';
+import { SmartPickSnapshot } from './entities/smart-pick-snapshot.entity';
+import { SmartPicksAiGenerator } from './services/smart-picks-ai-generator';
+import { SmartPicksContextBuilder } from './services/smart-picks-context-builder';
+import { SmartPicksCoverageService } from './services/smart-picks-coverage.service';
+import { SmartPicksGenerationQueueService } from './services/smart-picks-generation-queue.service';
+import { SmartPicksOverviewService } from './services/smart-picks-overview.service';
+import { SmartPicksPreparationService } from './services/smart-picks-preparation.service';
+import { SmartPicksProductPerformanceService } from './services/smart-picks-product-performance.service';
+import { SmartPicksRedundancyService } from './services/smart-picks-redundancy.service';
+import { SmartPicksWishlistService } from './services/smart-picks-wishlist.service';
+import { SmartPicksController } from './smart-picks.controller';
+
+@Module({
+  imports: [
+    ConfigModule,
+    EnvironmentIntelligenceModule,
+    NotificationsModule,
+    PlatformGlobalRestrictionsModule,
+    UsersModule,
+    TypeOrmModule.forFeature([
+      SmartPickSnapshot,
+      SmartPickProductSuggestion,
+      SmartPickGenerationJob,
+      SuggestionGapAction,
+      SuggestionInstance,
+      SuggestionStep,
+      SuggestionObservabilityEvent,
+      ScheduleSlot,
+      RoutineStep,
+      SkinProfile,
+      InventoryProduct,
+      ApplicationLog,
+      ApplicationLogItem,
+      ApplicationLogVersion,
+      SkinJournalEntry,
+      User,
+    ]),
+  ],
+  providers: [
+    SmartPicksAiGenerator,
+    SmartPicksContextBuilder,
+    SmartPicksCoverageService,
+    SmartPicksGenerationQueueService,
+    SmartPicksOverviewService,
+    SmartPicksPreparationService,
+    SmartPicksProductPerformanceService,
+    SmartPicksRedundancyService,
+    SmartPicksWishlistService,
+    SuggestionObservabilityService,
+  ],
+  controllers: [SmartPicksController],
+  exports: [
+    SmartPicksGenerationQueueService,
+    SmartPicksOverviewService,
+    SmartPicksPreparationService,
+  ],
+})
+export class SmartPicksModule {}

@@ -53,23 +53,32 @@ cp .env.example .env
 Important variable groups:
 
 - Database: `DATABASE_*`
-- Web app / CORS: `WEB_APP_URL`, `CORS_ORIGINS`
+- Web app / CORS: `WEB_APP_URL`, `API_PUBLIC_URL`, `CORS_ORIGINS`
 - JWT: `JWT_SECRET`, `JWT_REFRESH_SECRET`, expiry, issuer, audience
 - Cookies: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
-- Mail: `RESEND_API_KEY`, `MAIL_FROM`
-- OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`
+- Mail: `RESEND_API_KEY`, `MAIL_FROM`, `NOTIFICATION_MAIL_FROM`, `MAIL_UNSUBSCRIBE_SECRET`
+- OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`, feature-specific model keys such as `SUGGESTION_AI_MODEL`
 - Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
 - Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
+- Skin Journal analysis cost metadata: `SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD`, `SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD`
+- Skin Journal analysis queue: `SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER` (`database` or `sqs`), `SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL`, optional `SKIN_JOURNAL_ANALYSIS_SQS_DLQ_URL`
+- Smart Picks queue: `SMART_PICKS_QUEUE_DRIVER` (`database` or `sqs`), `SMART_PICKS_SQS_QUEUE_URL`, optional `SMART_PICKS_SQS_DLQ_URL`
+- Smart Picks generation worker: run `npm run smart-picks:generation-worker` as a separate process so API instances enqueue work while the worker processes queued product generation jobs.
+- Skin Journal operations: `SKIN_JOURNAL_OPERATIONS_TOKEN`
 - Product media: `AWS_REGION`, `PRODUCT_MEDIA_*`
 - Legal consent versions: `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`
 
 Production validation requires:
 
 - `WEB_APP_URL` to be HTTPS
+- `API_PUBLIC_URL` to be HTTPS and include the API prefix, for example `https://api.example.com/api/v1`
 - `COOKIE_SECURE=true`
 - non-empty strong JWT secrets
-- a valid `MAIL_FROM`
+- a stable `MAIL_UNSUBSCRIBE_SECRET` with at least 32 characters
+- `SMART_PICKS_QUEUE_DRIVER=sqs` with a non-empty HTTPS `SMART_PICKS_SQS_QUEUE_URL`
+- a valid `MAIL_FROM` for auth emails
+- a valid `NOTIFICATION_MAIL_FROM` for notification emails, different from `MAIL_FROM`
 - valid `CORS_ORIGINS` when configured
 
 ## Local development
@@ -98,6 +107,7 @@ DATABASE_NAME=ritora
 DATABASE_USER=postgres
 DATABASE_PASSWORD=your-local-password
 WEB_APP_URL=http://localhost:3000
+API_PUBLIC_URL=http://localhost:3001/api/v1
 CORS_ORIGINS=http://localhost:3000
 JWT_SECRET=dev-jwt-secret-change-me
 JWT_REFRESH_SECRET=dev-refresh-secret-change-me
@@ -109,13 +119,44 @@ JWT_REFRESH_SECRET=dev-refresh-secret-change-me
 npm run migration:run
 ```
 
-5. Start the API.
+5. Optional: seed Skin Journal and Notifications demo data.
+
+```bash
+npm run skin-journal:seed
+npm run skin-journal:analysis-worker
+```
+
+The seeder creates or reuses `demo@ritora.local` with password
+`Password123!`, grants Skin Progress consent, writes local demo journal photos,
+and prepopulates calendar entries, AI analysis states, events, insights,
+notification preferences, an active simplification warning, and notifications.
+Re-running the seeder resets Skin Journal and Notification demo data for the
+demo user only.
+
+6. Start the API.
 
 ```bash
 npm run start:dev
 ```
 
-6. Useful local URLs:
+To run the API and all local workers together during development, use the
+source-based dev runner. This avoids starting workers from `dist` while the Nest
+watch compiler is rebuilding that folder. When
+`ACCOUNT_MONITORING_QUEUE_DRIVER=sqs` and `ACCOUNT_MONITORING_SQS_QUEUE_URL` are
+configured, this also starts the account monitoring SQS worker.
+
+```bash
+npm run start:dev:all
+```
+
+To run the Skin Journal analysis evaluation once before starting the API and
+workers:
+
+```bash
+npm run start:dev:all:evaluate
+```
+
+7. Useful local URLs:
 
 - API base: `http://localhost:3001/api/v1`
 - Health: `http://localhost:3001/api/v1/health`
@@ -220,6 +261,8 @@ npm run test:e2e
 npm run migration:run
 npm run migration:revert
 npm run migration:generate -- src/database/migrations/YourMigrationName
+
+npm run skin-journal:seed
 ```
 
 Notes:

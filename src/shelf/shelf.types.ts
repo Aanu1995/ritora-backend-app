@@ -65,10 +65,6 @@ export enum ShelfStatFilter {
 
 export enum DataProvenance {
   PhotoLookup = 'photo-lookup',
-  BarcodeLookup = 'barcode-lookup',
-  UrlFetch = 'url-fetch',
-  Catalogue = 'catalogue',
-  UserEntered = 'user-entered',
 }
 
 export enum CatalogueSource {

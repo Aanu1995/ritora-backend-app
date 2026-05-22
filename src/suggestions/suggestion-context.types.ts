@@ -1,0 +1,85 @@
+import type { PreferredTimeOfDay, ProductCategory } from '../shelf/shelf.types';
+import type { EnvironmentContextSummary } from '../environment-intelligence/environment-intelligence.types';
+import {
+  SuggestionDaypart,
+  SuggestionEvidenceSourceId,
+  SuggestionEvidenceSourceJson,
+  SuggestionRequestContextJson,
+  SuggestionRequestSource,
+} from './suggestions.constants';
+
+export interface SuggestionContextSummary {
+  cacheKey: string;
+  builtAt: string;
+  targetDate: string;
+  targetTime: string;
+  daypart: SuggestionDaypart;
+  requestSource: SuggestionRequestSource;
+  onDemand: SuggestionRequestContextJson | null;
+  skinProfile: {
+    primaryGoal: string | null;
+    skinType: string | null;
+    sensitivityLevel: string | null;
+    activeConcerns: string[];
+    pregnancyStatus: string | null;
+  };
+  reaction: {
+    hasSignal: boolean;
+    severity: string | null;
+    confidence: number | null;
+    indicators: string[];
+    affectedZones: string[];
+    concernKeys: string[];
+    daysSinceLatestSignal: number | null;
+    barrierCompromised: boolean;
+    photoInputImages: number;
+    multiAnglePhotoEntries: number;
+  };
+  routineBreak: {
+    recentlyResumed: boolean;
+    lastPausedFrom: string | null;
+    lastPausedUntil: string | null;
+  };
+  environment: EnvironmentContextSummary | null;
+  productScores: SuggestionProductScore[];
+  applicationPatterns: {
+    days: number;
+    daysSinceLastApplication: number | null;
+    conservativeRestart: boolean;
+    skippedByCategory: Record<string, number>;
+    substitutedByCategory: Record<string, number>;
+    addedOffShelfCount: number;
+    editedLogCount: number;
+    adherenceByCategory: Record<string, number>;
+  };
+  safetyConstraints: string[];
+  governance: {
+    safetyPolicyVersion: string;
+    safetyPolicyReviewedAt: string;
+    aiPersonalizationAllowed: boolean;
+    aiPersonalizationBlockedReason: string | null;
+  };
+  evidenceSources: SuggestionEvidenceSourceJson[];
+  skippedCandidates: {
+    productId: string;
+    reason: string;
+    sourceIds: SuggestionEvidenceSourceId[];
+  }[];
+}
+
+export interface SuggestionProductScore {
+  productId: string;
+  brand: string;
+  name: string;
+  category: ProductCategory;
+  preferredTimeOfDay: PreferredTimeOfDay | null;
+  activeTags: string[];
+  suitabilityScore: number;
+  suitabilityReasons: string[];
+  cautionReasons: string[];
+  waitMinutes: number | null;
+  inciQuality: 'available' | 'missing';
+  dataQuality: 'verified' | 'partial' | 'insufficient';
+  dataQualityWarnings: string[];
+  evidenceSourceIds: SuggestionEvidenceSourceId[];
+}

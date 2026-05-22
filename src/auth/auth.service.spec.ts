@@ -8,16 +8,39 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import * as bcrypt from 'bcrypt';
+import { hashSync } from 'bcrypt';
 import { createHash } from 'crypto';
 import type { Response } from 'express';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
+import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.entity';
+import { SkinJournalService } from '../skin-journal/skin-journal.service';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
+import {
+  AccountMonitoringEvent,
+  AccountMonitoringEventType,
+} from '../users/entities/account-monitoring-event.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import { createDefaultUserCapabilities } from '../users/dto/user-capabilities.dto';
+import { UserCapabilitySnapshotService } from '../users/user-capability-snapshot.service';
+import { UserRestrictionCapability } from '../users/user-restrictions';
+import {
+  UserConsentType,
+  UserDataAccessPurpose,
+} from '../users/user-consent.constants';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { AuthSession } from './entities/auth-session.entity';
 import { AuthService } from './auth.service';
+import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
+import { AccountDeletionStatus } from './dto/account-deletion-response.dto';
+import { OAuthProvider } from './oauth/oauth-profile';
 
 function sha256(data: string): string {
   return createHash('sha256').update(data).digest('hex');
@@ -31,7 +54,11 @@ const mockRes = () => ({
 type MockResponse = Pick<Response, 'cookie' | 'clearCookie'>;
 
 const asResponse = (response: MockResponse): Response =>
-  response as unknown as Response;
+  response as MockResponse & Response;
+
+const ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS = 10_000;
+const ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS =
+  ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS + 1;
 
 const mockConfigValues: Record<string, string | number | boolean> = {
   JWT_ACCESS_EXPIRY: '15m',
@@ -53,26 +80,58 @@ const mockConfigValues: Record<string, string | number | boolean> = {
   RESEND_API_KEY: 're_test_mock',
 };
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: Record<string, jest.Mock>;
   let jwtService: Record<string, jest.Mock>;
   let mailService: Record<string, jest.Mock>;
   let sessionsRepo: Record<string, jest.Mock>;
+  let accountMonitoringEventsRepo: Record<string, jest.Mock>;
   let consentsRepo: Record<string, jest.Mock>;
   let skinProfileRepo: Record<string, jest.Mock>;
+  let smartPickSnapshotsRepo: Record<string, jest.Mock>;
+  let smartPickSuggestionsRepo: Record<string, jest.Mock>;
+  let suggestionGapActionsRepo: Record<string, jest.Mock>;
+  let inventoryProductsRepo: Record<string, jest.Mock>;
+  let dataAccessLogService: Record<string, jest.Mock>;
+  let cataloguePhotoStorageService: Record<string, jest.Mock>;
+  let accountDeletionScheduler: Record<string, jest.Mock>;
+  let platformRestrictions: Record<string, jest.Mock>;
+  let capabilitySnapshot: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     usersService = {
       findByEmail: jest.fn(),
       findByEmailForAuth: jest.fn(),
+      findByGoogleSubject: jest.fn(),
+      findByAppleSubject: jest.fn(),
       findById: jest.fn(),
       findByIdForAuth: jest.fn(),
       create: jest.fn(),
+      createGoogleUser: jest.fn(),
+      createAppleUser: jest.fn(),
       update: jest.fn(),
+      linkGoogleSubject: jest.fn(),
+      linkAppleSubject: jest.fn(),
       remove: jest.fn(),
       findByVerificationTokenHash: jest.fn(),
       findByResetTokenHash: jest.fn(),
+      findByAccountDeletionCancelTokenHash: jest.fn(),
+      findByAccountDeletionConfirmTokenHash: jest.fn(),
+      findDueAccountDeletions: jest.fn(),
+      setAccountDeletionState: jest.fn(),
+      markAccountDeletionCancellationComplete: jest
+        .fn()
+        .mockResolvedValue(true),
+      clearAccountDeletionState: jest.fn(),
+      clearExpiredAccountDeletionCancellationReceipts: jest
+        .fn()
+        .mockResolvedValue(0),
+      clearExpiredAccountRestriction: jest.fn().mockResolvedValue(false),
     };
 
     jwtService = {
@@ -82,6 +141,11 @@ describe('AuthService', () => {
     mailService = {
       sendVerificationEmail: jest.fn().mockResolvedValue(undefined),
       sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
+      sendAccountDeletionConfirmationEmail: jest
+        .fn()
+        .mockResolvedValue(undefined),
+      sendAccountDeletionScheduledEmail: jest.fn().mockResolvedValue(undefined),
+      sendAccountDeletionCancelledEmail: jest.fn().mockResolvedValue(undefined),
     };
 
     sessionsRepo = {
@@ -90,6 +154,10 @@ describe('AuthService', () => {
       findOne: jest.fn(),
       find: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue(undefined),
+    };
+    accountMonitoringEventsRepo = {
+      create: jest.fn().mockImplementation((data) => data),
+      save: jest.fn().mockResolvedValue(undefined),
     };
 
     consentsRepo = {
@@ -102,6 +170,43 @@ describe('AuthService', () => {
       findOne: jest.fn().mockResolvedValue(null),
     };
 
+    smartPickSnapshotsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    smartPickSuggestionsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    suggestionGapActionsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    inventoryProductsRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+
+    dataAccessLogService = {
+      recordDataAccess: jest.fn().mockResolvedValue(undefined),
+    };
+    cataloguePhotoStorageService = {
+      deleteManagedImageUrls: jest.fn().mockResolvedValue(undefined),
+      deleteManagedImagesForOwner: jest.fn().mockResolvedValue(undefined),
+    };
+    accountDeletionScheduler = {
+      scheduleFinalization: jest.fn().mockResolvedValue(undefined),
+      cancelFinalization: jest.fn().mockResolvedValue(undefined),
+    };
+    platformRestrictions = {
+      assertAllowed: jest.fn().mockResolvedValue(undefined),
+    };
+    capabilitySnapshot = {
+      buildForUser: jest
+        .fn()
+        .mockResolvedValue(createDefaultUserCapabilities()),
+    };
+    const skinJournalService = {
+      exportAllDataForAccount: jest.fn().mockResolvedValue(null),
+      deleteAllMediaForUser: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -109,14 +214,56 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: jwtService },
         { provide: MailService, useValue: mailService },
         { provide: getRepositoryToken(AuthSession), useValue: sessionsRepo },
+        {
+          provide: getRepositoryToken(AccountMonitoringEvent),
+          useValue: accountMonitoringEventsRepo,
+        },
         { provide: getRepositoryToken(UserConsent), useValue: consentsRepo },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfileRepo },
         {
+          provide: getRepositoryToken(SmartPickSnapshot),
+          useValue: smartPickSnapshotsRepo,
+        },
+        {
+          provide: getRepositoryToken(SmartPickProductSuggestion),
+          useValue: smartPickSuggestionsRepo,
+        },
+        {
+          provide: getRepositoryToken(SuggestionGapAction),
+          useValue: suggestionGapActionsRepo,
+        },
+        {
+          provide: getRepositoryToken(InventoryProduct),
+          useValue: inventoryProductsRepo,
+        },
+        { provide: UserDataAccessLogService, useValue: dataAccessLogService },
+        { provide: SkinJournalService, useValue: skinJournalService },
+        {
+          provide: CataloguePhotoStorageService,
+          useValue: cataloguePhotoStorageService,
+        },
+        {
+          provide: AccountDeletionSchedulerService,
+          useValue: accountDeletionScheduler,
+        },
+        {
+          provide: PlatformGlobalRestrictionsService,
+          useValue: platformRestrictions,
+        },
+        {
+          provide: UserCapabilitySnapshotService,
+          useValue: capabilitySnapshot,
+        },
+        {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, defaultVal?: unknown) =>
-              key in mockConfigValues ? mockConfigValues[key] : defaultVal,
-            ),
+            get: jest.fn((key: string) => mockConfigValues[key]),
+            getOrThrow: jest.fn((key: string) => {
+              if (key in mockConfigValues) {
+                return mockConfigValues[key];
+              }
+              throw new Error(`Missing config ${key}`);
+            }),
           },
         },
       ],
@@ -129,7 +276,7 @@ describe('AuthService', () => {
     ({
       id: '01TESTUSER',
       email: 'test@example.com',
-      password_hash: bcrypt.hashSync('Password1', 4),
+      password_hash: hashSync('Password1', 4),
       first_name: 'Jane',
       last_name: 'Doe',
       email_verified: false,
@@ -137,7 +284,22 @@ describe('AuthService', () => {
       email_verification_expires: null,
       password_reset_token_hash: null,
       password_reset_expires: null,
+      account_deletion_requested_at: null,
+      account_deletion_scheduled_for: null,
+      account_deletion_cancel_token_hash: null,
+      account_deletion_cancel_token_consumed_at: null,
+      account_deletion_confirm_token_hash: null,
+      account_deletion_confirm_expires: null,
+      account_restricted_at: null,
+      account_restricted_by_admin_id: null,
+      account_restriction_capabilities: null,
+      account_restriction_expires_at: null,
+      account_restriction_internal_note: null,
+      account_restriction_reason: null,
+      account_restriction_user_message: null,
       preferred_language: 'en',
+      google_subject: null,
+      apple_subject: null,
       created_at: new Date('2024-01-01'),
       updated_at: new Date('2024-01-01'),
       ...overrides,
@@ -167,11 +329,41 @@ describe('AuthService', () => {
       expect(consentsRepo.save).toHaveBeenCalled();
       expect(mailService.sendVerificationEmail).toHaveBeenCalledWith(
         'test@example.com',
-        expect.any(String),
+        expect.stringMatching(/^[a-f0-9]{64}$/),
         'Jane',
         'en',
       );
       expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(platformRestrictions.assertAllowed).toHaveBeenCalledWith(
+        PlatformGlobalRestrictionCapability.DisableAccountCreation,
+      );
+    });
+
+    it('blocks password account creation while the global signup control is active', async () => {
+      platformRestrictions.assertAllowed.mockRejectedValue(
+        new ForbiddenException({
+          capability:
+            PlatformGlobalRestrictionCapability.DisableAccountCreation,
+          code: 'PLATFORM_GLOBAL_RESTRICTION_ACTIVE',
+          message: 'Platform feature temporarily disabled',
+        }),
+      );
+
+      await expect(
+        service.register({
+          email: 'test@example.com',
+          password: 'Password1',
+          firstName: 'Jane',
+          lastName: 'Doe',
+          preferredLanguage: 'en',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(usersService.findByEmail).not.toHaveBeenCalled();
+      expect(usersService.create).not.toHaveBeenCalled();
+      expect(mailService.sendVerificationEmail).not.toHaveBeenCalled();
     });
 
     it('rejects duplicate email', async () => {
@@ -263,17 +455,41 @@ describe('AuthService', () => {
       usersService.findByEmailForAuth.mockResolvedValue(fakeUser());
 
       await expect(
-        service.login('test@example.com', 'WrongPassword1', asResponse(res)),
+        service.login(
+          'test@example.com',
+          'WrongPassword1',
+          asResponse(res),
+          '127.0.0.1',
+        ),
       ).rejects.toThrow(UnauthorizedException);
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          event_type: AccountMonitoringEventType.AuthLoginFailed,
+          ip_address_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          metadata: { reason: 'invalid_credentials' },
+          user_id: '01TESTUSER',
+        }),
+      );
+      expect(
+        JSON.stringify(accountMonitoringEventsRepo.create.mock.calls),
+      ).not.toContain('test@example.com');
     });
 
-    it('rejects unknown email with generic message', async () => {
+    it('rejects missing email with generic message', async () => {
       const res = mockRes();
       usersService.findByEmailForAuth.mockResolvedValue(null);
 
       await expect(
         service.login('nobody@example.com', 'Password1', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event_type: AccountMonitoringEventType.AuthLoginFailed,
+          metadata: { reason: 'invalid_credentials' },
+          user_id: null,
+        }),
+      );
     });
 
     it('rejects unverified users before creating a session', async () => {
@@ -284,6 +500,391 @@ describe('AuthService', () => {
         service.login('test@example.com', 'Password1', asResponse(res)),
       ).rejects.toThrow(ForbiddenException);
       expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('rejects restricted users before creating a session', async () => {
+      const res = mockRes();
+      usersService.findByEmailForAuth.mockResolvedValue(
+        fakeUser({
+          account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+          account_restriction_capabilities: [
+            UserRestrictionCapability.DisableLogin,
+          ],
+          email_verified: true,
+        }),
+      );
+
+      await expect(
+        service.login('test@example.com', 'Password1', asResponse(res)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('allows login when a non-login restriction is active', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableNotifications,
+        ],
+        email_verified: true,
+      });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
+      sessionsRepo.save.mockImplementation(async (session) => ({
+        ...session,
+        id: '01SESSION',
+      }));
+
+      await expect(
+        service.login('test@example.com', 'Password1', asResponse(res)),
+      ).resolves.toMatchObject({
+        user: expect.objectContaining({ id: user.id }),
+      });
+    });
+
+    it('soft-clears an expired login restriction before creating a session', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableLogin,
+        ],
+        account_restriction_expires_at: new Date('2026-05-20T10:00:00.000Z'),
+        email_verified: true,
+      });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
+
+      await expect(
+        service.login('test@example.com', 'Password1', asResponse(res)),
+      ).resolves.toMatchObject({
+        user: expect.objectContaining({ id: user.id }),
+      });
+      expect(usersService.clearExpiredAccountRestriction).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(sessionsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+  });
+
+  describe('loginWithGoogle', () => {
+    const googleProfile = {
+      provider: OAuthProvider.Google,
+      providerSubject: 'google-subject-123',
+      email: 'test@example.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: false,
+    };
+    const authoritativeGoogleProfile = {
+      ...googleProfile,
+      email: 'test@gmail.com',
+      isEmailAuthoritative: true,
+    };
+
+    it('creates a verified user, records legal consents, and starts a session for first-time Google sign-in', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        email_verified: true,
+        password_hash: null,
+        google_subject: googleProfile.providerSubject,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+      usersService.createGoogleUser.mockResolvedValue(user);
+
+      const result = await service.loginWithGoogle(
+        googleProfile,
+        {
+          preferredLanguage: 'sv',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        },
+        asResponse(res),
+        '127.0.0.1',
+        'Google Agent',
+      );
+
+      expect(result.accessToken).toBe('access-token-123');
+      expect(usersService.createGoogleUser).toHaveBeenCalledWith({
+        email: googleProfile.email,
+        google_subject: googleProfile.providerSubject,
+        first_name: googleProfile.firstName,
+        last_name: googleProfile.lastName,
+        preferred_language: 'sv',
+      });
+      expect(consentsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+      expect(platformRestrictions.assertAllowed).toHaveBeenCalledWith(
+        PlatformGlobalRestrictionCapability.DisableAccountCreation,
+      );
+    });
+
+    it('blocks new Google account creation while allowing existing-account paths to be checked first', async () => {
+      const res = mockRes();
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+      platformRestrictions.assertAllowed.mockRejectedValue(
+        new ForbiddenException({
+          capability:
+            PlatformGlobalRestrictionCapability.DisableAccountCreation,
+          code: 'PLATFORM_GLOBAL_RESTRICTION_ACTIVE',
+          message: 'Platform feature temporarily disabled',
+        }),
+      );
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: true,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(usersService.createGoogleUser).not.toHaveBeenCalled();
+      expect(consentsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('requires legal consent before creating a new Google user', async () => {
+      const res = mockRes();
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: false,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(usersService.createGoogleUser).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('links authoritative Gmail Google identity to an existing email account', async () => {
+      const res = mockRes();
+      const existing = fakeUser({
+        email: authoritativeGoogleProfile.email,
+        email_verified: true,
+        google_subject: null,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+      usersService.linkGoogleSubject.mockResolvedValue({
+        ...existing,
+        google_subject: authoritativeGoogleProfile.providerSubject,
+      });
+
+      await service.loginWithGoogle(
+        authoritativeGoogleProfile,
+        {
+          preferredLanguage: 'en',
+          termsAccepted: false,
+          privacyPolicyAccepted: false,
+        },
+        asResponse(res),
+      );
+
+      expect(usersService.linkGoogleSubject).toHaveBeenCalledWith(
+        existing.id,
+        authoritativeGoogleProfile.providerSubject,
+      );
+      expect(consentsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('links authoritative Workspace Google identity to an existing email account', async () => {
+      const res = mockRes();
+      const workspaceGoogleProfile = {
+        ...googleProfile,
+        isEmailAuthoritative: true,
+      };
+      const existing = fakeUser({
+        email: workspaceGoogleProfile.email,
+        email_verified: true,
+        google_subject: null,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+      usersService.linkGoogleSubject.mockResolvedValue({
+        ...existing,
+        google_subject: workspaceGoogleProfile.providerSubject,
+      });
+
+      await service.loginWithGoogle(
+        workspaceGoogleProfile,
+        {
+          preferredLanguage: 'en',
+          termsAccepted: false,
+          privacyPolicyAccepted: false,
+        },
+        asResponse(res),
+      );
+
+      expect(usersService.linkGoogleSubject).toHaveBeenCalledWith(
+        existing.id,
+        workspaceGoogleProfile.providerSubject,
+      );
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('rejects non-authoritative Google email when an email-password account already exists', async () => {
+      const res = mockRes();
+      const existing = fakeUser({
+        email: googleProfile.email,
+        email_verified: true,
+        google_subject: null,
+      });
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: false,
+            privacyPolicyAccepted: false,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      expect(usersService.linkGoogleSubject).not.toHaveBeenCalled();
+      expect(sessionsRepo.create).not.toHaveBeenCalled();
+      expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('rejects if the email account is already linked to a different Google subject', async () => {
+      const res = mockRes();
+      usersService.findByGoogleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(
+        fakeUser({ google_subject: 'different-subject' }),
+      );
+
+      await expect(
+        service.loginWithGoogle(
+          googleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: true,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('loginWithApple', () => {
+    const appleProfile = {
+      provider: OAuthProvider.Apple,
+      providerSubject: 'apple-subject-123',
+      email: 'user@privaterelay.appleid.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: true,
+    };
+
+    it('creates a verified user, records legal consents, and starts a session for first-time Apple sign-in', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        email: appleProfile.email,
+        email_verified: true,
+        password_hash: null,
+        apple_subject: appleProfile.providerSubject,
+      });
+      usersService.findByAppleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(null);
+      usersService.createAppleUser.mockResolvedValue(user);
+
+      const result = await service.loginWithApple(
+        appleProfile,
+        {
+          preferredLanguage: 'sv',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        },
+        asResponse(res),
+        '127.0.0.1',
+        'Apple Agent',
+      );
+
+      expect(result.accessToken).toBe('access-token-123');
+      expect(usersService.createAppleUser).toHaveBeenCalledWith({
+        email: appleProfile.email,
+        apple_subject: appleProfile.providerSubject,
+        first_name: appleProfile.firstName,
+        last_name: appleProfile.lastName,
+        preferred_language: 'sv',
+      });
+      expect(consentsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('links a verified Apple identity to an existing email account', async () => {
+      const res = mockRes();
+      const existing = fakeUser({
+        email: appleProfile.email,
+        email_verified: true,
+        apple_subject: null,
+      });
+      usersService.findByAppleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(existing);
+      usersService.linkAppleSubject.mockResolvedValue({
+        ...existing,
+        apple_subject: appleProfile.providerSubject,
+      });
+
+      await service.loginWithApple(
+        appleProfile,
+        {
+          preferredLanguage: 'en',
+          termsAccepted: false,
+          privacyPolicyAccepted: false,
+        },
+        asResponse(res),
+      );
+
+      expect(usersService.linkAppleSubject).toHaveBeenCalledWith(
+        existing.id,
+        appleProfile.providerSubject,
+      );
+      expect(consentsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
+
+    it('rejects if the email account is already linked to a different Apple subject', async () => {
+      const res = mockRes();
+      usersService.findByAppleSubject.mockResolvedValue(null);
+      usersService.findByEmail.mockResolvedValue(
+        fakeUser({ apple_subject: 'different-subject' }),
+      );
+
+      await expect(
+        service.loginWithApple(
+          appleProfile,
+          {
+            preferredLanguage: 'en',
+            termsAccepted: true,
+            privacyPolicyAccepted: true,
+          },
+          asResponse(res),
+        ),
+      ).rejects.toThrow(ConflictException);
     });
   });
 
@@ -374,6 +975,94 @@ describe('AuthService', () => {
         service.refreshTokens('01SESSION.fakesecret', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
     });
+
+    it('rejects restricted users before rotating refresh tokens', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableLogin,
+        ],
+      });
+
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        user,
+      });
+
+      await expect(
+        service.refreshTokens(`01SESSION.${secret}`, asResponse(res)),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('allows refresh when the active restriction does not disable login', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableAiGeneration,
+        ],
+      });
+
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        user,
+      });
+      sessionsRepo.save.mockImplementation(async (session) => session);
+
+      await expect(
+        service.refreshTokens(`01SESSION.${secret}`, asResponse(res)),
+      ).resolves.toMatchObject({
+        accessToken: expect.any(String),
+        preferredLanguage: user.preferred_language,
+      });
+    });
+
+    it('soft-clears an expired login restriction before rotating refresh tokens', async () => {
+      const res = mockRes();
+      const secret = 'a'.repeat(64);
+      const user = fakeUser({
+        account_restricted_at: new Date('2026-05-20T09:00:00.000Z'),
+        account_restriction_capabilities: [
+          UserRestrictionCapability.DisableLogin,
+        ],
+        account_restriction_expires_at: new Date('2026-05-20T10:00:00.000Z'),
+      });
+
+      sessionsRepo.findOne.mockResolvedValue({
+        id: '01SESSION',
+        user_id: user.id,
+        refresh_token_hash: sha256(secret),
+        expires_at: new Date(Date.now() + 86400000),
+        revoked_at: null,
+        user,
+      });
+
+      await expect(
+        service.refreshTokens(`01SESSION.${secret}`, asResponse(res)),
+      ).resolves.toMatchObject({
+        accessToken: expect.any(String),
+        preferredLanguage: user.preferred_language,
+      });
+      expect(usersService.clearExpiredAccountRestriction).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(sessionsRepo.save).toHaveBeenCalled();
+      expect(res.cookie).toHaveBeenCalled();
+    });
   });
 
   describe('verifyEmail', () => {
@@ -426,24 +1115,46 @@ describe('AuthService', () => {
     it('sends reset email for existing user', async () => {
       usersService.findByEmail.mockResolvedValue(fakeUser());
 
-      await service.forgotPassword('test@example.com');
+      await service.forgotPassword('test@example.com', undefined, '127.0.0.1');
 
       expect(usersService.update).toHaveBeenCalled();
       expect(mailService.sendPasswordResetEmail).toHaveBeenCalledWith(
         'test@example.com',
-        expect.any(String),
+        expect.stringMatching(/^[a-f0-9]{64}$/),
         'Jane',
         'en',
       );
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          event_type: AccountMonitoringEventType.PasswordResetRequested,
+          ip_address_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          metadata: { reason: 'password_reset_requested' },
+          user_id: '01TESTUSER',
+        }),
+      );
     });
 
-    it('does nothing for unknown email (no info leak)', async () => {
+    it('records missing email reset requests without leaking account existence', async () => {
       usersService.findByEmail.mockResolvedValue(null);
 
-      await service.forgotPassword('nobody@example.com');
+      await service.forgotPassword(
+        'nobody@example.com',
+        undefined,
+        '127.0.0.1',
+      );
 
       expect(usersService.update).not.toHaveBeenCalled();
       expect(mailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          event_type: AccountMonitoringEventType.PasswordResetRequested,
+          ip_address_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          metadata: { reason: 'password_reset_requested_unknown_account' },
+          user_id: null,
+        }),
+      );
     });
   });
 
@@ -562,7 +1273,7 @@ describe('AuthService', () => {
       usersService.findByIdForAuth.mockResolvedValue(user);
       consentsRepo.find.mockResolvedValue([
         {
-          consent_type: 'privacy_policy',
+          consent_type: UserConsentType.PrivacyPolicy,
           consent_version: '1.0.0',
           granted: true,
           granted_at: new Date('2024-01-01'),
@@ -585,17 +1296,83 @@ describe('AuthService', () => {
         user_id: user.id,
         skin_type: 'oily',
         skin_tone: 'medium',
-        age_range: '25_34',
         ethnicity: 'black',
         current_concerns: ['acne'],
-        known_sensitivities: ['retinol'],
-        skin_goals: ['clear_acne'],
         country_code: 'SE',
         city: 'Stockholm',
-        routine_complexity: 'moderate',
+        fitzpatrick_phototype: 'IV',
+        primary_goal: 'acne',
+        allow_smart_picks: true,
+        budget_tier: 'mid',
+        safety_context: {},
+        reaction_history: {
+          entries: [{ trigger: 'retinol', trigger_type: 'ingredient' }],
+        },
+        concern_details: {},
+        skin_behavior: {},
+        active_tolerances: {},
+        routine_preferences: {},
+        lifestyle_context: {},
+        shopping_preferences: {},
+        hormonal_context: {},
         created_at: new Date('2024-01-01'),
         updated_at: new Date('2024-01-02'),
       });
+      smartPickSnapshotsRepo.find.mockResolvedValue([
+        {
+          mode: 'refine',
+          coverage_json: { filled: 4, total: 5, slots: [] },
+          gaps_json: [
+            {
+              ingredientOrCategory: 'Replacement for Serum',
+              normalizedKey: 'replacement-for-serum',
+              priority: 'priority',
+              reason: 'History suggests a replacement.',
+              goalAlignment: 'acne',
+              sourceIds: [],
+              gapKind: 'replacement',
+              replacementFor: null,
+            },
+          ],
+          covered_json: [],
+          redundancy_json: [],
+          recap_json: {
+            primaryGoal: 'acne',
+            skinType: 'oily',
+            location: { city: 'Stockholm', countryCode: 'SE' },
+            budgetTier: 'mid',
+            ethnicity: 'black',
+          },
+          inputs_hash: 'hash-1',
+          generated_at: new Date('2026-05-12T09:00:00.000Z'),
+        },
+      ]);
+      smartPickSuggestionsRepo.find.mockResolvedValue([
+        {
+          ingredient_or_category: 'Replacement for Serum',
+          normalized_key: 'replacement-for-serum',
+          brand: 'Better Brand',
+          product_name: 'Gentle Serum',
+          budget_tier: 'mid',
+          seller_names_json: ['Stylevana', 'Derm Store'],
+          recommendation_rank_reason: 'Better fit for the goal.',
+          source_ids: [],
+          gap_reason: 'History suggests a replacement.',
+          goal_alignment: 'acne',
+          created_at: new Date('2026-05-12T09:00:00.000Z'),
+          updated_at: new Date('2026-05-12T09:00:00.000Z'),
+        },
+      ]);
+      suggestionGapActionsRepo.find.mockResolvedValue([
+        {
+          source_type: 'smart_pick',
+          ingredient_or_category: 'Replacement for Serum',
+          normalized_key: 'replacement-for-serum',
+          action: 'saved',
+          created_at: new Date('2026-05-12T10:00:00.000Z'),
+          updated_at: new Date('2026-05-12T10:00:00.000Z'),
+        },
+      ]);
 
       const result = await service.exportData(user.id, 'Password1');
 
@@ -603,11 +1380,41 @@ describe('AuthService', () => {
       expect(result.user).toMatchObject({ email: 'test@example.com' });
       expect(result.skinProfile).toMatchObject({
         skinType: 'oily',
-        knownSensitivities: ['retinol'],
+        reactionHistory: {
+          entries: [{ trigger: 'retinol', trigger_type: 'ingredient' }],
+        },
         countryCode: 'SE',
       });
       expect(result.consents).toHaveLength(1);
       expect(result.sessions).toHaveLength(1);
+      expect(result.smartPicks.snapshots).toHaveLength(1);
+      expect(result.smartPicks.productSuggestions[0]).toMatchObject({
+        ingredientOrCategory: 'Replacement for Serum',
+        productName: 'Gentle Serum',
+        sellerNames: ['Stylevana', 'Derm Store'],
+      });
+      expect(result.smartPicks.actions[0]).toMatchObject({
+        sourceType: 'smart_pick',
+        normalizedKey: 'replacement-for-serum',
+        action: 'saved',
+      });
+      expect(suggestionGapActionsRepo.find).toHaveBeenCalledWith({
+        where: { user_id: user.id, source_type: 'smart_pick' },
+        order: { created_at: 'DESC' },
+      });
+      expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
+        user.id,
+        [
+          UserConsentType.LocationProcessing,
+          UserConsentType.HealthContextProcessing,
+        ],
+        UserDataAccessPurpose.AccountExport,
+      );
+      expect(dataAccessLogService.recordDataAccess).toHaveBeenCalledWith(
+        user.id,
+        [UserConsentType.AiSuggestionProcessing],
+        UserDataAccessPurpose.AccountExport,
+      );
     });
 
     it('rejects when password confirmation is wrong', async () => {
@@ -621,15 +1428,115 @@ describe('AuthService', () => {
   });
 
   describe('deleteAccount', () => {
-    it('deletes user after password confirmation', async () => {
+    it('schedules deletion after password confirmation and revokes sessions', async () => {
       const res = mockRes();
       const user = fakeUser();
       usersService.findByIdForAuth.mockResolvedValue(user);
+      usersService.setAccountDeletionState.mockImplementation(
+        async (_id: string, data: { scheduledFor: Date }) =>
+          fakeUser({
+            account_deletion_requested_at: new Date('2026-05-14T12:00:00.000Z'),
+            account_deletion_scheduled_for: data.scheduledFor,
+          }),
+      );
 
-      await service.deleteAccount(user.id, 'Password1', asResponse(res));
+      const result = await service.deleteAccount(
+        user.id,
+        'Password1',
+        asResponse(res),
+        'en',
+      );
 
-      expect(usersService.remove).toHaveBeenCalledWith(user.id);
+      expect(result.status).toBe(AccountDeletionStatus.Scheduled);
+      expect(result.scheduledFor).toEqual(expect.any(String));
+      expect(usersService.setAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+        expect.objectContaining({
+          requestedAt: expect.any(Date),
+          scheduledFor: expect.any(Date),
+          cancelTokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          confirmTokenHash: null,
+          confirmExpires: null,
+        }),
+      );
+      expect(sessionsRepo.update).toHaveBeenCalledWith(
+        { user_id: user.id, revoked_at: expect.any(Object) },
+        { revoked_at: expect.any(Date) },
+      );
+      expect(
+        mailService.sendAccountDeletionScheduledEmail,
+      ).toHaveBeenCalledWith(
+        user.email,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        user.first_name,
+        'en',
+        expect.any(String),
+      );
+      expect(
+        accountDeletionScheduler.scheduleFinalization,
+      ).toHaveBeenCalledWith(user.id, expect.any(Date));
+      expect(usersService.remove).not.toHaveBeenCalled();
       expect(res.clearCookie).toHaveBeenCalled();
+    });
+
+    it('clears pending deletion state when durable schedule creation fails', async () => {
+      const res = mockRes();
+      const user = fakeUser();
+      usersService.findByIdForAuth.mockResolvedValue(user);
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      accountDeletionScheduler.scheduleFinalization.mockRejectedValueOnce(
+        new Error('scheduler unavailable'),
+      );
+
+      await expect(
+        service.deleteAccount(user.id, 'Password1', asResponse(res), 'en'),
+      ).rejects.toThrow('Account deletion could not be scheduled');
+
+      expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(
+        mailService.sendAccountDeletionScheduledEmail,
+      ).not.toHaveBeenCalled();
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
+      expect(res.clearCookie).not.toHaveBeenCalled();
+    });
+
+    it('clears pending deletion state when scheduled email delivery fails', async () => {
+      const logger = {
+        error: jest.fn(),
+        warn: jest.fn(),
+      };
+      Object.defineProperty(service, 'logger', { value: logger });
+      const res = mockRes();
+      const user = fakeUser();
+      usersService.findByIdForAuth.mockResolvedValue(user);
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      mailService.sendAccountDeletionScheduledEmail.mockRejectedValueOnce(
+        new Error('Delivery failed'),
+      );
+
+      await expect(
+        service.deleteAccount(user.id, 'Password1', asResponse(res), 'en'),
+      ).rejects.toThrow('Account deletion email could not be sent');
+
+      const scheduledEmailCall = mailService.sendAccountDeletionScheduledEmail
+        .mock.calls[0] as [string, string, string, string, string];
+      const rawToken = scheduledEmailCall[1];
+      const warnOutput = logger.warn.mock.calls.flat().join('\n');
+
+      expect(rawToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(warnOutput).not.toContain(rawToken);
+      expect(warnOutput).not.toContain(`/cancel-account-deletion/${rawToken}`);
+      expect(warnOutput).toContain('account deletion action URL withheld');
+      expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
+      expect(res.clearCookie).not.toHaveBeenCalled();
     });
 
     it('rejects with wrong password', async () => {
@@ -640,6 +1547,621 @@ describe('AuthService', () => {
       await expect(
         service.deleteAccount(user.id, 'WrongPassword1', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('sends an email confirmation before scheduling OAuth-only accounts', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        password_hash: null,
+        google_subject: 'google-subject',
+      });
+      usersService.findByIdForAuth.mockResolvedValue(user);
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+
+      const result = await service.deleteAccount(
+        user.id,
+        '',
+        asResponse(res),
+        'en',
+      );
+
+      expect(result.status).toBe(AccountDeletionStatus.ConfirmationRequired);
+      expect(usersService.setAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+        expect.objectContaining({
+          requestedAt: expect.any(Date),
+          scheduledFor: null,
+          cancelTokenHash: null,
+          confirmTokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          confirmExpires: expect.any(Date),
+        }),
+      );
+      expect(
+        mailService.sendAccountDeletionConfirmationEmail,
+      ).toHaveBeenCalledWith(
+        user.email,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        user.first_name,
+        'en',
+      );
+      expect(sessionsRepo.update).toHaveBeenCalled();
+      expect(res.clearCookie).toHaveBeenCalled();
+    });
+
+    it('clears pending OAuth confirmation state when confirmation email delivery fails', async () => {
+      const res = mockRes();
+      const user = fakeUser({
+        password_hash: null,
+        google_subject: 'google-subject',
+      });
+      usersService.findByIdForAuth.mockResolvedValue(user);
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      mailService.sendAccountDeletionConfirmationEmail.mockRejectedValueOnce(
+        new Error('Delivery failed'),
+      );
+
+      await expect(
+        service.deleteAccount(user.id, '', asResponse(res), 'en'),
+      ).rejects.toThrow('Account deletion email could not be sent');
+
+      expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
+      expect(res.clearCookie).not.toHaveBeenCalled();
+    });
+
+    it('does not leave OAuth deletion request pending when confirmation email stalls', async () => {
+      jest.useFakeTimers();
+      const res = mockRes();
+      const user = fakeUser({
+        password_hash: null,
+        google_subject: 'google-subject',
+      });
+      usersService.findByIdForAuth.mockResolvedValue(user);
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      mailService.sendAccountDeletionConfirmationEmail.mockReturnValue(
+        new Promise<void>(() => undefined),
+      );
+
+      try {
+        const request = service.deleteAccount(
+          user.id,
+          '',
+          asResponse(res),
+          'en',
+        );
+        const result = Promise.race([
+          request.then(() => 'resolved' as const).catch(toErrorMessage),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(
+              () => resolve('pending'),
+              ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+            );
+          }),
+        ]);
+
+        await jest.advanceTimersByTimeAsync(
+          ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+        );
+
+        await expect(result).resolves.toBe(
+          'Account deletion email could not be sent',
+        );
+        expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+          user.id,
+        );
+        expect(sessionsRepo.update).not.toHaveBeenCalled();
+        expect(res.clearCookie).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('confirms OAuth deletion tokens and schedules the 30-day grace period', async () => {
+      const token = 'a'.repeat(64);
+      const confirmExpires = new Date('2999-01-01T00:00:00.000Z');
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_confirm_expires: confirmExpires,
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+
+      const result = await service.confirmAccountDeletion(token, 'en');
+
+      expect(result.status).toBe(AccountDeletionStatus.Scheduled);
+      expect(usersService.setAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+        expect.objectContaining({
+          scheduledFor: expect.any(Date),
+          cancelTokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          confirmTokenHash: sha256(token),
+          confirmExpires,
+        }),
+      );
+      expect(mailService.sendAccountDeletionScheduledEmail).toHaveBeenCalled();
+      expect(sessionsRepo.update).toHaveBeenCalled();
+    });
+
+    it('treats an already scheduled confirmation token as success', async () => {
+      const scheduledFor = new Date('2999-01-01T00:00:00.000Z');
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_scheduled_for: scheduledFor,
+        account_deletion_confirm_expires: new Date('2026-05-14T12:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+
+      const result = await service.confirmAccountDeletion('a'.repeat(64), 'en');
+
+      expect(result).toEqual({
+        status: AccountDeletionStatus.Scheduled,
+        scheduledFor: scheduledFor.toISOString(),
+      });
+      expect(usersService.setAccountDeletionState).not.toHaveBeenCalled();
+      expect(
+        mailService.sendAccountDeletionScheduledEmail,
+      ).not.toHaveBeenCalled();
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('does not leave OAuth confirmation pending when durable scheduling stalls', async () => {
+      jest.useFakeTimers();
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_confirm_expires: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      accountDeletionScheduler.scheduleFinalization.mockReturnValue(
+        new Promise<void>(() => undefined),
+      );
+
+      try {
+        const confirmation = service.confirmAccountDeletion(
+          'a'.repeat(64),
+          'en',
+        );
+        const result = Promise.race([
+          confirmation.then(() => 'resolved' as const).catch(toErrorMessage),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(
+              () => resolve('pending'),
+              ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+            );
+          }),
+        ]);
+
+        await jest.advanceTimersByTimeAsync(
+          ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+        );
+
+        await expect(result).resolves.toBe(
+          'Account deletion could not be scheduled',
+        );
+        expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+          user.id,
+        );
+        expect(
+          mailService.sendAccountDeletionScheduledEmail,
+        ).not.toHaveBeenCalled();
+        expect(sessionsRepo.update).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not leave OAuth confirmation pending when scheduled notice email stalls', async () => {
+      jest.useFakeTimers();
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_confirm_expires: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+      mailService.sendAccountDeletionScheduledEmail.mockReturnValue(
+        new Promise<void>(() => undefined),
+      );
+
+      try {
+        const confirmation = service.confirmAccountDeletion(
+          'a'.repeat(64),
+          'en',
+        );
+        const result = Promise.race([
+          confirmation.then(() => 'resolved' as const).catch(toErrorMessage),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(
+              () => resolve('pending'),
+              ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+            );
+          }),
+        ]);
+
+        await jest.advanceTimersByTimeAsync(
+          ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+        );
+
+        await expect(result).resolves.toBe(
+          'Account deletion email could not be sent',
+        );
+        expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+          user.id,
+        );
+        expect(
+          accountDeletionScheduler.cancelFinalization,
+        ).toHaveBeenCalledWith(user.id);
+        expect(sessionsRepo.update).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('rounds scheduled deletion timestamps up to a whole second', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-05-14T12:00:00.123Z'));
+      const user = fakeUser({
+        password_hash: null,
+        account_deletion_confirm_expires: new Date('2026-05-14T12:15:00.000Z'),
+      });
+      usersService.findByAccountDeletionConfirmTokenHash.mockResolvedValue(
+        user,
+      );
+      usersService.setAccountDeletionState.mockResolvedValue(user);
+
+      try {
+        const result = await service.confirmAccountDeletion(
+          'a'.repeat(64),
+          'en',
+        );
+
+        const expectedScheduledFor = new Date('2026-06-13T12:00:01.000Z');
+        expect(result.scheduledFor).toBe(expectedScheduledFor.toISOString());
+        expect(usersService.setAccountDeletionState).toHaveBeenCalledWith(
+          user.id,
+          expect.objectContaining({
+            scheduledFor: expectedScheduledFor,
+          }),
+        );
+        expect(
+          accountDeletionScheduler.scheduleFinalization,
+        ).toHaveBeenCalledWith(user.id, expectedScheduledFor);
+        expect(
+          mailService.sendAccountDeletionScheduledEmail,
+        ).toHaveBeenCalledWith(
+          user.email,
+          expect.stringMatching(/^[a-f0-9]{64}$/),
+          user.first_name,
+          'en',
+          expectedScheduledFor.toISOString(),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('cancels scheduled deletion from a cancellation token', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      await service.cancelAccountDeletion('b'.repeat(64), 'en');
+
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
+        user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
+      );
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).toHaveBeenCalledWith(user.email, user.first_name, 'en');
+      expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
+        user.id,
+      );
+    });
+
+    it('treats a recently consumed cancellation token as success', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_consumed_at: new Date(),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      await service.cancelAccountDeletion('b'.repeat(64), 'en');
+
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).not.toHaveBeenCalled();
+      expect(usersService.clearAccountDeletionState).not.toHaveBeenCalled();
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).not.toHaveBeenCalled();
+      expect(
+        accountDeletionScheduler.cancelFinalization,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rejects an expired consumed cancellation token receipt', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_consumed_at: new Date(
+          Date.now() - 25 * 60 * 60 * 1000,
+        ),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      await expect(
+        service.cancelAccountDeletion('b'.repeat(64), 'en'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).not.toHaveBeenCalled();
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not send duplicate cancellation side effects for a concurrent repeat', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+      usersService.markAccountDeletionCancellationComplete.mockResolvedValue(
+        false,
+      );
+
+      await service.cancelAccountDeletion('b'.repeat(64), 'en');
+
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
+        user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
+      );
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).not.toHaveBeenCalled();
+      expect(
+        accountDeletionScheduler.cancelFinalization,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('clears expired cancellation token receipts after the idempotency window', async () => {
+      const now = new Date('2026-05-15T12:00:00.000Z');
+      usersService.clearExpiredAccountDeletionCancellationReceipts.mockResolvedValue(
+        3,
+      );
+
+      const cleared =
+        await service.clearExpiredAccountDeletionCancellationReceipts(now);
+
+      expect(cleared).toBe(3);
+      expect(
+        usersService.clearExpiredAccountDeletionCancellationReceipts,
+      ).toHaveBeenCalledWith(new Date('2026-05-14T12:00:00.000Z'));
+    });
+
+    it('does not block cancellation on the notification email delivery', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      let resolveEmail: () => void = () => undefined;
+      mailService.sendAccountDeletionCancelledEmail.mockReturnValue(
+        new Promise<void>((resolve) => {
+          resolveEmail = resolve;
+        }),
+      );
+
+      const cancellation = service.cancelAccountDeletion('b'.repeat(64), 'en');
+      const result = await Promise.race([
+        cancellation.then(() => 'resolved' as const),
+        new Promise<'pending'>((resolve) => {
+          setTimeout(() => resolve('pending'), 25);
+        }),
+      ]);
+
+      expect(result).toBe('resolved');
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
+        user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
+      );
+      expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).toHaveBeenCalledWith(user.email, user.first_name, 'en');
+
+      resolveEmail();
+      await cancellation;
+    });
+
+    it('does not block cancellation on durable schedule cleanup', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByAccountDeletionCancelTokenHash.mockResolvedValue(user);
+
+      let resolveScheduleCleanup: () => void = () => undefined;
+      accountDeletionScheduler.cancelFinalization.mockReturnValue(
+        new Promise<void>((resolve) => {
+          resolveScheduleCleanup = resolve;
+        }),
+      );
+
+      const cancellation = service.cancelAccountDeletion('b'.repeat(64), 'en');
+      const result = await Promise.race([
+        cancellation.then(() => 'resolved' as const),
+        new Promise<'pending'>((resolve) => {
+          setTimeout(() => resolve('pending'), 25);
+        }),
+      ]);
+
+      expect(result).toBe('resolved');
+      expect(
+        usersService.markAccountDeletionCancellationComplete,
+      ).toHaveBeenCalledWith(
+        user.id,
+        expect.stringMatching(/^[a-f0-9]{64}$/),
+        expect.any(Date),
+      );
+      expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(
+        mailService.sendAccountDeletionCancelledEmail,
+      ).toHaveBeenCalledWith(user.email, user.first_name, 'en');
+
+      resolveScheduleCleanup();
+      await cancellation;
+    });
+
+    it('cancels pending deletion on successful login within the grace period', async () => {
+      const user = fakeUser({
+        email_verified: true,
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findByEmailForAuth.mockResolvedValue(user);
+      const res = mockRes();
+
+      await service.login(
+        user.email,
+        'Password1',
+        asResponse(res),
+        '127.0.0.1',
+      );
+
+      expect(usersService.clearAccountDeletionState).toHaveBeenCalledWith(
+        user.id,
+      );
+      expect(mailService.sendAccountDeletionCancelledEmail).toHaveBeenCalled();
+      expect(accountDeletionScheduler.cancelFinalization).toHaveBeenCalledWith(
+        user.id,
+      );
+    });
+
+    it('finalizes due deletions and removes managed media', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-01T00:00:00.000Z'),
+      });
+      usersService.findDueAccountDeletions.mockResolvedValue([user]);
+      usersService.findById.mockResolvedValue(user);
+      inventoryProductsRepo.find.mockResolvedValue([
+        {
+          identity: {
+            imageUrls: ['https://media.example.com/product.webp'],
+          },
+        },
+      ]);
+
+      const deleted = await service.processDueAccountDeletions(
+        new Date('2999-01-01T00:00:01.000Z'),
+      );
+
+      expect(deleted).toBe(1);
+      expect(
+        cataloguePhotoStorageService.deleteManagedImageUrls,
+      ).toHaveBeenCalledWith(['https://media.example.com/product.webp']);
+      expect(
+        cataloguePhotoStorageService.deleteManagedImagesForOwner,
+      ).toHaveBeenCalledWith(user.id);
+      expect(usersService.remove).toHaveBeenCalledWith(user.id);
+    });
+
+    it('keeps the account pending when managed product media cleanup fails', async () => {
+      const scheduledFor = new Date('2999-01-01T00:00:00.000Z');
+      const user = fakeUser({
+        account_deletion_scheduled_for: scheduledFor,
+      });
+      usersService.findById.mockResolvedValue(user);
+      inventoryProductsRepo.find.mockResolvedValue([
+        {
+          identity: {
+            imageUrls: ['https://media.example.com/product.webp'],
+          },
+        },
+      ]);
+      cataloguePhotoStorageService.deleteManagedImageUrls.mockRejectedValueOnce(
+        new Error('s3 unavailable'),
+      );
+
+      await expect(
+        service.processScheduledAccountDeletion(
+          user.id,
+          scheduledFor,
+          new Date('2999-01-01T00:00:01.000Z'),
+        ),
+      ).rejects.toThrow('s3 unavailable');
+
+      expect(usersService.remove).not.toHaveBeenCalled();
+    });
+
+    it('does not finalize scheduler messages before the exact scheduled instant', async () => {
+      const scheduledFor = new Date('2999-01-01T00:00:00.500Z');
+      const user = fakeUser({
+        account_deletion_scheduled_for: scheduledFor,
+      });
+      usersService.findById.mockResolvedValue(user);
+
+      const deleted = await service.processScheduledAccountDeletion(
+        user.id,
+        scheduledFor,
+        new Date('2999-01-01T00:00:00.499Z'),
+      );
+
+      expect(deleted).toBe(false);
+      expect(usersService.remove).not.toHaveBeenCalled();
+    });
+
+    it('ignores stale scheduler messages for a newer deletion request', async () => {
+      const user = fakeUser({
+        account_deletion_scheduled_for: new Date('2999-01-02T00:00:00.000Z'),
+      });
+      usersService.findById.mockResolvedValue(user);
+
+      const deleted = await service.processScheduledAccountDeletion(
+        user.id,
+        new Date('2999-01-01T00:00:00.000Z'),
+      );
+
+      expect(deleted).toBe(false);
+      expect(usersService.remove).not.toHaveBeenCalled();
+    });
+
+    it('finalizes due scheduler messages when the DB state still matches', async () => {
+      const scheduledFor = new Date('2999-01-01T00:00:00.000Z');
+      const user = fakeUser({
+        account_deletion_scheduled_for: scheduledFor,
+      });
+      usersService.findById.mockResolvedValue(user);
+
+      const deleted = await service.processScheduledAccountDeletion(
+        user.id,
+        scheduledFor,
+        new Date('2999-01-01T00:00:01.000Z'),
+      );
+
+      expect(deleted).toBe(true);
+      expect(usersService.remove).toHaveBeenCalledWith(user.id);
     });
   });
 });

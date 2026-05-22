@@ -11,8 +11,13 @@ import {
 } from 'typeorm';
 import { ulid } from 'ulid';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import { encryptedNullableStringFieldTransformer } from '../../skin-profile/skin-profile-field-encryption';
 import { StepLabel } from '../dto/schedule.constants';
 import { ScheduleSlot } from './schedule-slot.entity';
+
+const encryptedStepNotesTransformer = encryptedNullableStringFieldTransformer(
+  'routine_steps.notes',
+);
 
 @Entity('routine_steps')
 @Index('IDX_routine_steps_slot_order', ['slot_id', 'step_order'])
@@ -35,11 +40,18 @@ export class RoutineStep {
   @Column({ type: 'varchar', length: 100, nullable: true })
   custom_label: string | null;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedStepNotesTransformer,
+  })
   notes: string | null;
 
   @Column({ type: 'boolean', default: false })
   optional: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  is_specialist_locked: boolean;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;

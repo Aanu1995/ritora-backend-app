@@ -4,19 +4,21 @@ import {
   ForbiddenException,
   HttpStatus,
   Injectable,
+  InternalServerErrorException,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { compare, hash } from 'bcrypt';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { Response } from 'express';
 import type { SignOptions } from 'jsonwebtoken';
 import { IsNull, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { type AppLanguage, normalizeLanguage } from '../common/i18n/i18n';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import {
   expiresFromDuration,
   isAfterNow,
@@ -25,19 +27,150 @@ import {
   toIsoString,
   toNullableIsoString,
 } from '../common/utils/date';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SkinProfileResponseDto } from '../skin-profile/dto/skin-profile-response.dto';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { getSensitiveSkinProfileConsentTypes } from '../skin-profile/skin-profile-sensitive-data';
+import { SkinJournalService } from '../skin-journal/skin-journal.service';
+import type { SkinJournalExportPayload } from '../skin-journal/skin-journal.constants';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
+import {
+  AccountMonitoringEvent,
+  AccountMonitoringEventMetadata,
+  AccountMonitoringEventType,
+} from '../users/entities/account-monitoring-event.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserCapabilitySnapshotService } from '../users/user-capability-snapshot.service';
+import { UserDataAccessLogService } from '../users/user-data-access-log.service';
+import {
+  clearUserRestrictionState,
+  hasActiveUserRestrictionCapability,
+  isUserRestrictionExpired,
+  UserRestrictionCapability,
+} from '../users/user-restrictions';
+import {
+  UserConsentType,
+  UserDataAccessPurpose,
+} from '../users/user-consent.constants';
 import { UsersService } from '../users/users.service';
 import { MAIL_PROVIDER_LABEL } from '../mail/mail.constants';
 import { MailService } from '../mail/mail.service';
+import { PlatformGlobalRestrictionsService } from '../platform-controls/platform-global-restrictions.service';
+import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { sanitizeIpAddress, sanitizeUserAgent } from './auth-session.utils';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
+import { AccountDeletionStatus } from './dto/account-deletion-response.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { AuthSession } from './entities/auth-session.entity';
+import { OAuthIdentityProfile, OAuthProvider } from './oauth/oauth-profile';
+import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
+import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.entity';
+import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
+
+type AccountExportConsent = {
+  consentType: UserConsentType;
+  consentVersion: string;
+  granted: boolean;
+  grantedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+};
+
+type AccountExportSession = {
+  id: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  revokedAt: string | null;
+};
+
+type AccountExportData = {
+  user: UserResponseDto;
+  skinProfile: SkinProfileResponseDto | null;
+  skinJournal: SkinJournalExportPayload | null;
+  smartPicks: AccountExportSmartPicks;
+  consents: AccountExportConsent[];
+  sessions: AccountExportSession[];
+};
+
+type AccountExportSmartPicks = {
+  snapshots: Array<{
+    mode: string;
+    coverage: unknown;
+    gaps: unknown;
+    covered: unknown;
+    redundancy: unknown;
+    recap: unknown;
+    inputsHash: string;
+    generatedAt: string;
+  }>;
+  productSuggestions: Array<{
+    ingredientOrCategory: string;
+    normalizedKey: string;
+    brand: string;
+    productName: string;
+    budgetTier: string | null;
+    sellerNames: string[];
+    recommendationRankReason: string | null;
+    sourceIds: string[];
+    gapReason: string | null;
+    goalAlignment: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  actions: Array<{
+    sourceType: string;
+    ingredientOrCategory: string;
+    normalizedKey: string;
+    action: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+};
+
+type AccountDeletionResult = {
+  status: AccountDeletionStatus;
+  scheduledFor?: string;
+};
+
+type AccountDeletionScheduleOptions = {
+  confirmTokenHash?: string | null;
+  confirmExpires?: Date | null;
+};
+
+const ACCOUNT_DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+const ACCOUNT_DELETION_CONFIRM_EXPIRY = '1h';
+const ACCOUNT_DELETION_BATCH_SIZE = 100;
+const ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS = 24 * 60 * 60 * 1000;
+const ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS = 10_000;
+
+function roundUpToWholeSecond(value: Date): Date {
+  const timestamp = value.getTime();
+  const millisecondRemainder = timestamp % 1000;
+  if (millisecondRemainder === 0) {
+    return value;
+  }
+
+  return new Date(timestamp + (1000 - millisecondRemainder));
+}
+
+type OAuthProviderConfig = {
+  displayName: string;
+  findBySubject: (subject: string) => Promise<User | null>;
+  readSubject: (user: User) => string | null;
+  linkSubject: (id: string, subject: string) => Promise<User>;
+  createUser: (data: {
+    email: string;
+    subject: string;
+    firstName: string;
+    lastName: string;
+    preferredLanguage: string;
+  }) => Promise<User>;
+};
 
 @Injectable()
 export class AuthService {
@@ -58,6 +191,7 @@ export class AuthService {
   private readonly privacyVersion: string;
   private readonly webAppUrl: string;
   private readonly nodeEnv: string;
+  private readonly accountDeletionExternalTimeoutMs: number;
 
   constructor(
     private readonly usersService: UsersService,
@@ -66,33 +200,49 @@ export class AuthService {
     private readonly mailService: MailService,
     @InjectRepository(AuthSession)
     private readonly sessionsRepository: Repository<AuthSession>,
+    @InjectRepository(AccountMonitoringEvent)
+    private readonly accountMonitoringEventsRepository: Repository<AccountMonitoringEvent>,
     @InjectRepository(UserConsent)
     private readonly consentsRepository: Repository<UserConsent>,
     @InjectRepository(SkinProfile)
     private readonly skinProfileRepository: Repository<SkinProfile>,
+    @InjectRepository(SmartPickSnapshot)
+    private readonly smartPickSnapshotRepository: Repository<SmartPickSnapshot>,
+    @InjectRepository(SmartPickProductSuggestion)
+    private readonly smartPickProductSuggestionRepository: Repository<SmartPickProductSuggestion>,
+    @InjectRepository(SuggestionGapAction)
+    private readonly suggestionGapActionRepository: Repository<SuggestionGapAction>,
+    @InjectRepository(InventoryProduct)
+    private readonly inventoryProductRepository: Repository<InventoryProduct>,
+    private readonly dataAccessLogService: UserDataAccessLogService,
+    private readonly skinJournalService: SkinJournalService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
+    private readonly accountDeletionScheduler: AccountDeletionSchedulerService,
+    private readonly platformRestrictions: PlatformGlobalRestrictionsService,
+    private readonly capabilitySnapshot: UserCapabilitySnapshotService,
   ) {
-    this.jwtAccessExpiry = configService.get('JWT_ACCESS_EXPIRY', '15m');
-    this.jwtRefreshExpiry = configService.get('JWT_REFRESH_EXPIRY', '7d');
-    this.jwtIssuer = configService.get('JWT_ISSUER', 'ritora');
-    this.jwtAudience = configService.get('JWT_AUDIENCE', 'ritora-web');
-    this.jwtRefreshSecret = configService.get('JWT_REFRESH_SECRET', '');
-    this.bcryptRounds = configService.get('BCRYPT_SALT_ROUNDS', 12);
-    this.cookieDomain = configService.get('COOKIE_DOMAIN', '');
-    this.cookieSecure = configService.get('COOKIE_SECURE', false);
-    this.cookieSameSite = configService.get('COOKIE_SAME_SITE', 'lax');
-    this.cookieRefreshName = configService.get(
-      'COOKIE_REFRESH_NAME',
-      'ritora_refresh',
-    );
-    this.emailVerificationExpiry = configService.get(
+    this.jwtAccessExpiry = configService.getOrThrow('JWT_ACCESS_EXPIRY');
+    this.jwtRefreshExpiry = configService.getOrThrow('JWT_REFRESH_EXPIRY');
+    this.jwtIssuer = configService.getOrThrow('JWT_ISSUER');
+    this.jwtAudience = configService.getOrThrow('JWT_AUDIENCE');
+    this.jwtRefreshSecret = configService.getOrThrow('JWT_REFRESH_SECRET');
+    this.bcryptRounds = configService.getOrThrow('BCRYPT_SALT_ROUNDS');
+    this.cookieDomain = configService.getOrThrow('COOKIE_DOMAIN');
+    this.cookieSecure = configService.getOrThrow('COOKIE_SECURE');
+    this.cookieSameSite = configService.getOrThrow('COOKIE_SAME_SITE');
+    this.cookieRefreshName = configService.getOrThrow('COOKIE_REFRESH_NAME');
+    this.emailVerificationExpiry = configService.getOrThrow(
       'EMAIL_VERIFICATION_EXPIRY',
-      '24h',
     );
-    this.passwordResetExpiry = configService.get('PASSWORD_RESET_EXPIRY', '1h');
-    this.termsVersion = configService.get('LEGAL_TERMS_VERSION', '1.0.0');
-    this.privacyVersion = configService.get('LEGAL_PRIVACY_VERSION', '1.0.0');
-    this.webAppUrl = configService.get('WEB_APP_URL', 'http://localhost:3000');
-    this.nodeEnv = configService.get('NODE_ENV', 'development');
+    this.passwordResetExpiry = configService.getOrThrow(
+      'PASSWORD_RESET_EXPIRY',
+    );
+    this.termsVersion = configService.getOrThrow('LEGAL_TERMS_VERSION');
+    this.privacyVersion = configService.getOrThrow('LEGAL_PRIVACY_VERSION');
+    this.webAppUrl = configService.getOrThrow('WEB_APP_URL');
+    this.nodeEnv = configService.getOrThrow('NODE_ENV');
+    this.accountDeletionExternalTimeoutMs =
+      ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS;
   }
 
   async register(
@@ -107,6 +257,10 @@ export class AuthService {
     },
     ip?: string,
   ): Promise<RegisterResponseDto> {
+    await this.platformRestrictions.assertAllowed(
+      PlatformGlobalRestrictionCapability.DisableAccountCreation,
+    );
+
     if (!dto.termsAccepted || !dto.privacyPolicyAccepted) {
       const message = 'You must accept the terms of service and privacy policy';
 
@@ -127,7 +281,7 @@ export class AuthService {
       throw new ConflictException('Email already in use');
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, this.bcryptRounds);
+    const passwordHash = await hash(dto.password, this.bcryptRounds);
     const verificationToken = randomBytes(32).toString('hex');
     const verificationTokenHash = this.sha256(verificationToken);
 
@@ -142,8 +296,8 @@ export class AuthService {
     });
 
     await this.recordConsents(user.id, ip, [
-      { type: 'terms_of_service', version: this.termsVersion },
-      { type: 'privacy_policy', version: this.privacyVersion },
+      { type: UserConsentType.TermsOfService, version: this.termsVersion },
+      { type: UserConsentType.PrivacyPolicy, version: this.privacyVersion },
     ]);
 
     await this.sendVerificationEmailOrLogFailure(
@@ -155,7 +309,7 @@ export class AuthService {
 
     return new RegisterResponseDto(
       'Verify your email to activate your account',
-      UserResponseDto.fromEntity(user),
+      await this.toUserResponse(user),
     );
   }
 
@@ -167,14 +321,31 @@ export class AuthService {
     userAgent?: string,
   ): Promise<AuthResponseDto> {
     const user = await this.usersService.findByEmailForAuth(email);
-    if (!user) {
+    if (!user || !user.password_hash) {
+      await this.recordAccountMonitoringEvent({
+        email,
+        eventType: AccountMonitoringEventType.AuthLoginFailed,
+        ip,
+        metadata: { reason: 'invalid_credentials' },
+        userId: user?.id ?? null,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    const valid = await compare(password, user.password_hash);
     if (!valid) {
+      await this.recordAccountMonitoringEvent({
+        email,
+        eventType: AccountMonitoringEventType.AuthLoginFailed,
+        ip,
+        metadata: { reason: 'invalid_credentials' },
+        userId: user.id,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    await this.clearExpiredAccountRestrictionIfNeeded(user);
+    this.assertUserNotRestricted(user);
 
     if (!user.email_verified) {
       throw new ForbiddenException({
@@ -183,9 +354,202 @@ export class AuthService {
       });
     }
 
+    await this.cancelAccountDeletionOnAccess(user);
+
     const { accessToken } = await this.createSession(user, res, ip, userAgent);
 
-    return new AuthResponseDto(accessToken, UserResponseDto.fromEntity(user));
+    return new AuthResponseDto(accessToken, await this.toUserResponse(user));
+  }
+
+  async loginWithGoogle(
+    googleProfile: OAuthIdentityProfile,
+    options: {
+      preferredLanguage: string;
+      termsAccepted: boolean;
+      privacyPolicyAccepted: boolean;
+    },
+    res: Response,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResponseDto> {
+    try {
+      return await this.loginWithOAuthProvider(
+        googleProfile,
+        options,
+        res,
+        ip,
+        userAgent,
+      );
+    } catch (error) {
+      await this.recordOAuthFailureForMonitoring(OAuthProvider.Google, {
+        email: googleProfile.email,
+        ip,
+        reason: this.oauthFailureReason(error),
+      });
+      throw error;
+    }
+  }
+
+  async loginWithApple(
+    appleProfile: OAuthIdentityProfile,
+    options: {
+      preferredLanguage: string;
+      termsAccepted: boolean;
+      privacyPolicyAccepted: boolean;
+    },
+    res: Response,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResponseDto> {
+    try {
+      return await this.loginWithOAuthProvider(
+        appleProfile,
+        options,
+        res,
+        ip,
+        userAgent,
+      );
+    } catch (error) {
+      await this.recordOAuthFailureForMonitoring(OAuthProvider.Apple, {
+        email: appleProfile.email,
+        ip,
+        reason: this.oauthFailureReason(error),
+      });
+      throw error;
+    }
+  }
+
+  async recordOAuthFailureForMonitoring(
+    provider: OAuthProvider,
+    input: {
+      email?: string;
+      ip?: string;
+      reason: string;
+      userId?: string | null;
+    },
+  ): Promise<void> {
+    await this.recordAccountMonitoringEvent({
+      email: input.email,
+      eventType: AccountMonitoringEventType.OAuthLoginFailed,
+      ip: input.ip,
+      metadata: {
+        provider,
+        reason: this.normalizeOAuthFailureReason(input.reason),
+      },
+      userId: input.userId ?? null,
+    });
+  }
+
+  private async loginWithOAuthProvider(
+    profile: OAuthIdentityProfile,
+    options: {
+      preferredLanguage: string;
+      termsAccepted: boolean;
+      privacyPolicyAccepted: boolean;
+    },
+    res: Response,
+    ip?: string,
+    userAgent?: string,
+  ): Promise<AuthResponseDto> {
+    const providerConfig = this.getOAuthProviderConfig(profile.provider);
+    const existingProviderUser = await providerConfig.findBySubject(
+      profile.providerSubject,
+    );
+
+    if (existingProviderUser) {
+      await this.clearExpiredAccountRestrictionIfNeeded(existingProviderUser);
+      this.assertUserNotRestricted(existingProviderUser);
+      await this.cancelAccountDeletionOnAccess(existingProviderUser);
+      const authUser =
+        (await this.usersService.findByIdForAuth(existingProviderUser.id)) ??
+        existingProviderUser;
+      const { accessToken } = await this.createSession(
+        existingProviderUser,
+        res,
+        ip,
+        userAgent,
+      );
+      return new AuthResponseDto(
+        accessToken,
+        await this.toUserResponse(
+          existingProviderUser,
+          Boolean(authUser.password_hash),
+        ),
+      );
+    }
+
+    const existingEmailUser = await this.usersService.findByEmail(
+      profile.email,
+    );
+
+    if (existingEmailUser) {
+      await this.clearExpiredAccountRestrictionIfNeeded(existingEmailUser);
+      this.assertUserNotRestricted(existingEmailUser);
+      const linkedSubject = providerConfig.readSubject(existingEmailUser);
+      if (linkedSubject && linkedSubject !== profile.providerSubject) {
+        throw new ConflictException(
+          `Email already linked to ${providerConfig.displayName}`,
+        );
+      }
+
+      if (!profile.isEmailAuthoritative) {
+        throw new ConflictException(
+          `Sign in with your password before linking ${providerConfig.displayName}`,
+        );
+      }
+
+      const linkedUser = await providerConfig.linkSubject(
+        existingEmailUser.id,
+        profile.providerSubject,
+      );
+      await this.cancelAccountDeletionOnAccess(linkedUser);
+      const authUser =
+        (await this.usersService.findByIdForAuth(linkedUser.id)) ?? linkedUser;
+      const { accessToken } = await this.createSession(
+        linkedUser,
+        res,
+        ip,
+        userAgent,
+      );
+
+      return new AuthResponseDto(
+        accessToken,
+        await this.toUserResponse(linkedUser, Boolean(authUser.password_hash)),
+      );
+    }
+
+    this.assertLegalConsent(
+      options.termsAccepted,
+      options.privacyPolicyAccepted,
+    );
+    await this.platformRestrictions.assertAllowed(
+      PlatformGlobalRestrictionCapability.DisableAccountCreation,
+    );
+
+    const createdUser = await providerConfig.createUser({
+      email: profile.email,
+      subject: profile.providerSubject,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      preferredLanguage: normalizeLanguage(options.preferredLanguage),
+    });
+
+    await this.recordConsents(createdUser.id, ip, [
+      { type: UserConsentType.TermsOfService, version: this.termsVersion },
+      { type: UserConsentType.PrivacyPolicy, version: this.privacyVersion },
+    ]);
+
+    const { accessToken } = await this.createSession(
+      createdUser,
+      res,
+      ip,
+      userAgent,
+    );
+
+    return new AuthResponseDto(
+      accessToken,
+      await this.toUserResponse(createdUser),
+    );
   }
 
   async refreshTokens(
@@ -230,6 +594,9 @@ export class AuthService {
     ) {
       throw new UnauthorizedException('Invalid refresh token');
     }
+
+    await this.clearExpiredAccountRestrictionIfNeeded(session.user);
+    this.assertUserNotRestricted(session.user);
 
     const newSecret = randomBytes(32).toString('hex');
     const newSecretHash = this.sha256(newSecret);
@@ -298,11 +665,30 @@ export class AuthService {
     );
   }
 
-  async forgotPassword(email: string, language?: AppLanguage): Promise<void> {
+  async forgotPassword(
+    email: string,
+    language?: AppLanguage,
+    ip?: string,
+  ): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
+      await this.recordAccountMonitoringEvent({
+        email,
+        eventType: AccountMonitoringEventType.PasswordResetRequested,
+        ip,
+        metadata: { reason: 'password_reset_requested_unknown_account' },
+        userId: null,
+      });
       return;
     }
+
+    await this.recordAccountMonitoringEvent({
+      email,
+      eventType: AccountMonitoringEventType.PasswordResetRequested,
+      ip,
+      metadata: { reason: 'password_reset_requested' },
+      userId: user.id,
+    });
 
     const resetToken = randomBytes(32).toString('hex');
     const resetTokenHash = this.sha256(resetToken);
@@ -336,7 +722,7 @@ export class AuthService {
       throw new BadRequestException('Reset token has expired');
     }
 
-    const passwordHash = await bcrypt.hash(newPassword, this.bcryptRounds);
+    const passwordHash = await hash(newPassword, this.bcryptRounds);
 
     await this.usersService.update(user.id, {
       password_hash: passwordHash,
@@ -387,11 +773,11 @@ export class AuthService {
   }
 
   async getMe(userId: string): Promise<UserResponseDto> {
-    const user = await this.usersService.findById(userId);
+    const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
-    return UserResponseDto.fromEntity(user);
+    return this.toUserResponse(user);
   }
 
   async getSessions(userId: string): Promise<SessionResponseDto[]> {
@@ -405,16 +791,29 @@ export class AuthService {
       .map((session) => SessionResponseDto.fromEntity(session));
   }
 
+  private async toUserResponse(
+    user: User,
+    hasPassword?: boolean,
+  ): Promise<UserResponseDto> {
+    return UserResponseDto.fromEntity(
+      user,
+      hasPassword,
+      await this.capabilitySnapshot.buildForUser(user),
+    );
+  }
+
   async exportData(
     userId: string,
     password: string,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<AccountExportData> {
     const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    const valid = user.password_hash
+      ? await compare(password, user.password_hash)
+      : false;
     if (!valid) {
       throw new UnauthorizedException('Invalid password');
     }
@@ -428,13 +827,46 @@ export class AuthService {
     });
     const skinProfile = await this.skinProfileRepository.findOne({
       where: { user_id: userId },
+      relations: ['user'],
     });
+    const activeConsentTypes = new Set(
+      consents
+        .filter((consent) => consent.granted && consent.revoked_at === null)
+        .map((consent) => consent.consent_type),
+    );
+
+    if (skinProfile) {
+      await this.dataAccessLogService.recordDataAccess(
+        userId,
+        getSensitiveSkinProfileConsentTypes(skinProfile),
+        UserDataAccessPurpose.AccountExport,
+      );
+    }
+    const skinJournal =
+      await this.skinJournalService.exportAllDataForAccount(userId);
+    const smartPicks = await this.exportSmartPicksData(userId);
+    if (hasSmartPicksExportData(smartPicks)) {
+      await this.dataAccessLogService.recordDataAccess(
+        userId,
+        [UserConsentType.AiSuggestionProcessing],
+        UserDataAccessPurpose.AccountExport,
+      );
+    }
 
     return {
-      user: UserResponseDto.fromEntity(user),
+      user: await this.toUserResponse(user),
       skinProfile: skinProfile
-        ? SkinProfileResponseDto.fromEntity(skinProfile)
+        ? SkinProfileResponseDto.fromEntity(skinProfile, {
+            hasHealthContextConsent: activeConsentTypes.has(
+              UserConsentType.HealthContextProcessing,
+            ),
+            hasHormonalContextConsent: activeConsentTypes.has(
+              UserConsentType.HormonalContextProcessing,
+            ),
+          })
         : null,
+      skinJournal,
+      smartPicks,
       consents: consents.map((c) => ({
         consentType: c.consent_type,
         consentVersion: c.consent_version,
@@ -454,23 +886,405 @@ export class AuthService {
     };
   }
 
+  private async exportSmartPicksData(
+    userId: string,
+  ): Promise<AccountExportSmartPicks> {
+    const [snapshots, productSuggestions, actions] = await Promise.all([
+      this.smartPickSnapshotRepository.find({
+        where: { user_id: userId },
+        order: { generated_at: 'DESC' },
+      }),
+      this.smartPickProductSuggestionRepository.find({
+        where: { user_id: userId },
+        order: { created_at: 'DESC' },
+      }),
+      this.suggestionGapActionRepository.find({
+        where: { user_id: userId, source_type: 'smart_pick' },
+        order: { created_at: 'DESC' },
+      }),
+    ]);
+
+    return {
+      snapshots: snapshots.map((snapshot) => ({
+        mode: snapshot.mode,
+        coverage: snapshot.coverage_json,
+        gaps: snapshot.gaps_json,
+        covered: snapshot.covered_json,
+        redundancy: snapshot.redundancy_json,
+        recap: snapshot.recap_json,
+        inputsHash: snapshot.inputs_hash,
+        generatedAt: toIsoString(snapshot.generated_at),
+      })),
+      productSuggestions: productSuggestions.map((suggestion) => ({
+        ingredientOrCategory: suggestion.ingredient_or_category,
+        normalizedKey: suggestion.normalized_key,
+        brand: suggestion.brand,
+        productName: suggestion.product_name,
+        budgetTier: suggestion.budget_tier,
+        sellerNames: suggestion.seller_names_json,
+        recommendationRankReason: suggestion.recommendation_rank_reason,
+        sourceIds: suggestion.source_ids,
+        gapReason: suggestion.gap_reason,
+        goalAlignment: suggestion.goal_alignment,
+        createdAt: toIsoString(suggestion.created_at),
+        updatedAt: toIsoString(suggestion.updated_at),
+      })),
+      actions: actions.map((action) => ({
+        sourceType: action.source_type,
+        ingredientOrCategory: action.ingredient_or_category,
+        normalizedKey: action.normalized_key,
+        action: action.action,
+        createdAt: toIsoString(action.created_at),
+        updatedAt: toIsoString(action.updated_at),
+      })),
+    };
+  }
+
   async deleteAccount(
     userId: string,
     password: string,
     res: Response,
-  ): Promise<void> {
+    language: AppLanguage = 'en',
+  ): Promise<AccountDeletionResult> {
     const user = await this.usersService.findByIdForAuth(userId);
     if (!user) {
       throw new UnauthorizedException();
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!user.password_hash) {
+      const result = await this.requestOAuthAccountDeletionConfirmation(
+        user,
+        language,
+      );
+      await this.revokeAllSessions(user.id);
+      this.clearRefreshCookie(res);
+      return result;
+    }
+
+    const valid = await compare(password, user.password_hash);
     if (!valid) {
       throw new UnauthorizedException('Invalid password');
     }
 
-    await this.usersService.remove(userId);
+    const result = await this.scheduleAccountDeletion(user, language);
+    await this.revokeAllSessions(user.id);
     this.clearRefreshCookie(res);
+    return result;
+  }
+
+  async confirmAccountDeletion(
+    token: string,
+    language?: string,
+  ): Promise<AccountDeletionResult> {
+    const tokenHash = this.sha256(token);
+    const user =
+      await this.usersService.findByAccountDeletionConfirmTokenHash(tokenHash);
+
+    if (!user) {
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (user.account_deletion_scheduled_for) {
+      if (!isAfterNow(user.account_deletion_scheduled_for)) {
+        throw new BadRequestException('Account deletion token has expired');
+      }
+
+      return {
+        status: AccountDeletionStatus.Scheduled,
+        scheduledFor: toIsoString(user.account_deletion_scheduled_for),
+      };
+    }
+
+    const confirmExpires = user.account_deletion_confirm_expires;
+    if (!confirmExpires) {
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (isBeforeNow(confirmExpires)) {
+      await this.usersService.clearAccountDeletionState(user.id);
+      throw new BadRequestException('Account deletion token has expired');
+    }
+
+    const result = await this.scheduleAccountDeletion(
+      user,
+      normalizeLanguage(language),
+      {
+        confirmTokenHash: tokenHash,
+        confirmExpires,
+      },
+    );
+    await this.revokeAllSessions(user.id);
+    return result;
+  }
+
+  async cancelAccountDeletion(token: string, language?: string): Promise<void> {
+    const tokenHash = this.sha256(token);
+    const user =
+      await this.usersService.findByAccountDeletionCancelTokenHash(tokenHash);
+
+    if (!user) {
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (!user.account_deletion_scheduled_for) {
+      if (this.isRecentAccountDeletionCancellation(user)) {
+        return;
+      }
+      throw new BadRequestException('Invalid account deletion token');
+    }
+
+    if (!isAfterNow(user.account_deletion_scheduled_for)) {
+      throw new BadRequestException('Account deletion token has expired');
+    }
+
+    await this.cancelAccountDeletionForUser(
+      user,
+      normalizeLanguage(language),
+      tokenHash,
+    );
+  }
+
+  async processDueAccountDeletions(
+    now: Date = nowDate(),
+    take = ACCOUNT_DELETION_BATCH_SIZE,
+  ): Promise<number> {
+    const users = await this.usersService.findDueAccountDeletions(now, take);
+    let deleted = 0;
+
+    for (const user of users) {
+      try {
+        if (!user.account_deletion_scheduled_for) {
+          continue;
+        }
+        const wasDeleted = await this.processScheduledAccountDeletion(
+          user.id,
+          user.account_deletion_scheduled_for,
+          now,
+        );
+        if (wasDeleted) deleted += 1;
+      } catch (error) {
+        this.logger.error(
+          `Failed to finalize scheduled account deletion for user ${user.id}`,
+          error,
+        );
+      }
+    }
+
+    return deleted;
+  }
+
+  async clearExpiredAccountDeletionCancellationReceipts(
+    now: Date = nowDate(),
+  ): Promise<number> {
+    return this.usersService.clearExpiredAccountDeletionCancellationReceipts(
+      new Date(now.getTime() - ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS),
+    );
+  }
+
+  async processScheduledAccountDeletion(
+    userId: string,
+    scheduledFor: Date,
+    now: Date = nowDate(),
+  ): Promise<boolean> {
+    const current = await this.usersService.findById(userId);
+    const currentScheduledFor = current?.account_deletion_scheduled_for;
+    if (!currentScheduledFor) {
+      return false;
+    }
+
+    if (currentScheduledFor.getTime() !== scheduledFor.getTime()) {
+      return false;
+    }
+
+    if (currentScheduledFor.getTime() > now.getTime()) {
+      return false;
+    }
+
+    await this.finalizeAccountDeletion(current.id);
+    return true;
+  }
+
+  private async requestOAuthAccountDeletionConfirmation(
+    user: User,
+    language: AppLanguage,
+  ): Promise<AccountDeletionResult> {
+    const confirmToken = randomBytes(32).toString('hex');
+    const now = nowDate();
+
+    await this.usersService.setAccountDeletionState(user.id, {
+      requestedAt: now,
+      scheduledFor: null,
+      cancelTokenHash: null,
+      confirmTokenHash: this.sha256(confirmToken),
+      confirmExpires: expiresFromDuration(ACCOUNT_DELETION_CONFIRM_EXPIRY),
+    });
+
+    await this.sendAccountDeletionConfirmationEmailOrFail(
+      user,
+      confirmToken,
+      language,
+    );
+    await this.recordAccountMonitoringEvent({
+      email: user.email,
+      eventType: AccountMonitoringEventType.AccountDeletionRequested,
+      metadata: { flow: 'oauth_confirmation' },
+      userId: user.id,
+    });
+
+    return { status: AccountDeletionStatus.ConfirmationRequired };
+  }
+
+  private async scheduleAccountDeletion(
+    user: User,
+    language: AppLanguage,
+    options: AccountDeletionScheduleOptions = {},
+  ): Promise<AccountDeletionResult> {
+    const cancelToken = randomBytes(32).toString('hex');
+    const requestedAt = nowDate();
+    const scheduledFor = roundUpToWholeSecond(
+      new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_MS),
+    );
+    const scheduledForIso = toIsoString(scheduledFor);
+
+    await this.usersService.setAccountDeletionState(user.id, {
+      requestedAt,
+      scheduledFor,
+      cancelTokenHash: this.sha256(cancelToken),
+      confirmTokenHash: options.confirmTokenHash ?? null,
+      confirmExpires: options.confirmExpires ?? null,
+    });
+
+    try {
+      await this.runAccountDeletionExternalOperation(
+        this.accountDeletionScheduler.scheduleFinalization(
+          user.id,
+          scheduledFor,
+        ),
+        'Account deletion finalization scheduling timed out',
+      );
+    } catch (error) {
+      await this.usersService.clearAccountDeletionState(user.id);
+      void this.cancelDurableAccountDeletionSchedule(user.id);
+      this.logger.error(
+        `Failed to create durable account deletion schedule for user ${user.id}`,
+        error,
+      );
+      throw new InternalServerErrorException(
+        'Account deletion could not be scheduled',
+      );
+    }
+
+    await this.sendAccountDeletionScheduledEmailOrRollback(
+      user,
+      cancelToken,
+      language,
+      scheduledForIso,
+    );
+    await this.recordAccountMonitoringEvent({
+      email: user.email,
+      eventType: AccountMonitoringEventType.AccountDeletionRequested,
+      metadata: { flow: 'scheduled_deletion' },
+      userId: user.id,
+    });
+
+    return {
+      status: AccountDeletionStatus.Scheduled,
+      scheduledFor: scheduledForIso,
+    };
+  }
+
+  private async cancelAccountDeletionOnAccess(user: User): Promise<void> {
+    if (!user.account_deletion_scheduled_for) {
+      await this.usersService.clearAccountDeletionState(user.id);
+      return;
+    }
+
+    if (!isAfterNow(user.account_deletion_scheduled_for)) {
+      await this.finalizeAccountDeletion(user.id);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    await this.cancelAccountDeletionForUser(
+      user,
+      normalizeLanguage(user.preferred_language),
+    );
+  }
+
+  private async cancelAccountDeletionForUser(
+    user: User,
+    language: AppLanguage,
+    cancelTokenHash?: string,
+  ): Promise<void> {
+    if (cancelTokenHash) {
+      const didCancel =
+        await this.usersService.markAccountDeletionCancellationComplete(
+          user.id,
+          cancelTokenHash,
+          nowDate(),
+        );
+
+      if (!didCancel) {
+        return;
+      }
+    } else {
+      await this.usersService.clearAccountDeletionState(user.id);
+    }
+    // The database state is the source of truth; external cleanup must not keep
+    // the cancellation request open after the account is already safe.
+    void this.cancelDurableAccountDeletionSchedule(user.id);
+    void this.sendAccountDeletionCancelledEmailOrLogFailure(user, language);
+    await this.recordAccountMonitoringEvent({
+      email: user.email,
+      eventType: AccountMonitoringEventType.AccountDeletionCancelled,
+      metadata: { flow: cancelTokenHash ? 'token' : 'account_access' },
+      userId: user.id,
+    });
+  }
+
+  private isRecentAccountDeletionCancellation(user: User): boolean {
+    if (!user.account_deletion_cancel_token_consumed_at) {
+      return false;
+    }
+
+    const consumedAt = user.account_deletion_cancel_token_consumed_at.getTime();
+    return (
+      nowDate().getTime() - consumedAt <= ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS
+    );
+  }
+
+  private async cancelDurableAccountDeletionSchedule(
+    userId: string,
+  ): Promise<void> {
+    try {
+      await this.runAccountDeletionExternalOperation(
+        this.accountDeletionScheduler.cancelFinalization(userId),
+        'Account deletion finalization cancellation timed out',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to cancel durable account deletion schedule for user ${userId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async finalizeAccountDeletion(userId: string): Promise<void> {
+    const products = await this.inventoryProductRepository.find({
+      where: { user_id: userId },
+    });
+    const imageUrls = products.flatMap((product) =>
+      Array.isArray(product.identity.imageUrls)
+        ? product.identity.imageUrls.filter(
+            (imageUrl): imageUrl is string => typeof imageUrl === 'string',
+          )
+        : [],
+    );
+
+    await this.cataloguePhotoStorageService.deleteManagedImageUrls(imageUrls);
+    await this.cataloguePhotoStorageService.deleteManagedImagesForOwner(userId);
+    await this.skinJournalService.deleteAllMediaForUser(userId);
+    await this.usersService.remove(userId);
   }
 
   private async createSession(
@@ -536,7 +1350,7 @@ export class AuthService {
   private async recordConsents(
     userId: string,
     ip: string | undefined,
-    consents: { type: string; version: string }[],
+    consents: { type: UserConsentType; version: string }[],
   ): Promise<void> {
     const now = nowDate();
     const sanitizedIp = sanitizeIpAddress(ip);
@@ -552,6 +1366,51 @@ export class AuthService {
       }),
     );
     await this.consentsRepository.save(entities);
+  }
+
+  private assertLegalConsent(
+    termsAccepted: boolean,
+    privacyPolicyAccepted: boolean,
+  ): void {
+    if (termsAccepted && privacyPolicyAccepted) {
+      return;
+    }
+
+    const message = 'You must accept the terms of service and privacy policy';
+
+    throw new BadRequestException({
+      statusCode: HttpStatus.BAD_REQUEST,
+      message: [message],
+      fieldErrors: {
+        ...(!termsAccepted ? { termsAccepted: [message] } : {}),
+        ...(!privacyPolicyAccepted ? { privacyPolicyAccepted: [message] } : {}),
+      },
+    });
+  }
+
+  private assertUserNotRestricted(user: User): void {
+    if (
+      hasActiveUserRestrictionCapability(
+        user,
+        UserRestrictionCapability.DisableLogin,
+      )
+    ) {
+      throw new ForbiddenException({
+        code: 'ACCOUNT_RESTRICTED',
+        message: 'Account restricted',
+      });
+    }
+  }
+
+  private async clearExpiredAccountRestrictionIfNeeded(
+    user: User,
+  ): Promise<void> {
+    if (!isUserRestrictionExpired(user)) {
+      return;
+    }
+
+    await this.usersService.clearExpiredAccountRestriction(user.id);
+    clearUserRestrictionState(user);
   }
 
   private async findUserByField(
@@ -578,11 +1437,15 @@ export class AuthService {
         language,
       );
     } catch (error) {
+      const deliveryError =
+        error instanceof Error
+          ? error
+          : new Error('Email delivery failed with a non-Error value');
       this.logEmailDeliveryFailure(
         'verification',
         email,
         this.buildFrontendPathActionUrl('verify-email', token),
-        error,
+        deliveryError,
       );
     }
   }
@@ -601,24 +1464,145 @@ export class AuthService {
         language,
       );
     } catch (error) {
+      const deliveryError =
+        error instanceof Error
+          ? error
+          : new Error('Email delivery failed with a non-Error value');
       this.logEmailDeliveryFailure(
         'password reset',
         email,
         this.buildFrontendPathActionUrl('reset-password', token),
+        deliveryError,
+      );
+    }
+  }
+
+  private async sendAccountDeletionConfirmationEmailOrFail(
+    user: User,
+    token: string,
+    language: AppLanguage,
+  ): Promise<void> {
+    try {
+      await this.runAccountDeletionExternalOperation(
+        this.mailService.sendAccountDeletionConfirmationEmail(
+          user.email,
+          token,
+          user.first_name,
+          language,
+        ),
+        'Account deletion confirmation email timed out',
+      );
+    } catch (error) {
+      this.logAccountDeletionEmailFailure(
+        'account deletion confirmation',
+        user.email,
+        error,
+      );
+      await this.usersService.clearAccountDeletionState(user.id);
+      throw new InternalServerErrorException(
+        'Account deletion email could not be sent',
+      );
+    }
+  }
+
+  private async sendAccountDeletionScheduledEmailOrRollback(
+    user: User,
+    token: string,
+    language: AppLanguage,
+    scheduledFor: string,
+  ): Promise<void> {
+    try {
+      await this.runAccountDeletionExternalOperation(
+        this.mailService.sendAccountDeletionScheduledEmail(
+          user.email,
+          token,
+          user.first_name,
+          language,
+          scheduledFor,
+        ),
+        'Account deletion scheduled email timed out',
+      );
+    } catch (error) {
+      this.logAccountDeletionEmailFailure(
+        'account deletion scheduled',
+        user.email,
+        error,
+      );
+      await this.usersService.clearAccountDeletionState(user.id);
+      void this.cancelDurableAccountDeletionSchedule(user.id);
+      throw new InternalServerErrorException(
+        'Account deletion email could not be sent',
+      );
+    }
+  }
+
+  private async sendAccountDeletionCancelledEmailOrLogFailure(
+    user: User,
+    language: AppLanguage,
+  ): Promise<void> {
+    try {
+      await this.mailService.sendAccountDeletionCancelledEmail(
+        user.email,
+        user.first_name,
+        language,
+      );
+    } catch (error) {
+      this.logAccountDeletionEmailFailure(
+        'account deletion cancellation',
+        user.email,
         error,
       );
     }
   }
 
-  private logEmailDeliveryFailure(
-    type: 'verification' | 'password reset',
+  private async runAccountDeletionExternalOperation<T>(
+    operation: Promise<T>,
+    timeoutMessage: string,
+  ): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        reject(new Error(timeoutMessage));
+      }, this.accountDeletionExternalTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([operation, timeoutPromise]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  private logAccountDeletionEmailFailure(
+    type:
+      | 'account deletion confirmation'
+      | 'account deletion scheduled'
+      | 'account deletion cancellation',
     email: string,
-    actionUrl: string,
     error: unknown,
   ): void {
-    const message =
-      error instanceof Error ? error.message : 'Unknown email delivery error';
-    const stack = error instanceof Error ? error.stack : undefined;
+    const deliveryError =
+      error instanceof Error
+        ? error
+        : new Error('Email delivery failed with a non-Error value');
+    this.logEmailDeliveryFailure(type, email, null, deliveryError);
+  }
+
+  private logEmailDeliveryFailure(
+    type:
+      | 'verification'
+      | 'password reset'
+      | 'account deletion confirmation'
+      | 'account deletion scheduled'
+      | 'account deletion cancellation',
+    email: string,
+    actionUrl: string | null,
+    error: Error,
+  ): void {
+    const message = error.message;
+    const stack = error.stack;
 
     this.logger.error(
       `Failed to send ${type} email to ${email} via ${MAIL_PROVIDER_LABEL}: ${message}`,
@@ -629,9 +1613,12 @@ export class AuthService {
       return;
     }
 
+    const actionUrlMessage = actionUrl
+      ? `Temporary ${type} URL for ${email}: ${actionUrl}`
+      : `Temporary ${type} URL for ${email}: account deletion action URL withheld because it contains a one-time token.`;
+
     this.logger.warn(
-      `${MAIL_PROVIDER_LABEL} delivery failed in development. Check your RESEND_API_KEY and verified MAIL_FROM address. ` +
-        `Temporary ${type} URL for ${email}: ${actionUrl}`,
+      `${MAIL_PROVIDER_LABEL} delivery failed in development. Check your RESEND_API_KEY and verified MAIL_FROM address. ${actionUrlMessage}`,
     );
   }
 
@@ -652,6 +1639,112 @@ export class AuthService {
 
   private sha256(data: string): string {
     return createHash('sha256').update(data).digest('hex');
+  }
+
+  private accountMonitoringHash(
+    value: string | null | undefined,
+  ): string | null {
+    const normalized = value?.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+
+    return createHmac('sha256', this.jwtRefreshSecret)
+      .update(normalized)
+      .digest('hex');
+  }
+
+  private oauthFailureReason(error: unknown): string {
+    if (error instanceof ConflictException) {
+      return 'account_link_conflict';
+    }
+    if (error instanceof ForbiddenException) {
+      return 'forbidden';
+    }
+    if (error instanceof UnauthorizedException) {
+      return 'unauthorized';
+    }
+    if (error instanceof BadRequestException) {
+      return 'bad_request';
+    }
+
+    return 'oauth_login_failed';
+  }
+
+  private normalizeOAuthFailureReason(reason: string): string {
+    return reason
+      .replace(/[^a-z0-9_-]/gi, '_')
+      .toLowerCase()
+      .slice(0, 80);
+  }
+
+  private async recordAccountMonitoringEvent(input: {
+    email?: string;
+    eventType: AccountMonitoringEventType;
+    ip?: string;
+    metadata?: AccountMonitoringEventMetadata;
+    userId: string | null;
+  }): Promise<void> {
+    try {
+      const sanitizedIp = sanitizeIpAddress(input.ip);
+      const event = this.accountMonitoringEventsRepository.create({
+        email_hash: this.accountMonitoringHash(input.email),
+        event_type: input.eventType,
+        ip_address_hash: this.accountMonitoringHash(sanitizedIp),
+        metadata: input.metadata ?? {},
+        occurred_at: nowDate(),
+        user_id: input.userId,
+      });
+      await this.accountMonitoringEventsRepository.save(event);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record account monitoring event: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private getOAuthProviderConfig(provider: OAuthProvider): OAuthProviderConfig {
+    if (provider === OAuthProvider.Apple) {
+      return {
+        displayName: 'Apple',
+        findBySubject: (subject) =>
+          this.usersService.findByAppleSubject(subject),
+        readSubject: (user) => user.apple_subject,
+        linkSubject: (id, subject) =>
+          this.usersService.linkAppleSubject(id, subject),
+        createUser: (data) =>
+          this.usersService.createAppleUser({
+            email: data.email,
+            apple_subject: data.subject,
+            first_name: data.firstName,
+            last_name: data.lastName,
+            preferred_language: data.preferredLanguage,
+          }),
+      };
+    }
+
+    if (provider === OAuthProvider.Google) {
+      return {
+        displayName: 'Google',
+        findBySubject: (subject) =>
+          this.usersService.findByGoogleSubject(subject),
+        readSubject: (user) => user.google_subject,
+        linkSubject: (id, subject) =>
+          this.usersService.linkGoogleSubject(id, subject),
+        createUser: (data) =>
+          this.usersService.createGoogleUser({
+            email: data.email,
+            google_subject: data.subject,
+            first_name: data.firstName,
+            last_name: data.lastName,
+            preferred_language: data.preferredLanguage,
+          }),
+      };
+    }
+
+    throw new UnauthorizedException('Unsupported OAuth provider');
   }
 
   private parseRefreshToken(
@@ -735,4 +1828,12 @@ export class AuthService {
 
     return cookieOptions;
   }
+}
+
+function hasSmartPicksExportData(data: AccountExportSmartPicks): boolean {
+  return (
+    data.snapshots.length > 0 ||
+    data.productSuggestions.length > 0 ||
+    data.actions.length > 0
+  );
 }

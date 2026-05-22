@@ -12,7 +12,9 @@ import {
   Put,
 } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ProductImageUrlResolverOptions } from '../inventory/product-image-url-resolver';
 import { ApplyPresetDto } from './dto/apply-preset.dto';
 import { CreateSlotDto } from './dto/create-slot.dto';
 import { CreateSlotsDto } from './dto/create-slots.dto';
@@ -30,7 +32,10 @@ import { ScheduleSlot } from './entities/schedule-slot.entity';
 @ApiTags('schedule')
 @Controller('schedule')
 export class ScheduleController {
-  constructor(private readonly scheduleService: ScheduleService) {}
+  constructor(
+    private readonly scheduleService: ScheduleService,
+    private readonly cataloguePhotoStorageService: CataloguePhotoStorageService,
+  ) {}
 
   @Get()
   @ApiOkResponse({ type: ScheduleResponseDto })
@@ -60,6 +65,7 @@ export class ScheduleController {
       day,
       effectiveTimeZone,
       slots,
+      this.productImageOptions(),
     );
   }
 
@@ -70,7 +76,7 @@ export class ScheduleController {
     @Body() dto: CreateSlotDto,
   ): Promise<ScheduleSlotResponseDto> {
     const slot = await this.scheduleService.createSlot(userId, dto);
-    return ScheduleSlotResponseDto.fromEntity(slot);
+    return ScheduleSlotResponseDto.fromEntity(slot, this.productImageOptions());
   }
 
   @Post('slots/batch')
@@ -105,7 +111,7 @@ export class ScheduleController {
     @Body() dto: UpdateSlotDto,
   ): Promise<ScheduleSlotResponseDto> {
     const slot = await this.scheduleService.updateSlot(userId, id, dto);
-    return ScheduleSlotResponseDto.fromEntity(slot);
+    return ScheduleSlotResponseDto.fromEntity(slot, this.productImageOptions());
   }
 
   @Delete('slots/:id')
@@ -125,7 +131,7 @@ export class ScheduleController {
     @Body() dto: UpsertRoutineStepsDto,
   ): Promise<ScheduleSlotResponseDto> {
     const slot = await this.scheduleService.upsertSteps(userId, id, dto);
-    return ScheduleSlotResponseDto.fromEntity(slot);
+    return ScheduleSlotResponseDto.fromEntity(slot, this.productImageOptions());
   }
 
   @Post('slots/:id/move')
@@ -136,7 +142,7 @@ export class ScheduleController {
     @Body() dto: MoveSlotDto,
   ): Promise<ScheduleSlotResponseDto> {
     const slot = await this.scheduleService.moveSlot(userId, id, dto);
-    return ScheduleSlotResponseDto.fromEntity(slot);
+    return ScheduleSlotResponseDto.fromEntity(slot, this.productImageOptions());
   }
 
   private toScheduleResponse(
@@ -150,6 +156,14 @@ export class ScheduleController {
         savedTimeZone,
         requestTimeZone,
       ),
+      this.productImageOptions(),
     );
+  }
+
+  private productImageOptions(): ProductImageUrlResolverOptions {
+    return {
+      resolveProductImageUrls: (imageUrls) =>
+        this.cataloguePhotoStorageService.resolvePublicImageUrls(imageUrls),
+    };
   }
 }

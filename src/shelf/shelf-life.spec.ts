@@ -48,7 +48,7 @@ function createSnapshot(): ShelfProductSnapshot {
       preferredTimeOfDay: null,
     },
     status: ShelfStatus.Active,
-    provenance: DataProvenance.UserEntered,
+    provenance: DataProvenance.PhotoLookup,
   };
 }
 

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { toIsoString } from '../../common/utils/date';
+import { ProductImageUrlResolverOptions } from '../../inventory/product-image-url-resolver';
 import { ScheduleSlot } from '../entities/schedule-slot.entity';
 import { RoutineStepResponseDto } from './routine-step-response.dto';
 
@@ -27,6 +28,18 @@ export class ScheduleSlotResponseDto {
   @ApiProperty({ nullable: true })
   slotNotes: string | null;
 
+  @ApiProperty({ nullable: true })
+  specialistProviderName: string | null;
+
+  @ApiProperty({ nullable: true })
+  specialistClinicName: string | null;
+
+  @ApiProperty({ nullable: true })
+  specialistActiveSince: string | null;
+
+  @ApiProperty({ nullable: true })
+  specialistSafetyNotes: string | null;
+
   @ApiProperty({ type: [RoutineStepResponseDto] })
   steps: RoutineStepResponseDto[];
 
@@ -42,6 +55,10 @@ export class ScheduleSlotResponseDto {
     slotTime: string,
     mode: string,
     slotNotes: string | null,
+    specialistProviderName: string | null,
+    specialistClinicName: string | null,
+    specialistActiveSince: string | null,
+    specialistSafetyNotes: string | null,
     steps: RoutineStepResponseDto[],
     createdAt: string,
     updatedAt: string,
@@ -51,16 +68,23 @@ export class ScheduleSlotResponseDto {
     this.slotTime = slotTime;
     this.mode = mode;
     this.slotNotes = slotNotes;
+    this.specialistProviderName = specialistProviderName;
+    this.specialistClinicName = specialistClinicName;
+    this.specialistActiveSince = specialistActiveSince;
+    this.specialistSafetyNotes = specialistSafetyNotes;
     this.steps = steps;
     this.createdAt = createdAt;
     this.updatedAt = updatedAt;
   }
 
-  static fromEntity(slot: ScheduleSlot): ScheduleSlotResponseDto {
+  static fromEntity(
+    slot: ScheduleSlot,
+    options: ProductImageUrlResolverOptions = {},
+  ): ScheduleSlotResponseDto {
     const steps = (slot.steps ?? [])
       .slice()
       .sort((a, b) => a.step_order - b.step_order)
-      .map((step) => RoutineStepResponseDto.fromEntity(step));
+      .map((step) => RoutineStepResponseDto.fromEntity(step, options));
 
     return new ScheduleSlotResponseDto(
       slot.id,
@@ -68,6 +92,10 @@ export class ScheduleSlotResponseDto {
       formatSlotTime(slot.slot_time),
       slot.mode,
       slot.slot_notes,
+      slot.specialist_provider_name,
+      slot.specialist_clinic_name,
+      slot.specialist_active_since,
+      slot.specialist_safety_notes,
       steps,
       toIsoString(slot.created_at),
       toIsoString(slot.updated_at),

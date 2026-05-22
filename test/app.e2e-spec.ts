@@ -29,9 +29,22 @@ describe('Health endpoint (e2e)', () => {
     return request(app.getHttpServer())
       .get('/api/v1/health')
       .expect(200)
-      .expect((response: { body: { status: string; timestamp: string } }) => {
-        expect(response.body.status).toBe('ok');
-        expect(typeof response.body.timestamp).toBe('string');
-      });
+      .expect(
+        (response: {
+          body: {
+            checks: {
+              api: { status: string };
+              database: { status: string };
+            };
+            status: string;
+            timestamp: string;
+          };
+        }) => {
+          expect(response.body.status).toBe('ok');
+          expect(typeof response.body.timestamp).toBe('string');
+          expect(response.body.checks.api.status).toBe('ok');
+          expect(response.body.checks.database.status).toBe('ok');
+        },
+      );
   });
 });

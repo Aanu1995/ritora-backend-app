@@ -1,0 +1,318 @@
+import { ConfigService } from '@nestjs/config';
+import { ObjectLiteral, Repository } from 'typeorm';
+import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
+import { SuggestionInstance } from '../entities/suggestion-instance.entity';
+import { RoutineBreakService } from './routine-break.service';
+import { SuggestionGenerationService } from './suggestion-generation.service';
+import { SuggestionGenerationWorker } from './suggestion-generation-worker.service';
+import { SuggestionObservabilityService } from './suggestion-observability.service';
+
+describe('SuggestionGenerationWorker', () => {
+  const generationService = {
+    generateForJob: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionGenerationService>;
+  const jobRepo = repo<SuggestionGenerationJob>();
+  const suggestionRepo = repo<SuggestionInstance>();
+  const observability = {
+    record: jest.fn(),
+  } as unknown as jest.Mocked<SuggestionObservabilityService>;
+  const routineBreakService = {
+    isRoutineBreakActive: jest.fn(),
+  } as unknown as jest.Mocked<RoutineBreakService>;
+  const queryBuilder = updateQueryBuilder();
+  const worker = new SuggestionGenerationWorker(
+    {
+      get: jest.fn().mockReturnValue('development'),
+    } as unknown as ConfigService,
+    generationService,
+    jobRepo,
+    suggestionRepo,
+    observability,
+    routineBreakService,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jobRepo.createQueryBuilder.mockReturnValue(queryBuilder as never);
+    jobRepo.find.mockResolvedValue([]);
+    queryBuilder.execute.mockResolvedValue({
+      raw: [
+        {
+          id: 'job-1',
+          user_id: 'user-1',
+          slot_id: 'slot-1',
+          target_date: new Date(2026, 4, 4, 0, 0, 0),
+          target_time: '08:00',
+          attempt_count: 0,
+        },
+      ],
+    });
+    generationService.generateForJob.mockResolvedValue(undefined);
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
+    jobRepo.update.mockResolvedValue({
+      affected: 1,
+      raw: [],
+      generatedMaps: [],
+    });
+    suggestionRepo.update.mockResolvedValue({
+      affected: 1,
+      raw: [],
+      generatedMaps: [],
+    });
+  });
+
+  it('recovers stale running jobs before claiming new work', async () => {
+    const staleLockedAt = new Date('2026-05-04T05:40:00.000Z');
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T06:00:00.000Z'));
+    jobRepo.find.mockResolvedValue([
+      {
+        id: 'stale-job',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        target_time: '08:00',
+        attempt_count: 0,
+        locked_at: staleLockedAt,
+      } as SuggestionGenerationJob,
+    ]);
+    queryBuilder.execute.mockResolvedValue({ raw: [] });
+
+    await worker.pollOnce();
+
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'stale-job' },
+      expect.objectContaining({
+        status: 'queued',
+        attempt_count: 1,
+        locked_at: null,
+        locked_by: null,
+      }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'job_recovered',
+        severity: 'warning',
+        jobId: 'stale-job',
+      }),
+    );
+    jest.useRealTimers();
+  });
+
+  it('dead-letters stale on-demand jobs and marks the suggestion failed by id', async () => {
+    const staleLockedAt = new Date('2026-05-04T05:40:00.000Z');
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T06:00:00.000Z'));
+    jobRepo.find.mockResolvedValue([
+      {
+        id: 'stale-on-demand',
+        user_id: 'user-1',
+        slot_id: null,
+        suggestion_instance_id: 'suggestion-on-demand-1',
+        request_source: 'on_demand',
+        target_date: '2026-05-04',
+        target_time: '12:00',
+        attempt_count: 2,
+        locked_at: staleLockedAt,
+      } as SuggestionGenerationJob,
+    ]);
+    queryBuilder.execute.mockResolvedValue({ raw: [] });
+
+    await worker.pollOnce();
+
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      {
+        user_id: 'user-1',
+        id: 'suggestion-on-demand-1',
+        generation_status: expect.anything(),
+      },
+      expect.objectContaining({
+        generation_status: 'failed',
+        ai_error: expect.stringContaining('stale lock recovered'),
+        ai_retry_count: 3,
+      }),
+    );
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'stale-on-demand' },
+      expect.objectContaining({
+        status: 'failed',
+        attempt_count: 3,
+      }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'job_dead_lettered',
+        jobId: 'stale-on-demand',
+      }),
+    );
+    jest.useRealTimers();
+  });
+
+  it('marks the pending suggestion as generating before invoking AI generation', async () => {
+    await worker.pollOnce();
+
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      {
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        generation_status: 'pending',
+      },
+      {
+        generation_status: 'generating',
+        ai_error: null,
+      },
+    );
+    expect(suggestionRepo.update.mock.invocationCallOrder[0]).toBeLessThan(
+      generationService.generateForJob.mock.invocationCallOrder[0],
+    );
+    expect(generationService.generateForJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target_date: '2026-05-04',
+      }),
+    );
+  });
+
+  it('cancels claimed queued work when a break becomes active before generation', async () => {
+    routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
+
+    await worker.pollOnce();
+
+    expect(generationService.generateForJob).not.toHaveBeenCalled();
+    expect(suggestionRepo.update).toHaveBeenCalledWith(
+      {
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        generation_status: 'pending',
+      },
+      {
+        generation_status: 'superseded',
+        ai_error: 'routine_break_active',
+      },
+    );
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'job-1' },
+      expect.objectContaining({
+        status: 'cancelled',
+        last_error: 'routine_break_active',
+      }),
+    );
+  });
+
+  it('does not crash when a corrupt scheduled job is missing its slot id', async () => {
+    queryBuilder.execute.mockResolvedValue({
+      raw: [
+        {
+          id: 'job-corrupt',
+          user_id: 'user-1',
+          slot_id: null,
+          suggestion_instance_id: null,
+          request_source: 'scheduled',
+          target_date: '2026-05-04',
+          target_time: '08:00',
+          attempt_count: 2,
+        },
+      ],
+    });
+    generationService.generateForJob.mockRejectedValueOnce(
+      new Error('Scheduled suggestion job is missing slot_id'),
+    );
+
+    await expect(worker.pollOnce()).resolves.toBeUndefined();
+
+    expect(suggestionRepo.update).not.toHaveBeenCalled();
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'job-corrupt' },
+      expect.objectContaining({
+        status: 'failed',
+        attempt_count: 3,
+        locked_at: null,
+        locked_by: null,
+      }),
+    );
+  });
+
+  it('dead-letters corrupt stale scheduled jobs without a slot id', async () => {
+    const staleLockedAt = new Date('2026-05-04T05:40:00.000Z');
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T06:00:00.000Z'));
+    jobRepo.find.mockResolvedValue([
+      {
+        id: 'stale-corrupt',
+        user_id: 'user-1',
+        slot_id: null,
+        suggestion_instance_id: null,
+        request_source: 'scheduled',
+        target_date: '2026-05-04',
+        target_time: '08:00',
+        attempt_count: 2,
+        locked_at: staleLockedAt,
+      } as SuggestionGenerationJob,
+    ]);
+    queryBuilder.execute.mockResolvedValue({ raw: [] });
+
+    await expect(worker.pollOnce()).resolves.toBeUndefined();
+
+    expect(suggestionRepo.update).not.toHaveBeenCalled();
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'stale-corrupt' },
+      expect.objectContaining({
+        status: 'failed',
+        attempt_count: 3,
+      }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'job_dead_lettered',
+        jobId: 'stale-corrupt',
+      }),
+    );
+    jest.useRealTimers();
+  });
+
+  it('keeps the standalone worker process alive with a referenced poll timer', () => {
+    const unref = jest.fn();
+    const fakeTimer = { unref } as unknown as ReturnType<typeof setTimeout>;
+    const setTimeoutMock = ((..._args: Parameters<typeof setTimeout>) =>
+      fakeTimer) as unknown as typeof setTimeout;
+    const setTimeoutSpy = jest
+      .spyOn(global, 'setTimeout')
+      .mockImplementation(setTimeoutMock);
+    const workerWithTimer = new SuggestionGenerationWorker(
+      {
+        get: jest.fn().mockReturnValue('development'),
+      } as unknown as ConfigService,
+      generationService,
+      jobRepo,
+      suggestionRepo,
+      observability,
+      routineBreakService,
+    );
+
+    try {
+      workerWithTimer.onModuleInit();
+
+      expect(setTimeoutSpy).toHaveBeenCalled();
+      expect(unref).not.toHaveBeenCalled();
+    } finally {
+      workerWithTimer.onModuleDestroy();
+      setTimeoutSpy.mockRestore();
+    }
+  });
+});
+
+function repo<T extends ObjectLiteral>() {
+  return {
+    createQueryBuilder: jest.fn(),
+    find: jest.fn(),
+    update: jest.fn(),
+  } as unknown as jest.Mocked<Repository<T>>;
+}
+
+function updateQueryBuilder() {
+  return {
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    returning: jest.fn().mockReturnThis(),
+    execute: jest.fn(),
+  };
+}

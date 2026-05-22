@@ -3,12 +3,19 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   OneToMany,
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { ulid } from 'ulid';
+import { encryptedNullableStringFieldTransformer } from '../../skin-profile/skin-profile-field-encryption';
+import { UserRestrictionCapability } from '../user-restrictions';
 import { UserConsent } from './user-consent.entity';
+import { UserDataAccessLog } from './user-data-access-log.entity';
+
+const encryptedUserStringTransformer = (field: string) =>
+  encryptedNullableStringFieldTransformer(`users.${field}`);
 
 @Entity('users')
 export class User {
@@ -18,8 +25,26 @@ export class User {
   @Column({ type: 'varchar', length: 255, unique: true })
   email: string;
 
-  @Column({ type: 'varchar', length: 255, select: false })
-  password_hash: string;
+  @Index('idx_users_canonical_email', { unique: true })
+  @Column({ type: 'varchar', length: 255 })
+  canonical_email: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
+  password_hash: string | null;
+
+  @Index('idx_users_google_subject', {
+    unique: true,
+    where: '"google_subject" IS NOT NULL',
+  })
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  google_subject: string | null;
+
+  @Index('idx_users_apple_subject', {
+    unique: true,
+    where: '"apple_subject" IS NOT NULL',
+  })
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  apple_subject: string | null;
 
   @Column({ type: 'varchar', length: 100 })
   first_name: string;
@@ -42,11 +67,83 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   password_reset_expires: Date | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_requested_at: Date | null;
+
+  @Index('idx_users_account_deletion_scheduled_for')
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_scheduled_for: Date | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
+  account_deletion_cancel_token_hash: string | null;
+
+  @Index('idx_users_account_deletion_cancel_token_consumed_at', {
+    where: '"account_deletion_cancel_token_consumed_at" IS NOT NULL',
+  })
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_cancel_token_consumed_at: Date | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false })
+  account_deletion_confirm_token_hash: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  account_deletion_confirm_expires: Date | null;
+
+  @Index('idx_users_account_restricted_at')
+  @Column({ type: 'timestamptz', nullable: true })
+  account_restricted_at: Date | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  account_restriction_reason: string | null;
+
+  @Index('idx_users_account_restricted_by_admin_id')
+  @Column({ type: 'varchar', length: 26, nullable: true })
+  account_restricted_by_admin_id: string | null;
+
+  @Column({ type: 'varchar', array: true, nullable: true })
+  account_restriction_capabilities: UserRestrictionCapability[] | null;
+
+  @Index('idx_users_account_restriction_expires_at')
+  @Column({ type: 'timestamptz', nullable: true })
+  account_restriction_expires_at: Date | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer(
+      'account_restriction_internal_note',
+    ),
+  })
+  account_restriction_internal_note: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer(
+      'account_restriction_user_message',
+    ),
+  })
+  account_restriction_user_message: string | null;
+
   @Column({ type: 'varchar', length: 5, default: 'en' })
   preferred_language: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   time_zone: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer('date_of_birth'),
+  })
+  date_of_birth: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+    transformer: encryptedUserStringTransformer('sex_at_birth'),
+  })
+  sex_at_birth: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
@@ -56,6 +153,9 @@ export class User {
 
   @OneToMany(() => UserConsent, (consent) => consent.user)
   consents: UserConsent[];
+
+  @OneToMany(() => UserDataAccessLog, (log) => log.user)
+  data_access_logs: UserDataAccessLog[];
 
   @BeforeInsert()
   generateId() {

@@ -8,6 +8,7 @@ import {
 import type { Request } from 'express';
 import { Observable } from 'rxjs';
 import { UsersService } from '../../users/users.service';
+import { readTimeZoneHeaderFromHeaders } from '../timezone/timezone-header.utils';
 import { canonicalizeTimeZone } from '../timezone/timezone.utils';
 
 type AuthenticatedRequest = Request & {
@@ -22,16 +23,8 @@ type CapturableUser = {
   timeZone?: string | null;
 };
 
-function readHeaderValue(header: string | string[] | undefined): string | null {
-  if (Array.isArray(header)) {
-    return header[0] ?? null;
-  }
-
-  return typeof header === 'string' ? header : null;
-}
-
 function resolveRequestTimeZone(request: AuthenticatedRequest): string | null {
-  return canonicalizeTimeZone(readHeaderValue(request.headers['x-timezone']));
+  return canonicalizeTimeZone(readTimeZoneHeaderFromHeaders(request.headers));
 }
 
 @Injectable()

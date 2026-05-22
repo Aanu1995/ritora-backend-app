@@ -4,9 +4,13 @@ import {
   extractOutputText,
   type OpenAiResponsePayload,
 } from '../catalogue/openai-extraction.utils';
-import { readOpenAiModel } from '../common/utils/openai-config';
+import {
+  INGREDIENT_TRANSLATION_AI_MODEL_ENV_KEY,
+  readFeatureOpenAiModel,
+} from '../common/utils/openai-config';
+import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
 
-const DEFAULT_MODEL = 'gpt-5.5';
+const DEFAULT_MODEL = 'gpt-5-mini';
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_OUTPUT_TOKENS = 220;
 const MAX_BATCH_OUTPUT_TOKENS = 1600;
@@ -24,7 +28,11 @@ export async function translateWithOpenAi(
     return null;
   }
 
-  const model = readOpenAiModel(configService, DEFAULT_MODEL);
+  const model = readFeatureOpenAiModel(
+    configService,
+    INGREDIENT_TRANSLATION_AI_MODEL_ENV_KEY,
+    DEFAULT_MODEL,
+  );
   if (!model) {
     logStructured({
       event: 'translation_skipped',
@@ -51,9 +59,11 @@ export async function translateWithOpenAi(
       },
       body: JSON.stringify({
         model,
+        store: false,
         reasoning: { effort: 'low' },
         text: { verbosity: 'low' },
         max_output_tokens: maxOutputTokens,
+        ...openAiRepeatabilityRequestOptions(model),
         input: buildTranslationInput(sourceTexts, targetLanguage),
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

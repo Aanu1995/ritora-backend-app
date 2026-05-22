@@ -13,12 +13,10 @@ export function setLocaleCookie(
   configService: ConfigService,
   language: AppLanguage,
 ): void {
-  const cookieDomain = configService.get<string>('COOKIE_DOMAIN', '');
-  const cookieSecure = configService.get<boolean>('COOKIE_SECURE', false);
-  const cookieSameSite = configService.get<LocaleCookieSameSite>(
-    'COOKIE_SAME_SITE',
-    'lax',
-  );
+  const cookieDomain = configService.getOrThrow<string>('COOKIE_DOMAIN');
+  const cookieSecure = configService.getOrThrow<boolean>('COOKIE_SECURE');
+  const cookieSameSite =
+    configService.getOrThrow<LocaleCookieSameSite>('COOKIE_SAME_SITE');
 
   const cookieOptions: {
     domain?: string;

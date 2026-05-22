@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, LessThanOrEqual, Not, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import {
   buildTimeZonePatch,
+  canonicalizeEmailForIdentity,
   normalizeEmail,
   normalizePreferredLanguage,
   normalizeProfileName,
@@ -14,6 +19,22 @@ type AuthUserLookup = {
   params: Record<string, string>;
 };
 
+type DatabaseError = {
+  code?: unknown;
+  constraint?: unknown;
+};
+
+const POSTGRES_UNIQUE_VIOLATION_CODE = '23505';
+const EMAIL_IDENTITY_UNIQUE_CONSTRAINTS = new Set([
+  'idx_users_canonical_email',
+  'idx_users_email_lower',
+]);
+const EMAIL_IN_USE_MESSAGE = 'Email already in use';
+const EXPLICIT_USER_DATA_TABLES = [
+  'push_notification_deliveries',
+  'skin_journal_media_deletion_jobs',
+] as const;
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -23,14 +44,26 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.usersRepository.findOne({
-      where: { email: normalizeEmail(email) },
+      where: { canonical_email: canonicalizeEmailForIdentity(email) },
     });
   }
 
   async findByEmailForAuth(email: string): Promise<User | null> {
     return this.findForAuth({
-      clause: 'LOWER(user.email) = :email',
-      params: { email: normalizeEmail(email) },
+      clause: 'user.canonical_email = :canonicalEmail',
+      params: { canonicalEmail: canonicalizeEmailForIdentity(email) },
+    });
+  }
+
+  async findByGoogleSubject(googleSubject: string): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { google_subject: googleSubject },
+    });
+  }
+
+  async findByAppleSubject(appleSubject: string): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { apple_subject: appleSubject },
     });
   }
 
@@ -54,19 +87,76 @@ export class UsersService {
     });
   }
 
+  async findByAccountDeletionCancelTokenHash(
+    hash: string,
+  ): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { account_deletion_cancel_token_hash: hash },
+    });
+  }
+
+  async findByAccountDeletionConfirmTokenHash(
+    hash: string,
+  ): Promise<User | null> {
+    return this.usersRepository.findOne({
+      where: { account_deletion_confirm_token_hash: hash },
+    });
+  }
+
   async create(data: {
     email: string;
-    password_hash: string;
+    password_hash: string | null;
     first_name: string;
     last_name: string;
     preferred_language: string;
     email_verification_token_hash?: string;
     email_verification_expires?: Date;
   }): Promise<User> {
-    return this.usersRepository.save(
+    return this.saveCreatedUser(
       this.usersRepository.create({
         ...data,
         email: normalizeEmail(data.email),
+        canonical_email: canonicalizeEmailForIdentity(data.email),
+      }),
+    );
+  }
+
+  async createGoogleUser(data: {
+    email: string;
+    google_subject: string;
+    first_name: string;
+    last_name: string;
+    preferred_language: string;
+  }): Promise<User> {
+    return this.saveCreatedUser(
+      this.usersRepository.create({
+        ...data,
+        email: normalizeEmail(data.email),
+        canonical_email: canonicalizeEmailForIdentity(data.email),
+        password_hash: null,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      }),
+    );
+  }
+
+  async createAppleUser(data: {
+    email: string;
+    apple_subject: string;
+    first_name: string;
+    last_name: string;
+    preferred_language: string;
+  }): Promise<User> {
+    return this.saveCreatedUser(
+      this.usersRepository.create({
+        ...data,
+        email: normalizeEmail(data.email),
+        canonical_email: canonicalizeEmailForIdentity(data.email),
+        password_hash: null,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
       }),
     );
   }
@@ -99,6 +189,52 @@ export class UsersService {
     return this.update(id, buildTimeZonePatch(timeZone));
   }
 
+  async linkGoogleSubject(id: string, googleSubject: string): Promise<User> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        google_subject: googleSubject,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('(google_subject IS NULL OR google_subject = :googleSubject)', {
+        googleSubject,
+      })
+      .execute();
+
+    if (result.affected !== 1) {
+      throw new ConflictException('Email already linked to Google');
+    }
+
+    return this.findByIdOrFail(id);
+  }
+
+  async linkAppleSubject(id: string, appleSubject: string): Promise<User> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        apple_subject: appleSubject,
+        email_verified: true,
+        email_verification_token_hash: null,
+        email_verification_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('(apple_subject IS NULL OR apple_subject = :appleSubject)', {
+        appleSubject,
+      })
+      .execute();
+
+    if (result.affected !== 1) {
+      throw new ConflictException('Email already linked to Apple');
+    }
+
+    return this.findByIdOrFail(id);
+  }
+
   async captureTimeZoneIfMissing(id: string, timeZone: string): Promise<User> {
     const timeZonePatch = buildTimeZonePatch(timeZone);
 
@@ -125,9 +261,145 @@ export class UsersService {
     });
   }
 
+  async setAccountDeletionState(
+    id: string,
+    data: {
+      requestedAt: Date | null;
+      scheduledFor: Date | null;
+      cancelTokenHash: string | null;
+      confirmTokenHash: string | null;
+      confirmExpires: Date | null;
+    },
+  ): Promise<User> {
+    return this.update(id, {
+      account_deletion_requested_at: data.requestedAt,
+      account_deletion_scheduled_for: data.scheduledFor,
+      account_deletion_cancel_token_hash: data.cancelTokenHash,
+      account_deletion_cancel_token_consumed_at: null,
+      account_deletion_confirm_token_hash: data.confirmTokenHash,
+      account_deletion_confirm_expires: data.confirmExpires,
+    });
+  }
+
+  async markAccountDeletionCancellationComplete(
+    id: string,
+    cancelTokenHash: string,
+    cancelledAt: Date,
+  ): Promise<boolean> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_deletion_requested_at: null,
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_hash: cancelTokenHash,
+        account_deletion_cancel_token_consumed_at: cancelledAt,
+        account_deletion_confirm_token_hash: null,
+        account_deletion_confirm_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('account_deletion_cancel_token_hash = :cancelTokenHash', {
+        cancelTokenHash,
+      })
+      .andWhere('account_deletion_scheduled_for IS NOT NULL')
+      .execute();
+
+    return result.affected === 1;
+  }
+
+  async clearAccountDeletionState(id: string): Promise<void> {
+    await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_deletion_requested_at: null,
+        account_deletion_scheduled_for: null,
+        account_deletion_cancel_token_hash: null,
+        account_deletion_cancel_token_consumed_at: null,
+        account_deletion_confirm_token_hash: null,
+        account_deletion_confirm_expires: null,
+      })
+      .where('id = :id', { id })
+      .andWhere(
+        [
+          'account_deletion_requested_at IS NOT NULL',
+          'account_deletion_scheduled_for IS NOT NULL',
+          'account_deletion_cancel_token_hash IS NOT NULL',
+          'account_deletion_cancel_token_consumed_at IS NOT NULL',
+          'account_deletion_confirm_token_hash IS NOT NULL',
+          'account_deletion_confirm_expires IS NOT NULL',
+        ].join(' OR '),
+      )
+      .execute();
+  }
+
+  async findDueAccountDeletions(now: Date, take: number): Promise<User[]> {
+    return this.usersRepository.find({
+      where: {
+        account_deletion_scheduled_for: LessThanOrEqual(now),
+        account_deletion_cancel_token_hash: Not(IsNull()),
+      },
+      order: { account_deletion_scheduled_for: 'ASC' },
+      take,
+    });
+  }
+
+  async clearExpiredAccountDeletionCancellationReceipts(
+    olderThan: Date,
+  ): Promise<number> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_deletion_cancel_token_hash: null,
+        account_deletion_cancel_token_consumed_at: null,
+      })
+      .where('account_deletion_scheduled_for IS NULL')
+      .andWhere('account_deletion_requested_at IS NULL')
+      .andWhere('account_deletion_confirm_token_hash IS NULL')
+      .andWhere('account_deletion_confirm_expires IS NULL')
+      .andWhere('account_deletion_cancel_token_consumed_at <= :olderThan', {
+        olderThan,
+      })
+      .execute();
+
+    return result.affected ?? 0;
+  }
+
+  async clearExpiredAccountRestriction(
+    id: string,
+    now = new Date(),
+  ): Promise<boolean> {
+    const result = await this.usersRepository
+      .createQueryBuilder()
+      .update(User)
+      .set({
+        account_restricted_at: null,
+        account_restricted_by_admin_id: null,
+        account_restriction_capabilities: null,
+        account_restriction_expires_at: null,
+        account_restriction_internal_note: null,
+        account_restriction_reason: null,
+        account_restriction_user_message: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('account_restricted_at IS NOT NULL')
+      .andWhere('account_restriction_expires_at IS NOT NULL')
+      .andWhere('account_restriction_expires_at <= :now', { now })
+      .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
   async remove(id: string): Promise<void> {
     const user = await this.findByIdOrFail(id);
-    await this.usersRepository.remove(user);
+    await this.usersRepository.manager.transaction(async (manager) => {
+      for (const tableName of EXPLICIT_USER_DATA_TABLES) {
+        await manager.delete(tableName, { user_id: id });
+      }
+
+      await manager.remove(User, user);
+    });
   }
 
   private findForAuth({
@@ -136,7 +408,10 @@ export class UsersService {
   }: AuthUserLookup): Promise<User | null> {
     return this.usersRepository
       .createQueryBuilder('user')
-      .addSelect('user.password_hash')
+      .addSelect([
+        'user.password_hash',
+        'user.account_deletion_confirm_token_hash',
+      ])
       .where(clause, params)
       .getOne();
   }
@@ -145,4 +420,32 @@ export class UsersService {
     Object.assign(user, data);
     return this.usersRepository.save(user);
   }
+
+  private async saveCreatedUser(user: User): Promise<User> {
+    try {
+      return await this.usersRepository.save(user);
+    } catch (error: unknown) {
+      if (isEmailIdentityUniqueViolation(error)) {
+        throw new ConflictException(EMAIL_IN_USE_MESSAGE);
+      }
+
+      throw error;
+    }
+  }
+}
+
+function isEmailIdentityUniqueViolation(error: unknown): boolean {
+  if (!isDatabaseError(error)) {
+    return false;
+  }
+
+  return (
+    error.code === POSTGRES_UNIQUE_VIOLATION_CODE &&
+    typeof error.constraint === 'string' &&
+    EMAIL_IDENTITY_UNIQUE_CONSTRAINTS.has(error.constraint)
+  );
+}
+
+function isDatabaseError(error: unknown): error is DatabaseError {
+  return typeof error === 'object' && error !== null;
 }

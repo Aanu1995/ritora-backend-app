@@ -9,6 +9,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { SUPPORTED_LANGUAGES, type AppLanguage } from '../../common/i18n/i18n';
+import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 
 export class AnalyzeProductsDto {
   @IsOptional()
@@ -16,6 +17,7 @@ export class AnalyzeProductsDto {
   @MaxLength(26)
   focusProductId?: string;
 
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
@@ -24,10 +26,12 @@ export class AnalyzeProductsDto {
   @MaxLength(26, { each: true })
   productIds?: string[];
 
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsBoolean()
   withExplanations = false;
 
+  @EmptyStringToUndefined()
   @IsOptional()
   @IsIn(SUPPORTED_LANGUAGES)
   language?: AppLanguage;

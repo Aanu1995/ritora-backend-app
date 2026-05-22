@@ -1,11 +1,13 @@
-import type { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ProductCategory } from '../shelf/shelf.types';
 import { AnalysisService } from './analysis.service';
 import type { ExplanationPort } from './explanation.port';
 import { buildStubCatalog } from './__tests__/catalog-fixtures';
 import { MatchingService } from './matching.service';
 import type { ProductForAnalysis } from './ingredients.types';
-import type { TranslationService } from './translation.service';
+import { TranslationService } from './translation.service';
 
 function createService() {
   const catalog = buildStubCatalog();
@@ -13,10 +15,16 @@ function createService() {
   const explanationProvider: ExplanationPort = {
     explainFindings: jest.fn(async () => null),
   };
-  const translationService = {
-    translate: jest.fn(async (text: string) => text),
-    translateMany: jest.fn(async (texts: string[]) => [...texts]),
-  } as unknown as TranslationService;
+  const translationService = new TranslationService(
+    new ConfigService(),
+    {} as DataSource,
+  );
+  jest
+    .spyOn(translationService, 'translate')
+    .mockImplementation(async (text: string) => text);
+  jest
+    .spyOn(translationService, 'translateMany')
+    .mockImplementation(async (texts: string[]) => [...texts]);
   return new AnalysisService(
     matching,
     catalog,
@@ -149,7 +157,9 @@ describe('AnalysisService', () => {
 
     it('reports engine version on every response', async () => {
       const result = await service.analyze({
-        products: [createProduct('any', 'Any', ['Retinol'])],
+        products: [
+          createProduct('version-product', 'Version Product', ['Retinol']),
+        ],
         skinProfile: null,
         language: 'en',
         withExplanations: false,
@@ -195,10 +205,10 @@ describe('AnalysisService', () => {
       const result = await service.analyze({
         products: [createProduct('focus', 'Mystery', [])],
         focusProductId: 'focus',
-        skinProfile: {
+        skinProfile: Object.assign(new SkinProfile(), {
           skin_type: null,
-          known_sensitivities: [],
-        } as unknown as SkinProfile,
+          reaction_history: {},
+        }),
         language: 'en',
         withExplanations: false,
       });

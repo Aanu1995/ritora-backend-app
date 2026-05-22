@@ -21,7 +21,8 @@ function buildProvider(
   return new OpenAiExtractorProvider(
     buildConfig({
       OPENAI_API_KEY: 'sk-test',
-      OPENAI_MODEL: 'gpt-5.5',
+      CATALOGUE_AI_MODEL: 'catalogue-model',
+      OPENAI_MODEL: 'fallback-model',
       OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
       ...overrides,
     }),
@@ -115,6 +116,9 @@ describe('OpenAiExtractorProvider', () => {
 
     expect(result?.data.identity?.name).toBe('Glycolic Acid Daily Toner');
     const body = lastRequestBody();
+    expect(body.model).toBe('catalogue-model');
+    expect(body.store).toBe(false);
+    expect(body.temperature).toBe(0);
     expect(body.text).toMatchObject({
       verbosity: 'low',
       format: {
@@ -235,9 +239,28 @@ describe('OpenAiExtractorProvider', () => {
     await provider.completeMissingFields(buildDraft());
 
     const body = lastRequestBody();
-    expect(body.model).toBe('gpt-5.5');
+    expect(body.model).toBe('catalogue-model');
     expect(body.reasoning).toBeUndefined();
     expect(timeoutSpy).toHaveBeenCalledWith(20000);
+  });
+
+  it('falls back to OPENAI_MODEL when the catalogue model is not configured', async () => {
+    const provider = buildProvider({
+      CATALOGUE_AI_MODEL: '',
+      OPENAI_MODEL: 'fallback-model',
+    });
+    mockFetchJson(buildProductOutput('Fallback Model Toner'));
+
+    await provider.extract({
+      identity: {},
+      guidance: {},
+      manufacturer: {},
+      evidence: [],
+      rawSource: {},
+      textExcerpt: null,
+    });
+
+    expect(lastRequestBody().model).toBe('fallback-model');
   });
 
   it('logs optional web discovery timeouts as non-fatal enrichment skips', async () => {

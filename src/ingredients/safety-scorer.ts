@@ -48,25 +48,25 @@ export function maybeAdjustSeverity(
     return bumpSeverity(severity);
   }
 
-  const normalizedSensitivities = new Set(
-    (skinProfile.known_sensitivities ?? [])
-      .map((value) => normalizeValue(value))
+  const normalizedReactionTriggers = new Set(
+    (skinProfile.reaction_history?.entries ?? [])
+      .map((entry) => normalizeValue(entry.trigger))
       .filter(Boolean),
   );
 
-  if (normalizedSensitivities.size === 0) {
+  if (normalizedReactionTriggers.size === 0) {
     return severity;
   }
 
   for (const tag of tags
     .map((value) => normalizeValue(value))
     .filter(Boolean)) {
-    if (normalizedSensitivities.has(tag)) {
+    if (normalizedReactionTriggers.has(tag)) {
       return bumpSeverity(severity);
     }
 
-    for (const sensitivity of normalizedSensitivities) {
-      if (sensitivity.includes(tag) || tag.includes(sensitivity)) {
+    for (const trigger of normalizedReactionTriggers) {
+      if (trigger.includes(tag) || tag.includes(trigger)) {
         return bumpSeverity(severity);
       }
     }
@@ -81,7 +81,7 @@ export function scoreAnalysis(input: {
 }): number {
   let score = 100;
 
-  for (const conflict of input.conflicts) {
+  for (const conflict of uniquePenaltyConflicts(input.conflicts)) {
     score -= CONFLICT_PENALTIES[conflict.severity];
   }
 
@@ -90,4 +90,27 @@ export function scoreAnalysis(input: {
   }
 
   return Math.max(0, score);
+}
+
+function uniquePenaltyConflicts(
+  conflicts: AnalysisConflict[],
+): AnalysisConflict[] {
+  const seen = new Set<string>();
+  const unique: AnalysisConflict[] = [];
+
+  for (const conflict of conflicts) {
+    const key = [
+      conflict.code,
+      ...[conflict.productAId, conflict.productBId].sort(),
+    ].join(':');
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    unique.push(conflict);
+  }
+
+  return unique;
 }

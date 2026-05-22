@@ -1,10 +1,18 @@
-import type { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { AnalysisSeverity } from './ingredients.types';
 import {
   bumpSeverity,
   maybeAdjustSeverity,
   scoreAnalysis,
 } from './safety-scorer';
+
+function createSkinProfile(overrides: Partial<SkinProfile>): SkinProfile {
+  return Object.assign(new SkinProfile(), {
+    skin_type: null,
+    reaction_history: {},
+    ...overrides,
+  });
+}
 
 describe('safety-scorer', () => {
   it('applies the configured penalties', () => {
@@ -46,7 +54,7 @@ describe('safety-scorer', () => {
         ingredientA: 'Retinol',
         ingredientB: 'Glycolic acid',
         productAId: 'a',
-        productBId: 'b',
+        productBId: `b-${index}`,
         explanation: null,
         description: 'desc',
       })),
@@ -56,11 +64,54 @@ describe('safety-scorer', () => {
     expect(score).toBe(0);
   });
 
+  it('penalizes repeated conflict families between the same products once', () => {
+    const score = scoreAnalysis({
+      conflicts: [
+        {
+          id: 'aha-bha:citric:azelaic',
+          code: 'AHA_BHA',
+          severity: AnalysisSeverity.Medium,
+          ingredientA: 'Citric acid',
+          ingredientB: 'Azelaic acid',
+          productAId: 'checked-product',
+          productBId: 'shelf-1',
+          explanation: null,
+          description: 'desc',
+        },
+        {
+          id: 'aha-bha:citric:salicylic',
+          code: 'AHA_BHA',
+          severity: AnalysisSeverity.Medium,
+          ingredientA: 'Citric acid',
+          ingredientB: 'Salicylic acid',
+          productAId: 'checked-product',
+          productBId: 'shelf-1',
+          explanation: null,
+          description: 'desc',
+        },
+        {
+          id: 'aha-bha:citric:willow',
+          code: 'AHA_BHA',
+          severity: AnalysisSeverity.Medium,
+          ingredientA: 'Citric acid',
+          ingredientB: 'Willow bark extract',
+          productAId: 'checked-product',
+          productBId: 'shelf-1',
+          explanation: null,
+          description: 'desc',
+        },
+      ],
+      overlaps: [],
+    });
+
+    expect(score).toBe(85);
+  });
+
   it('bumps severity for sensitive skin type', () => {
-    const skinProfile = {
+    const skinProfile = createSkinProfile({
       skin_type: 'sensitive',
-      known_sensitivities: [],
-    } as unknown as SkinProfile;
+      reaction_history: {},
+    });
 
     expect(
       maybeAdjustSeverity(AnalysisSeverity.Medium, skinProfile, ['retinoid']),
@@ -68,11 +119,13 @@ describe('safety-scorer', () => {
     expect(bumpSeverity(AnalysisSeverity.Low)).toBe(AnalysisSeverity.Medium);
   });
 
-  it('bumps severity when known sensitivities match ingredient tags', () => {
-    const skinProfile = {
+  it('bumps severity when reaction triggers match ingredient tags', () => {
+    const skinProfile = createSkinProfile({
       skin_type: null,
-      known_sensitivities: ['Niacinamide'],
-    } as unknown as SkinProfile;
+      reaction_history: {
+        entries: [{ trigger: 'Niacinamide' }],
+      },
+    });
 
     expect(
       maybeAdjustSeverity(AnalysisSeverity.Low, skinProfile, ['niacinamide']),

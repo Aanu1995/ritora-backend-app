@@ -5,9 +5,12 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
+import { createDefaultUserCapabilities } from './dto/user-capabilities.dto';
+import { UserCapabilitySnapshotService } from './user-capability-snapshot.service';
 
 const mockUsersService = () => ({
   findByIdOrFail: jest.fn(),
+  findByIdForAuth: jest.fn(),
   updateProfile: jest.fn(),
   updatePreferredLanguage: jest.fn(),
   updateTimeZone: jest.fn(),
@@ -20,18 +23,39 @@ const mockRes = () => ({
 describe('UsersController', () => {
   let controller: UsersController;
   let usersService: ReturnType<typeof mockUsersService>;
+  let capabilitySnapshot: { buildForUser: jest.Mock };
 
   beforeEach(async () => {
     usersService = mockUsersService();
+    capabilitySnapshot = {
+      buildForUser: jest
+        .fn()
+        .mockResolvedValue(createDefaultUserCapabilities()),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UsersController],
       providers: [
         { provide: UsersService, useValue: usersService },
         {
+          provide: UserCapabilitySnapshotService,
+          useValue: capabilitySnapshot,
+        },
+        {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string, defaultValue?: unknown) => defaultValue),
+            get: jest.fn((key: string) => {
+              if (key === 'COOKIE_DOMAIN') return '';
+              if (key === 'COOKIE_SECURE') return false;
+              if (key === 'COOKIE_SAME_SITE') return 'lax';
+              return undefined;
+            }),
+            getOrThrow: jest.fn((key: string) => {
+              if (key === 'COOKIE_DOMAIN') return '';
+              if (key === 'COOKIE_SECURE') return false;
+              if (key === 'COOKIE_SAME_SITE') return 'lax';
+              throw new Error(`Missing config ${key}`);
+            }),
           },
         },
       ],
@@ -56,17 +80,21 @@ describe('UsersController', () => {
     }) as User;
 
   it('getMe returns the current user DTO', async () => {
-    usersService.findByIdOrFail.mockResolvedValue(fakeUser());
+    usersService.findByIdForAuth.mockResolvedValue(fakeUser());
 
     const result = await controller.getMe('01TESTUSER');
 
-    expect(usersService.findByIdOrFail).toHaveBeenCalledWith('01TESTUSER');
+    expect(usersService.findByIdForAuth).toHaveBeenCalledWith('01TESTUSER');
+    expect(usersService.findByIdOrFail).not.toHaveBeenCalled();
     expect(result).toBeInstanceOf(UserResponseDto);
     expect(result.firstName).toBe('Jane');
   });
 
   it('updateMe trims and returns the updated profile DTO', async () => {
     usersService.updateProfile.mockResolvedValue(
+      fakeUser({ first_name: 'Ada', last_name: 'Lovelace' }),
+    );
+    usersService.findByIdForAuth.mockResolvedValue(
       fakeUser({ first_name: 'Ada', last_name: 'Lovelace' }),
     );
 
@@ -84,6 +112,7 @@ describe('UsersController', () => {
   });
 
   it('surfaces not found errors from the service', async () => {
+    usersService.findByIdForAuth.mockResolvedValue(null);
     usersService.findByIdOrFail.mockRejectedValue(
       new NotFoundException('User not found'),
     );
@@ -96,6 +125,9 @@ describe('UsersController', () => {
   it('updateLanguage returns the updated user DTO', async () => {
     const res = mockRes();
     usersService.updatePreferredLanguage.mockResolvedValue(
+      fakeUser({ preferred_language: 'sv' }),
+    );
+    usersService.findByIdForAuth.mockResolvedValue(
       fakeUser({ preferred_language: 'sv' }),
     );
 
@@ -124,6 +156,9 @@ describe('UsersController', () => {
 
   it('updateTimeZone returns the updated user DTO', async () => {
     usersService.updateTimeZone.mockResolvedValue(
+      fakeUser({ time_zone: 'America/New_York' }),
+    );
+    usersService.findByIdForAuth.mockResolvedValue(
       fakeUser({ time_zone: 'America/New_York' }),
     );
 
