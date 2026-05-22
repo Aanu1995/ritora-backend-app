@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -21,6 +22,7 @@ import { AdminRootGuard } from './admin-root.guard';
 import { AdminService } from './admin.service';
 import { AdminAiCostUserListQueryDto } from './dto/admin-ai-cost-user-list-query.dto';
 import { AdminAuditLogQueryDto } from './dto/admin-audit-log-query.dto';
+import { AdminNotificationListQueryDto } from './dto/admin-notification.dto';
 import { AdminListQueryDto } from './dto/admin-list-query.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { DeleteAdminDto } from './dto/delete-admin.dto';
@@ -36,6 +38,15 @@ import {
   ResolveOperationalIncidentDto,
 } from './dto/admin-operational-incident.dto';
 import {
+  AdminAccountMonitoringTimelineQueryDto,
+  AdminAccountMonitoringListQueryDto,
+  CreateAdminAccountMonitoringFlagDto,
+  CreateAdminAccountMonitoringSupportEventDto,
+  ResolveAdminAccountMonitoringFlagDto,
+  UpdateAdminAccountMonitoringFlagDto,
+  UpdateAdminAccountMonitoringSettingsDto,
+} from './dto/admin-account-monitoring.dto';
+import {
   AdminPlatformGlobalRestrictionParamDto,
   DisablePlatformGlobalRestrictionDto,
   EnablePlatformGlobalRestrictionDto,
@@ -46,10 +57,17 @@ import {
 } from './dto/admin-user-restriction.dto';
 import type {
   AdminAuthenticatedUser,
+  AdminAccountMonitoringAutomatedScanResponse,
+  AdminAccountMonitoringEventTimelineResponse,
+  AdminAccountMonitoringFlagListResponse,
+  AdminAccountMonitoringFlagResponse,
+  AdminAccountMonitoringSettingsResponse,
   AdminAiCostByUserListResponse,
   AdminAuditLogListResponse,
   AdminMemberListResponse,
   AdminMemberResponse,
+  AdminNotificationListResponse,
+  AdminNotificationResponse,
   AdminOperationalIncidentListResponse,
   AdminOperationalIncidentResponse,
   AdminOperationsMonitoringResponse,
@@ -138,6 +156,179 @@ export class AdminController {
     @Query() query: AdminAuditLogQueryDto,
   ): Promise<AdminAuditLogListResponse> {
     return this.adminService.listAuditLogs(query);
+  }
+
+  @Get('notifications')
+  listNotifications(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Query() query: AdminNotificationListQueryDto,
+  ): Promise<AdminNotificationListResponse> {
+    return this.adminService.listNotifications(user, { limit: query.limit });
+  }
+
+  @Post('notifications/:id/read')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  markNotificationRead(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<AdminNotificationResponse> {
+    return this.adminService.markNotificationRead(user, id);
+  }
+
+  @Get('account-monitoring')
+  listAccountMonitoringFlags(
+    @Query() query: AdminAccountMonitoringListQueryDto,
+  ): Promise<AdminAccountMonitoringFlagListResponse> {
+    return this.adminService.listAccountMonitoringFlags(query);
+  }
+
+  @Post('account-monitoring')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  createAccountMonitoringFlag(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: CreateAdminAccountMonitoringFlagDto,
+    @Req() req: Request,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    return this.adminService.createAccountMonitoringFlag(
+      user,
+      {
+        internalNote: dto.internalNote,
+        latestSignal: dto.latestSignal,
+        nextReviewAt: dto.nextReviewAt,
+        reason: dto.reason,
+        severity: dto.severity,
+        signalType: dto.signalType,
+        summary: dto.summary,
+        userIdentifier: dto.userIdentifier,
+      },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Post('account-monitoring/automated-scan')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  runAccountMonitoringAutomatedScan(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Req() req: Request,
+  ): Promise<AdminAccountMonitoringAutomatedScanResponse> {
+    return this.adminService.runAccountMonitoringAutomatedScan(user, {
+      ip: req.ip,
+      sessionId: user.sessionId,
+      userAgent: getHeaderValue(req.headers, 'user-agent'),
+    });
+  }
+
+  @Post('account-monitoring/support-events')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  createAccountMonitoringSupportEvent(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: CreateAdminAccountMonitoringSupportEventDto,
+    @Req() req: Request,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    return this.adminService.createAccountMonitoringSupportEvent(
+      user,
+      {
+        internalNote: dto.internalNote,
+        latestSignal: dto.latestSignal,
+        reason: dto.reason,
+        severity: dto.severity,
+        summary: dto.summary,
+        supportReference: dto.supportReference,
+        userIdentifier: dto.userIdentifier,
+      },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Get('account-monitoring/:id/events')
+  getAccountMonitoringEventTimeline(
+    @Param('id') id: string,
+    @Query() query: AdminAccountMonitoringTimelineQueryDto,
+  ): Promise<AdminAccountMonitoringEventTimelineResponse> {
+    return this.adminService.getAccountMonitoringEventTimeline(id, {
+      limit: query.limit,
+    });
+  }
+
+  @Get('account-monitoring/settings')
+  getAccountMonitoringSettings(): Promise<AdminAccountMonitoringSettingsResponse> {
+    return this.adminService.getAccountMonitoringSettings();
+  }
+
+  @Patch('account-monitoring/settings')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  updateAccountMonitoringSettings(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: UpdateAdminAccountMonitoringSettingsDto,
+    @Req() req: Request,
+  ): Promise<AdminAccountMonitoringSettingsResponse> {
+    return this.adminService.updateAccountMonitoringSettings(
+      user,
+      { reason: dto.reason, thresholds: dto.thresholds },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Patch('account-monitoring/:id')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  updateAccountMonitoringFlag(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminAccountMonitoringFlagDto,
+    @Req() req: Request,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    return this.adminService.updateAccountMonitoringFlag(
+      user,
+      id,
+      {
+        assignedAdminId: dto.assignedAdminId,
+        internalNote: dto.internalNote,
+        latestSignal: dto.latestSignal,
+        nextReviewAt: dto.nextReviewAt,
+        reason: dto.reason,
+        status: dto.status,
+      },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Post('account-monitoring/:id/resolve')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  resolveAccountMonitoringFlag(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ResolveAdminAccountMonitoringFlagDto,
+    @Req() req: Request,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    return this.adminService.resolveAccountMonitoringFlag(
+      user,
+      id,
+      {
+        reason: dto.reason,
+        resolutionNote: dto.resolutionNote,
+      },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
   }
 
   @Get('operations/monitoring')

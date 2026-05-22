@@ -141,7 +141,9 @@ npm run start:dev
 
 To run the API and all local workers together during development, use the
 source-based dev runner. This avoids starting workers from `dist` while the Nest
-watch compiler is rebuilding that folder.
+watch compiler is rebuilding that folder. When
+`ACCOUNT_MONITORING_QUEUE_DRIVER=sqs` and `ACCOUNT_MONITORING_SQS_QUEUE_URL` are
+configured, this also starts the account monitoring SQS worker.
 
 ```bash
 npm run start:dev:all

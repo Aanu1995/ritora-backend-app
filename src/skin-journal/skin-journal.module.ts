@@ -14,6 +14,7 @@ import { SkinJournalMediaDeletionJob } from './entities/skin-journal-media-delet
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
+import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
 import { User } from '../users/entities/user.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
@@ -54,6 +55,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       SkinJournalMediaDeletionJob,
       RoutineSimplificationEvent,
       SkinJournalExportJob,
+      AccountMonitoringEvent,
       UserConsent,
       User,
       SkinProfile,

@@ -11,6 +11,7 @@ import { SkinJournalModule } from '../skin-journal/skin-journal.module';
 import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';
 import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.entity';
 import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
+import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
@@ -47,6 +48,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       SmartPickSnapshot,
       SmartPickProductSuggestion,
       SuggestionGapAction,
+      AccountMonitoringEvent,
       InventoryProduct,
     ]),
     CatalogueModule,

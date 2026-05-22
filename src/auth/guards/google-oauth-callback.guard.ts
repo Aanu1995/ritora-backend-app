@@ -5,12 +5,17 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
+import { AuthService } from '../auth.service';
 import { OAuthProvider } from '../oauth/oauth-profile';
 import { GOOGLE_OAUTH_STATE_COOKIE } from '../oauth/oauth-state';
 
 @Injectable()
 export class GoogleOAuthCallbackGuard extends AuthGuard(OAuthProvider.Google) {
-  canActivate(context: ExecutionContext) {
+  constructor(private readonly authService: AuthService) {
+    super();
+  }
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const cookies = request.cookies as Record<string, unknown> | undefined;
     const expectedState = cookies?.[GOOGLE_OAUTH_STATE_COOKIE];
@@ -21,10 +26,17 @@ export class GoogleOAuthCallbackGuard extends AuthGuard(OAuthProvider.Google) {
       typeof receivedState !== 'string' ||
       expectedState !== receivedState
     ) {
+      await this.authService.recordOAuthFailureForMonitoring(
+        OAuthProvider.Google,
+        {
+          ip: request.ip,
+          reason: 'invalid_state',
+        },
+      );
       throw new ForbiddenException('Invalid OAuth state');
     }
 
-    return super.canActivate(context);
+    return (await super.canActivate(context)) as boolean;
   }
 
   getAuthenticateOptions() {

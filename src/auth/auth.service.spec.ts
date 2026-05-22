@@ -18,6 +18,10 @@ import { SmartPickSnapshot } from '../smart-picks/entities/smart-pick-snapshot.e
 import { SkinJournalService } from '../skin-journal/skin-journal.service';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { SuggestionGapAction } from '../suggestions/entities/suggestion-gap-action.entity';
+import {
+  AccountMonitoringEvent,
+  AccountMonitoringEventType,
+} from '../users/entities/account-monitoring-event.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
@@ -52,6 +56,10 @@ type MockResponse = Pick<Response, 'cookie' | 'clearCookie'>;
 const asResponse = (response: MockResponse): Response =>
   response as MockResponse & Response;
 
+const ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS = 10_000;
+const ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS =
+  ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS + 1;
+
 const mockConfigValues: Record<string, string | number | boolean> = {
   JWT_ACCESS_EXPIRY: '15m',
   JWT_REFRESH_EXPIRY: '7d',
@@ -68,7 +76,6 @@ const mockConfigValues: Record<string, string | number | boolean> = {
   LEGAL_TERMS_VERSION: '1.0.0',
   LEGAL_PRIVACY_VERSION: '1.0.0',
   WEB_APP_URL: 'http://localhost:3000',
-  ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS: 25,
   NODE_ENV: 'development',
   RESEND_API_KEY: 're_test_mock',
 };
@@ -83,6 +90,7 @@ describe('AuthService', () => {
   let jwtService: Record<string, jest.Mock>;
   let mailService: Record<string, jest.Mock>;
   let sessionsRepo: Record<string, jest.Mock>;
+  let accountMonitoringEventsRepo: Record<string, jest.Mock>;
   let consentsRepo: Record<string, jest.Mock>;
   let skinProfileRepo: Record<string, jest.Mock>;
   let smartPickSnapshotsRepo: Record<string, jest.Mock>;
@@ -147,6 +155,10 @@ describe('AuthService', () => {
       find: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue(undefined),
     };
+    accountMonitoringEventsRepo = {
+      create: jest.fn().mockImplementation((data) => data),
+      save: jest.fn().mockResolvedValue(undefined),
+    };
 
     consentsRepo = {
       create: jest.fn().mockImplementation((data) => data),
@@ -202,6 +214,10 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: jwtService },
         { provide: MailService, useValue: mailService },
         { provide: getRepositoryToken(AuthSession), useValue: sessionsRepo },
+        {
+          provide: getRepositoryToken(AccountMonitoringEvent),
+          useValue: accountMonitoringEventsRepo,
+        },
         { provide: getRepositoryToken(UserConsent), useValue: consentsRepo },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfileRepo },
         {
@@ -439,8 +455,25 @@ describe('AuthService', () => {
       usersService.findByEmailForAuth.mockResolvedValue(fakeUser());
 
       await expect(
-        service.login('test@example.com', 'WrongPassword1', asResponse(res)),
+        service.login(
+          'test@example.com',
+          'WrongPassword1',
+          asResponse(res),
+          '127.0.0.1',
+        ),
       ).rejects.toThrow(UnauthorizedException);
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          event_type: AccountMonitoringEventType.AuthLoginFailed,
+          ip_address_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          metadata: { reason: 'invalid_credentials' },
+          user_id: '01TESTUSER',
+        }),
+      );
+      expect(
+        JSON.stringify(accountMonitoringEventsRepo.create.mock.calls),
+      ).not.toContain('test@example.com');
     });
 
     it('rejects missing email with generic message', async () => {
@@ -450,6 +483,13 @@ describe('AuthService', () => {
       await expect(
         service.login('nobody@example.com', 'Password1', asResponse(res)),
       ).rejects.toThrow(UnauthorizedException);
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event_type: AccountMonitoringEventType.AuthLoginFailed,
+          metadata: { reason: 'invalid_credentials' },
+          user_id: null,
+        }),
+      );
     });
 
     it('rejects unverified users before creating a session', async () => {
@@ -1075,7 +1115,7 @@ describe('AuthService', () => {
     it('sends reset email for existing user', async () => {
       usersService.findByEmail.mockResolvedValue(fakeUser());
 
-      await service.forgotPassword('test@example.com');
+      await service.forgotPassword('test@example.com', undefined, '127.0.0.1');
 
       expect(usersService.update).toHaveBeenCalled();
       expect(mailService.sendPasswordResetEmail).toHaveBeenCalledWith(
@@ -1084,15 +1124,37 @@ describe('AuthService', () => {
         'Jane',
         'en',
       );
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          event_type: AccountMonitoringEventType.PasswordResetRequested,
+          ip_address_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          metadata: { reason: 'password_reset_requested' },
+          user_id: '01TESTUSER',
+        }),
+      );
     });
 
-    it('does nothing for missing email (no info leak)', async () => {
+    it('records missing email reset requests without leaking account existence', async () => {
       usersService.findByEmail.mockResolvedValue(null);
 
-      await service.forgotPassword('nobody@example.com');
+      await service.forgotPassword(
+        'nobody@example.com',
+        undefined,
+        '127.0.0.1',
+      );
 
       expect(usersService.update).not.toHaveBeenCalled();
       expect(mailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+      expect(accountMonitoringEventsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          event_type: AccountMonitoringEventType.PasswordResetRequested,
+          ip_address_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          metadata: { reason: 'password_reset_requested_unknown_account' },
+          user_id: null,
+        }),
+      );
     });
   });
 
@@ -1572,11 +1634,16 @@ describe('AuthService', () => {
         const result = Promise.race([
           request.then(() => 'resolved' as const).catch(toErrorMessage),
           new Promise<'pending'>((resolve) => {
-            setTimeout(() => resolve('pending'), 50);
+            setTimeout(
+              () => resolve('pending'),
+              ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+            );
           }),
         ]);
 
-        await jest.advanceTimersByTimeAsync(50);
+        await jest.advanceTimersByTimeAsync(
+          ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+        );
 
         await expect(result).resolves.toBe(
           'Account deletion email could not be sent',
@@ -1665,11 +1732,16 @@ describe('AuthService', () => {
         const result = Promise.race([
           confirmation.then(() => 'resolved' as const).catch(toErrorMessage),
           new Promise<'pending'>((resolve) => {
-            setTimeout(() => resolve('pending'), 50);
+            setTimeout(
+              () => resolve('pending'),
+              ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+            );
           }),
         ]);
 
-        await jest.advanceTimersByTimeAsync(50);
+        await jest.advanceTimersByTimeAsync(
+          ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+        );
 
         await expect(result).resolves.toBe(
           'Account deletion could not be scheduled',
@@ -1708,11 +1780,16 @@ describe('AuthService', () => {
         const result = Promise.race([
           confirmation.then(() => 'resolved' as const).catch(toErrorMessage),
           new Promise<'pending'>((resolve) => {
-            setTimeout(() => resolve('pending'), 50);
+            setTimeout(
+              () => resolve('pending'),
+              ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+            );
           }),
         ]);
 
-        await jest.advanceTimersByTimeAsync(50);
+        await jest.advanceTimersByTimeAsync(
+          ACCOUNT_DELETION_TIMEOUT_TEST_WINDOW_MS,
+        );
 
         await expect(result).resolves.toBe(
           'Account deletion email could not be sent',

@@ -13,6 +13,12 @@ import { AdminUserRestrictionFilter } from './admin.types';
 import { AdminAuditAction } from './entities/admin-audit-log.entity';
 import { AdminOperationalIncidentSeverity } from './entities/admin-operational-incident.entity';
 import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
+import {
+  AdminAccountMonitoringSeverity,
+  AdminAccountMonitoringSignalType,
+  AdminAccountMonitoringStatus,
+} from './entities/admin-account-monitoring-flag.entity';
+import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitoring.dto';
 
 function getRouteGuards(methodName: keyof AdminController): unknown[] {
   const method = AdminController.prototype[methodName] as object;
@@ -31,6 +37,27 @@ describe('AdminController', () => {
       AdminRootGuard,
     );
     expect(getRouteGuards('listAiCostByUsers')).not.toContain(AdminRootGuard);
+    expect(getRouteGuards('listAccountMonitoringFlags')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('createAccountMonitoringFlag')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('updateAccountMonitoringFlag')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('resolveAccountMonitoringFlag')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('createAccountMonitoringFlag')).toContain(
+      OriginCheckGuard,
+    );
+    expect(getRouteGuards('updateAccountMonitoringFlag')).toContain(
+      OriginCheckGuard,
+    );
+    expect(getRouteGuards('resolveAccountMonitoringFlag')).toContain(
+      OriginCheckGuard,
+    );
     expect(getRouteGuards('listOperationalIncidents')).not.toContain(
       AdminRootGuard,
     );
@@ -277,6 +304,7 @@ describe('AdminController', () => {
       controller.listAuditLogs({
         action: AdminAuditAction.UserRestricted,
         limit: 25,
+        monitoringFlagId: 'flag-1',
         page: 1,
         query: 'jane',
       }),
@@ -292,6 +320,7 @@ describe('AdminController', () => {
     expect(service.listAuditLogs).toHaveBeenCalledWith({
       action: AdminAuditAction.UserRestricted,
       limit: 25,
+      monitoringFlagId: 'flag-1',
       page: 1,
       query: 'jane',
     });
@@ -334,6 +363,234 @@ describe('AdminController', () => {
       workItems: [],
     });
     expect(service.getOperationsMonitoring).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes account monitoring requests with audit context for all admins', async () => {
+    const service = {
+      createAccountMonitoringFlag: jest.fn(async () => ({ id: 'flag-1' })),
+      listAccountMonitoringFlags: jest.fn(async () => ({
+        flags: [],
+        hasNextPage: false,
+        hasPreviousPage: false,
+        limit: 10,
+        page: 1,
+        total: 0,
+        totalPages: 0,
+      })),
+      getAccountMonitoringSettings: jest.fn(async () => ({
+        thresholds: {
+          aiCost24hCriticalUsd: 5,
+          aiCost24hWarningUsd: 2,
+          aiGenerations24hCritical: 50,
+          aiGenerations24hWarning: 25,
+          authFailures24hWarning: 8,
+          deletionEvents30dWarning: 3,
+          mediaCleanupAttempts24hWarning: 6,
+          mediaCleanupFailures24hWarning: 3,
+          passwordResets24hWarning: 5,
+          productExtractions24hWarning: 20,
+          safetyReactionSignals7dWarning: 3,
+          unknownAuthFailures24hCritical: 20,
+          unknownAuthFailures24hWarning: 8,
+          uploadFailures24hWarning: 5,
+        },
+        updatedAt: '2026-05-22T09:00:00.000Z',
+        updatedByAdminId: null,
+      })),
+      resolveAccountMonitoringFlag: jest.fn(async () => ({ id: 'flag-1' })),
+      runAccountMonitoringAutomatedScan: jest.fn(async () => ({
+        candidates: 0,
+        created: 0,
+        flags: [],
+        platformCandidates: 0,
+        platformIncidentsCreated: 0,
+        platformIncidentsRefreshed: 0,
+        refreshed: 0,
+        scannedAt: '2026-05-22T09:00:00.000Z',
+        skipped: 0,
+      })),
+      updateAccountMonitoringSettings: jest.fn(async () => ({
+        thresholds: {
+          aiCost24hCriticalUsd: 5,
+          aiCost24hWarningUsd: 3,
+          aiGenerations24hCritical: 50,
+          aiGenerations24hWarning: 30,
+          authFailures24hWarning: 8,
+          deletionEvents30dWarning: 3,
+          mediaCleanupAttempts24hWarning: 6,
+          mediaCleanupFailures24hWarning: 3,
+          passwordResets24hWarning: 5,
+          productExtractions24hWarning: 20,
+          safetyReactionSignals7dWarning: 3,
+          unknownAuthFailures24hCritical: 20,
+          unknownAuthFailures24hWarning: 8,
+          uploadFailures24hWarning: 5,
+        },
+        updatedAt: '2026-05-22T09:10:00.000Z',
+        updatedByAdminId: 'admin-ops',
+      })),
+      updateAccountMonitoringFlag: jest.fn(async () => ({ id: 'flag-1' })),
+    } as unknown as AdminService;
+    const authService = {} as unknown as AdminAuthService;
+    const controller = new AdminController(service, authService);
+    const user = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Admin',
+      role: AdminAccountRole.Admin,
+      sessionId: 'session-1',
+      status: AdminAccountStatus.Active,
+    };
+    const request = {
+      headers: { 'user-agent': 'Jest' },
+      ip: '127.0.0.1',
+    };
+
+    await expect(
+      controller.listAccountMonitoringFlags({
+        limit: 10,
+        page: 1,
+        query: 'jane',
+        signalType: AdminAccountMonitoringSignalType.HighAiCost,
+        status: AdminAccountMonitoringStatusFilter.Active,
+      }),
+    ).resolves.toMatchObject({ flags: [] });
+    await controller.createAccountMonitoringFlag(
+      user,
+      {
+        internalNote: 'Review AI cost trend before taking action.',
+        latestSignal: 'AI spend crossed the daily review threshold.',
+        reason: 'AI cost spike needs manual review',
+        severity: AdminAccountMonitoringSeverity.Warning,
+        signalType: AdminAccountMonitoringSignalType.HighAiCost,
+        summary: 'High AI spend spike',
+        userIdentifier: 'jane@example.com',
+      },
+      request as never,
+    );
+    await controller.updateAccountMonitoringFlag(
+      user,
+      'flag-1',
+      {
+        reason: 'Account is under active review',
+        status: AdminAccountMonitoringStatus.Watching,
+      },
+      request as never,
+    );
+    await controller.resolveAccountMonitoringFlag(
+      user,
+      'flag-1',
+      {
+        reason: 'Manual review cleared account',
+        resolutionNote: 'Cost returned to expected usage after review.',
+      },
+      request as never,
+    );
+    await controller.runAccountMonitoringAutomatedScan(user, request as never);
+    await controller.getAccountMonitoringSettings();
+    await controller.updateAccountMonitoringSettings(
+      user,
+      {
+        reason: 'Tune monitoring thresholds after launch traffic review',
+        thresholds: {
+          aiCost24hCriticalUsd: 5,
+          aiCost24hWarningUsd: 3,
+          aiGenerations24hCritical: 50,
+          aiGenerations24hWarning: 30,
+          authFailures24hWarning: 8,
+          deletionEvents30dWarning: 3,
+          mediaCleanupAttempts24hWarning: 6,
+          mediaCleanupFailures24hWarning: 3,
+          passwordResets24hWarning: 5,
+          productExtractions24hWarning: 20,
+          safetyReactionSignals7dWarning: 3,
+          unknownAuthFailures24hCritical: 20,
+          unknownAuthFailures24hWarning: 8,
+          uploadFailures24hWarning: 5,
+        },
+      },
+      request as never,
+    );
+
+    expect(service.listAccountMonitoringFlags).toHaveBeenCalledWith({
+      limit: 10,
+      page: 1,
+      query: 'jane',
+      signalType: AdminAccountMonitoringSignalType.HighAiCost,
+      status: AdminAccountMonitoringStatusFilter.Active,
+    });
+    expect(service.createAccountMonitoringFlag).toHaveBeenCalledWith(
+      user,
+      {
+        internalNote: 'Review AI cost trend before taking action.',
+        latestSignal: 'AI spend crossed the daily review threshold.',
+        nextReviewAt: undefined,
+        reason: 'AI cost spike needs manual review',
+        severity: AdminAccountMonitoringSeverity.Warning,
+        signalType: AdminAccountMonitoringSignalType.HighAiCost,
+        summary: 'High AI spend spike',
+        userIdentifier: 'jane@example.com',
+      },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
+    expect(service.updateAccountMonitoringFlag).toHaveBeenCalledWith(
+      user,
+      'flag-1',
+      {
+        assignedAdminId: undefined,
+        internalNote: undefined,
+        latestSignal: undefined,
+        nextReviewAt: undefined,
+        reason: 'Account is under active review',
+        status: AdminAccountMonitoringStatus.Watching,
+      },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
+    expect(service.resolveAccountMonitoringFlag).toHaveBeenCalledWith(
+      user,
+      'flag-1',
+      {
+        reason: 'Manual review cleared account',
+        resolutionNote: 'Cost returned to expected usage after review.',
+      },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
+    expect(service.runAccountMonitoringAutomatedScan).toHaveBeenCalledWith(
+      user,
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
+    expect(service.getAccountMonitoringSettings).toHaveBeenCalledTimes(1);
+    expect(service.updateAccountMonitoringSettings).toHaveBeenCalledWith(
+      user,
+      {
+        reason: 'Tune monitoring thresholds after launch traffic review',
+        thresholds: expect.objectContaining({
+          aiCost24hWarningUsd: 3,
+          aiGenerations24hWarning: 30,
+        }),
+      },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Jest',
+      },
+    );
   });
 
   it('passes operational incident triage requests with audit context', async () => {

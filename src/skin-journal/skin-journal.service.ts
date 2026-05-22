@@ -190,6 +190,10 @@ import type { InsightAction } from './insights/insight-types';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import type { RoutineApplicationEvidence } from './skin-journal-insight-detectors';
+import {
+  AccountMonitoringEvent,
+  AccountMonitoringEventType,
+} from '../users/entities/account-monitoring-event.entity';
 import { User } from '../users/entities/user.entity';
 import {
   INSIGHT_CADENCE_DEFAULT,
@@ -398,6 +402,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly consents: Repository<UserConsent>,
     @InjectRepository(SkinProfile)
     private readonly skinProfiles: Repository<SkinProfile>,
+    @InjectRepository(AccountMonitoringEvent)
+    private readonly accountMonitoringEvents: Repository<AccountMonitoringEvent>,
     @InjectRepository(User)
     private readonly users: Repository<User>,
     private readonly photoStorage: SkinJournalPhotoStorageService,
@@ -795,6 +801,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         );
       }
     } catch (error) {
+      await this.recordAccountMonitoringEvent(params.userId, {
+        reason: 'photo_store_failed',
+        storedPhotoCount: newlyStoredPhotos.length,
+      });
       for (const stored of newlyStoredPhotos) {
         await this.deletePhotoBestEffort(
           stored.object_key,
@@ -852,6 +862,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       saved = savedState.saved;
       savedPhotoRows = savedState.savedPhotoRows;
     } catch (error) {
+      await this.recordAccountMonitoringEvent(params.userId, {
+        reason: 'entry_save_failed_after_photo_upload',
+        storedPhotoCount: newlyStoredPhotos.length,
+      });
       for (const stored of newlyStoredPhotos) {
         await this.deletePhotoBestEffort(
           stored.object_key,
@@ -967,6 +981,29 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.warn(
         `Failed to enqueue media deletion verification for ${objectKey}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async recordAccountMonitoringEvent(
+    userId: string,
+    metadata: Record<string, string | number | boolean | null>,
+  ): Promise<void> {
+    try {
+      const event = this.accountMonitoringEvents.create({
+        email_hash: null,
+        event_type: AccountMonitoringEventType.SkinJournalPhotoUploadFailed,
+        ip_address_hash: null,
+        metadata,
+        occurred_at: nowDate(),
+        user_id: userId,
+      });
+      await this.accountMonitoringEvents.save(event);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record skin journal account monitoring event: ${
           error instanceof Error ? error.message : 'unknown error'
         }`,
       );

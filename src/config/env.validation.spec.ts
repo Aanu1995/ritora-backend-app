@@ -80,6 +80,9 @@ function developmentEnv(
     ACCOUNT_DELETION_SCHEDULER_ROLE_ARN: '',
     ACCOUNT_DELETION_SCHEDULER_GROUP: '',
     ACCOUNT_DELETION_SCHEDULER_DLQ_ARN: '',
+    ACCOUNT_MONITORING_QUEUE_DRIVER: 'none',
+    ACCOUNT_MONITORING_SQS_QUEUE_URL: '',
+    ACCOUNT_MONITORING_SQS_DLQ_URL: '',
     OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
     OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: '',
     INSIGHTS_AI_MODEL: 'gpt-5.5',
@@ -188,6 +191,10 @@ function productionEnv(
       'arn:aws:iam::123:role/account-deletion-scheduler',
     ACCOUNT_DELETION_SCHEDULER_GROUP: 'account-deletions',
     ACCOUNT_DELETION_SCHEDULER_DLQ_ARN: '',
+    ACCOUNT_MONITORING_QUEUE_DRIVER: 'sqs',
+    ACCOUNT_MONITORING_SQS_QUEUE_URL:
+      'https://sqs.eu-west-1.amazonaws.com/123/account-monitoring',
+    ACCOUNT_MONITORING_SQS_DLQ_URL: '',
     SKIN_JOURNAL_OPERATIONS_TOKEN: 'o'.repeat(32),
     SKIN_JOURNAL_MEDIA_BUCKET: 'ritora-prod-skin-journal',
     SKIN_JOURNAL_MEDIA_CLOUDFRONT_URL: 'https://media.ritora.com',
@@ -620,6 +627,18 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error?.message).toContain('ACCOUNT_DELETION_SQS_QUEUE_URL');
+  });
+
+  it('requires account monitoring SQS in production', () => {
+    const result = validateEnv(
+      productionEnv({
+        ACCOUNT_MONITORING_QUEUE_DRIVER: 'none',
+        ACCOUNT_MONITORING_SQS_QUEUE_URL: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('ACCOUNT_MONITORING_QUEUE_DRIVER');
   });
 
   it('strips Skin Journal queue policy values even when provided', () => {

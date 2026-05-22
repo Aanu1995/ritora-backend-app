@@ -393,6 +393,65 @@ export class MailService {
     });
   }
 
+  async sendAdminAccountMonitoringAlertEmail(input: {
+    email: string;
+    flagId: string;
+    ownerName: string;
+    reason: 'assigned' | 'created' | 'refreshed';
+    severity: string;
+    signalType: string;
+    status: string;
+    summary: string;
+    userEmail: string;
+  }): Promise<void> {
+    const dashboardUrl = this.buildAdminUrl(
+      `/account-monitoring?flagId=${encodeURIComponent(input.flagId)}`,
+    );
+    const reasonLabel =
+      input.reason === 'assigned'
+        ? 'assigned to you'
+        : input.reason === 'refreshed'
+          ? 'refreshed after severity escalation'
+          : 'created';
+    const safeOwnerName = safeHtmlText(input.ownerName, 'Admin');
+    const safeSummary = safeHtmlText(input.summary, 'Account monitoring alert');
+    const safeUserEmail = safeHtmlText(input.userEmail, 'user');
+    const safeSignalType = safeHtmlText(input.signalType);
+    const safeSeverity = safeHtmlText(input.severity);
+    const safeStatus = safeHtmlText(input.status);
+    const safeReason = safeHtmlText(reasonLabel);
+    const safeDashboardUrl = escapeExpression(dashboardUrl);
+    const html = `
+      <div style="font-family:Inter,Arial,sans-serif;line-height:1.55;color:#1f2924;background:#f8f7f3;padding:24px">
+        <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #dde3dc;border-radius:16px;padding:28px">
+          <img src="${EMAIL_LOGO_URL}" alt="Ritora" width="120" style="display:block;margin-bottom:24px" />
+          <p style="margin:0 0 12px;color:#66736b">Hi ${safeOwnerName},</p>
+          <h1 style="font-size:22px;margin:0 0 12px;color:#17211b">Account monitoring flag ${safeReason}</h1>
+          <p style="margin:0 0 18px;color:#334139">${safeSummary}</p>
+          <dl style="margin:0 0 22px">
+            <dt style="font-size:12px;text-transform:uppercase;color:#66736b">User</dt>
+            <dd style="margin:0 0 12px;color:#17211b">${safeUserEmail}</dd>
+            <dt style="font-size:12px;text-transform:uppercase;color:#66736b">Signal</dt>
+            <dd style="margin:0 0 12px;color:#17211b">${safeSignalType}</dd>
+            <dt style="font-size:12px;text-transform:uppercase;color:#66736b">Severity</dt>
+            <dd style="margin:0 0 12px;color:#17211b">${safeSeverity}</dd>
+            <dt style="font-size:12px;text-transform:uppercase;color:#66736b">Status</dt>
+            <dd style="margin:0;color:#17211b">${safeStatus}</dd>
+          </dl>
+          <a href="${safeDashboardUrl}" style="display:inline-block;background:#427a56;color:#fff;text-decoration:none;border-radius:10px;padding:12px 16px;font-weight:700">Open account monitoring</a>
+          <p style="margin:22px 0 0;color:#66736b;font-size:13px">This internal alert includes only a privacy-safe summary. Review the admin dashboard before taking action.</p>
+        </div>
+      </div>
+    `;
+
+    await this.sendEmail({
+      from: this.notificationFrom,
+      to: input.email,
+      subject: `Ritora admin alert: ${normalizeTemplateText(input.summary, 120)}`,
+      html,
+    });
+  }
+
   async sendAccountDeletionConfirmationEmail(
     email: string,
     token: string,
@@ -1070,6 +1129,18 @@ export class MailService {
 
   private buildAdminPathActionUrl(path: string, token: string): string {
     return this.buildAppPathActionUrl(this.adminWebAppUrl, path, token);
+  }
+
+  private buildAdminUrl(pathOrUrl: string): string {
+    const base = new URL(this.adminWebAppUrl);
+    const basePath = base.pathname.replace(/\/$/, '');
+    const path = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+    const target = new URL(path, `${base.origin}${basePath}/`);
+    if (basePath && !target.pathname.startsWith(`${basePath}/`)) {
+      target.pathname = `${basePath}${target.pathname}`;
+    }
+    target.hash = '';
+    return target.toString();
   }
 
   private buildAppPathActionUrl(

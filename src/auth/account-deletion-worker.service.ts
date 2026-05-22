@@ -193,7 +193,7 @@ export class AccountDeletionWorkerService
       return null;
     }
 
-    return setInterval(() => {
+    const heartbeat = setInterval(() => {
       void this.accountDeletionScheduler
         .extendMessageVisibility(receiptHandle)
         .catch((error) => {
@@ -204,5 +204,7 @@ export class AccountDeletionWorkerService
           );
         });
     }, ACCOUNT_DELETION_SQS_VISIBILITY_HEARTBEAT_MS);
+    heartbeat.unref();
+    return heartbeat;
   }
 }

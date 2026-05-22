@@ -279,11 +279,19 @@ describe('AuthController', () => {
   it('forgot-password always returns success message', async () => {
     authService.forgotPassword.mockResolvedValue(undefined);
 
-    const result = await controller.forgotPassword({
-      email: 'test@example.com',
-      language: 'sv',
-    });
+    const result = await controller.forgotPassword(
+      {
+        email: 'test@example.com',
+        language: 'sv',
+      },
+      { ip: '127.0.0.1' } as never,
+    );
 
+    expect(authService.forgotPassword).toHaveBeenCalledWith(
+      'test@example.com',
+      'sv',
+      '127.0.0.1',
+    );
     expect(result.message).toContain('Om e-postadressen är registrerad');
   });
 

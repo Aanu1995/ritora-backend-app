@@ -2,11 +2,13 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   DataSource,
   EntityManager,
+  In,
   IsNull,
   Repository,
   type ValueTransformer,
@@ -17,8 +19,13 @@ import {
   sanitizeIpAddress,
   sanitizeUserAgent,
 } from '../auth/auth-session.utils';
-import { toIsoString, toNullableIsoString } from '../common/utils/date';
+import {
+  nowDate,
+  toIsoString,
+  toNullableIsoString,
+} from '../common/utils/date';
 import { isPostgresUniqueConstraintError } from '../common/utils/database-errors';
+import { MailService } from '../mail/mail.service';
 import { encryptedNullableStringFieldTransformer } from '../skin-profile/skin-profile-field-encryption';
 import {
   isPlatformGlobalRestrictionCapability,
@@ -26,6 +33,7 @@ import {
   PlatformGlobalRestrictionCapability,
 } from '../platform-controls/platform-global-restrictions';
 import { platformGlobalRestrictionInternalNoteTransformer } from '../platform-controls/entities/platform-global-restriction.entity';
+import { canonicalizeEmailForIdentity } from '../users/users.service.utils';
 import {
   AnalysisJobStatusValue,
   AnalysisStatusValue,
@@ -38,6 +46,10 @@ import {
   SuggestionGenerationStatus,
 } from '../suggestions/suggestions.constants';
 import { User } from '../users/entities/user.entity';
+import {
+  AccountMonitoringEvent,
+  AccountMonitoringEventType,
+} from '../users/entities/account-monitoring-event.entity';
 import {
   AdminAlertSeverity,
   AdminAiCostFeatureFilter,
@@ -53,9 +65,18 @@ import {
   type AdminOperationalIncidentListQuery,
   type AdminOperationalIncidentListResponse,
   type AdminOperationalIncidentResponse,
+  type AdminNotificationListResponse,
+  type AdminNotificationResponse,
   type AdminOperationalWorkItemResponse,
   AdminPermission,
   type AdminAuthenticatedUser,
+  type AdminAccountMonitoringAutomatedScanResponse,
+  type AdminAccountMonitoringEventTimelineItemResponse,
+  type AdminAccountMonitoringEventTimelineResponse,
+  type AdminAccountMonitoringFlagListResponse,
+  type AdminAccountMonitoringFlagResponse,
+  type AdminAccountMonitoringListQuery,
+  type AdminAccountMonitoringSettingsResponse,
   type AdminMemberResponse,
   type AdminOverviewResponse,
   type AdminPlatformGlobalRestrictionListResponse,
@@ -85,20 +106,40 @@ import {
   AdminAccountStatus,
 } from './entities/admin-account.entity';
 import {
+  AdminAccountMonitoringFlag,
+  AdminAccountMonitoringSeverity,
+  AdminAccountMonitoringSignalType,
+  AdminAccountMonitoringStatus,
+} from './entities/admin-account-monitoring-flag.entity';
+import {
+  ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
+  AdminAccountMonitoringSettings,
+  type AdminAccountMonitoringThresholds,
+} from './entities/admin-account-monitoring-settings.entity';
+import {
   AdminAuditAction,
   AdminAuditLog,
 } from './entities/admin-audit-log.entity';
+import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitoring.dto';
 import {
   AdminOperationalIncident,
   AdminOperationalIncidentSeverity,
   AdminOperationalIncidentStatus,
 } from './entities/admin-operational-incident.entity';
+import {
+  AdminNotification,
+  AdminNotificationSeverity,
+  AdminNotificationType,
+} from './entities/admin-notification.entity';
 import { AdminUserNote } from './entities/admin-user-note.entity';
 import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
 
 type QueryRow = Record<string, unknown>;
 
 const ENCRYPTED_STRING_PREFIX = 'ritora:v1:';
+export const ACCOUNT_MONITORING_SCAN_SESSION_ID = 'sys-acct-mon-scan';
+export const ACCOUNT_MONITORING_SUPPORT_SESSION_ID = 'sys-acct-mon-support';
+export const ACCOUNT_MONITORING_INCIDENT_SESSION_ID = 'sys-acct-mon-incident';
 const userRestrictionInternalNoteTransformer =
   encryptedNullableStringFieldTransformer(
     'users.account_restriction_internal_note',
@@ -131,8 +172,13 @@ type AdminPlatformGlobalRestrictionEnableContext = AdminUserAuditContext & {
 };
 
 type AdminUserMutationRepositories = {
+  accountsRepository: Repository<AdminAccount>;
   auditLogsRepository: Repository<AdminAuditLog>;
   incidentsRepository: Repository<AdminOperationalIncident>;
+  notificationsRepository: Repository<AdminNotification>;
+  monitoringEventsRepository: Repository<AccountMonitoringEvent>;
+  monitoringRepository: Repository<AdminAccountMonitoringFlag>;
+  monitoringSettingsRepository: Repository<AdminAccountMonitoringSettings>;
   notesRepository: Repository<AdminUserNote>;
   sessionsRepository: Repository<AuthSession>;
   usersRepository: Repository<User>;
@@ -142,6 +188,38 @@ type AdminOperationalIncidentActor = {
   email: string;
   id: string;
   name: string;
+};
+
+type AccountMonitoringAutomatedCandidate = {
+  costUsd: number;
+  eventCount: number;
+  latestAt: string | null;
+  reasonCode: string;
+  severity: AdminAccountMonitoringSeverity;
+  signalType: AdminAccountMonitoringSignalType;
+  userEmail: string;
+  userId: string;
+  userName: string;
+};
+
+type AccountMonitoringSecurityIncidentCandidate = {
+  description: string;
+  eventCount: number;
+  latestAt: string | null;
+  severity: AdminOperationalIncidentSeverity;
+  sourceId: string;
+  sourceType: string;
+  title: string;
+};
+
+type AccountMonitoringOwnerNotificationReason =
+  | 'created'
+  | 'refreshed'
+  | 'assigned';
+
+type AccountMonitoringOwnerNotification = {
+  flag: AdminAccountMonitoringFlagResponse;
+  reason: AccountMonitoringOwnerNotificationReason;
 };
 
 type JobHealthConfig = {
@@ -193,6 +271,28 @@ const ADMIN_OPERATIONAL_INCIDENTS_MAX_LIMIT = 50;
 const ADMIN_OPERATIONAL_INCIDENT_TITLE_MAX_LENGTH = 160;
 const ADMIN_OPERATIONAL_INCIDENT_DESCRIPTION_MAX_LENGTH = 1000;
 const ADMIN_OPERATIONS_WORK_ITEM_LIMIT = 20;
+const ADMIN_ACCOUNT_MONITORING_DEFAULT_LIMIT = 10;
+const ADMIN_ACCOUNT_MONITORING_MAX_LIMIT = 50;
+const ADMIN_ACCOUNT_MONITORING_SUMMARY_MAX_LENGTH = 160;
+const ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH = 1000;
+const ADMIN_ACCOUNT_MONITORING_AUTOMATED_SCAN_LIMIT = 100;
+const DEFAULT_ACCOUNT_MONITORING_THRESHOLDS: AdminAccountMonitoringThresholds =
+  {
+    aiCost24hCriticalUsd: 5,
+    aiCost24hWarningUsd: 2,
+    aiGenerations24hCritical: 50,
+    aiGenerations24hWarning: 25,
+    authFailures24hWarning: 8,
+    deletionEvents30dWarning: 3,
+    mediaCleanupAttempts24hWarning: 6,
+    mediaCleanupFailures24hWarning: 3,
+    passwordResets24hWarning: 5,
+    productExtractions24hWarning: 20,
+    safetyReactionSignals7dWarning: 3,
+    unknownAuthFailures24hCritical: 20,
+    unknownAuthFailures24hWarning: 8,
+    uploadFailures24hWarning: 5,
+  };
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -720,7 +820,12 @@ function resolveJobStatus(
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly dataSource: DataSource) {}
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly mailService?: MailService,
+  ) {}
 
   getCurrentAdmin(
     user: AdminAuthenticatedUser | AdminAccount,
@@ -1697,7 +1802,7 @@ export class AdminService {
   ): Promise<AdminUserNoteResponse> {
     const body = this.normalizeUserNoteBody(input.body);
 
-    return this.runUserMutation(async (repositories) => {
+    const response = await this.runUserMutation(async (repositories) => {
       const user = await this.findUserForAdminMutation(
         repositories.usersRepository,
         userId,
@@ -1737,6 +1842,7 @@ export class AdminService {
         ]),
       );
     });
+    return response;
   }
 
   async listAuditLogs(
@@ -1765,6 +1871,13 @@ export class AdminService {
     if (query.targetUserId) {
       params.push(query.targetUserId);
       whereClauses.push(`logs.target_user_id = $${params.length}`);
+    }
+
+    if (query.monitoringFlagId) {
+      params.push(query.monitoringFlagId);
+      whereClauses.push(
+        `logs.metadata ->> 'monitoringFlagId' = $${params.length}`,
+      );
     }
 
     const search = normalizeSearch(
@@ -1860,6 +1973,990 @@ export class AdminService {
         .map((row) => this.toAdminAuditLogResponse(row)),
       ...buildPaginationMeta(total, pagination),
     };
+  }
+
+  async listAccountMonitoringFlags(
+    query: AdminAccountMonitoringListQuery = {},
+  ): Promise<AdminAccountMonitoringFlagListResponse> {
+    const pagination = normalizePagination({
+      defaultLimit: ADMIN_ACCOUNT_MONITORING_DEFAULT_LIMIT,
+      limit: query.limit,
+      maxLimit: ADMIN_ACCOUNT_MONITORING_MAX_LIMIT,
+      page: query.page,
+    });
+    const whereClauses = ['1 = 1'];
+    const params: Array<number | string> = [];
+
+    if (query.status === AdminAccountMonitoringStatusFilter.All) {
+      // Intentionally no status predicate.
+    } else if (query.status === AdminAccountMonitoringStatusFilter.Resolved) {
+      params.push(AdminAccountMonitoringStatus.Resolved);
+      whereClauses.push(`flags.status = $${params.length}`);
+    } else if (query.status === AdminAccountMonitoringStatusFilter.Open) {
+      params.push(AdminAccountMonitoringStatus.Open);
+      whereClauses.push(`flags.status = $${params.length}`);
+    } else if (query.status === AdminAccountMonitoringStatusFilter.Watching) {
+      params.push(AdminAccountMonitoringStatus.Watching);
+      whereClauses.push(`flags.status = $${params.length}`);
+    } else {
+      params.push(AdminAccountMonitoringStatus.Open);
+      const openStatusIndex = params.length;
+      params.push(AdminAccountMonitoringStatus.Watching);
+      const watchingStatusIndex = params.length;
+      whereClauses.push(
+        `flags.status IN ($${openStatusIndex}, $${watchingStatusIndex})`,
+      );
+    }
+
+    if (query.signalType) {
+      params.push(query.signalType);
+      whereClauses.push(`flags.signal_type = $${params.length}`);
+    }
+
+    if (query.assignedAdminId) {
+      params.push(query.assignedAdminId);
+      whereClauses.push(`flags.assigned_admin_id = $${params.length}`);
+    }
+
+    const search = normalizeSearch(query.query);
+    if (search) {
+      params.push(`%${escapeLikePattern(search)}%`);
+      const searchIndex = params.length;
+      whereClauses.push(`(
+        users.canonical_email ILIKE $${searchIndex} ESCAPE '\\'
+        OR users.first_name ILIKE $${searchIndex} ESCAPE '\\'
+        OR users.last_name ILIKE $${searchIndex} ESCAPE '\\'
+        OR flags.summary ILIKE $${searchIndex} ESCAPE '\\'
+      )`);
+    }
+    const filteredUsersJoin = search
+      ? 'JOIN users ON users.id = flags.user_id'
+      : '';
+
+    params.push(pagination.limit);
+    const limitIndex = params.length;
+    params.push(pagination.offset);
+    const offsetIndex = params.length;
+
+    const result: unknown = await this.dataSource.query(
+      `
+        WITH filtered_flags AS (
+          SELECT
+            flags.id,
+            flags.created_at,
+            flags.next_review_at
+          FROM admin_account_monitoring_flags flags
+          ${filteredUsersJoin}
+          WHERE ${whereClauses.join(' AND ')}
+        ),
+        counted_flags AS (
+          SELECT COUNT(*)::int AS total_count
+          FROM filtered_flags
+        ),
+        paged_flags AS (
+          SELECT *
+          FROM filtered_flags
+          ORDER BY
+            next_review_at ASC NULLS LAST,
+            created_at DESC,
+            id DESC
+          LIMIT $${limitIndex}
+          OFFSET $${offsetIndex}
+        )
+        SELECT
+          counted_flags.total_count,
+          flags.id,
+          flags.user_id,
+          flags.signal_type,
+          flags.status,
+          flags.severity,
+          flags.summary,
+          flags.latest_signal,
+          flags.internal_note,
+          flags.assigned_admin_id,
+          flags.created_by_admin_id,
+          flags.resolved_by_admin_id,
+          flags.next_review_at,
+          flags.resolved_at,
+          flags.resolution_note,
+          flags.created_at,
+          flags.updated_at,
+          users.email AS user_email,
+          NULLIF(CONCAT_WS(' ', users.first_name, users.last_name), '') AS user_name,
+          assigned_admin.email AS assigned_admin_email,
+          assigned_admin.name AS assigned_admin_name,
+          created_admin.email AS created_by_admin_email,
+          created_admin.name AS created_by_admin_name,
+          resolved_admin.email AS resolved_by_admin_email,
+          resolved_admin.name AS resolved_by_admin_name,
+          COALESCE(audit_counts.audit_log_count, 0)::int AS audit_log_count
+        FROM counted_flags
+        LEFT JOIN paged_flags ON true
+        LEFT JOIN admin_account_monitoring_flags flags
+          ON flags.id = paged_flags.id
+        LEFT JOIN users ON users.id = flags.user_id
+        LEFT JOIN admin_accounts assigned_admin
+          ON assigned_admin.id = flags.assigned_admin_id
+        LEFT JOIN admin_accounts created_admin
+          ON created_admin.id = flags.created_by_admin_id
+        LEFT JOIN admin_accounts resolved_admin
+          ON resolved_admin.id = flags.resolved_by_admin_id
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS audit_log_count
+          FROM admin_audit_logs logs
+          WHERE logs.target_user_id = flags.user_id
+            AND logs.action IN (
+              'account_monitoring_flag_created',
+              'account_monitoring_flag_updated',
+              'account_monitoring_flag_resolved'
+            )
+            AND logs.metadata ->> 'monitoringFlagId' = flags.id
+        ) audit_counts ON flags.id IS NOT NULL
+        ORDER BY
+          paged_flags.next_review_at ASC NULLS LAST,
+          paged_flags.created_at DESC NULLS LAST,
+          paged_flags.id DESC NULLS LAST
+      `,
+      params,
+    );
+    const rows = toQueryRows(result);
+    const total = toNumber(rows[0]?.total_count);
+
+    return {
+      flags: rows
+        .filter((row) => typeof row.id === 'string')
+        .map((row) => this.toAccountMonitoringFlagResponse(row)),
+      ...buildPaginationMeta(total, pagination),
+    };
+  }
+
+  async createAccountMonitoringFlag(
+    actor: AdminAuthenticatedUser,
+    input: {
+      internalNote: string;
+      latestSignal: string;
+      nextReviewAt?: string | null;
+      reason: string;
+      severity: AdminAccountMonitoringSeverity;
+      signalType: AdminAccountMonitoringSignalType;
+      summary: string;
+      userIdentifier: string;
+    },
+    context: AdminRequestContext,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    const reason = this.normalizeAuditReason(input.reason);
+    const signalType = this.normalizeMonitoringSignalType(input.signalType);
+    const severity = this.normalizeMonitoringSeverity(input.severity);
+    const summary = this.normalizeMonitoringText(
+      input.summary,
+      'Account monitoring summary is required',
+      ADMIN_ACCOUNT_MONITORING_SUMMARY_MAX_LENGTH,
+      3,
+    );
+    const latestSignal = this.normalizeMonitoringText(
+      input.latestSignal,
+      'Account monitoring signal is required',
+      ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH,
+      8,
+    );
+    const internalNote = this.normalizeMonitoringText(
+      input.internalNote,
+      'Account monitoring internal note is required',
+      ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH,
+      8,
+    );
+    const nextReviewAt = this.normalizeFutureReviewDate(input.nextReviewAt);
+
+    const response = await this.runUserMutation(async (repositories) => {
+      const user = await this.findUserByAdminIdentifierForMutation(
+        repositories.usersRepository,
+        input.userIdentifier,
+      );
+      const existingFlag = await repositories.monitoringRepository.findOne({
+        where: {
+          signal_type: signalType,
+          status: In([
+            AdminAccountMonitoringStatus.Open,
+            AdminAccountMonitoringStatus.Watching,
+          ]),
+          user_id: user.id,
+        },
+      });
+      if (existingFlag) {
+        throw new ConflictException(
+          'An active monitoring flag already exists for this account signal',
+        );
+      }
+
+      const flag = repositories.monitoringRepository.create({
+        assigned_admin_id: actor.id,
+        created_by_admin_id: actor.id,
+        internal_note: internalNote,
+        latest_signal: latestSignal,
+        next_review_at: nextReviewAt,
+        resolution_note: null,
+        resolved_at: null,
+        resolved_by_admin_id: null,
+        severity,
+        signal_type: signalType,
+        status: AdminAccountMonitoringStatus.Open,
+        summary,
+        user_id: user.id,
+      });
+      let savedFlag: AdminAccountMonitoringFlag;
+      try {
+        savedFlag = await repositories.monitoringRepository.save(flag);
+      } catch (error) {
+        if (isPostgresUniqueConstraintError(error)) {
+          throw new ConflictException(
+            'An active monitoring flag already exists for this account signal',
+          );
+        }
+
+        throw error;
+      }
+
+      await this.writeUserAuditLog(repositories.auditLogsRepository, {
+        action: AdminAuditAction.AccountMonitoringFlagCreated,
+        actor,
+        context: { ...context, reason },
+        metadata: {
+          monitoringFlagId: savedFlag.id,
+          nextReviewAt: nextReviewAt ? nextReviewAt.toISOString() : null,
+          severity,
+          signalType,
+          status: savedFlag.status,
+        },
+        targetUserId: user.id,
+      });
+
+      return this.toAccountMonitoringFlagResponseFromEntity(savedFlag, user, {
+        [actor.id]: {
+          email: actor.email,
+          id: actor.id,
+          name: actor.name,
+        },
+      });
+    });
+    await this.notifyAccountMonitoringOwner({
+      flag: response,
+      reason: 'created',
+    });
+    return response;
+  }
+
+  async runAccountMonitoringAutomatedScan(
+    actor: AdminAuthenticatedUser,
+    context: AdminRequestContext,
+  ): Promise<AdminAccountMonitoringAutomatedScanResponse> {
+    const scannedAt = nowDate();
+    const thresholds = await this.loadAccountMonitoringThresholds();
+    const [candidates, platformCandidates] = await Promise.all([
+      this.loadAutomatedMonitoringCandidates(scannedAt, thresholds),
+      this.loadPlatformMonitoringIncidentCandidates(scannedAt, thresholds),
+    ]);
+    if (candidates.length === 0 && platformCandidates.length === 0) {
+      return {
+        candidates: 0,
+        created: 0,
+        flags: [],
+        platformCandidates: 0,
+        platformIncidentsCreated: 0,
+        platformIncidentsRefreshed: 0,
+        refreshed: 0,
+        scannedAt: toIsoString(scannedAt),
+        skipped: 0,
+      };
+    }
+
+    const ownerNotificationReasons = new Map<
+      string,
+      AccountMonitoringOwnerNotificationReason
+    >();
+    const response = await this.runUserMutation(async (repositories) => {
+      const candidateUserIds = [
+        ...new Set(candidates.map((item) => item.userId)),
+      ];
+      const existingFlags =
+        candidateUserIds.length > 0
+          ? await repositories.monitoringRepository.find({
+              where: {
+                status: In([
+                  AdminAccountMonitoringStatus.Open,
+                  AdminAccountMonitoringStatus.Watching,
+                ]),
+                user_id: In(candidateUserIds),
+              },
+            })
+          : [];
+      const existingByKey = new Map(
+        existingFlags.map((flag) => [
+          this.accountMonitoringCandidateKey(flag.user_id, flag.signal_type),
+          flag,
+        ]),
+      );
+      const savedFlags: AdminAccountMonitoringFlag[] = [];
+      let created = 0;
+      let refreshed = 0;
+      let skipped = 0;
+
+      for (const candidate of candidates) {
+        const draft = this.toAutomatedMonitoringDraft(candidate, scannedAt);
+        const existing = existingByKey.get(
+          this.accountMonitoringCandidateKey(
+            candidate.userId,
+            candidate.signalType,
+          ),
+        );
+
+        if (existing) {
+          if (existing.status === AdminAccountMonitoringStatus.Resolved) {
+            skipped += 1;
+            continue;
+          }
+          const previousSeverity = existing.severity;
+          existing.latest_signal = draft.latestSignal;
+          existing.summary = draft.summary;
+          existing.severity = this.maxMonitoringSeverity(
+            existing.severity,
+            candidate.severity,
+          );
+          existing.next_review_at =
+            existing.next_review_at &&
+            existing.next_review_at.getTime() < draft.nextReviewAt.getTime()
+              ? existing.next_review_at
+              : draft.nextReviewAt;
+          const saved = await repositories.monitoringRepository.save(existing);
+          savedFlags.push(saved);
+          if (saved.severity !== previousSeverity) {
+            ownerNotificationReasons.set(saved.id, 'refreshed');
+          }
+          refreshed += 1;
+          await this.writeAutomatedMonitoringAuditLog(
+            repositories.auditLogsRepository,
+            actor,
+            context,
+            saved,
+            AdminAuditAction.AccountMonitoringFlagUpdated,
+            candidate,
+          );
+          continue;
+        }
+
+        const createdFlag = repositories.monitoringRepository.create({
+          assigned_admin_id: actor.id,
+          created_by_admin_id: actor.id,
+          internal_note: draft.internalNote,
+          latest_signal: draft.latestSignal,
+          next_review_at: draft.nextReviewAt,
+          resolution_note: null,
+          resolved_at: null,
+          resolved_by_admin_id: null,
+          severity: candidate.severity,
+          signal_type: candidate.signalType,
+          status: AdminAccountMonitoringStatus.Open,
+          summary: draft.summary,
+          user_id: candidate.userId,
+        });
+        const saved = await repositories.monitoringRepository.save(createdFlag);
+        existingByKey.set(
+          this.accountMonitoringCandidateKey(
+            candidate.userId,
+            candidate.signalType,
+          ),
+          saved,
+        );
+        savedFlags.push(saved);
+        ownerNotificationReasons.set(saved.id, 'created');
+        created += 1;
+        await this.writeAutomatedMonitoringAuditLog(
+          repositories.auditLogsRepository,
+          actor,
+          context,
+          saved,
+          AdminAuditAction.AccountMonitoringFlagCreated,
+          candidate,
+        );
+      }
+
+      const actors = await this.getMonitoringActorsForFlags(savedFlags);
+      if (!actors.has(actor.id)) {
+        actors.set(actor.id, {
+          email: actor.email,
+          id: actor.id,
+          name: actor.name,
+        });
+      }
+      const candidatesByKey = new Map(
+        candidates.map((candidate) => [
+          this.accountMonitoringCandidateKey(
+            candidate.userId,
+            candidate.signalType,
+          ),
+          candidate,
+        ]),
+      );
+      const incidentStats = await this.upsertAutomatedSecurityIncidents(
+        repositories,
+        actor,
+        context,
+        platformCandidates,
+      );
+
+      return {
+        candidates: candidates.length,
+        created,
+        flags: savedFlags.map((flag) =>
+          this.toAccountMonitoringFlagResponseFromCandidate(
+            flag,
+            candidatesByKey.get(
+              this.accountMonitoringCandidateKey(
+                flag.user_id,
+                flag.signal_type,
+              ),
+            ),
+            Object.fromEntries(actors),
+          ),
+        ),
+        platformCandidates: platformCandidates.length,
+        platformIncidentsCreated: incidentStats.created,
+        platformIncidentsRefreshed: incidentStats.refreshed,
+        refreshed,
+        scannedAt: toIsoString(scannedAt),
+        skipped,
+      };
+    });
+    await this.notifyAccountMonitoringOwners(
+      response.flags
+        .map((flag) => {
+          const reason = ownerNotificationReasons.get(flag.id);
+          return reason ? { flag, reason } : null;
+        })
+        .filter(
+          (value): value is AccountMonitoringOwnerNotification =>
+            value !== null,
+        ),
+    );
+    return response;
+  }
+
+  async createAccountMonitoringSupportEvent(
+    actor: AdminAuthenticatedUser,
+    input: {
+      internalNote: string;
+      latestSignal: string;
+      reason: string;
+      severity: AdminAccountMonitoringSeverity;
+      summary: string;
+      supportReference: string;
+      userIdentifier: string;
+    },
+    context: AdminRequestContext,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    const reason = this.normalizeAuditReason(input.reason);
+    const severity = this.normalizeMonitoringSeverity(input.severity);
+    const summary = this.normalizeMonitoringText(
+      input.summary,
+      'Support escalation summary is required',
+      ADMIN_ACCOUNT_MONITORING_SUMMARY_MAX_LENGTH,
+      3,
+    );
+    const latestSignal = this.normalizeMonitoringText(
+      input.latestSignal,
+      'Support escalation signal is required',
+      ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH,
+      8,
+    );
+    const internalNote = this.normalizeMonitoringText(
+      input.internalNote,
+      'Support escalation internal note is required',
+      ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH,
+      8,
+    );
+    const supportReference = this.normalizeMonitoringText(
+      input.supportReference,
+      'Support reference is required',
+      120,
+      3,
+    );
+    let notificationReason: AccountMonitoringOwnerNotificationReason =
+      'created';
+    const response = await this.runUserMutation(async (repositories) => {
+      const user = await this.findUserByAdminIdentifierForMutation(
+        repositories.usersRepository,
+        input.userIdentifier,
+      );
+      const event = repositories.monitoringEventsRepository.create({
+        email_hash: null,
+        event_type: AccountMonitoringEventType.SupportEscalationReceived,
+        ip_address_hash: null,
+        metadata: {
+          reason: 'support_escalation',
+          severity,
+          supportReference,
+        },
+        occurred_at: nowDate(),
+        user_id: user.id,
+      });
+      const savedEvent =
+        await repositories.monitoringEventsRepository.save(event);
+
+      const existingFlag = await repositories.monitoringRepository.findOne({
+        where: {
+          signal_type: AdminAccountMonitoringSignalType.SupportEscalation,
+          status: In([
+            AdminAccountMonitoringStatus.Open,
+            AdminAccountMonitoringStatus.Watching,
+          ]),
+          user_id: user.id,
+        },
+      });
+      notificationReason = existingFlag ? 'refreshed' : 'created';
+      const flag =
+        existingFlag ??
+        repositories.monitoringRepository.create({
+          assigned_admin_id: actor.id,
+          created_by_admin_id: actor.id,
+          resolution_note: null,
+          resolved_at: null,
+          resolved_by_admin_id: null,
+          signal_type: AdminAccountMonitoringSignalType.SupportEscalation,
+          status: AdminAccountMonitoringStatus.Open,
+          user_id: user.id,
+        });
+
+      flag.assigned_admin_id = flag.assigned_admin_id ?? actor.id;
+      flag.internal_note = internalNote;
+      flag.latest_signal = latestSignal;
+      flag.next_review_at = new Date(nowDate().getTime() + DAY_MS);
+      flag.severity = existingFlag
+        ? this.maxMonitoringSeverity(existingFlag.severity, severity)
+        : severity;
+      flag.summary = summary;
+
+      const savedFlag = await repositories.monitoringRepository.save(flag);
+      await this.writeUserAuditLog(repositories.auditLogsRepository, {
+        action: existingFlag
+          ? AdminAuditAction.AccountMonitoringFlagUpdated
+          : AdminAuditAction.AccountMonitoringFlagCreated,
+        actor,
+        context: { ...context, reason },
+        metadata: {
+          eventId: savedEvent.id,
+          monitoringFlagId: savedFlag.id,
+          severity: savedFlag.severity,
+          signalType: savedFlag.signal_type,
+          status: savedFlag.status,
+          supportReference,
+        },
+        targetUserId: user.id,
+      });
+
+      const actors = await this.getMonitoringActorsForFlags([savedFlag]);
+      if (!actors.has(actor.id)) {
+        actors.set(actor.id, {
+          email: actor.email,
+          id: actor.id,
+          name: actor.name,
+        });
+      }
+
+      return this.toAccountMonitoringFlagResponseFromEntity(
+        savedFlag,
+        user,
+        Object.fromEntries(actors),
+      );
+    });
+    await this.notifyAccountMonitoringOwner({
+      flag: response,
+      reason: notificationReason,
+    });
+    return response;
+  }
+
+  async getAccountMonitoringEventTimeline(
+    flagId: string,
+    input: { limit?: number } = {},
+  ): Promise<AdminAccountMonitoringEventTimelineResponse> {
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 50);
+    const flag = await this.dataSource
+      .getRepository(AdminAccountMonitoringFlag)
+      .findOne({ where: { id: flagId } });
+    if (!flag) {
+      throw new NotFoundException('Account monitoring flag not found');
+    }
+
+    const [accountEvents, syntheticRows] = await Promise.all([
+      this.loadAccountMonitoringEventTimelineItems(flag, limit),
+      this.loadSyntheticMonitoringTimelineItems(flag, limit),
+    ]);
+    const events = [...accountEvents, ...syntheticRows]
+      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+      .slice(0, limit);
+
+    return {
+      events,
+      flagId: flag.id,
+      generatedAt: toIsoString(nowDate()),
+    };
+  }
+
+  async runScheduledAccountMonitoringScan(
+    context: Omit<AdminRequestContext, 'sessionId'> & {
+      sessionId?: string;
+    } = {},
+  ): Promise<AdminAccountMonitoringAutomatedScanResponse | null> {
+    const actor = await this.loadSystemMonitoringActor(
+      context.sessionId ?? ACCOUNT_MONITORING_SCAN_SESSION_ID,
+    );
+    if (!actor) {
+      this.logger.warn(
+        'Skipped scheduled account monitoring scan because no active admin account exists.',
+      );
+      return null;
+    }
+
+    return this.runAccountMonitoringAutomatedScan(actor, {
+      ip: context.ip,
+      sessionId: context.sessionId ?? actor.sessionId,
+      userAgent:
+        context.userAgent ?? 'ritora-account-monitoring-sqs-worker/1.0',
+    });
+  }
+
+  async createScheduledAccountMonitoringSupportEvent(input: {
+    internalNote: string;
+    latestSignal: string;
+    reason: string;
+    severity: AdminAccountMonitoringSeverity;
+    summary: string;
+    supportReference: string;
+    userIdentifier: string;
+  }): Promise<AdminAccountMonitoringFlagResponse | null> {
+    const actor = await this.loadSystemMonitoringActor(
+      ACCOUNT_MONITORING_SUPPORT_SESSION_ID,
+    );
+    if (!actor) {
+      this.logger.warn(
+        'Skipped queued account monitoring support event because no active admin account exists.',
+      );
+      return null;
+    }
+
+    return this.createAccountMonitoringSupportEvent(actor, input, {
+      sessionId: actor.sessionId,
+      userAgent: 'ritora-account-monitoring-sqs-worker/1.0',
+    });
+  }
+
+  async createScheduledAccountMonitoringOperationalIncident(input: {
+    description: string;
+    severity: AdminOperationalIncidentSeverity;
+    sourceId: string;
+    sourceType: string;
+    title: string;
+  }): Promise<AdminOperationalIncidentResponse | null> {
+    const actor = await this.loadSystemMonitoringActor(
+      ACCOUNT_MONITORING_INCIDENT_SESSION_ID,
+    );
+    if (!actor) {
+      this.logger.warn(
+        'Skipped queued account monitoring operational incident because no active admin account exists.',
+      );
+      return null;
+    }
+
+    return this.upsertScheduledOperationalIncident(actor, input, {
+      sessionId: actor.sessionId,
+      userAgent: 'ritora-account-monitoring-sqs-worker/1.0',
+    });
+  }
+
+  async getAccountMonitoringSettings(): Promise<AdminAccountMonitoringSettingsResponse> {
+    const settingsRepository = this.dataSource.getRepository(
+      AdminAccountMonitoringSettings,
+    );
+    const settings = await settingsRepository.findOne({
+      where: { id: ADMIN_ACCOUNT_MONITORING_SETTINGS_ID },
+    });
+
+    return {
+      thresholds: this.normalizeAccountMonitoringThresholds(
+        settings?.thresholds,
+      ),
+      updatedAt:
+        toNullableIsoString(settings?.updated_at) ?? toIsoString(new Date(0)),
+      updatedByAdminId: settings?.updated_by_admin_id ?? null,
+    };
+  }
+
+  async listNotifications(
+    actor: AdminAuthenticatedUser,
+    input: { limit?: number } = {},
+  ): Promise<AdminNotificationListResponse> {
+    const limit = Math.min(Math.max(input.limit ?? 10, 1), 20);
+    const notificationsRepository =
+      this.dataSource.getRepository(AdminNotification);
+    const [notifications, unreadCount] = await Promise.all([
+      notificationsRepository
+        .createQueryBuilder('notification')
+        .where('notification.admin_id = :adminId', { adminId: actor.id })
+        .orderBy('notification.read_at', 'ASC', 'NULLS FIRST')
+        .addOrderBy('notification.created_at', 'DESC')
+        .addOrderBy('notification.id', 'DESC')
+        .take(limit)
+        .getMany(),
+      notificationsRepository.count({
+        where: { admin_id: actor.id, read_at: IsNull() },
+      }),
+    ]);
+
+    return {
+      generatedAt: toIsoString(nowDate()),
+      notifications: notifications.map((notification) =>
+        this.toAdminNotificationResponse(notification),
+      ),
+      unreadCount,
+    };
+  }
+
+  async markNotificationRead(
+    actor: AdminAuthenticatedUser,
+    notificationId: string,
+  ): Promise<AdminNotificationResponse> {
+    const notificationsRepository =
+      this.dataSource.getRepository(AdminNotification);
+    const notification = await notificationsRepository.findOne({
+      where: { admin_id: actor.id, id: notificationId },
+    });
+    if (!notification) {
+      throw new NotFoundException('Admin notification not found');
+    }
+
+    if (!notification.read_at) {
+      notification.read_at = nowDate();
+      await notificationsRepository.save(notification);
+    }
+
+    return this.toAdminNotificationResponse(notification);
+  }
+
+  async updateAccountMonitoringSettings(
+    actor: AdminAuthenticatedUser,
+    input: { reason: string; thresholds: AdminAccountMonitoringThresholds },
+    context: AdminRequestContext,
+  ): Promise<AdminAccountMonitoringSettingsResponse> {
+    const reason = this.normalizeAuditReason(input.reason);
+    const thresholds = this.normalizeAccountMonitoringThresholds(
+      input.thresholds,
+    );
+
+    return this.runUserMutation(async (repositories) => {
+      const existing = await repositories.monitoringSettingsRepository.findOne({
+        where: { id: ADMIN_ACCOUNT_MONITORING_SETTINGS_ID },
+      });
+      const settings =
+        existing ??
+        repositories.monitoringSettingsRepository.create({
+          id: ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
+          thresholds: DEFAULT_ACCOUNT_MONITORING_THRESHOLDS,
+          updated_by_admin_id: null,
+        });
+
+      settings.thresholds = thresholds;
+      settings.updated_by_admin_id = actor.id;
+      const saved =
+        await repositories.monitoringSettingsRepository.save(settings);
+
+      await this.writeUserAuditLog(repositories.auditLogsRepository, {
+        action: AdminAuditAction.AccountMonitoringSettingsUpdated,
+        actor,
+        context: { ...context, reason },
+        metadata: { thresholds },
+        targetUserId: null,
+      });
+
+      return {
+        thresholds: this.normalizeAccountMonitoringThresholds(saved.thresholds),
+        updatedAt:
+          toNullableIsoString(saved.updated_at) ?? toIsoString(nowDate()),
+        updatedByAdminId: saved.updated_by_admin_id,
+      };
+    });
+  }
+
+  async updateAccountMonitoringFlag(
+    actor: AdminAuthenticatedUser,
+    flagId: string,
+    input: {
+      assignedAdminId?: string | null;
+      internalNote?: string;
+      latestSignal?: string;
+      nextReviewAt?: string | null;
+      reason: string;
+      status?:
+        | AdminAccountMonitoringStatus.Open
+        | AdminAccountMonitoringStatus.Watching;
+    },
+    context: AdminRequestContext,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    const reason = this.normalizeAuditReason(input.reason);
+
+    const response = await this.runUserMutation(async (repositories) => {
+      const flag = await repositories.monitoringRepository.findOne({
+        where: { id: flagId },
+      });
+      if (!flag) {
+        throw new NotFoundException('Account monitoring flag not found');
+      }
+      if (flag.status === AdminAccountMonitoringStatus.Resolved) {
+        throw new ConflictException(
+          'Resolved monitoring flags cannot be updated',
+        );
+      }
+
+      if (input.status !== undefined) {
+        flag.status = this.normalizeMonitoringOpenStatus(input.status);
+      }
+      if (input.latestSignal !== undefined) {
+        flag.latest_signal = this.normalizeMonitoringText(
+          input.latestSignal,
+          'Account monitoring signal is required',
+          ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH,
+          8,
+        );
+      }
+      if (input.internalNote !== undefined) {
+        flag.internal_note = this.normalizeMonitoringText(
+          input.internalNote,
+          'Account monitoring internal note is required',
+          ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH,
+          8,
+        );
+      }
+      if ('nextReviewAt' in input) {
+        flag.next_review_at = this.normalizeFutureReviewDate(
+          input.nextReviewAt,
+        );
+      }
+      if ('assignedAdminId' in input) {
+        flag.assigned_admin_id = input.assignedAdminId
+          ? (
+              await this.findAdminAccountForMonitoringAssignment(
+                repositories.accountsRepository,
+                input.assignedAdminId,
+              )
+            ).id
+          : null;
+      }
+
+      const savedFlag = await repositories.monitoringRepository.save(flag);
+      const user = await this.findUserForAdminMutation(
+        repositories.usersRepository,
+        savedFlag.user_id,
+      );
+
+      await this.writeUserAuditLog(repositories.auditLogsRepository, {
+        action: AdminAuditAction.AccountMonitoringFlagUpdated,
+        actor,
+        context: { ...context, reason },
+        metadata: {
+          assignedAdminId: savedFlag.assigned_admin_id,
+          monitoringFlagId: savedFlag.id,
+          nextReviewAt: savedFlag.next_review_at
+            ? savedFlag.next_review_at.toISOString()
+            : null,
+          signalType: savedFlag.signal_type,
+          status: savedFlag.status,
+        },
+        targetUserId: savedFlag.user_id,
+      });
+
+      const admins = await this.getMonitoringActorsForFlags([savedFlag]);
+      if (!admins.has(actor.id)) {
+        admins.set(actor.id, {
+          email: actor.email,
+          id: actor.id,
+          name: actor.name,
+        });
+      }
+
+      return this.toAccountMonitoringFlagResponseFromEntity(
+        savedFlag,
+        user,
+        Object.fromEntries(admins),
+      );
+    });
+    if ('assignedAdminId' in input && input.assignedAdminId) {
+      await this.notifyAccountMonitoringOwner({
+        flag: response,
+        reason: 'assigned',
+      });
+    }
+    return response;
+  }
+
+  async resolveAccountMonitoringFlag(
+    actor: AdminAuthenticatedUser,
+    flagId: string,
+    input: { reason: string; resolutionNote: string },
+    context: AdminRequestContext,
+  ): Promise<AdminAccountMonitoringFlagResponse> {
+    const reason = this.normalizeAuditReason(input.reason);
+    const resolutionNote = this.normalizeMonitoringText(
+      input.resolutionNote,
+      'Account monitoring resolution is required',
+      ADMIN_ACCOUNT_MONITORING_BODY_MAX_LENGTH,
+      8,
+    );
+
+    return this.runUserMutation(async (repositories) => {
+      const flag = await repositories.monitoringRepository.findOne({
+        where: { id: flagId },
+      });
+      if (!flag) {
+        throw new NotFoundException('Account monitoring flag not found');
+      }
+
+      if (flag.status !== AdminAccountMonitoringStatus.Resolved) {
+        flag.status = AdminAccountMonitoringStatus.Resolved;
+        flag.resolved_at = new Date();
+        flag.resolved_by_admin_id = actor.id;
+        flag.resolution_note = resolutionNote;
+        await repositories.monitoringRepository.save(flag);
+
+        await this.writeUserAuditLog(repositories.auditLogsRepository, {
+          action: AdminAuditAction.AccountMonitoringFlagResolved,
+          actor,
+          context: { ...context, reason },
+          metadata: {
+            monitoringFlagId: flag.id,
+            signalType: flag.signal_type,
+            status: flag.status,
+          },
+          targetUserId: flag.user_id,
+        });
+      }
+
+      const user = await this.findUserForAdminMutation(
+        repositories.usersRepository,
+        flag.user_id,
+      );
+      const admins = await this.getMonitoringActorsForFlags([flag]);
+      if (!admins.has(actor.id)) {
+        admins.set(actor.id, {
+          email: actor.email,
+          id: actor.id,
+          name: actor.name,
+        });
+      }
+
+      return this.toAccountMonitoringFlagResponseFromEntity(
+        flag,
+        user,
+        Object.fromEntries(admins),
+      );
+    });
   }
 
   async getOperationsMonitoring(
@@ -2094,6 +3191,98 @@ export class AdminService {
         incident,
         admins,
         targetUser ? this.userMap(targetUser) : new Map(),
+      );
+    });
+  }
+
+  private async upsertScheduledOperationalIncident(
+    actor: AdminAuthenticatedUser,
+    input: {
+      description: string;
+      severity: AdminOperationalIncidentSeverity;
+      sourceId: string;
+      sourceType: string;
+      title: string;
+    },
+    context: AdminRequestContext,
+  ): Promise<AdminOperationalIncidentResponse> {
+    const title = this.normalizeOperationalIncidentText(
+      input.title,
+      'Operational incident title is required',
+      ADMIN_OPERATIONAL_INCIDENT_TITLE_MAX_LENGTH,
+    );
+    const description = this.normalizeOperationalIncidentText(
+      input.description,
+      'Operational incident description is required',
+      ADMIN_OPERATIONAL_INCIDENT_DESCRIPTION_MAX_LENGTH,
+      8,
+    );
+    const sourceType = this.normalizeOperationalIncidentText(
+      input.sourceType,
+      'Operational incident source type is required',
+      80,
+      2,
+    );
+    const sourceId = this.normalizeOperationalIncidentText(
+      input.sourceId,
+      'Operational incident source id is required',
+      120,
+    );
+    const severity = this.normalizeOperationalIncidentSeverity(input.severity);
+
+    return this.runUserMutation(async (repositories) => {
+      const existingIncident = await repositories.incidentsRepository.findOne({
+        where: {
+          source_id: sourceId,
+          source_type: sourceType,
+          status: AdminOperationalIncidentStatus.Open,
+        },
+      });
+      const incident =
+        existingIncident ??
+        repositories.incidentsRepository.create({
+          created_by_admin_id: actor.id,
+          resolution_summary: null,
+          resolved_at: null,
+          resolved_by_admin_id: null,
+          source_id: sourceId,
+          source_type: sourceType,
+          status: AdminOperationalIncidentStatus.Open,
+          target_user_id: null,
+        });
+
+      incident.description = description;
+      incident.severity = existingIncident
+        ? this.maxIncidentSeverity(existingIncident.severity, severity)
+        : severity;
+      incident.title = title;
+
+      const savedIncident =
+        await repositories.incidentsRepository.save(incident);
+      if (!existingIncident) {
+        await this.writeUserAuditLog(repositories.auditLogsRepository, {
+          action: AdminAuditAction.OperationalIncidentCreated,
+          actor,
+          context: {
+            ...context,
+            reason: 'Queued operational incident opened',
+          },
+          metadata: {
+            automated: true,
+            incidentId: savedIncident.id,
+            severity: savedIncident.severity,
+            sourceId,
+            sourceType,
+            title,
+          },
+          targetUserId: null,
+        });
+      }
+
+      return this.toOperationalIncidentResponse(
+        savedIncident,
+        this.actorMap(actor),
+        new Map(),
       );
     });
   }
@@ -3300,6 +4489,1326 @@ export class AdminService {
     };
   }
 
+  private toAdminNotificationResponse(
+    notification: AdminNotification,
+  ): AdminNotificationResponse {
+    return {
+      actionUrl: notification.action_url,
+      body: notification.body,
+      createdAt:
+        toNullableIso(notification.created_at) ?? toIsoString(new Date(0)),
+      id: notification.id,
+      metadata: this.safeNotificationMetadata(notification.metadata),
+      readAt: toNullableIso(notification.read_at),
+      severity: notification.severity,
+      title: notification.title,
+      type: notification.type,
+    };
+  }
+
+  private async loadAccountMonitoringThresholds(): Promise<AdminAccountMonitoringThresholds> {
+    const settings = await this.dataSource
+      .getRepository(AdminAccountMonitoringSettings)
+      .findOne({ where: { id: ADMIN_ACCOUNT_MONITORING_SETTINGS_ID } });
+
+    return this.normalizeAccountMonitoringThresholds(settings?.thresholds);
+  }
+
+  private normalizeAccountMonitoringThresholds(
+    value: Partial<AdminAccountMonitoringThresholds> | null | undefined,
+  ): AdminAccountMonitoringThresholds {
+    const thresholds = {
+      ...DEFAULT_ACCOUNT_MONITORING_THRESHOLDS,
+      ...(value ?? {}),
+    };
+    const aiGenerations24hWarning = this.normalizeThresholdInteger(
+      thresholds.aiGenerations24hWarning,
+      DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.aiGenerations24hWarning,
+    );
+    const aiCost24hWarningUsd = this.normalizeThresholdNumber(
+      thresholds.aiCost24hWarningUsd,
+      DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.aiCost24hWarningUsd,
+    );
+    const unknownAuthFailures24hWarning = this.normalizeThresholdInteger(
+      thresholds.unknownAuthFailures24hWarning,
+      DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.unknownAuthFailures24hWarning,
+    );
+    const aiGenerations24hCritical = Math.max(
+      aiGenerations24hWarning,
+      this.normalizeThresholdInteger(
+        thresholds.aiGenerations24hCritical,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.aiGenerations24hCritical,
+      ),
+    );
+    const aiCost24hCriticalUsd = Math.max(
+      aiCost24hWarningUsd,
+      this.normalizeThresholdNumber(
+        thresholds.aiCost24hCriticalUsd,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.aiCost24hCriticalUsd,
+      ),
+    );
+    const unknownAuthFailures24hCritical = Math.max(
+      unknownAuthFailures24hWarning,
+      this.normalizeThresholdInteger(
+        thresholds.unknownAuthFailures24hCritical,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.unknownAuthFailures24hCritical,
+      ),
+    );
+
+    return {
+      aiCost24hCriticalUsd,
+      aiCost24hWarningUsd,
+      aiGenerations24hCritical,
+      aiGenerations24hWarning,
+      authFailures24hWarning: this.normalizeThresholdInteger(
+        thresholds.authFailures24hWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.authFailures24hWarning,
+      ),
+      deletionEvents30dWarning: this.normalizeThresholdInteger(
+        thresholds.deletionEvents30dWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.deletionEvents30dWarning,
+      ),
+      mediaCleanupAttempts24hWarning: this.normalizeThresholdInteger(
+        thresholds.mediaCleanupAttempts24hWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.mediaCleanupAttempts24hWarning,
+      ),
+      mediaCleanupFailures24hWarning: this.normalizeThresholdInteger(
+        thresholds.mediaCleanupFailures24hWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.mediaCleanupFailures24hWarning,
+      ),
+      passwordResets24hWarning: this.normalizeThresholdInteger(
+        thresholds.passwordResets24hWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.passwordResets24hWarning,
+      ),
+      productExtractions24hWarning: this.normalizeThresholdInteger(
+        thresholds.productExtractions24hWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.productExtractions24hWarning,
+      ),
+      safetyReactionSignals7dWarning: this.normalizeThresholdInteger(
+        thresholds.safetyReactionSignals7dWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.safetyReactionSignals7dWarning,
+      ),
+      unknownAuthFailures24hCritical,
+      unknownAuthFailures24hWarning,
+      uploadFailures24hWarning: this.normalizeThresholdInteger(
+        thresholds.uploadFailures24hWarning,
+        DEFAULT_ACCOUNT_MONITORING_THRESHOLDS.uploadFailures24hWarning,
+      ),
+    };
+  }
+
+  private normalizeThresholdInteger(value: unknown, fallback: number): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isInteger(value) ||
+      value < 1 ||
+      value > 10000
+    ) {
+      return fallback;
+    }
+
+    return value;
+  }
+
+  private normalizeThresholdNumber(value: unknown, fallback: number): number {
+    if (
+      typeof value !== 'number' ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      value > 100000
+    ) {
+      return fallback;
+    }
+
+    return value;
+  }
+
+  private async loadSystemMonitoringActor(
+    sessionId: string,
+  ): Promise<AdminAuthenticatedUser | null> {
+    const accountsRepository = this.dataSource.getRepository(AdminAccount);
+    const root = await accountsRepository.findOne({
+      order: { created_at: 'ASC' },
+      where: {
+        role: AdminAccountRole.Root,
+        status: AdminAccountStatus.Active,
+      },
+    });
+    const account =
+      root ??
+      (await accountsRepository.findOne({
+        order: { created_at: 'ASC' },
+        where: { status: AdminAccountStatus.Active },
+      }));
+
+    if (!account) {
+      return null;
+    }
+
+    return {
+      email: account.email,
+      id: account.id,
+      name: account.name,
+      role: account.role,
+      sessionId,
+      status: account.status,
+    };
+  }
+
+  private async notifyAccountMonitoringOwners(
+    notifications: readonly AccountMonitoringOwnerNotification[],
+  ): Promise<void> {
+    for (const notification of notifications) {
+      await this.notifyAccountMonitoringOwner(notification);
+    }
+  }
+
+  private async notifyAccountMonitoringOwner(
+    notification: AccountMonitoringOwnerNotification,
+  ): Promise<void> {
+    const owner =
+      notification.flag.assignedAdmin ?? notification.flag.createdBy ?? null;
+    if (!owner?.email) {
+      return;
+    }
+
+    await this.createAccountMonitoringAdminNotification(owner.id, notification);
+
+    if (!this.mailService) {
+      return;
+    }
+
+    try {
+      await this.mailService.sendAdminAccountMonitoringAlertEmail({
+        email: owner.email,
+        flagId: notification.flag.id,
+        ownerName: owner.name || owner.email,
+        reason: notification.reason,
+        severity: notification.flag.severity,
+        signalType: notification.flag.signalType,
+        status: notification.flag.status,
+        summary: notification.flag.summary,
+        userEmail: notification.flag.user.email,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to notify account monitoring owner ${owner.id}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async createAccountMonitoringAdminNotification(
+    adminId: string,
+    notification: AccountMonitoringOwnerNotification,
+  ): Promise<void> {
+    try {
+      const notificationsRepository =
+        this.dataSource.getRepository(AdminNotification);
+      const title =
+        notification.reason === 'assigned'
+          ? 'Account monitoring flag assigned'
+          : notification.reason === 'refreshed'
+            ? 'Account monitoring flag refreshed'
+            : 'Account monitoring flag opened';
+      const adminNotification = notificationsRepository.create({
+        action_url: '/account-monitoring?status=active',
+        admin_id: adminId,
+        body: `${notification.flag.summary} for ${notification.flag.user.email}.`,
+        metadata: {
+          flagId: notification.flag.id,
+          reason: notification.reason,
+          severity: notification.flag.severity,
+          signalType: notification.flag.signalType,
+          status: notification.flag.status,
+          userId: notification.flag.userId,
+        },
+        read_at: null,
+        severity: this.toAdminNotificationSeverity(notification.flag.severity),
+        title,
+        type: AdminNotificationType.AccountMonitoringAlert,
+      });
+      await notificationsRepository.save(adminNotification);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to create account monitoring in-app notification for admin ${adminId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private toAdminNotificationSeverity(
+    severity: AdminAccountMonitoringSeverity,
+  ): AdminNotificationSeverity {
+    if (severity === AdminAccountMonitoringSeverity.Critical) {
+      return AdminNotificationSeverity.Critical;
+    }
+    if (severity === AdminAccountMonitoringSeverity.Warning) {
+      return AdminNotificationSeverity.Warning;
+    }
+    return AdminNotificationSeverity.Info;
+  }
+
+  private async loadAccountMonitoringEventTimelineItems(
+    flag: AdminAccountMonitoringFlag,
+    limit: number,
+  ): Promise<AdminAccountMonitoringEventTimelineItemResponse[]> {
+    const eventTypes = this.accountMonitoringEventTypesForSignal(
+      flag.signal_type,
+    );
+    if (eventTypes.length === 0) {
+      return [];
+    }
+
+    const events = await this.dataSource
+      .getRepository(AccountMonitoringEvent)
+      .find({
+        order: { occurred_at: 'DESC' },
+        take: limit,
+        where: {
+          event_type: In(eventTypes),
+          user_id: flag.user_id,
+        },
+      });
+
+    return events.map((event) =>
+      this.toMonitoringEventTimelineItem(event, flag.signal_type),
+    );
+  }
+
+  private async loadSyntheticMonitoringTimelineItems(
+    flag: AdminAccountMonitoringFlag,
+    limit: number,
+  ): Promise<AdminAccountMonitoringEventTimelineItemResponse[]> {
+    const sql = this.timelineSqlForSignal(flag.signal_type);
+    if (!sql) {
+      return [];
+    }
+
+    const rows = toQueryRows(
+      await this.dataSource.query(sql, [flag.user_id, limit]),
+    );
+    return rows.map((row) => ({
+      eventType: toStringValue(row.event_type),
+      id: toStringValue(row.id),
+      metadata: this.safeTimelineMetadata(row.metadata),
+      occurredAt: toNullableIso(row.occurred_at) ?? toIsoString(new Date(0)),
+      sourceType: toStringValue(row.source_type),
+      summary: toStringValue(row.summary),
+    }));
+  }
+
+  private accountMonitoringEventTypesForSignal(
+    signalType: AdminAccountMonitoringSignalType,
+  ): AccountMonitoringEventType[] {
+    if (signalType === AdminAccountMonitoringSignalType.RepeatedAuthFailures) {
+      return [
+        AccountMonitoringEventType.AuthLoginFailed,
+        AccountMonitoringEventType.OAuthLoginFailed,
+        AccountMonitoringEventType.PasswordResetRequested,
+      ];
+    }
+    if (
+      signalType === AdminAccountMonitoringSignalType.RepeatedUploadFailures
+    ) {
+      return [AccountMonitoringEventType.SkinJournalPhotoUploadFailed];
+    }
+    if (
+      signalType === AdminAccountMonitoringSignalType.DeletionComplianceWatch
+    ) {
+      return [
+        AccountMonitoringEventType.AccountDeletionCancelled,
+        AccountMonitoringEventType.AccountDeletionRequested,
+      ];
+    }
+    if (signalType === AdminAccountMonitoringSignalType.SupportEscalation) {
+      return [AccountMonitoringEventType.SupportEscalationReceived];
+    }
+
+    return [];
+  }
+
+  private toMonitoringEventTimelineItem(
+    event: AccountMonitoringEvent,
+    signalType: AdminAccountMonitoringSignalType,
+  ): AdminAccountMonitoringEventTimelineItemResponse {
+    return {
+      eventType: event.event_type,
+      id: event.id,
+      metadata: this.safeTimelineMetadata(event.metadata),
+      occurredAt: toIsoString(event.occurred_at),
+      sourceType: 'account_monitoring_events',
+      summary: this.monitoringEventTimelineSummary(event, signalType),
+    };
+  }
+
+  private monitoringEventTimelineSummary(
+    event: AccountMonitoringEvent,
+    signalType: AdminAccountMonitoringSignalType,
+  ): string {
+    const provider =
+      typeof event.metadata.provider === 'string'
+        ? ` (${event.metadata.provider})`
+        : '';
+    const supportReference =
+      typeof event.metadata.supportReference === 'string'
+        ? ` ${event.metadata.supportReference}`
+        : '';
+    const summaries: Record<AccountMonitoringEventType, string> = {
+      [AccountMonitoringEventType.AccountDeletionCancelled]:
+        'Account deletion cancellation was recorded.',
+      [AccountMonitoringEventType.AccountDeletionRequested]:
+        'Account deletion request was recorded.',
+      [AccountMonitoringEventType.AuthLoginFailed]:
+        'Email/password authentication failure was recorded.',
+      [AccountMonitoringEventType.OAuthLoginFailed]: `OAuth authentication failure was recorded${provider}.`,
+      [AccountMonitoringEventType.PasswordResetRequested]:
+        'Password reset activity was recorded.',
+      [AccountMonitoringEventType.SkinJournalPhotoUploadFailed]:
+        'Skin Journal photo upload failure was recorded.',
+      [AccountMonitoringEventType.SupportEscalationReceived]: `Support escalation${supportReference} was received.`,
+    };
+
+    return (
+      summaries[event.event_type] ??
+      `Monitoring event recorded for ${signalType}.`
+    );
+  }
+
+  private safeTimelineMetadata(
+    value: unknown,
+  ): Record<string, string | number | boolean | null> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    const record = value as Record<string, unknown>;
+    const allowedKeys = [
+      'attemptCount',
+      'costUsd',
+      'provider',
+      'reason',
+      'severity',
+      'source',
+      'status',
+      'supportReference',
+    ] as const;
+    return allowedKeys.reduce<Record<string, string | number | boolean | null>>(
+      (metadata, key) => {
+        const item = record[key];
+        if (
+          typeof item === 'string' ||
+          typeof item === 'number' ||
+          typeof item === 'boolean' ||
+          item === null
+        ) {
+          metadata[key] = item;
+        }
+        return metadata;
+      },
+      {},
+    );
+  }
+
+  private safeNotificationMetadata(
+    value: unknown,
+  ): Record<string, string | number | boolean | null> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    const record = value as Record<string, unknown>;
+    const allowedKeys = [
+      'flagId',
+      'incidentId',
+      'reason',
+      'severity',
+      'signalType',
+      'sourceId',
+      'sourceType',
+      'status',
+      'userId',
+    ] as const;
+    return allowedKeys.reduce<Record<string, string | number | boolean | null>>(
+      (metadata, key) => {
+        const item = record[key];
+        if (
+          typeof item === 'string' ||
+          typeof item === 'number' ||
+          typeof item === 'boolean' ||
+          item === null
+        ) {
+          metadata[key] = item;
+        }
+        return metadata;
+      },
+      {},
+    );
+  }
+
+  private timelineSqlForSignal(
+    signalType: AdminAccountMonitoringSignalType,
+  ): string | null {
+    if (signalType === AdminAccountMonitoringSignalType.HighAiCost) {
+      return `
+        WITH timeline AS (
+          SELECT id, COALESCE(analysis_completed_at, analysis_started_at, created_at) AS occurred_at,
+            'skin_journal_analysis' AS event_type,
+            'skin_journal_entries' AS source_type,
+            'Skin Journal analysis cost was recorded.' AS summary,
+            jsonb_build_object('source', 'skin_journal_analysis', 'costUsd', COALESCE(analysis_estimated_cost_usd, 0)::float) AS metadata
+          FROM skin_journal_entries
+          WHERE user_id = $1 AND analysis_status = 'completed'
+          UNION ALL
+          SELECT id, COALESCE(completed_at, created_at) AS occurred_at,
+            'skin_journal_insight_generation' AS event_type,
+            'skin_journal_insight_generation_runs' AS source_type,
+            'Skin Journal insight generation cost was recorded.' AS summary,
+            jsonb_build_object('source', 'skin_journal_insights', 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float, 'status', status) AS metadata
+          FROM skin_journal_insight_generation_runs
+          WHERE user_id = $1 AND status = 'completed'
+          UNION ALL
+          SELECT id, occurred_at, 'product_check_ai_review' AS event_type,
+            'product_check_ai_review_metrics' AS source_type,
+            'Product check AI cost was recorded.' AS summary,
+            jsonb_build_object('source', COALESCE(product_source, 'unknown'), 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float) AS metadata
+          FROM product_check_ai_review_metrics
+          WHERE user_id = $1
+          UNION ALL
+          SELECT id, generated_at AS occurred_at, 'smart_picks_snapshot' AS event_type,
+            'smart_pick_snapshots' AS source_type,
+            'Smart Picks snapshot cost was recorded.' AS summary,
+            jsonb_build_object('source', 'smart_picks_snapshot', 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float) AS metadata
+          FROM smart_pick_snapshots
+          WHERE user_id = $1
+          UNION ALL
+          SELECT id, updated_at AS occurred_at, 'smart_picks_generation' AS event_type,
+            'smart_pick_generation_jobs' AS source_type,
+            'Smart Picks AI generation completed.' AS summary,
+            jsonb_build_object('source', 'smart_picks', 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float, 'status', status) AS metadata
+          FROM smart_pick_generation_jobs
+          WHERE user_id = $1 AND status = 'completed'
+          UNION ALL
+          SELECT id, generated_at AS occurred_at, 'suggestion_generation' AS event_type,
+            'suggestion_instances' AS source_type,
+            'Suggestion AI generation completed.' AS summary,
+            jsonb_build_object('source', 'suggestions', 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float, 'status', generation_status) AS metadata
+          FROM suggestion_instances
+          WHERE user_id = $1 AND generated_at IS NOT NULL AND generation_status = 'ready'
+        )
+        SELECT * FROM timeline ORDER BY occurred_at DESC LIMIT $2
+      `;
+    }
+
+    if (
+      signalType === AdminAccountMonitoringSignalType.ProductExtractionAbuse
+    ) {
+      return `
+        SELECT id, occurred_at, 'product_photo_extraction' AS event_type,
+          'product_check_ai_review_metrics' AS source_type,
+          'Product photo extraction was processed.' AS summary,
+          jsonb_build_object('source', COALESCE(product_source, 'unknown'), 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float) AS metadata
+        FROM product_check_ai_review_metrics
+        WHERE user_id = $1 AND product_source = 'photo_extraction'
+        ORDER BY occurred_at DESC
+        LIMIT $2
+      `;
+    }
+
+    if (
+      signalType ===
+      AdminAccountMonitoringSignalType.SafetyCriticalReactionSignals
+    ) {
+      return `
+        SELECT id, created_at AS occurred_at, 'skin_journal_reaction' AS event_type,
+          'skin_journal_events' AS source_type,
+          'Reaction safety signal was recorded.' AS summary,
+          jsonb_build_object('severity', severity, 'source', kind) AS metadata
+        FROM skin_journal_events
+        WHERE user_id = $1
+          AND kind = 'reaction_detected'
+          AND severity IN ('warning', 'critical')
+        ORDER BY created_at DESC
+        LIMIT $2
+      `;
+    }
+
+    if (
+      signalType === AdminAccountMonitoringSignalType.RepeatedUploadFailures
+    ) {
+      return `
+        SELECT id, updated_at AS occurred_at, 'media_cleanup_failed' AS event_type,
+          'skin_journal_media_deletion_jobs' AS source_type,
+          'Media cleanup job failed.' AS summary,
+          jsonb_build_object('status', status, 'attemptCount', attempt_count) AS metadata
+        FROM skin_journal_media_deletion_jobs
+        WHERE user_id = $1 AND status = 'failed'
+        ORDER BY updated_at DESC
+        LIMIT $2
+      `;
+    }
+
+    return null;
+  }
+
+  private async loadAutomatedMonitoringCandidates(
+    scannedAt: Date,
+    thresholds: AdminAccountMonitoringThresholds,
+  ): Promise<AccountMonitoringAutomatedCandidate[]> {
+    const rows = toQueryRows(
+      await this.dataSource.query(
+        `
+          WITH ai_events AS (
+            SELECT user_id, analysis_started_at AS occurred_at,
+              COALESCE(analysis_estimated_cost_usd, 0)::float AS cost_usd
+            FROM skin_journal_entries
+            WHERE user_id IS NOT NULL AND analysis_started_at >= $1 AND analysis_status = 'completed'
+            UNION ALL
+            SELECT user_id, completed_at AS occurred_at,
+              COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
+            FROM skin_journal_insight_generation_runs
+            WHERE user_id IS NOT NULL AND completed_at >= $1 AND status = 'completed'
+            UNION ALL
+            SELECT user_id, generated_at AS occurred_at,
+              COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
+            FROM suggestion_instances
+            WHERE user_id IS NOT NULL AND generated_at >= $1 AND generation_status = 'ready'
+            UNION ALL
+            SELECT user_id, occurred_at, COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
+            FROM product_check_ai_review_metrics
+            WHERE user_id IS NOT NULL AND occurred_at >= $1
+            UNION ALL
+            SELECT user_id, generated_at AS occurred_at,
+              COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
+            FROM smart_pick_snapshots
+            WHERE user_id IS NOT NULL AND generated_at >= $1
+            UNION ALL
+            SELECT user_id, updated_at AS occurred_at,
+              COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
+            FROM smart_pick_generation_jobs
+            WHERE user_id IS NOT NULL AND updated_at >= $1 AND status = 'completed'
+            UNION ALL
+            SELECT user_id, updated_at AS occurred_at, 0::float AS cost_usd
+            FROM skin_journal_analysis_jobs
+            WHERE user_id IS NOT NULL AND updated_at >= $1 AND status = 'failed'
+            UNION ALL
+            SELECT user_id, COALESCE(completed_at, created_at) AS occurred_at, 0::float AS cost_usd
+            FROM skin_journal_insight_generation_runs
+            WHERE user_id IS NOT NULL
+              AND COALESCE(completed_at, created_at) >= $1
+              AND status = 'failed'
+            UNION ALL
+            SELECT user_id, updated_at AS occurred_at, 0::float AS cost_usd
+            FROM suggestion_generation_jobs
+            WHERE user_id IS NOT NULL AND updated_at >= $1 AND status = 'failed'
+            UNION ALL
+            SELECT user_id, updated_at AS occurred_at, 0::float AS cost_usd
+            FROM smart_pick_generation_jobs
+            WHERE user_id IS NOT NULL AND updated_at >= $1 AND status = 'failed'
+          ),
+          auth_pressure_events AS (
+            SELECT user_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
+            FROM account_monitoring_events
+            WHERE user_id IS NOT NULL
+              AND occurred_at >= $1
+              AND event_type IN ('auth_login_failed', 'oauth_login_failed')
+              AND email_hash IS NOT NULL
+            GROUP BY user_id, email_hash
+            HAVING COUNT(*) >= $8
+            UNION ALL
+            SELECT user_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
+            FROM account_monitoring_events
+            WHERE user_id IS NOT NULL
+              AND occurred_at >= $1
+              AND event_type IN ('auth_login_failed', 'oauth_login_failed')
+              AND ip_address_hash IS NOT NULL
+            GROUP BY user_id, ip_address_hash
+            HAVING COUNT(*) >= $8
+            UNION ALL
+            SELECT user_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
+            FROM account_monitoring_events
+            WHERE user_id IS NOT NULL
+              AND occurred_at >= $1
+              AND event_type = 'password_reset_requested'
+              AND email_hash IS NOT NULL
+            GROUP BY user_id, email_hash
+            HAVING COUNT(*) >= $9
+          ),
+          raw_candidates AS (
+            SELECT user_id, 'high_ai_cost' AS signal_type,
+              CASE WHEN COUNT(*) >= $3 OR COALESCE(SUM(cost_usd), 0) >= $5 THEN 'critical' ELSE 'warning' END AS severity,
+              'ai_usage_threshold' AS reason_code, COUNT(*)::int AS event_count,
+              COALESCE(SUM(cost_usd), 0)::float AS cost_usd, MAX(occurred_at) AS latest_at
+            FROM ai_events
+            GROUP BY user_id
+            HAVING COUNT(*) >= $2 OR COALESCE(SUM(cost_usd), 0) >= $4
+            UNION ALL
+            SELECT user_id, 'product_extraction_abuse',
+              CASE WHEN COUNT(*) >= ($6 * 2) THEN 'critical' ELSE 'warning' END,
+              'product_extraction_volume', COUNT(*)::int, 0::float, MAX(occurred_at)
+            FROM product_check_ai_review_metrics
+            WHERE user_id IS NOT NULL AND occurred_at >= $1 AND product_source = 'photo_extraction'
+            GROUP BY user_id
+            HAVING COUNT(*) >= $6
+            UNION ALL
+            SELECT user_id, 'repeated_upload_failures',
+              CASE WHEN COUNT(*) >= ($7 * 2) THEN 'critical' ELSE 'warning' END,
+              'upload_failures', COUNT(*)::int, 0::float, MAX(occurred_at)
+            FROM account_monitoring_events
+            WHERE user_id IS NOT NULL AND occurred_at >= $1 AND event_type = 'skin_journal_photo_upload_failed'
+            GROUP BY user_id
+            HAVING COUNT(*) >= $7
+            UNION ALL
+            SELECT user_id, 'repeated_auth_failures',
+              CASE WHEN MAX(event_count) >= ($8 * 2) THEN 'critical' ELSE 'warning' END,
+              'auth_failure_pressure', MAX(event_count)::int, 0::float, MAX(latest_at)
+            FROM auth_pressure_events
+            GROUP BY user_id
+            UNION ALL
+            SELECT user_id, 'deletion_compliance_watch', 'warning',
+              'account_deletion_loop', COUNT(*)::int, 0::float, MAX(occurred_at)
+            FROM account_monitoring_events
+            WHERE user_id IS NOT NULL AND occurred_at >= $10
+              AND event_type IN ('account_deletion_requested', 'account_deletion_cancelled')
+            GROUP BY user_id
+            HAVING COUNT(*) >= $11
+              AND COUNT(*) FILTER (WHERE event_type = 'account_deletion_requested') >= 2
+              AND COUNT(*) FILTER (WHERE event_type = 'account_deletion_cancelled') >= 1
+            UNION ALL
+            SELECT user_id, 'repeated_upload_failures',
+              CASE WHEN COALESCE(SUM(attempt_count), 0) >= ($13 * 2) THEN 'critical' ELSE 'warning' END,
+              'media_cleanup_failures', COUNT(*)::int,
+              COALESCE(SUM(attempt_count), 0)::float, MAX(updated_at)
+            FROM skin_journal_media_deletion_jobs
+            WHERE user_id IS NOT NULL AND updated_at >= $1 AND status = 'failed'
+            GROUP BY user_id
+            HAVING COUNT(*) >= $12 OR COALESCE(SUM(attempt_count), 0) >= $13
+            UNION ALL
+            SELECT user_id, 'safety_critical_reaction_signals',
+              CASE WHEN COUNT(*) FILTER (WHERE severity = 'critical') > 0 THEN 'critical' ELSE 'warning' END,
+              'safety_reaction_signals', COUNT(*)::int, 0::float, MAX(created_at)
+            FROM skin_journal_events
+            WHERE user_id IS NOT NULL AND created_at >= $14
+              AND kind = 'reaction_detected' AND severity IN ('warning', 'critical')
+            GROUP BY user_id
+            HAVING COUNT(*) >= $15
+            UNION ALL
+            SELECT user_id, 'support_escalation', 'warning',
+              'support_escalation', COUNT(*)::int, 0::float, MAX(occurred_at)
+            FROM account_monitoring_events
+            WHERE user_id IS NOT NULL AND occurred_at >= $10
+              AND event_type = 'support_escalation_received'
+            GROUP BY user_id
+          ),
+          ranked_candidates AS (
+            SELECT raw_candidates.*,
+              ROW_NUMBER() OVER (
+                PARTITION BY user_id, signal_type
+                ORDER BY CASE severity WHEN 'critical' THEN 2 ELSE 1 END DESC, latest_at DESC
+              ) AS candidate_rank
+            FROM raw_candidates
+          )
+          SELECT ranked_candidates.*, users.email AS user_email,
+            NULLIF(CONCAT_WS(' ', users.first_name, users.last_name), '') AS user_name
+          FROM ranked_candidates
+          JOIN users ON users.id = ranked_candidates.user_id
+          WHERE candidate_rank = 1
+          ORDER BY CASE severity WHEN 'critical' THEN 2 ELSE 1 END DESC, latest_at DESC
+          LIMIT $16
+        `,
+        [
+          new Date(scannedAt.getTime() - DAY_MS),
+          thresholds.aiGenerations24hWarning,
+          thresholds.aiGenerations24hCritical,
+          thresholds.aiCost24hWarningUsd,
+          thresholds.aiCost24hCriticalUsd,
+          thresholds.productExtractions24hWarning,
+          thresholds.uploadFailures24hWarning,
+          thresholds.authFailures24hWarning,
+          thresholds.passwordResets24hWarning,
+          new Date(scannedAt.getTime() - 30 * DAY_MS),
+          thresholds.deletionEvents30dWarning,
+          thresholds.mediaCleanupFailures24hWarning,
+          thresholds.mediaCleanupAttempts24hWarning,
+          new Date(scannedAt.getTime() - 7 * DAY_MS),
+          thresholds.safetyReactionSignals7dWarning,
+          ADMIN_ACCOUNT_MONITORING_AUTOMATED_SCAN_LIMIT,
+        ],
+      ),
+    );
+
+    return rows
+      .filter((row) => typeof row.user_id === 'string')
+      .map((row) => ({
+        costUsd: toNumber(row.cost_usd),
+        eventCount: toNumber(row.event_count),
+        latestAt: toNullableIso(row.latest_at),
+        reasonCode: toStringValue(row.reason_code),
+        severity: this.normalizeMonitoringSeverity(
+          toStringValue(row.severity) as AdminAccountMonitoringSeverity,
+        ),
+        signalType: this.normalizeMonitoringSignalType(
+          toStringValue(row.signal_type) as AdminAccountMonitoringSignalType,
+        ),
+        userEmail: toStringValue(row.user_email),
+        userId: toStringValue(row.user_id),
+        userName: toStringValue(row.user_name) || toStringValue(row.user_email),
+      }));
+  }
+
+  private async loadPlatformMonitoringIncidentCandidates(
+    scannedAt: Date,
+    thresholds: AdminAccountMonitoringThresholds,
+  ): Promise<AccountMonitoringSecurityIncidentCandidate[]> {
+    const [authCandidates, mediaCandidates] = await Promise.all([
+      this.loadUnknownAuthSecurityIncidentCandidates(scannedAt, thresholds),
+      this.loadGlobalMediaCleanupIncidentCandidates(scannedAt, thresholds),
+    ]);
+    return [...authCandidates, ...mediaCandidates];
+  }
+
+  private async loadUnknownAuthSecurityIncidentCandidates(
+    scannedAt: Date,
+    thresholds: AdminAccountMonitoringThresholds,
+  ): Promise<AccountMonitoringSecurityIncidentCandidate[]> {
+    const rows = toQueryRows(
+      await this.dataSource.query(
+        `
+          WITH auth_sources AS (
+            SELECT 'login_email' AS source_kind, email_hash AS source_hash,
+              COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
+            FROM account_monitoring_events
+            WHERE user_id IS NULL
+              AND occurred_at >= $1
+              AND event_type IN ('auth_login_failed', 'oauth_login_failed')
+              AND email_hash IS NOT NULL
+            GROUP BY email_hash
+            HAVING COUNT(*) >= $2
+            UNION ALL
+            SELECT 'login_ip' AS source_kind, ip_address_hash AS source_hash,
+              COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
+            FROM account_monitoring_events
+            WHERE user_id IS NULL
+              AND occurred_at >= $1
+              AND event_type IN ('auth_login_failed', 'oauth_login_failed')
+              AND ip_address_hash IS NOT NULL
+            GROUP BY ip_address_hash
+            HAVING COUNT(*) >= $2
+            UNION ALL
+            SELECT 'reset_email' AS source_kind, email_hash AS source_hash,
+              COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
+            FROM account_monitoring_events
+            WHERE user_id IS NULL
+              AND occurred_at >= $1
+              AND event_type = 'password_reset_requested'
+              AND email_hash IS NOT NULL
+            GROUP BY email_hash
+            HAVING COUNT(*) >= $2
+          )
+          SELECT source_kind, source_hash, event_count, latest_at
+          FROM auth_sources
+          ORDER BY event_count DESC, latest_at DESC
+          LIMIT $3
+        `,
+        [
+          new Date(scannedAt.getTime() - DAY_MS),
+          thresholds.unknownAuthFailures24hWarning,
+          ADMIN_ACCOUNT_MONITORING_AUTOMATED_SCAN_LIMIT,
+        ],
+      ),
+    );
+
+    return rows
+      .filter((row) => typeof row.source_hash === 'string')
+      .map((row) => {
+        const sourceKind = toStringValue(row.source_kind);
+        const sourceHash = toStringValue(row.source_hash);
+        const eventCount = toNumber(row.event_count);
+        const latestAt = toNullableIso(row.latest_at);
+        const severity =
+          eventCount >= thresholds.unknownAuthFailures24hCritical
+            ? AdminOperationalIncidentSeverity.Critical
+            : AdminOperationalIncidentSeverity.Warning;
+        const label =
+          sourceKind === 'login_ip'
+            ? 'same IP'
+            : sourceKind === 'reset_email'
+              ? 'same password reset email'
+              : 'same login email';
+
+        return {
+          description: `Unknown-account authentication pressure crossed the 24-hour threshold from the ${label}. ${eventCount} events were recorded. Latest event: ${latestAt ?? toIsoString(scannedAt)}.`,
+          eventCount,
+          latestAt,
+          severity,
+          sourceId: this.toUnknownAuthIncidentSourceId(sourceKind, sourceHash),
+          sourceType: 'account-monitoring:unknown-auth',
+          title: 'Unknown account auth pressure detected',
+        };
+      });
+  }
+
+  private async loadGlobalMediaCleanupIncidentCandidates(
+    scannedAt: Date,
+    thresholds: AdminAccountMonitoringThresholds,
+  ): Promise<AccountMonitoringSecurityIncidentCandidate[]> {
+    const rows = toQueryRows(
+      await this.dataSource.query(
+        `
+          SELECT COUNT(*)::int AS event_count,
+            COALESCE(SUM(attempt_count), 0)::int AS attempt_count,
+            MAX(updated_at) AS latest_at
+          FROM skin_journal_media_deletion_jobs
+          WHERE updated_at >= $1 AND status = 'failed'
+          HAVING COUNT(*) >= $2 OR COALESCE(SUM(attempt_count), 0) >= $3
+        `,
+        [
+          new Date(scannedAt.getTime() - DAY_MS),
+          thresholds.mediaCleanupFailures24hWarning,
+          thresholds.mediaCleanupAttempts24hWarning,
+        ],
+      ),
+    );
+    const row = rows[0];
+    if (!row) {
+      return [];
+    }
+
+    const eventCount = toNumber(row.event_count);
+    const attemptCount = toNumber(row.attempt_count);
+    if (eventCount <= 0 && attemptCount <= 0) {
+      return [];
+    }
+
+    const latestAt = toNullableIso(row.latest_at);
+    const severity =
+      eventCount >= thresholds.mediaCleanupFailures24hWarning * 2 ||
+      attemptCount >= thresholds.mediaCleanupAttempts24hWarning * 2
+        ? AdminOperationalIncidentSeverity.Critical
+        : AdminOperationalIncidentSeverity.Warning;
+
+    return [
+      {
+        description: `Global media cleanup failures crossed the 24-hour threshold. ${eventCount} failed jobs and ${attemptCount} retry attempts were recorded. Latest event: ${latestAt ?? toIsoString(scannedAt)}.`,
+        eventCount,
+        latestAt,
+        severity,
+        sourceId: 'skin-journal-media-cleanup:24h',
+        sourceType: 'account-monitoring:media-cleanup',
+        title: 'Global media cleanup failures detected',
+      },
+    ];
+  }
+
+  private async upsertAutomatedSecurityIncidents(
+    repositories: AdminUserMutationRepositories,
+    actor: AdminAuthenticatedUser,
+    context: AdminRequestContext,
+    candidates: readonly AccountMonitoringSecurityIncidentCandidate[],
+  ): Promise<{ created: number; refreshed: number }> {
+    if (candidates.length === 0) {
+      return { created: 0, refreshed: 0 };
+    }
+
+    const existingIncidents = await repositories.incidentsRepository.find({
+      where: {
+        source_id: In(candidates.map((candidate) => candidate.sourceId)),
+        source_type: In([
+          ...new Set(candidates.map((item) => item.sourceType)),
+        ]),
+        status: AdminOperationalIncidentStatus.Open,
+      },
+    });
+    const existingBySourceId = new Map(
+      existingIncidents.map((incident) => [
+        `${incident.source_type}:${incident.source_id}`,
+        incident,
+      ]),
+    );
+    let created = 0;
+    let refreshed = 0;
+
+    for (const candidate of candidates) {
+      const existing = existingBySourceId.get(
+        `${candidate.sourceType}:${candidate.sourceId}`,
+      );
+      if (existing) {
+        existing.description = candidate.description;
+        existing.severity = this.maxIncidentSeverity(
+          existing.severity,
+          candidate.severity,
+        );
+        existing.title = candidate.title;
+        await repositories.incidentsRepository.save(existing);
+        refreshed += 1;
+        continue;
+      }
+
+      const incident = repositories.incidentsRepository.create({
+        created_by_admin_id: actor.id,
+        description: candidate.description,
+        resolution_summary: null,
+        resolved_at: null,
+        resolved_by_admin_id: null,
+        severity: candidate.severity,
+        source_id: candidate.sourceId,
+        source_type: candidate.sourceType,
+        status: AdminOperationalIncidentStatus.Open,
+        target_user_id: null,
+        title: candidate.title,
+      });
+      const saved = await repositories.incidentsRepository.save(incident);
+      created += 1;
+      await this.writeUserAuditLog(repositories.auditLogsRepository, {
+        action: AdminAuditAction.OperationalIncidentCreated,
+        actor,
+        context: {
+          ...context,
+          reason: 'Automated platform monitoring threshold crossed',
+        },
+        metadata: {
+          automated: true,
+          eventCount: candidate.eventCount,
+          incidentId: saved.id,
+          latestAt: candidate.latestAt,
+          severity: candidate.severity,
+          sourceId: candidate.sourceId,
+          sourceType: candidate.sourceType,
+        },
+        targetUserId: null,
+      });
+    }
+
+    return { created, refreshed };
+  }
+
+  private toUnknownAuthIncidentSourceId(
+    sourceKind: string,
+    sourceHash: string,
+  ): string {
+    return `${sourceKind}:${sourceHash.slice(0, 48)}`;
+  }
+
+  private maxIncidentSeverity(
+    current: AdminOperationalIncidentSeverity,
+    next: AdminOperationalIncidentSeverity,
+  ): AdminOperationalIncidentSeverity {
+    if (current === AdminOperationalIncidentSeverity.Critical) {
+      return current;
+    }
+
+    return next;
+  }
+
+  private toAutomatedMonitoringDraft(
+    candidate: AccountMonitoringAutomatedCandidate,
+    scannedAt: Date,
+  ): {
+    internalNote: string;
+    latestSignal: string;
+    nextReviewAt: Date;
+    summary: string;
+  } {
+    const latest = candidate.latestAt ?? toIsoString(scannedAt);
+    const reviewWindowMs =
+      candidate.severity === AdminAccountMonitoringSeverity.Critical
+        ? DAY_MS
+        : 3 * DAY_MS;
+    const metric =
+      candidate.costUsd > 0
+        ? `${candidate.eventCount} events, $${candidate.costUsd.toFixed(4)} estimated cost`
+        : `${candidate.eventCount} events`;
+    const templates: Record<string, { signal: string; summary: string }> = {
+      account_deletion_loop: {
+        signal: `Deletion/cancellation activity crossed the 30-day review threshold: ${metric}. Latest event: ${latest}.`,
+        summary: 'Account deletion activity needs review',
+      },
+      ai_usage_threshold: {
+        signal: `AI activity crossed the 24-hour monitoring threshold: ${metric}. Latest event: ${latest}.`,
+        summary: 'High AI usage detected',
+      },
+      auth_failure_pressure: {
+        signal: `Authentication or reset activity crossed the 24-hour monitoring threshold: ${metric}. Latest event: ${latest}.`,
+        summary: 'Repeated auth activity detected',
+      },
+      media_cleanup_failures: {
+        signal: `Media cleanup failures crossed the 24-hour monitoring threshold: ${metric}. Latest event: ${latest}.`,
+        summary: 'Media cleanup failures detected',
+      },
+      product_extraction_volume: {
+        signal: `Photo extraction volume crossed the 24-hour monitoring threshold: ${metric}. Latest event: ${latest}.`,
+        summary: 'Product extraction volume spike',
+      },
+      safety_reaction_signals: {
+        signal: `Safety-critical reaction signals crossed the 7-day monitoring threshold: ${metric}. Latest event: ${latest}.`,
+        summary: 'Repeated reaction safety signals',
+      },
+      support_escalation: {
+        signal: `Support escalation event was received for this account. Latest event: ${latest}.`,
+        summary: 'Support escalation needs review',
+      },
+      upload_failures: {
+        signal: `Upload failures crossed the 24-hour monitoring threshold: ${metric}. Latest event: ${latest}.`,
+        summary: 'Repeated upload failures detected',
+      },
+    };
+    const template = templates[candidate.reasonCode] ?? {
+      signal: `Automated monitoring threshold crossed: ${metric}. Latest event: ${latest}.`,
+      summary: 'Automated monitoring threshold crossed',
+    };
+
+    return {
+      internalNote:
+        'Automated monitoring candidate. Review account activity, avoid exposing sensitive event details, and resolve only after the pattern is explained.',
+      latestSignal: template.signal,
+      nextReviewAt: new Date(scannedAt.getTime() + reviewWindowMs),
+      summary: template.summary,
+    };
+  }
+
+  private accountMonitoringCandidateKey(
+    userId: string,
+    signalType: AdminAccountMonitoringSignalType,
+  ): string {
+    return `${userId}:${signalType}`;
+  }
+
+  private maxMonitoringSeverity(
+    current: AdminAccountMonitoringSeverity,
+    next: AdminAccountMonitoringSeverity,
+  ): AdminAccountMonitoringSeverity {
+    const rank: Record<AdminAccountMonitoringSeverity, number> = {
+      [AdminAccountMonitoringSeverity.Info]: 0,
+      [AdminAccountMonitoringSeverity.Warning]: 1,
+      [AdminAccountMonitoringSeverity.Critical]: 2,
+    };
+    return rank[next] > rank[current] ? next : current;
+  }
+
+  private async writeAutomatedMonitoringAuditLog(
+    auditLogsRepository: Repository<AdminAuditLog>,
+    actor: AdminAuthenticatedUser,
+    context: AdminRequestContext,
+    flag: AdminAccountMonitoringFlag,
+    action:
+      | AdminAuditAction.AccountMonitoringFlagCreated
+      | AdminAuditAction.AccountMonitoringFlagUpdated,
+    candidate: AccountMonitoringAutomatedCandidate,
+  ): Promise<void> {
+    await this.writeUserAuditLog(auditLogsRepository, {
+      action,
+      actor,
+      context: {
+        ...context,
+        reason: 'Automated account monitoring threshold crossed',
+      },
+      metadata: {
+        automated: true,
+        eventCount: candidate.eventCount,
+        monitoringFlagId: flag.id,
+        reasonCode: candidate.reasonCode,
+        signalType: flag.signal_type,
+        status: flag.status,
+      },
+      targetUserId: flag.user_id,
+    });
+  }
+
+  private toAccountMonitoringFlagResponse(
+    row: QueryRow,
+  ): AdminAccountMonitoringFlagResponse {
+    const assignedAdminId = toNullableString(row.assigned_admin_id);
+    const resolvedByAdminId = toNullableString(row.resolved_by_admin_id);
+    const userId = toStringValue(row.user_id);
+
+    return {
+      assignedAdmin: assignedAdminId
+        ? {
+            email: toStringValue(row.assigned_admin_email),
+            id: assignedAdminId,
+            name: toStringValue(row.assigned_admin_name),
+          }
+        : null,
+      assignedAdminId,
+      auditLogCount: toNumber(row.audit_log_count),
+      createdAt: toNullableIso(row.created_at) ?? toIsoString(new Date(0)),
+      createdBy: {
+        email: toStringValue(row.created_by_admin_email),
+        id: toStringValue(row.created_by_admin_id),
+        name: toStringValue(row.created_by_admin_name),
+      },
+      createdByAdminId: toStringValue(row.created_by_admin_id),
+      id: toStringValue(row.id),
+      internalNote: toNullableString(row.internal_note),
+      latestSignal: toNullableString(row.latest_signal),
+      nextReviewAt: toNullableIso(row.next_review_at),
+      resolutionNote: toNullableString(row.resolution_note),
+      resolvedAt: toNullableIso(row.resolved_at),
+      resolvedBy: resolvedByAdminId
+        ? {
+            email: toStringValue(row.resolved_by_admin_email),
+            id: resolvedByAdminId,
+            name: toStringValue(row.resolved_by_admin_name),
+          }
+        : null,
+      resolvedByAdminId,
+      severity: this.normalizeMonitoringSeverity(
+        toStringValue(row.severity) as AdminAccountMonitoringSeverity,
+      ),
+      signalType: this.normalizeMonitoringSignalType(
+        toStringValue(row.signal_type) as AdminAccountMonitoringSignalType,
+      ),
+      status: this.normalizeMonitoringStatus(
+        toStringValue(row.status) as AdminAccountMonitoringStatus,
+      ),
+      summary: toStringValue(row.summary),
+      updatedAt: toNullableIso(row.updated_at) ?? toIsoString(new Date(0)),
+      user: {
+        email: toStringValue(row.user_email),
+        id: userId,
+        name: toStringValue(row.user_name) || toStringValue(row.user_email),
+      },
+      userId,
+    };
+  }
+
+  private toAccountMonitoringFlagResponseFromEntity(
+    flag: AdminAccountMonitoringFlag,
+    user: User,
+    actors: Readonly<
+      Record<string, { email: string; id: string; name: string }>
+    >,
+  ): AdminAccountMonitoringFlagResponse {
+    const assignedAdminId = toNullableString(flag.assigned_admin_id);
+    const resolvedByAdminId = toNullableString(flag.resolved_by_admin_id);
+    const userName = [user.first_name, user.last_name]
+      .filter(Boolean)
+      .join(' ');
+
+    return {
+      assignedAdmin: assignedAdminId ? (actors[assignedAdminId] ?? null) : null,
+      assignedAdminId,
+      auditLogCount: 1,
+      createdAt: toNullableIso(flag.created_at) ?? toIsoString(new Date()),
+      createdBy: actors[flag.created_by_admin_id] ?? {
+        email: '',
+        id: flag.created_by_admin_id,
+        name: '',
+      },
+      createdByAdminId: flag.created_by_admin_id,
+      id: flag.id,
+      internalNote: flag.internal_note,
+      latestSignal: flag.latest_signal,
+      nextReviewAt: toNullableIso(flag.next_review_at),
+      resolutionNote: flag.resolution_note,
+      resolvedAt: toNullableIso(flag.resolved_at),
+      resolvedBy: resolvedByAdminId
+        ? (actors[resolvedByAdminId] ?? null)
+        : null,
+      resolvedByAdminId,
+      severity: flag.severity,
+      signalType: flag.signal_type,
+      status: flag.status,
+      summary: flag.summary,
+      updatedAt: toNullableIso(flag.updated_at) ?? toIsoString(new Date()),
+      user: {
+        email: user.email,
+        id: user.id,
+        name: userName || user.email,
+      },
+      userId: user.id,
+    };
+  }
+
+  private toAccountMonitoringFlagResponseFromCandidate(
+    flag: AdminAccountMonitoringFlag,
+    candidate: AccountMonitoringAutomatedCandidate | undefined,
+    actors: Readonly<
+      Record<string, { email: string; id: string; name: string }>
+    >,
+  ): AdminAccountMonitoringFlagResponse {
+    const assignedAdminId = toNullableString(flag.assigned_admin_id);
+    const resolvedByAdminId = toNullableString(flag.resolved_by_admin_id);
+    const userEmail = candidate?.userEmail ?? '';
+
+    return {
+      assignedAdmin: assignedAdminId ? (actors[assignedAdminId] ?? null) : null,
+      assignedAdminId,
+      auditLogCount: 1,
+      createdAt: toNullableIso(flag.created_at) ?? toIsoString(new Date()),
+      createdBy: actors[flag.created_by_admin_id] ?? {
+        email: '',
+        id: flag.created_by_admin_id,
+        name: '',
+      },
+      createdByAdminId: flag.created_by_admin_id,
+      id: flag.id,
+      internalNote: flag.internal_note,
+      latestSignal: flag.latest_signal,
+      nextReviewAt: toNullableIso(flag.next_review_at),
+      resolutionNote: flag.resolution_note,
+      resolvedAt: toNullableIso(flag.resolved_at),
+      resolvedBy: resolvedByAdminId
+        ? (actors[resolvedByAdminId] ?? null)
+        : null,
+      resolvedByAdminId,
+      severity: flag.severity,
+      signalType: flag.signal_type,
+      status: flag.status,
+      summary: flag.summary,
+      updatedAt: toNullableIso(flag.updated_at) ?? toIsoString(new Date()),
+      user: {
+        email: userEmail,
+        id: flag.user_id,
+        name: candidate?.userName || userEmail,
+      },
+      userId: flag.user_id,
+    };
+  }
+
+  private async getMonitoringActorsForFlags(
+    flags: readonly AdminAccountMonitoringFlag[],
+  ): Promise<Map<string, AdminOperationalIncidentActor>> {
+    const adminIds = [
+      ...new Set(
+        flags.flatMap((flag) => [
+          flag.assigned_admin_id,
+          flag.created_by_admin_id,
+          flag.resolved_by_admin_id,
+        ]),
+      ),
+    ].filter((id): id is string => typeof id === 'string' && id.length > 0);
+    if (adminIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = toQueryRows(
+      await this.dataSource.query(
+        `
+          SELECT id, email, name
+          FROM admin_accounts
+          WHERE id = ANY($1::varchar[])
+        `,
+        [adminIds],
+      ),
+    );
+
+    return new Map(
+      rows
+        .filter((row) => typeof row.id === 'string')
+        .map((row) => [
+          toStringValue(row.id),
+          {
+            email: toStringValue(row.email),
+            id: toStringValue(row.id),
+            name: toStringValue(row.name),
+          },
+        ]),
+    );
+  }
+
   private async getIncidentAdmins(
     incidents: readonly AdminOperationalIncident[],
   ): Promise<Map<string, AdminOperationalIncidentActor>> {
@@ -3638,6 +6147,41 @@ export class AdminService {
     return user;
   }
 
+  private async findUserByAdminIdentifierForMutation(
+    usersRepository: Repository<User>,
+    identifier: string,
+  ): Promise<User> {
+    const trimmed = identifier.trim();
+    const user = trimmed.includes('@')
+      ? await usersRepository.findOne({
+          where: { canonical_email: canonicalizeEmailForIdentity(trimmed) },
+        })
+      : await usersRepository.findOne({ where: { id: trimmed } });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  private async findAdminAccountForMonitoringAssignment(
+    accountsRepository: Repository<AdminAccount>,
+    adminId: string,
+  ): Promise<AdminAccount> {
+    const account = await accountsRepository.findOne({
+      where: {
+        id: adminId,
+        status: AdminAccountStatus.Active,
+      },
+    });
+    if (!account) {
+      throw new NotFoundException('Assigned admin not found');
+    }
+
+    return account;
+  }
+
   private normalizeAuditReason(reason: string): string {
     const trimmed = reason.trim();
     if (!trimmed) {
@@ -3815,6 +6359,94 @@ export class AdminService {
     return severity;
   }
 
+  private normalizeMonitoringText(
+    value: string,
+    requiredMessage: string,
+    maxLength: number,
+    minLength: number,
+  ): string {
+    const trimmed = value.trim().replace(/\s+/g, ' ');
+    if (trimmed.length < minLength) {
+      throw new BadRequestException(requiredMessage);
+    }
+
+    if (trimmed.length > maxLength) {
+      throw new BadRequestException('Account monitoring text is too long');
+    }
+
+    return trimmed;
+  }
+
+  private normalizeFutureReviewDate(
+    value: string | null | undefined,
+  ): Date | null {
+    if (!value) {
+      return null;
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException(
+        'Account monitoring review date is invalid',
+      );
+    }
+
+    if (date.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'Account monitoring review date must be in the future',
+      );
+    }
+
+    return date;
+  }
+
+  private normalizeMonitoringSignalType(
+    signalType: AdminAccountMonitoringSignalType,
+  ): AdminAccountMonitoringSignalType {
+    if (Object.values(AdminAccountMonitoringSignalType).includes(signalType)) {
+      return signalType;
+    }
+
+    throw new BadRequestException('Account monitoring signal type is invalid');
+  }
+
+  private normalizeMonitoringSeverity(
+    severity: AdminAccountMonitoringSeverity,
+  ): AdminAccountMonitoringSeverity {
+    if (Object.values(AdminAccountMonitoringSeverity).includes(severity)) {
+      return severity;
+    }
+
+    throw new BadRequestException('Account monitoring severity is invalid');
+  }
+
+  private normalizeMonitoringStatus(
+    status: AdminAccountMonitoringStatus,
+  ): AdminAccountMonitoringStatus {
+    if (Object.values(AdminAccountMonitoringStatus).includes(status)) {
+      return status;
+    }
+
+    throw new BadRequestException('Account monitoring status is invalid');
+  }
+
+  private normalizeMonitoringOpenStatus(
+    status:
+      | AdminAccountMonitoringStatus.Open
+      | AdminAccountMonitoringStatus.Watching,
+  ): AdminAccountMonitoringStatus.Open | AdminAccountMonitoringStatus.Watching {
+    if (
+      status === AdminAccountMonitoringStatus.Open ||
+      status === AdminAccountMonitoringStatus.Watching
+    ) {
+      return status;
+    }
+
+    throw new BadRequestException(
+      'Resolved monitoring flags must use the resolve endpoint',
+    );
+  }
+
   private async writeUserAuditLog(
     auditLogsRepository: Repository<AdminAuditLog>,
     input: {
@@ -3852,8 +6484,15 @@ export class AdminService {
     manager: EntityManager,
   ): AdminUserMutationRepositories {
     return {
+      accountsRepository: manager.getRepository(AdminAccount),
       auditLogsRepository: manager.getRepository(AdminAuditLog),
       incidentsRepository: manager.getRepository(AdminOperationalIncident),
+      notificationsRepository: manager.getRepository(AdminNotification),
+      monitoringEventsRepository: manager.getRepository(AccountMonitoringEvent),
+      monitoringRepository: manager.getRepository(AdminAccountMonitoringFlag),
+      monitoringSettingsRepository: manager.getRepository(
+        AdminAccountMonitoringSettings,
+      ),
       notesRepository: manager.getRepository(AdminUserNote),
       sessionsRepository: manager.getRepository(AuthSession),
       usersRepository: manager.getRepository(User),

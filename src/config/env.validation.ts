@@ -393,6 +393,27 @@ export const envValidationSchema = Joi.object({
     .allow('')
     .required(),
   ACCOUNT_DELETION_SCHEDULER_DLQ_ARN: Joi.string().trim().allow('').required(),
+  ACCOUNT_MONITORING_QUEUE_DRIVER: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().valid('sqs').required(),
+    otherwise: Joi.string().valid('sqs', 'none').default('none'),
+  }),
+  ACCOUNT_MONITORING_SQS_QUEUE_URL: Joi.when(
+    'ACCOUNT_MONITORING_QUEUE_DRIVER',
+    {
+      is: 'sqs',
+      then: Joi.string()
+        .trim()
+        .uri({ scheme: ['https'] })
+        .required(),
+      otherwise: Joi.string().trim().allow('').default(''),
+    },
+  ),
+  ACCOUNT_MONITORING_SQS_DLQ_URL: Joi.string()
+    .trim()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .default(''),
   OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
     .trim()
     .allow('')

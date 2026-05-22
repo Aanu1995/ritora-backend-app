@@ -9,6 +9,10 @@ import {
 import { ulid } from 'ulid';
 
 export enum AdminAuditAction {
+  AccountMonitoringFlagCreated = 'account_monitoring_flag_created',
+  AccountMonitoringFlagResolved = 'account_monitoring_flag_resolved',
+  AccountMonitoringFlagUpdated = 'account_monitoring_flag_updated',
+  AccountMonitoringSettingsUpdated = 'account_monitoring_settings_updated',
   AdminInvited = 'admin_invited',
   AdminInvitationResent = 'admin_invitation_resent',
   AdminDeleted = 'admin_deleted',

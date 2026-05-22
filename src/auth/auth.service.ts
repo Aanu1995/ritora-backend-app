@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { compare, hash } from 'bcrypt';
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { Response } from 'express';
 import type { SignOptions } from 'jsonwebtoken';
 import { IsNull, Repository } from 'typeorm';
@@ -35,6 +35,11 @@ import { SkinJournalService } from '../skin-journal/skin-journal.service';
 import type { SkinJournalExportPayload } from '../skin-journal/skin-journal.constants';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
+import {
+  AccountMonitoringEvent,
+  AccountMonitoringEventMetadata,
+  AccountMonitoringEventType,
+} from '../users/entities/account-monitoring-event.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { UserCapabilitySnapshotService } from '../users/user-capability-snapshot.service';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
@@ -141,9 +146,7 @@ const ACCOUNT_DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
 const ACCOUNT_DELETION_CONFIRM_EXPIRY = '1h';
 const ACCOUNT_DELETION_BATCH_SIZE = 100;
 const ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS = 10_000;
-const ACCOUNT_DELETION_EXTERNAL_TIMEOUT_CONFIG_KEY =
-  'ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS';
+const ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS = 10_000;
 
 function roundUpToWholeSecond(value: Date): Date {
   const timestamp = value.getTime();
@@ -153,21 +156,6 @@ function roundUpToWholeSecond(value: Date): Date {
   }
 
   return new Date(timestamp + (1000 - millisecondRemainder));
-}
-
-function readPositiveMilliseconds(value: unknown, fallback: number): number {
-  const parsed =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string'
-        ? Number(value)
-        : Number.NaN;
-
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-
-  return Math.floor(parsed);
 }
 
 type OAuthProviderConfig = {
@@ -212,6 +200,8 @@ export class AuthService {
     private readonly mailService: MailService,
     @InjectRepository(AuthSession)
     private readonly sessionsRepository: Repository<AuthSession>,
+    @InjectRepository(AccountMonitoringEvent)
+    private readonly accountMonitoringEventsRepository: Repository<AccountMonitoringEvent>,
     @InjectRepository(UserConsent)
     private readonly consentsRepository: Repository<UserConsent>,
     @InjectRepository(SkinProfile)
@@ -251,10 +241,8 @@ export class AuthService {
     this.privacyVersion = configService.getOrThrow('LEGAL_PRIVACY_VERSION');
     this.webAppUrl = configService.getOrThrow('WEB_APP_URL');
     this.nodeEnv = configService.getOrThrow('NODE_ENV');
-    this.accountDeletionExternalTimeoutMs = readPositiveMilliseconds(
-      configService.get(ACCOUNT_DELETION_EXTERNAL_TIMEOUT_CONFIG_KEY),
-      DEFAULT_ACCOUNT_DELETION_EXTERNAL_TIMEOUT_MS,
-    );
+    this.accountDeletionExternalTimeoutMs =
+      ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS;
   }
 
   async register(
@@ -334,11 +322,25 @@ export class AuthService {
   ): Promise<AuthResponseDto> {
     const user = await this.usersService.findByEmailForAuth(email);
     if (!user || !user.password_hash) {
+      await this.recordAccountMonitoringEvent({
+        email,
+        eventType: AccountMonitoringEventType.AuthLoginFailed,
+        ip,
+        metadata: { reason: 'invalid_credentials' },
+        userId: user?.id ?? null,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const valid = await compare(password, user.password_hash);
     if (!valid) {
+      await this.recordAccountMonitoringEvent({
+        email,
+        eventType: AccountMonitoringEventType.AuthLoginFailed,
+        ip,
+        metadata: { reason: 'invalid_credentials' },
+        userId: user.id,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -370,13 +372,22 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
   ): Promise<AuthResponseDto> {
-    return this.loginWithOAuthProvider(
-      googleProfile,
-      options,
-      res,
-      ip,
-      userAgent,
-    );
+    try {
+      return await this.loginWithOAuthProvider(
+        googleProfile,
+        options,
+        res,
+        ip,
+        userAgent,
+      );
+    } catch (error) {
+      await this.recordOAuthFailureForMonitoring(OAuthProvider.Google, {
+        email: googleProfile.email,
+        ip,
+        reason: this.oauthFailureReason(error),
+      });
+      throw error;
+    }
   }
 
   async loginWithApple(
@@ -390,13 +401,43 @@ export class AuthService {
     ip?: string,
     userAgent?: string,
   ): Promise<AuthResponseDto> {
-    return this.loginWithOAuthProvider(
-      appleProfile,
-      options,
-      res,
-      ip,
-      userAgent,
-    );
+    try {
+      return await this.loginWithOAuthProvider(
+        appleProfile,
+        options,
+        res,
+        ip,
+        userAgent,
+      );
+    } catch (error) {
+      await this.recordOAuthFailureForMonitoring(OAuthProvider.Apple, {
+        email: appleProfile.email,
+        ip,
+        reason: this.oauthFailureReason(error),
+      });
+      throw error;
+    }
+  }
+
+  async recordOAuthFailureForMonitoring(
+    provider: OAuthProvider,
+    input: {
+      email?: string;
+      ip?: string;
+      reason: string;
+      userId?: string | null;
+    },
+  ): Promise<void> {
+    await this.recordAccountMonitoringEvent({
+      email: input.email,
+      eventType: AccountMonitoringEventType.OAuthLoginFailed,
+      ip: input.ip,
+      metadata: {
+        provider,
+        reason: this.normalizeOAuthFailureReason(input.reason),
+      },
+      userId: input.userId ?? null,
+    });
   }
 
   private async loginWithOAuthProvider(
@@ -624,11 +665,30 @@ export class AuthService {
     );
   }
 
-  async forgotPassword(email: string, language?: AppLanguage): Promise<void> {
+  async forgotPassword(
+    email: string,
+    language?: AppLanguage,
+    ip?: string,
+  ): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
+      await this.recordAccountMonitoringEvent({
+        email,
+        eventType: AccountMonitoringEventType.PasswordResetRequested,
+        ip,
+        metadata: { reason: 'password_reset_requested_unknown_account' },
+        userId: null,
+      });
       return;
     }
+
+    await this.recordAccountMonitoringEvent({
+      email,
+      eventType: AccountMonitoringEventType.PasswordResetRequested,
+      ip,
+      metadata: { reason: 'password_reset_requested' },
+      userId: user.id,
+    });
 
     const resetToken = randomBytes(32).toString('hex');
     const resetTokenHash = this.sha256(resetToken);
@@ -1064,6 +1124,12 @@ export class AuthService {
       confirmToken,
       language,
     );
+    await this.recordAccountMonitoringEvent({
+      email: user.email,
+      eventType: AccountMonitoringEventType.AccountDeletionRequested,
+      metadata: { flow: 'oauth_confirmation' },
+      userId: user.id,
+    });
 
     return { status: AccountDeletionStatus.ConfirmationRequired };
   }
@@ -1114,6 +1180,12 @@ export class AuthService {
       language,
       scheduledForIso,
     );
+    await this.recordAccountMonitoringEvent({
+      email: user.email,
+      eventType: AccountMonitoringEventType.AccountDeletionRequested,
+      metadata: { flow: 'scheduled_deletion' },
+      userId: user.id,
+    });
 
     return {
       status: AccountDeletionStatus.Scheduled,
@@ -1161,6 +1233,12 @@ export class AuthService {
     // the cancellation request open after the account is already safe.
     void this.cancelDurableAccountDeletionSchedule(user.id);
     void this.sendAccountDeletionCancelledEmailOrLogFailure(user, language);
+    await this.recordAccountMonitoringEvent({
+      email: user.email,
+      eventType: AccountMonitoringEventType.AccountDeletionCancelled,
+      metadata: { flow: cancelTokenHash ? 'token' : 'account_access' },
+      userId: user.id,
+    });
   }
 
   private isRecentAccountDeletionCancellation(user: User): boolean {
@@ -1561,6 +1639,70 @@ export class AuthService {
 
   private sha256(data: string): string {
     return createHash('sha256').update(data).digest('hex');
+  }
+
+  private accountMonitoringHash(
+    value: string | null | undefined,
+  ): string | null {
+    const normalized = value?.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+
+    return createHmac('sha256', this.jwtRefreshSecret)
+      .update(normalized)
+      .digest('hex');
+  }
+
+  private oauthFailureReason(error: unknown): string {
+    if (error instanceof ConflictException) {
+      return 'account_link_conflict';
+    }
+    if (error instanceof ForbiddenException) {
+      return 'forbidden';
+    }
+    if (error instanceof UnauthorizedException) {
+      return 'unauthorized';
+    }
+    if (error instanceof BadRequestException) {
+      return 'bad_request';
+    }
+
+    return 'oauth_login_failed';
+  }
+
+  private normalizeOAuthFailureReason(reason: string): string {
+    return reason
+      .replace(/[^a-z0-9_-]/gi, '_')
+      .toLowerCase()
+      .slice(0, 80);
+  }
+
+  private async recordAccountMonitoringEvent(input: {
+    email?: string;
+    eventType: AccountMonitoringEventType;
+    ip?: string;
+    metadata?: AccountMonitoringEventMetadata;
+    userId: string | null;
+  }): Promise<void> {
+    try {
+      const sanitizedIp = sanitizeIpAddress(input.ip);
+      const event = this.accountMonitoringEventsRepository.create({
+        email_hash: this.accountMonitoringHash(input.email),
+        event_type: input.eventType,
+        ip_address_hash: this.accountMonitoringHash(sanitizedIp),
+        metadata: input.metadata ?? {},
+        occurred_at: nowDate(),
+        user_id: input.userId,
+      });
+      await this.accountMonitoringEventsRepository.save(event);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record account monitoring event: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
   }
 
   private getOAuthProviderConfig(provider: OAuthProvider): OAuthProviderConfig {

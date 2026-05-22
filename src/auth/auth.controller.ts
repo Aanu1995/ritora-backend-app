@@ -38,7 +38,7 @@ import { AppleOAuthCallbackGuard } from './guards/apple-oauth-callback.guard';
 import { AppleOAuthGuard } from './guards/apple-oauth.guard';
 import { GoogleOAuthCallbackGuard } from './guards/google-oauth-callback.guard';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
-import { OAuthIdentityProfile } from './oauth/oauth-profile';
+import { OAuthIdentityProfile, OAuthProvider } from './oauth/oauth-profile';
 import {
   APPLE_OAUTH_CONTEXT_COOKIE,
   APPLE_OAUTH_STATE_COOKIE,
@@ -155,6 +155,13 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     if (!req.user) {
+      await this.authService.recordOAuthFailureForMonitoring(
+        OAuthProvider.Google,
+        {
+          ip: req.ip,
+          reason: 'missing_profile',
+        },
+      );
       throw new UnauthorizedException('Missing Google profile');
     }
 
@@ -190,6 +197,13 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     if (!req.user) {
+      await this.authService.recordOAuthFailureForMonitoring(
+        OAuthProvider.Apple,
+        {
+          ip: req.ip,
+          reason: 'missing_profile',
+        },
+      );
       throw new UnauthorizedException('Missing Apple profile');
     }
 
@@ -281,9 +295,10 @@ export class AuthController {
   @Throttle(authThrottle(3))
   async forgotPassword(
     @Body() dto: ForgotPasswordDto,
+    @Req() req: Request,
   ): Promise<{ message: string }> {
     const language = normalizeLanguage(dto.language);
-    await this.authService.forgotPassword(dto.email, language);
+    await this.authService.forgotPassword(dto.email, language, req.ip);
     return {
       message: translate(language, 'messages.auth.forgotPassword.success'),
     };

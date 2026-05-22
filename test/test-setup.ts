@@ -155,7 +155,7 @@ export async function createTestApp(
   if (!dataSource.isInitialized) {
     await dataSource.initialize();
   }
-  await dataSource.runMigrations();
+  await dataSource.runMigrations({ transaction: 'each' });
 
   await app.init();
 

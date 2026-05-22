@@ -2,11 +2,25 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AuthSession } from '../auth/entities/auth-session.entity';
 import { User } from '../users/entities/user.entity';
-import { AdminService } from './admin.service';
+import {
+  ACCOUNT_MONITORING_INCIDENT_SESSION_ID,
+  AdminService,
+} from './admin.service';
 import {
   AdminAccountRole,
   AdminAccountStatus,
+  AdminAccount,
 } from './entities/admin-account.entity';
+import {
+  AdminAccountMonitoringFlag,
+  AdminAccountMonitoringSeverity,
+  AdminAccountMonitoringSignalType,
+  AdminAccountMonitoringStatus,
+} from './entities/admin-account-monitoring-flag.entity';
+import {
+  ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
+  AdminAccountMonitoringSettings,
+} from './entities/admin-account-monitoring-settings.entity';
 import {
   AdminAuditAction,
   AdminAuditLog,
@@ -17,11 +31,18 @@ import {
   AdminOperationalIncidentSeverity,
   AdminOperationalIncidentStatus,
 } from './entities/admin-operational-incident.entity';
+import {
+  AdminNotification,
+  AdminNotificationSeverity,
+  AdminNotificationType,
+} from './entities/admin-notification.entity';
 import { AdminUserNote } from './entities/admin-user-note.entity';
 import { AdminJobStatus, AdminUserRestrictionFilter } from './admin.types';
 import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
+import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitoring.dto';
 import { UserRestrictionCapability } from '../users/user-restrictions';
 import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
+import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
 
 type RepositoryMock = Record<string, unknown>;
 
@@ -35,8 +56,13 @@ const restrictionUserMessageTransformer =
   );
 
 function createAdminDataSourceMock(options: {
+  accountsRepository?: Partial<RepositoryMock>;
   auditLogsRepository?: Partial<RepositoryMock>;
   incidentsRepository?: Partial<RepositoryMock>;
+  notificationsRepository?: Partial<RepositoryMock>;
+  monitoringRepository?: Partial<RepositoryMock>;
+  monitoringEventsRepository?: Partial<RepositoryMock>;
+  monitoringSettingsRepository?: Partial<RepositoryMock>;
   notesRepository?: Partial<RepositoryMock>;
   query?: jest.Mock;
   sessionsRepository?: Partial<RepositoryMock>;
@@ -62,30 +88,94 @@ function createAdminDataSourceMock(options: {
     save: jest.fn(async (value: AdminUserNote) => value),
     ...options.notesRepository,
   };
+  const accountsRepository = {
+    findOne: jest.fn(),
+    ...options.accountsRepository,
+  };
+  const monitoringRepository = {
+    create: jest.fn(
+      (value: Partial<AdminAccountMonitoringFlag>) =>
+        value as AdminAccountMonitoringFlag,
+    ),
+    find: jest.fn(async () => []),
+    findOne: jest.fn(),
+    save: jest.fn(async (value: AdminAccountMonitoringFlag) => value),
+    ...options.monitoringRepository,
+  };
+  const monitoringEventsRepository = {
+    create: jest.fn((value: Partial<AccountMonitoringEvent>) => value),
+    find: jest.fn(async () => []),
+    save: jest.fn(async (value: AccountMonitoringEvent) => value),
+    ...options.monitoringEventsRepository,
+  };
+  const monitoringSettingsRepository = {
+    create: jest.fn(
+      (value: Partial<AdminAccountMonitoringSettings>) =>
+        value as AdminAccountMonitoringSettings,
+    ),
+    findOne: jest.fn(),
+    save: jest.fn(async (value: AdminAccountMonitoringSettings) => value),
+    ...options.monitoringSettingsRepository,
+  };
   const incidentsRepository = {
     create: jest.fn(
       (value: Partial<AdminOperationalIncident>) =>
         value as AdminOperationalIncident,
     ),
+    find: jest.fn(async () => []),
     findOne: jest.fn(),
     save: jest.fn(async (value: AdminOperationalIncident) => value),
     ...options.incidentsRepository,
   };
+  const notificationsRepository = {
+    create: jest.fn(
+      (value: Partial<AdminNotification>) => value as AdminNotification,
+    ),
+    count: jest.fn(async () => 0),
+    createQueryBuilder: jest.fn(() => ({
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn(async () => []),
+      orderBy: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+    })),
+    findOne: jest.fn(),
+    save: jest.fn(async (value: AdminNotification) => value),
+    ...options.notificationsRepository,
+  };
   const manager = {
     getRepository: jest.fn((entity: unknown) => {
+      if (entity === AdminAccount) return accountsRepository;
       if (entity === User) return usersRepository;
       if (entity === AuthSession) return sessionsRepository;
       if (entity === AdminAuditLog) return auditLogsRepository;
+      if (entity === AccountMonitoringEvent) {
+        return monitoringEventsRepository;
+      }
+      if (entity === AdminAccountMonitoringFlag) return monitoringRepository;
+      if (entity === AdminAccountMonitoringSettings) {
+        return monitoringSettingsRepository;
+      }
       if (entity === AdminUserNote) return notesRepository;
       if (entity === AdminOperationalIncident) return incidentsRepository;
+      if (entity === AdminNotification) return notificationsRepository;
       throw new Error('Unexpected repository requested');
     }),
   };
 
   return {
     getRepository: jest.fn((entity: unknown) => {
+      if (entity === AdminAccount) return accountsRepository;
       if (entity === AdminUserNote) return notesRepository;
       if (entity === AdminOperationalIncident) return incidentsRepository;
+      if (entity === AdminNotification) return notificationsRepository;
+      if (entity === AccountMonitoringEvent) {
+        return monitoringEventsRepository;
+      }
+      if (entity === AdminAccountMonitoringFlag) return monitoringRepository;
+      if (entity === AdminAccountMonitoringSettings) {
+        return monitoringSettingsRepository;
+      }
       throw new Error('Unexpected repository requested');
     }),
     query: options.query ?? jest.fn(),
@@ -134,6 +224,31 @@ function fakeUser(overrides: Partial<User> = {}): User {
     sex_at_birth: null,
     time_zone: 'Europe/Stockholm',
     updated_at: new Date('2026-05-10T10:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function fakeMonitoringFlag(
+  overrides: Partial<AdminAccountMonitoringFlag> = {},
+): AdminAccountMonitoringFlag {
+  return {
+    assigned_admin_id: 'admin-ops',
+    created_at: new Date('2026-05-21T09:00:00.000Z'),
+    created_by_admin_id: 'admin-ops',
+    generateId: jest.fn(),
+    id: 'flag-1',
+    internal_note: 'Review AI cost trend before taking action.',
+    latest_signal: 'AI spend crossed the daily review threshold.',
+    next_review_at: new Date('2099-05-22T09:00:00.000Z'),
+    resolution_note: null,
+    resolved_at: null,
+    resolved_by_admin_id: null,
+    severity: AdminAccountMonitoringSeverity.Warning,
+    signal_type: AdminAccountMonitoringSignalType.HighAiCost,
+    status: AdminAccountMonitoringStatus.Open,
+    summary: 'High AI spend spike',
+    updated_at: new Date('2026-05-21T09:00:00.000Z'),
+    user_id: '01USER',
     ...overrides,
   };
 }
@@ -196,6 +311,74 @@ describe('AdminService', () => {
       'audit:read',
     ]);
     expect(member.roles).toEqual(['admin']);
+  });
+
+  it('lists and marks admin notifications without exposing unsafe metadata', async () => {
+    const notification = {
+      action_url: '/account-monitoring?status=active',
+      admin_id: 'admin-ops',
+      body: 'High AI usage needs review.',
+      created_at: new Date('2026-05-22T09:00:00.000Z'),
+      generateId: jest.fn(),
+      id: 'notification-1',
+      metadata: {
+        flagId: 'flag-1',
+        secret: 'must-not-leak',
+        userId: '01USER',
+      },
+      read_at: null,
+      severity: AdminNotificationSeverity.Warning,
+      title: 'Account monitoring flag opened',
+      type: AdminNotificationType.AccountMonitoringAlert,
+    } as AdminNotification;
+    const save = jest.fn(async (value: AdminNotification) => value);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        notificationsRepository: {
+          count: jest.fn(async () => 1),
+          createQueryBuilder: jest.fn(() => ({
+            addOrderBy: jest.fn().mockReturnThis(),
+            getMany: jest.fn(async () => [notification]),
+            orderBy: jest.fn().mockReturnThis(),
+            take: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+          })),
+          findOne: jest.fn(async () => notification),
+          save,
+        },
+      }),
+    );
+    const actor = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Lead',
+      role: AdminAccountRole.Admin,
+      sessionId: 'admin-session',
+      status: AdminAccountStatus.Active,
+    };
+
+    await expect(service.listNotifications(actor)).resolves.toMatchObject({
+      notifications: [
+        {
+          id: 'notification-1',
+          metadata: { flagId: 'flag-1', userId: '01USER' },
+          readAt: null,
+        },
+      ],
+      unreadCount: 1,
+    });
+    await expect(
+      service.markNotificationRead(actor, 'notification-1'),
+    ).resolves.toMatchObject({
+      id: 'notification-1',
+      readAt: expect.any(String),
+    });
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'notification-1',
+        read_at: expect.any(Date),
+      }),
+    );
   });
 
   it('aggregates product health, jobs, alerts, and compliance metrics', async () => {
@@ -1293,6 +1476,7 @@ describe('AdminService', () => {
     const result = await service.listAuditLogs({
       action: AdminAuditAction.AdminInvited,
       limit: 25,
+      monitoringFlagId: 'flag-1',
       page: 1,
       query: 'ops_%',
       targetAdminId: 'admin-ops',
@@ -1303,6 +1487,7 @@ describe('AdminService', () => {
       expect.arrayContaining([
         AdminAuditAction.AdminInvited,
         'admin-ops',
+        'flag-1',
         '%ops\\_\\%%',
         25,
         0,
@@ -1310,6 +1495,7 @@ describe('AdminService', () => {
     );
     const sql = String(query.mock.calls[0]?.[0]);
     expect(sql).toContain('LEFT JOIN users target_user');
+    expect(sql).toContain("logs.metadata ->> 'monitoringFlagId'");
     expect(sql).toContain("ESCAPE '\\'");
     expect(sql).toContain('ORDER BY created_at DESC, id DESC');
     expect(result.logs[0]).toEqual(
@@ -1329,6 +1515,746 @@ describe('AdminService', () => {
       }),
     );
     expect(JSON.stringify(result)).not.toContain('password');
+  });
+
+  it('lists account monitoring flags with status, signal, search, and owner context', async () => {
+    const query = jest.fn().mockResolvedValueOnce([
+      {
+        assigned_admin_email: 'ops@ritora.app',
+        assigned_admin_id: 'admin-ops',
+        assigned_admin_name: 'Ops Lead',
+        audit_log_count: '2',
+        created_at: '2026-05-21T09:00:00.000Z',
+        created_by_admin_email: 'owner@ritora.app',
+        created_by_admin_id: 'admin-root',
+        created_by_admin_name: 'Root Admin',
+        id: 'flag-1',
+        internal_note: 'Review AI cost trend before taking action.',
+        latest_signal: 'AI spend crossed the daily review threshold.',
+        next_review_at: '2099-05-22T09:00:00.000Z',
+        resolution_note: null,
+        resolved_at: null,
+        resolved_by_admin_email: null,
+        resolved_by_admin_id: null,
+        resolved_by_admin_name: null,
+        severity: AdminAccountMonitoringSeverity.Warning,
+        signal_type: AdminAccountMonitoringSignalType.HighAiCost,
+        status: AdminAccountMonitoringStatus.Watching,
+        summary: 'High AI spend spike',
+        total_count: '1',
+        updated_at: '2026-05-21T09:05:00.000Z',
+        user_email: 'jane@example.com',
+        user_id: '01USER',
+        user_name: 'Jane Doe',
+      },
+    ]);
+    const service = new AdminService(createAdminDataSourceMock({ query }));
+
+    const result = await service.listAccountMonitoringFlags({
+      assignedAdminId: 'admin-ops',
+      limit: 10,
+      page: 1,
+      query: 'jane_%',
+      signalType: AdminAccountMonitoringSignalType.HighAiCost,
+      status: AdminAccountMonitoringStatusFilter.Watching,
+    });
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('WITH filtered_flags AS'),
+      expect.arrayContaining([
+        AdminAccountMonitoringStatus.Watching,
+        AdminAccountMonitoringSignalType.HighAiCost,
+        'admin-ops',
+        '%jane\\_\\%%',
+        10,
+        0,
+      ]),
+    );
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain('JOIN users ON users.id = flags.user_id');
+    expect(sql).toContain("ESCAPE '\\'");
+    expect(sql).toContain('ORDER BY');
+    expect(result).toEqual({
+      flags: [
+        expect.objectContaining({
+          assignedAdmin: {
+            email: 'ops@ritora.app',
+            id: 'admin-ops',
+            name: 'Ops Lead',
+          },
+          auditLogCount: 2,
+          latestSignal: 'AI spend crossed the daily review threshold.',
+          signalType: AdminAccountMonitoringSignalType.HighAiCost,
+          status: AdminAccountMonitoringStatus.Watching,
+          user: {
+            email: 'jane@example.com',
+            id: '01USER',
+            name: 'Jane Doe',
+          },
+        }),
+      ],
+      hasNextPage: false,
+      hasPreviousPage: false,
+      limit: 10,
+      page: 1,
+      total: 1,
+      totalPages: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain('password');
+  });
+
+  it('creates account monitoring flags with duplicate protection and audited metadata only', async () => {
+    const savedFlag = fakeMonitoringFlag({
+      assigned_admin_id: 'admin-ops',
+      created_by_admin_id: 'admin-ops',
+      id: 'flag-1',
+    });
+    const monitoringCreate = jest.fn(
+      (value: Partial<AdminAccountMonitoringFlag>) =>
+        value as AdminAccountMonitoringFlag,
+    );
+    const monitoringSave = jest.fn(async () => savedFlag);
+    const auditCreate = jest.fn(
+      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+    );
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        auditLogsRepository: { create: auditCreate },
+        monitoringRepository: {
+          create: monitoringCreate,
+          findOne: jest.fn(async () => null),
+          save: monitoringSave,
+        },
+        usersRepository: {
+          findOne: jest.fn(async () => fakeUser()),
+        },
+      }),
+    );
+    const actor = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Lead',
+      role: AdminAccountRole.Admin,
+      sessionId: 'admin-session',
+      status: AdminAccountStatus.Active,
+    };
+
+    const result = await service.createAccountMonitoringFlag(
+      actor,
+      {
+        internalNote: 'Review AI cost trend before taking action.',
+        latestSignal: 'AI spend crossed the daily review threshold.',
+        reason: 'AI cost spike needs manual review',
+        severity: AdminAccountMonitoringSeverity.Warning,
+        signalType: AdminAccountMonitoringSignalType.HighAiCost,
+        summary: 'High AI spend spike',
+        userIdentifier: 'jane@example.com',
+      },
+      { ip: '127.0.0.1', sessionId: 'admin-session', userAgent: 'Jest' },
+    );
+
+    expect(monitoringCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assigned_admin_id: 'admin-ops',
+        created_by_admin_id: 'admin-ops',
+        internal_note: 'Review AI cost trend before taking action.',
+        latest_signal: 'AI spend crossed the daily review threshold.',
+        severity: AdminAccountMonitoringSeverity.Warning,
+        signal_type: AdminAccountMonitoringSignalType.HighAiCost,
+        status: AdminAccountMonitoringStatus.Open,
+        summary: 'High AI spend spike',
+        user_id: '01USER',
+      }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AccountMonitoringFlagCreated,
+        actor_admin_id: 'admin-ops',
+        metadata: {
+          monitoringFlagId: 'flag-1',
+          nextReviewAt: null,
+          severity: AdminAccountMonitoringSeverity.Warning,
+          signalType: AdminAccountMonitoringSignalType.HighAiCost,
+          status: AdminAccountMonitoringStatus.Open,
+        },
+        reason: 'AI cost spike needs manual review',
+        target_user_id: '01USER',
+      }),
+    );
+    expect(JSON.stringify(auditCreate.mock.calls)).not.toContain(
+      'Review AI cost trend before taking action',
+    );
+    expect(result).toMatchObject({
+      assignedAdmin: {
+        email: 'ops@ritora.app',
+        id: 'admin-ops',
+        name: 'Ops Lead',
+      },
+      id: 'flag-1',
+      signalType: AdminAccountMonitoringSignalType.HighAiCost,
+      user: {
+        email: 'jane@example.com',
+        id: '01USER',
+        name: 'Jane Doe',
+      },
+    });
+  });
+
+  it('updates and resolves account monitoring flags with audited state transitions', async () => {
+    const openFlag = fakeMonitoringFlag();
+    const updatedFlag = fakeMonitoringFlag({
+      status: AdminAccountMonitoringStatus.Watching,
+    });
+    const resolvedFlag = fakeMonitoringFlag({
+      resolution_note: 'Cost returned to expected usage after review.',
+      resolved_at: new Date('2026-05-21T10:00:00.000Z'),
+      resolved_by_admin_id: 'admin-ops',
+      status: AdminAccountMonitoringStatus.Resolved,
+    });
+    const monitoringFindOne = jest
+      .fn()
+      .mockResolvedValueOnce(openFlag)
+      .mockResolvedValueOnce(updatedFlag);
+    const monitoringSave = jest
+      .fn()
+      .mockResolvedValueOnce(updatedFlag)
+      .mockResolvedValueOnce(resolvedFlag);
+    const auditCreate = jest.fn(
+      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+    );
+    const query = jest
+      .fn<Promise<Array<Record<string, unknown>>>, [string, unknown[]?]>()
+      .mockResolvedValue([
+        { email: 'ops@ritora.app', id: 'admin-ops', name: 'Ops Lead' },
+      ]);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        auditLogsRepository: { create: auditCreate },
+        monitoringRepository: {
+          findOne: monitoringFindOne,
+          save: monitoringSave,
+        },
+        query,
+        usersRepository: {
+          findOne: jest.fn(async () => fakeUser()),
+        },
+      }),
+    );
+    const actor = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Lead',
+      role: AdminAccountRole.Admin,
+      sessionId: 'admin-session',
+      status: AdminAccountStatus.Active,
+    };
+
+    await service.updateAccountMonitoringFlag(
+      actor,
+      'flag-1',
+      {
+        reason: 'Account is under active review',
+        status: AdminAccountMonitoringStatus.Watching,
+      },
+      { ip: '127.0.0.1', sessionId: 'admin-session', userAgent: 'Jest' },
+    );
+    const resolved = await service.resolveAccountMonitoringFlag(
+      actor,
+      'flag-1',
+      {
+        reason: 'Manual review cleared account',
+        resolutionNote: 'Cost returned to expected usage after review.',
+      },
+      { ip: '127.0.0.1', sessionId: 'admin-session', userAgent: 'Jest' },
+    );
+
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AccountMonitoringFlagUpdated,
+        metadata: expect.objectContaining({
+          monitoringFlagId: 'flag-1',
+          status: AdminAccountMonitoringStatus.Watching,
+        }),
+        reason: 'Account is under active review',
+      }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AccountMonitoringFlagResolved,
+        metadata: {
+          monitoringFlagId: 'flag-1',
+          signalType: AdminAccountMonitoringSignalType.HighAiCost,
+          status: AdminAccountMonitoringStatus.Resolved,
+        },
+        reason: 'Manual review cleared account',
+      }),
+    );
+    expect(resolved.status).toBe(AdminAccountMonitoringStatus.Resolved);
+    expect(JSON.stringify(auditCreate.mock.calls)).not.toContain(
+      'Cost returned to expected usage after review',
+    );
+  });
+
+  it('updates account monitoring thresholds with audit coverage', async () => {
+    const auditCreate = jest.fn(
+      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+    );
+    const settingsSave = jest.fn(
+      async (value: AdminAccountMonitoringSettings) => ({
+        ...value,
+        created_at: new Date('2026-05-22T09:00:00.000Z'),
+        updated_at: new Date('2026-05-22T09:10:00.000Z'),
+      }),
+    );
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        auditLogsRepository: { create: auditCreate },
+        monitoringSettingsRepository: {
+          findOne: jest.fn(async () => null),
+          save: settingsSave,
+        },
+      }),
+    );
+    const actor = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Lead',
+      role: AdminAccountRole.Admin,
+      sessionId: 'admin-session',
+      status: AdminAccountStatus.Active,
+    };
+
+    const result = await service.updateAccountMonitoringSettings(
+      actor,
+      {
+        reason: 'Tune monitoring thresholds after launch traffic review',
+        thresholds: {
+          aiCost24hCriticalUsd: 6,
+          aiCost24hWarningUsd: 3,
+          aiGenerations24hCritical: 40,
+          aiGenerations24hWarning: 45,
+          authFailures24hWarning: 9,
+          deletionEvents30dWarning: 4,
+          mediaCleanupAttempts24hWarning: 7,
+          mediaCleanupFailures24hWarning: 4,
+          passwordResets24hWarning: 6,
+          productExtractions24hWarning: 22,
+          safetyReactionSignals7dWarning: 4,
+          unknownAuthFailures24hCritical: 12,
+          unknownAuthFailures24hWarning: 10,
+          uploadFailures24hWarning: 6,
+        },
+      },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'admin-session',
+        userAgent: 'Jest',
+      },
+    );
+
+    expect(settingsSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
+        thresholds: expect.objectContaining({
+          aiGenerations24hCritical: 45,
+          aiGenerations24hWarning: 45,
+          unknownAuthFailures24hCritical: 12,
+        }),
+        updated_by_admin_id: 'admin-ops',
+      }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AccountMonitoringSettingsUpdated,
+        metadata: expect.objectContaining({
+          thresholds: expect.objectContaining({
+            aiCost24hWarningUsd: 3,
+            uploadFailures24hWarning: 6,
+          }),
+        }),
+        reason: 'Tune monitoring thresholds after launch traffic review',
+        target_user_id: null,
+      }),
+    );
+    expect(result).toMatchObject({
+      thresholds: expect.objectContaining({
+        aiGenerations24hCritical: 45,
+        aiGenerations24hWarning: 45,
+      }),
+      updatedByAdminId: 'admin-ops',
+    });
+  });
+
+  it('runs automated account monitoring scan across documented candidate sources', async () => {
+    const auditCreate = jest.fn(
+      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+    );
+    const monitoringSave = jest.fn(
+      async (value: AdminAccountMonitoringFlag) =>
+        ({
+          ...value,
+          created_at: new Date('2026-05-22T09:00:00.000Z'),
+          id: 'flag-auto-1',
+          updated_at: new Date('2026-05-22T09:00:00.000Z'),
+        }) as AdminAccountMonitoringFlag,
+    );
+    const incidentSave = jest.fn(
+      async (value: AdminOperationalIncident) =>
+        ({
+          ...value,
+          created_at: new Date('2026-05-22T09:00:00.000Z'),
+          id: 'incident-auto-1',
+          updated_at: new Date('2026-05-22T09:00:00.000Z'),
+        }) as AdminOperationalIncident,
+    );
+    const query = jest
+      .fn<Promise<Array<Record<string, unknown>>>, [string, unknown[]?]>()
+      .mockResolvedValueOnce([
+        {
+          cost_usd: '2.75',
+          event_count: '31',
+          latest_at: '2026-05-22T08:50:00.000Z',
+          reason_code: 'ai_usage_threshold',
+          severity: AdminAccountMonitoringSeverity.Warning,
+          signal_type: AdminAccountMonitoringSignalType.HighAiCost,
+          user_email: 'jane@example.com',
+          user_id: '01USER',
+          user_name: 'Jane Doe',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          event_count: '12',
+          latest_at: '2026-05-22T08:55:00.000Z',
+          source_hash: 'abcdef1234567890abcdef1234567890abcdef1234567890',
+          source_kind: 'login_ip',
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { email: 'ops@ritora.app', id: 'admin-ops', name: 'Ops Lead' },
+      ]);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        auditLogsRepository: { create: auditCreate },
+        incidentsRepository: {
+          find: jest.fn(async () => []),
+          save: incidentSave,
+        },
+        monitoringRepository: {
+          find: jest.fn(async () => []),
+          save: monitoringSave,
+        },
+        query,
+      }),
+    );
+    const actor = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Lead',
+      role: AdminAccountRole.Admin,
+      sessionId: 'admin-session',
+      status: AdminAccountStatus.Active,
+    };
+
+    const result = await service.runAccountMonitoringAutomatedScan(actor, {
+      ip: '127.0.0.1',
+      sessionId: 'admin-session',
+      userAgent: 'Jest',
+    });
+
+    const userSignalSql = String(query.mock.calls[0]?.[0]);
+    const platformSignalSql = String(query.mock.calls[1]?.[0]);
+    expect(userSignalSql).toContain('skin_journal_entries');
+    expect(userSignalSql).toContain('analysis_started_at >= $1');
+    expect(userSignalSql).toContain('skin_journal_insight_generation_runs');
+    expect(userSignalSql).toContain('completed_at >= $1');
+    expect(userSignalSql).toContain('suggestion_instances');
+    expect(userSignalSql).toContain('product_check_ai_review_metrics');
+    expect(userSignalSql).toContain('smart_pick_snapshots');
+    expect(userSignalSql).toMatch(
+      /FROM smart_pick_snapshots\s+WHERE user_id IS NOT NULL AND generated_at >= \$1/,
+    );
+    expect(userSignalSql).toMatch(
+      /FROM suggestion_instances\s+WHERE user_id IS NOT NULL AND generated_at >= \$1/,
+    );
+    expect(userSignalSql).toContain('smart_pick_generation_jobs');
+    expect(userSignalSql).toContain(
+      "updated_at >= $1 AND status = 'completed'",
+    );
+    expect(userSignalSql).toContain('skin_journal_analysis_jobs');
+    expect(userSignalSql).toContain('suggestion_generation_jobs');
+    expect(userSignalSql).toContain("analysis_status = 'completed'");
+    expect(userSignalSql).toContain("generation_status = 'ready'");
+    expect(userSignalSql).toContain("status = 'completed'");
+    expect(userSignalSql).toContain("status = 'failed'");
+    expect(userSignalSql).toContain('COALESCE(ai_estimated_cost_usd, 0)');
+    expect(userSignalSql).toContain('account_monitoring_events');
+    expect(userSignalSql).toContain("'oauth_login_failed'");
+    expect(userSignalSql).toContain("'support_escalation_received'");
+    expect(userSignalSql).toContain('GROUP BY user_id, email_hash');
+    expect(userSignalSql).toContain('GROUP BY user_id, ip_address_hash');
+    expect(userSignalSql).toContain('skin_journal_media_deletion_jobs');
+    expect(userSignalSql).toContain('skin_journal_events');
+    expect(platformSignalSql).toContain('user_id IS NULL');
+    expect(platformSignalSql).toContain("'oauth_login_failed'");
+    expect(platformSignalSql).toContain('GROUP BY ip_address_hash');
+    expect(monitoringSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assigned_admin_id: 'admin-ops',
+        internal_note: expect.stringContaining(
+          'Automated monitoring candidate',
+        ),
+        latest_signal: expect.stringContaining('AI activity crossed'),
+        signal_type: AdminAccountMonitoringSignalType.HighAiCost,
+        status: AdminAccountMonitoringStatus.Open,
+        user_id: '01USER',
+      }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AccountMonitoringFlagCreated,
+        metadata: expect.objectContaining({
+          automated: true,
+          eventCount: 31,
+          monitoringFlagId: 'flag-auto-1',
+          reasonCode: 'ai_usage_threshold',
+        }),
+        reason: 'Automated account monitoring threshold crossed',
+        target_user_id: '01USER',
+      }),
+    );
+    expect(incidentSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: expect.stringContaining(
+          'Unknown-account authentication pressure',
+        ),
+        source_type: 'account-monitoring:unknown-auth',
+        status: AdminOperationalIncidentStatus.Open,
+        target_user_id: null,
+      }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.OperationalIncidentCreated,
+        metadata: expect.objectContaining({
+          automated: true,
+          eventCount: 12,
+          incidentId: 'incident-auto-1',
+          sourceType: 'account-monitoring:unknown-auth',
+        }),
+        target_user_id: null,
+      }),
+    );
+    expect(JSON.stringify(auditCreate.mock.calls)).not.toContain(
+      'AI activity crossed',
+    );
+    expect(result).toMatchObject({
+      candidates: 1,
+      created: 1,
+      platformCandidates: 1,
+      platformIncidentsCreated: 1,
+      platformIncidentsRefreshed: 0,
+      refreshed: 0,
+      skipped: 0,
+      flags: [
+        expect.objectContaining({
+          id: 'flag-auto-1',
+          signalType: AdminAccountMonitoringSignalType.HighAiCost,
+          user: {
+            email: 'jane@example.com',
+            id: '01USER',
+            name: 'Jane Doe',
+          },
+        }),
+      ],
+    });
+  });
+
+  it('records support escalation events and opens a support monitoring flag', async () => {
+    const notificationSave = jest.fn(async (value: AdminNotification) => value);
+    const monitoringEventSave = jest.fn(
+      async (value: AccountMonitoringEvent) => ({
+        ...value,
+        id: 'event-support-1',
+      }),
+    );
+    const monitoringSave = jest.fn(
+      async (value: AdminAccountMonitoringFlag) => ({
+        ...fakeMonitoringFlag({
+          assigned_admin_id: 'admin-ops',
+          id: 'flag-support-1',
+          signal_type: AdminAccountMonitoringSignalType.SupportEscalation,
+          summary: value.summary,
+          user_id: '01USER',
+        }),
+        ...value,
+      }),
+    );
+    const auditCreate = jest.fn(
+      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+    );
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([
+        { email: 'ops@ritora.app', id: 'admin-ops', name: 'Ops Lead' },
+      ]);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        auditLogsRepository: { create: auditCreate },
+        monitoringEventsRepository: { save: monitoringEventSave },
+        monitoringRepository: {
+          findOne: jest.fn(async () => null),
+          save: monitoringSave,
+        },
+        notificationsRepository: { save: notificationSave },
+        query,
+        usersRepository: { findOne: jest.fn(async () => fakeUser()) },
+      }),
+    );
+    const actor = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Lead',
+      role: AdminAccountRole.Admin,
+      sessionId: 'admin-session',
+      status: AdminAccountStatus.Active,
+    };
+
+    const result = await service.createAccountMonitoringSupportEvent(
+      actor,
+      {
+        internalNote: 'Support reported unusual account behaviour.',
+        latestSignal: 'Support ticket SUP-123 reports suspicious activity.',
+        reason: 'Support escalation received from protected support queue',
+        severity: AdminAccountMonitoringSeverity.Warning,
+        summary: 'Support escalation needs review',
+        supportReference: 'SUP-123',
+        userIdentifier: 'jane@example.com',
+      },
+      { sessionId: 'admin-session' },
+    );
+
+    expect(monitoringEventSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'support_escalation_received',
+        metadata: expect.objectContaining({
+          supportReference: 'SUP-123',
+        }),
+        user_id: '01USER',
+      }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.AccountMonitoringFlagCreated,
+        metadata: expect.objectContaining({
+          eventId: 'event-support-1',
+          supportReference: 'SUP-123',
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      id: 'flag-support-1',
+      signalType: AdminAccountMonitoringSignalType.SupportEscalation,
+    });
+    expect(notificationSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action_url: '/account-monitoring?status=active',
+        admin_id: 'admin-ops',
+        metadata: expect.objectContaining({ flagId: 'flag-support-1' }),
+        type: AdminNotificationType.AccountMonitoringAlert,
+      }),
+    );
+  });
+
+  it('returns a privacy-safe event timeline for a monitoring flag', async () => {
+    const flag = fakeMonitoringFlag({
+      signal_type: AdminAccountMonitoringSignalType.RepeatedAuthFailures,
+    });
+    const monitoringEventsRepository = {
+      find: jest.fn(async () => [
+        {
+          event_type: 'oauth_login_failed',
+          id: 'event-1',
+          metadata: {
+            provider: 'google',
+            reason: 'invalid_state',
+            secret: 'must-not-leak',
+          },
+          occurred_at: new Date('2026-05-22T09:00:00.000Z'),
+          user_id: '01USER',
+        } as unknown as AccountMonitoringEvent,
+      ]),
+    };
+    const query = jest.fn(async () => []);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        monitoringEventsRepository,
+        monitoringRepository: { findOne: jest.fn(async () => flag) },
+        query,
+      }),
+    );
+
+    const result = await service.getAccountMonitoringEventTimeline('flag-1');
+
+    expect(monitoringEventsRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 20,
+        where: expect.objectContaining({
+          event_type: expect.any(Object),
+          user_id: '01USER',
+        }),
+      }),
+    );
+    expect(JSON.stringify(result)).toContain('oauth_login_failed');
+    expect(JSON.stringify(result)).not.toContain('must-not-leak');
+  });
+
+  it('includes all AI cost sources in high cost monitoring timelines', async () => {
+    const flag = fakeMonitoringFlag({
+      signal_type: AdminAccountMonitoringSignalType.HighAiCost,
+    });
+    const monitoringEventsRepository = {
+      find: jest.fn(async () => []),
+    };
+    const query = jest
+      .fn<Promise<Array<Record<string, unknown>>>, [string, unknown[]?]>()
+      .mockResolvedValueOnce([
+        {
+          event_type: 'skin_journal_insight_generation',
+          id: 'insight-run-1',
+          metadata: {
+            costUsd: 0.012,
+            secret: 'must-not-leak',
+            source: 'skin_journal_insights',
+          },
+          occurred_at: new Date('2026-05-22T09:10:00.000Z'),
+          source_type: 'skin_journal_insight_generation_runs',
+          summary: 'Skin Journal insight generation cost was recorded.',
+        },
+      ]);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        monitoringEventsRepository,
+        monitoringRepository: { findOne: jest.fn(async () => flag) },
+        query,
+      }),
+    );
+
+    const result = await service.getAccountMonitoringEventTimeline('flag-1');
+    const sql = query.mock.calls[0]?.[0] ?? '';
+
+    expect(sql).toContain('skin_journal_insight_generation_runs');
+    expect(sql).toContain('smart_pick_snapshots');
+    expect(result.events).toEqual([
+      expect.objectContaining({
+        eventType: 'skin_journal_insight_generation',
+        metadata: {
+          costUsd: 0.012,
+          source: 'skin_journal_insights',
+        },
+      }),
+    ]);
   });
 
   it('aggregates operations monitoring work items without exposing encrypted payloads', async () => {
@@ -1647,6 +2573,86 @@ describe('AdminService', () => {
       'Provider recovered and the queue drained.',
     );
     expect(resolved.status).toBe(AdminOperationalIncidentStatus.Resolved);
+  });
+
+  it('upserts scheduled operational incidents from the monitoring queue', async () => {
+    const savedIncident = {
+      created_at: new Date('2026-05-22T09:00:00.000Z'),
+      created_by_admin_id: 'admin-root',
+      description: 'CloudWatch reported elevated media provider failures.',
+      id: 'incident-sqs-1',
+      resolution_summary: null,
+      resolved_at: null,
+      resolved_by_admin_id: null,
+      severity: AdminOperationalIncidentSeverity.Critical,
+      source_id: 'cloudwatch:media-provider-errors',
+      source_type: 'aws:cloudwatch-alarm',
+      status: AdminOperationalIncidentStatus.Open,
+      target_user_id: null,
+      title: 'Media provider errors elevated',
+      updated_at: new Date('2026-05-22T09:00:00.000Z'),
+    } as AdminOperationalIncident;
+    const auditCreate = jest.fn(
+      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+    );
+    const incidentCreate = jest.fn(
+      (value: Partial<AdminOperationalIncident>) =>
+        value as AdminOperationalIncident,
+    );
+    const incidentSave = jest.fn(async () => savedIncident);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        accountsRepository: {
+          findOne: jest.fn(async () => ({
+            email: 'owner@ritora.app',
+            id: 'admin-root',
+            name: 'Root Admin',
+            role: AdminAccountRole.Root,
+            status: AdminAccountStatus.Active,
+          })),
+        },
+        auditLogsRepository: { create: auditCreate },
+        incidentsRepository: {
+          create: incidentCreate,
+          findOne: jest.fn(async () => null),
+          save: incidentSave,
+        },
+      }),
+    );
+
+    const result =
+      await service.createScheduledAccountMonitoringOperationalIncident({
+        description: 'CloudWatch reported elevated media provider failures.',
+        severity: AdminOperationalIncidentSeverity.Critical,
+        sourceId: 'cloudwatch:media-provider-errors',
+        sourceType: 'aws:cloudwatch-alarm',
+        title: 'Media provider errors elevated',
+      });
+
+    expect(incidentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        created_by_admin_id: 'admin-root',
+        source_id: 'cloudwatch:media-provider-errors',
+        source_type: 'aws:cloudwatch-alarm',
+        status: AdminOperationalIncidentStatus.Open,
+      }),
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.OperationalIncidentCreated,
+        actor_session_id: ACCOUNT_MONITORING_INCIDENT_SESSION_ID,
+        metadata: expect.objectContaining({
+          automated: true,
+          sourceId: 'cloudwatch:media-provider-errors',
+          sourceType: 'aws:cloudwatch-alarm',
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      id: 'incident-sqs-1',
+      severity: AdminOperationalIncidentSeverity.Critical,
+      sourceType: 'aws:cloudwatch-alarm',
+    });
   });
 
   it('resolves incidents created by another admin with complete actor context', async () => {

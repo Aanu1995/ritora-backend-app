@@ -6,6 +6,16 @@ import {
   AdminOperationalIncidentSeverity,
   AdminOperationalIncidentStatus,
 } from './entities/admin-operational-incident.entity';
+import {
+  AdminNotificationSeverity,
+  AdminNotificationType,
+} from './entities/admin-notification.entity';
+import {
+  AdminAccountMonitoringSeverity,
+  AdminAccountMonitoringSignalType,
+  AdminAccountMonitoringStatus,
+} from './entities/admin-account-monitoring-flag.entity';
+import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitoring.dto';
 import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
 import {
   type AdminAiCostFeatureFilter,
@@ -170,10 +180,29 @@ export type AdminMemberListResponse = AdminPaginationMeta & {
 export type AdminAuditLogQuery = {
   action?: string;
   limit?: number;
+  monitoringFlagId?: string;
   page?: number;
   query?: string;
   targetAdminId?: string;
   targetUserId?: string;
+};
+
+export type AdminNotificationResponse = {
+  actionUrl: string | null;
+  body: string;
+  createdAt: string;
+  id: string;
+  metadata: Record<string, string | number | boolean | null>;
+  readAt: string | null;
+  severity: AdminNotificationSeverity;
+  title: string;
+  type: AdminNotificationType;
+};
+
+export type AdminNotificationListResponse = {
+  generatedAt: string;
+  notifications: AdminNotificationResponse[];
+  unreadCount: number;
 };
 
 export type AdminOverviewResponse = {
@@ -508,4 +537,103 @@ export type AdminOperationalIncidentListQuery = {
 
 export type AdminOperationalIncidentListResponse = AdminPaginationMeta & {
   incidents: AdminOperationalIncidentResponse[];
+};
+
+export type AdminAccountMonitoringActorResponse = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+export type AdminAccountMonitoringUserResponse = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+export type AdminAccountMonitoringFlagResponse = {
+  id: string;
+  user: AdminAccountMonitoringUserResponse;
+  userId: string;
+  signalType: AdminAccountMonitoringSignalType;
+  status: AdminAccountMonitoringStatus;
+  severity: AdminAccountMonitoringSeverity;
+  summary: string;
+  latestSignal: string | null;
+  internalNote: string | null;
+  assignedAdmin: AdminAccountMonitoringActorResponse | null;
+  assignedAdminId: string | null;
+  createdBy: AdminAccountMonitoringActorResponse;
+  createdByAdminId: string;
+  resolvedBy: AdminAccountMonitoringActorResponse | null;
+  resolvedByAdminId: string | null;
+  nextReviewAt: string | null;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+  auditLogCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminAccountMonitoringListQuery = {
+  assignedAdminId?: string;
+  limit?: number;
+  page?: number;
+  query?: string;
+  signalType?: AdminAccountMonitoringSignalType;
+  status?: AdminAccountMonitoringStatusFilter;
+};
+
+export type AdminAccountMonitoringFlagListResponse = AdminPaginationMeta & {
+  flags: AdminAccountMonitoringFlagResponse[];
+};
+
+export type AdminAccountMonitoringEventTimelineItemResponse = {
+  id: string;
+  eventType: string;
+  occurredAt: string;
+  sourceType: string;
+  summary: string;
+  metadata: Record<string, string | number | boolean | null>;
+};
+
+export type AdminAccountMonitoringEventTimelineResponse = {
+  flagId: string;
+  generatedAt: string;
+  events: AdminAccountMonitoringEventTimelineItemResponse[];
+};
+
+export type AdminAccountMonitoringAutomatedScanResponse = {
+  scannedAt: string;
+  created: number;
+  refreshed: number;
+  skipped: number;
+  candidates: number;
+  platformCandidates: number;
+  platformIncidentsCreated: number;
+  platformIncidentsRefreshed: number;
+  flags: AdminAccountMonitoringFlagResponse[];
+};
+
+export type AdminAccountMonitoringThresholdsResponse = {
+  aiCost24hCriticalUsd: number;
+  aiCost24hWarningUsd: number;
+  aiGenerations24hCritical: number;
+  aiGenerations24hWarning: number;
+  authFailures24hWarning: number;
+  deletionEvents30dWarning: number;
+  mediaCleanupAttempts24hWarning: number;
+  mediaCleanupFailures24hWarning: number;
+  passwordResets24hWarning: number;
+  productExtractions24hWarning: number;
+  safetyReactionSignals7dWarning: number;
+  unknownAuthFailures24hCritical: number;
+  unknownAuthFailures24hWarning: number;
+  uploadFailures24hWarning: number;
+};
+
+export type AdminAccountMonitoringSettingsResponse = {
+  thresholds: AdminAccountMonitoringThresholdsResponse;
+  updatedAt: string;
+  updatedByAdminId: string | null;
 };

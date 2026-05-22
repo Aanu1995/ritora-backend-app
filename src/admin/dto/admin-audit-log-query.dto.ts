@@ -30,6 +30,12 @@ export class AdminAuditLogQueryDto {
   @IsOptional()
   @IsString()
   @MaxLength(26)
+  monitoringFlagId?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(26)
   targetAdminId?: string;
 
   @EmptyStringToUndefined()

@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { UserConsent } from '../users/entities/user-consent.entity';
+import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
 import { User } from '../users/entities/user.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { UserConsentType } from '../users/user-consent.constants';
@@ -287,6 +288,7 @@ describe('SkinJournalService', () => {
   let simplifications: ReturnType<typeof repo>;
   let consents: ReturnType<typeof repo>;
   let exportsRepo: ReturnType<typeof repo>;
+  let accountMonitoringEvents: ReturnType<typeof repo>;
   let skinProfiles: ReturnType<typeof repo>;
   const photoStorage = {
     newEntryId: jest.fn(() => 'entry-1'),
@@ -499,6 +501,7 @@ describe('SkinJournalService', () => {
     mediaRetention.enqueueDeletionVerification.mockClear();
     config.get.mockClear();
     smartPicksPreparation.scheduleForUser.mockClear();
+    accountMonitoringEvents = repo();
 
     const module = await Test.createTestingModule({
       providers: [
@@ -538,6 +541,10 @@ describe('SkinJournalService', () => {
         },
         { provide: getRepositoryToken(UserConsent), useValue: consents },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfiles },
+        {
+          provide: getRepositoryToken(AccountMonitoringEvent),
+          useValue: accountMonitoringEvents,
+        },
         { provide: SkinJournalPhotoStorageService, useValue: photoStorage },
         { provide: SkinJournalAnalysisService, useValue: analysis },
         {
@@ -1135,6 +1142,16 @@ describe('SkinJournalService', () => {
 
     expect(photoStorage.deletePhoto).toHaveBeenCalledWith(
       'skin-journal/user-1/entry-1/photo.webp',
+    );
+    expect(accountMonitoringEvents.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'skin_journal_photo_upload_failed',
+        metadata: {
+          reason: 'entry_save_failed_after_photo_upload',
+          storedPhotoCount: 1,
+        },
+        user_id: 'user-1',
+      }),
     );
     expect(photoStorage.deletePhoto).not.toHaveBeenCalledWith(
       'skin-journal/user-1/entry-1/old.webp',
