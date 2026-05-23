@@ -20,12 +20,12 @@ export enum AdminOperationalIncidentSeverity {
   Critical = 'critical',
 }
 
-const encryptedIncidentDescriptionTransformer =
+export const encryptedIncidentDescriptionTransformer =
   encryptedNullableStringFieldTransformer(
     'admin_operational_incidents.description',
   );
 
-const encryptedIncidentResolutionTransformer =
+export const encryptedIncidentResolutionTransformer =
   encryptedNullableStringFieldTransformer(
     'admin_operational_incidents.resolution_summary',
   );

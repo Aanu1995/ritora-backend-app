@@ -14,7 +14,7 @@ import {
   UserRestrictionCapability,
 } from './user-restrictions';
 
-const USER_RESTRICTION_ALLOWED_CAPABILITIES_KEY =
+export const USER_RESTRICTION_ALLOWED_CAPABILITIES_KEY =
   'userRestrictionAllowedCapabilities';
 
 type RequestWithUser = Request & {

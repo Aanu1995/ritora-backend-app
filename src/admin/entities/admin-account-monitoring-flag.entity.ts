@@ -33,17 +33,17 @@ export enum AdminAccountMonitoringSeverity {
   Critical = 'critical',
 }
 
-const encryptedLatestSignalTransformer =
+export const encryptedAccountMonitoringLatestSignalTransformer =
   encryptedNullableStringFieldTransformer(
     'admin_account_monitoring_flags.latest_signal',
   );
 
-const encryptedInternalNoteTransformer =
+export const encryptedAccountMonitoringInternalNoteTransformer =
   encryptedNullableStringFieldTransformer(
     'admin_account_monitoring_flags.internal_note',
   );
 
-const encryptedResolutionNoteTransformer =
+export const encryptedAccountMonitoringResolutionNoteTransformer =
   encryptedNullableStringFieldTransformer(
     'admin_account_monitoring_flags.resolution_note',
   );
@@ -107,14 +107,14 @@ export class AdminAccountMonitoringFlag {
   @Column({
     type: 'text',
     nullable: true,
-    transformer: encryptedLatestSignalTransformer,
+    transformer: encryptedAccountMonitoringLatestSignalTransformer,
   })
   latest_signal: string | null;
 
   @Column({
     type: 'text',
     nullable: true,
-    transformer: encryptedInternalNoteTransformer,
+    transformer: encryptedAccountMonitoringInternalNoteTransformer,
   })
   internal_note: string | null;
 
@@ -136,7 +136,7 @@ export class AdminAccountMonitoringFlag {
   @Column({
     type: 'text',
     nullable: true,
-    transformer: encryptedResolutionNoteTransformer,
+    transformer: encryptedAccountMonitoringResolutionNoteTransformer,
   })
   resolution_note: string | null;
 

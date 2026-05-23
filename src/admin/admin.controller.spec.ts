@@ -19,6 +19,13 @@ import {
   AdminAccountMonitoringStatus,
 } from './entities/admin-account-monitoring-flag.entity';
 import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitoring.dto';
+import {
+  SupportFeedbackPriority,
+  SupportFeedbackSource,
+  SupportFeedbackStatus,
+  SupportFeedbackType,
+} from '../support/entities/support-feedback-item.entity';
+import { SupportFeedbackStatusFilter } from '../support/dto/support-feedback.dto';
 
 function getRouteGuards(methodName: keyof AdminController): unknown[] {
   const method = AdminController.prototype[methodName] as object;
@@ -32,6 +39,19 @@ describe('AdminController', () => {
     expect(getRouteGuards('getUser')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('listUserNotes')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('createUserNote')).not.toContain(AdminRootGuard);
+    expect(getRouteGuards('listSupportFeedback')).not.toContain(AdminRootGuard);
+    expect(getRouteGuards('createSupportFeedback')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('updateSupportFeedback')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('listSupportFeedbackNotes')).not.toContain(
+      AdminRootGuard,
+    );
+    expect(getRouteGuards('createSupportFeedbackNote')).not.toContain(
+      AdminRootGuard,
+    );
     expect(getRouteGuards('listAuditLogs')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('getOperationsMonitoring')).not.toContain(
       AdminRootGuard,
@@ -72,6 +92,11 @@ describe('AdminController', () => {
     expect(getRouteGuards('restrictUser')).toContain(OriginCheckGuard);
     expect(getRouteGuards('unrestrictUser')).toContain(OriginCheckGuard);
     expect(getRouteGuards('createUserNote')).toContain(OriginCheckGuard);
+    expect(getRouteGuards('createSupportFeedback')).toContain(OriginCheckGuard);
+    expect(getRouteGuards('updateSupportFeedback')).toContain(OriginCheckGuard);
+    expect(getRouteGuards('createSupportFeedbackNote')).toContain(
+      OriginCheckGuard,
+    );
     expect(getRouteGuards('createOperationalIncident')).toContain(
       OriginCheckGuard,
     );
@@ -212,6 +237,181 @@ describe('AdminController', () => {
       period: 'today',
       query: 'jane',
     });
+  });
+
+  it('passes support feedback inbox queries and mutations to the support service for all admins', async () => {
+    const service = {} as unknown as AdminService;
+    const supportService = {
+      createAdminFeedback: jest.fn(async () => ({
+        assignedAdmin: null,
+        assignedAdminId: null,
+        closedAt: null,
+        context: { route: '/settings' },
+        createdAt: '2026-05-22T08:00:00.000Z',
+        createdByAdmin: {
+          email: 'ops@ritora.app',
+          id: 'admin-ops',
+          name: 'Ops Admin',
+        },
+        createdByAdminId: 'admin-ops',
+        description: 'User reported confusing account export copy.',
+        id: 'feedback-1',
+        noteCount: 0,
+        priority: SupportFeedbackPriority.High,
+        reporterEmail: 'jane@example.com',
+        source: SupportFeedbackSource.SupportEmail,
+        status: SupportFeedbackStatus.New,
+        title: 'Export wording confusion',
+        type: SupportFeedbackType.ConfusingResult,
+        updatedAt: '2026-05-22T08:00:00.000Z',
+        user: null,
+        userId: null,
+      })),
+      createAdminFeedbackNote: jest.fn(async () => ({
+        author: {
+          email: 'ops@ritora.app',
+          id: 'admin-ops',
+          name: 'Ops Admin',
+        },
+        authorAdminId: 'admin-ops',
+        body: 'Followed up by email.',
+        createdAt: '2026-05-22T09:00:00.000Z',
+        feedbackId: 'feedback-1',
+        id: 'note-1',
+      })),
+      listAdminFeedback: jest.fn(async () => ({
+        feedback: [],
+        hasNextPage: false,
+        hasPreviousPage: false,
+        limit: 20,
+        page: 1,
+        total: 0,
+        totalPages: 0,
+      })),
+      listAdminFeedbackNotes: jest.fn(async () => ({
+        hasNextPage: false,
+        hasPreviousPage: false,
+        limit: 10,
+        notes: [],
+        page: 1,
+        total: 0,
+        totalPages: 0,
+      })),
+      updateAdminFeedback: jest.fn(async () => ({
+        id: 'feedback-1',
+        status: SupportFeedbackStatus.Triaged,
+      })),
+    };
+    const authService = {} as unknown as AdminAuthService;
+    const controller = new AdminController(
+      service,
+      authService,
+      supportService as never,
+    );
+    const adminUser = {
+      email: 'ops@ritora.app',
+      id: 'admin-ops',
+      name: 'Ops Admin',
+      role: AdminAccountRole.Admin,
+      sessionId: 'session-1',
+      status: AdminAccountStatus.Active,
+    };
+    const req = {
+      headers: { 'user-agent': 'Safari' },
+      ip: '127.0.0.1',
+    } as never;
+
+    await controller.listSupportFeedback({
+      limit: 20,
+      page: 1,
+      query: 'export',
+      status: SupportFeedbackStatusFilter.New,
+      type: SupportFeedbackType.ConfusingResult,
+    });
+    await controller.createSupportFeedback(
+      adminUser,
+      {
+        context: { route: '/settings' },
+        description: 'User reported confusing account export copy.',
+        priority: SupportFeedbackPriority.High,
+        reason: 'Support email copied into Ritora inbox',
+        reporterEmail: 'jane@example.com',
+        source: SupportFeedbackSource.SupportEmail,
+        title: 'Export wording confusion',
+        type: SupportFeedbackType.ConfusingResult,
+      },
+      req,
+    );
+    await controller.updateSupportFeedback(
+      adminUser,
+      'feedback-1',
+      {
+        assignedAdminId: 'admin-ops',
+        priority: SupportFeedbackPriority.High,
+        reason: 'Support issue triaged for launch review',
+        status: SupportFeedbackStatus.Triaged,
+      },
+      req,
+    );
+    await controller.listSupportFeedbackNotes('feedback-1', {
+      limit: 10,
+      page: 1,
+    });
+    await controller.createSupportFeedbackNote(
+      adminUser,
+      'feedback-1',
+      {
+        body: 'Followed up by email.',
+        reason: 'Support follow-up recorded',
+      },
+      req,
+    );
+
+    expect(supportService.listAdminFeedback).toHaveBeenCalledWith({
+      limit: 20,
+      page: 1,
+      query: 'export',
+      status: SupportFeedbackStatusFilter.New,
+      type: SupportFeedbackType.ConfusingResult,
+    });
+    expect(supportService.createAdminFeedback).toHaveBeenCalledWith(
+      adminUser,
+      expect.objectContaining({
+        source: SupportFeedbackSource.SupportEmail,
+        title: 'Export wording confusion',
+      }),
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Safari',
+      },
+    );
+    expect(supportService.updateAdminFeedback).toHaveBeenCalledWith(
+      adminUser,
+      'feedback-1',
+      expect.objectContaining({
+        status: SupportFeedbackStatus.Triaged,
+      }),
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Safari',
+      },
+    );
+    expect(supportService.listAdminFeedbackNotes).toHaveBeenCalledWith(
+      'feedback-1',
+      { limit: 10, page: 1 },
+    );
+    expect(supportService.createAdminFeedbackNote).toHaveBeenCalledWith(
+      adminUser,
+      'feedback-1',
+      { body: 'Followed up by email.', reason: 'Support follow-up recorded' },
+      {
+        ip: '127.0.0.1',
+        sessionId: 'session-1',
+        userAgent: 'Safari',
+      },
+    );
   });
 
   it('passes user detail requests to the admin service for all admins', async () => {

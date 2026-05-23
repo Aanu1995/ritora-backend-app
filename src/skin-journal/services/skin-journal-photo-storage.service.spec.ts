@@ -58,6 +58,18 @@ describe('SkinJournalPhotoStorageService', () => {
     jest.clearAllMocks();
   });
 
+  it('destroys the S3 client on module shutdown', () => {
+    const service = new SkinJournalPhotoStorageService(config());
+    const destroy = jest.fn();
+    (service as unknown as { s3Client: { destroy: jest.Mock } }).s3Client = {
+      destroy,
+    };
+
+    service.onModuleDestroy();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects unsupported mime types before processing', async () => {
     const service = new SkinJournalPhotoStorageService(config());
 

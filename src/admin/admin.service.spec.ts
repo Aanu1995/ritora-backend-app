@@ -16,6 +16,9 @@ import {
   AdminAccountMonitoringSeverity,
   AdminAccountMonitoringSignalType,
   AdminAccountMonitoringStatus,
+  encryptedAccountMonitoringInternalNoteTransformer,
+  encryptedAccountMonitoringLatestSignalTransformer,
+  encryptedAccountMonitoringResolutionNoteTransformer,
 } from './entities/admin-account-monitoring-flag.entity';
 import {
   ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
@@ -30,6 +33,8 @@ import {
   AdminOperationalIncident,
   AdminOperationalIncidentSeverity,
   AdminOperationalIncidentStatus,
+  encryptedIncidentDescriptionTransformer,
+  encryptedIncidentResolutionTransformer,
 } from './entities/admin-operational-incident.entity';
 import {
   AdminNotification,
@@ -1529,10 +1534,16 @@ describe('AdminService', () => {
         created_by_admin_id: 'admin-root',
         created_by_admin_name: 'Root Admin',
         id: 'flag-1',
-        internal_note: 'Review AI cost trend before taking action.',
-        latest_signal: 'AI spend crossed the daily review threshold.',
+        internal_note: encryptedAccountMonitoringInternalNoteTransformer.to(
+          'Review AI cost trend before taking action.',
+        ),
+        latest_signal: encryptedAccountMonitoringLatestSignalTransformer.to(
+          'AI spend crossed the daily review threshold.',
+        ),
         next_review_at: '2099-05-22T09:00:00.000Z',
-        resolution_note: null,
+        resolution_note: encryptedAccountMonitoringResolutionNoteTransformer.to(
+          'Cost returned to normal after review.',
+        ),
         resolved_at: null,
         resolved_by_admin_email: null,
         resolved_by_admin_id: null,
@@ -1583,7 +1594,9 @@ describe('AdminService', () => {
             name: 'Ops Lead',
           },
           auditLogCount: 2,
+          internalNote: 'Review AI cost trend before taking action.',
           latestSignal: 'AI spend crossed the daily review threshold.',
+          resolutionNote: 'Cost returned to normal after review.',
           signalType: AdminAccountMonitoringSignalType.HighAiCost,
           status: AdminAccountMonitoringStatus.Watching,
           user: {
@@ -2306,6 +2319,13 @@ describe('AdminService', () => {
           user_id: '01USER',
         },
       ])
+      .mockResolvedValueOnce([
+        {
+          error_rate: '0.5',
+          p95_latency_ms: '220',
+          request_count: '540',
+        },
+      ])
       .mockResolvedValueOnce([{ ok: 1 }])
       .mockResolvedValueOnce([
         {
@@ -2339,8 +2359,12 @@ describe('AdminService', () => {
       checkedAt: '2026-05-20T10:00:00.000Z',
       components: expect.arrayContaining([
         expect.objectContaining({
+          errorRate: 0.5,
           id: 'api',
+          p95LatencyMs: 220,
+          requestCount: 540,
           status: AdminJobStatus.Healthy,
+          windowMinutes: 15,
         }),
         expect.objectContaining({
           id: 'database',
@@ -2373,7 +2397,9 @@ describe('AdminService', () => {
     const incident = {
       created_at: new Date('2026-05-21T08:00:00.000Z'),
       created_by_admin_id: 'admin-root',
-      description: 'Journal analysis has failed repeatedly for the user.',
+      description: encryptedIncidentDescriptionTransformer.to(
+        'Journal analysis has failed repeatedly for the user.',
+      ),
       id: 'incident-1',
       resolution_summary: null,
       resolved_at: null,
@@ -2465,7 +2491,9 @@ describe('AdminService', () => {
     } as AdminOperationalIncident;
     const resolvedIncident = {
       ...savedIncident,
-      resolution_summary: 'Provider recovered and the queue drained.',
+      resolution_summary: encryptedIncidentResolutionTransformer.to(
+        'Provider recovered and the queue drained.',
+      ),
       resolved_at: new Date('2026-05-21T09:00:00.000Z'),
       resolved_by_admin_id: 'admin-root',
       status: AdminOperationalIncidentStatus.Resolved,
@@ -2573,6 +2601,9 @@ describe('AdminService', () => {
       'Provider recovered and the queue drained.',
     );
     expect(resolved.status).toBe(AdminOperationalIncidentStatus.Resolved);
+    expect(resolved.resolutionSummary).toBe(
+      'Provider recovered and the queue drained.',
+    );
   });
 
   it('upserts scheduled operational incidents from the monitoring queue', async () => {

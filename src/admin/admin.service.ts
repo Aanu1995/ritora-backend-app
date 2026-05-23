@@ -110,6 +110,9 @@ import {
   AdminAccountMonitoringSeverity,
   AdminAccountMonitoringSignalType,
   AdminAccountMonitoringStatus,
+  encryptedAccountMonitoringInternalNoteTransformer,
+  encryptedAccountMonitoringLatestSignalTransformer,
+  encryptedAccountMonitoringResolutionNoteTransformer,
 } from './entities/admin-account-monitoring-flag.entity';
 import {
   ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
@@ -125,6 +128,8 @@ import {
   AdminOperationalIncident,
   AdminOperationalIncidentSeverity,
   AdminOperationalIncidentStatus,
+  encryptedIncidentDescriptionTransformer,
+  encryptedIncidentResolutionTransformer,
 } from './entities/admin-operational-incident.entity';
 import {
   AdminNotification,
@@ -306,6 +311,7 @@ const ENDPOINT_WARNING_ERROR_RATE = 1;
 const ENDPOINT_CRITICAL_ERROR_RATE = 5;
 const ENDPOINT_WARNING_P95_MS = 500;
 const ENDPOINT_CRITICAL_P95_MS = 1000;
+const BACKEND_API_HEALTH_WINDOW_MINUTES = 15;
 const USER_API_HEALTH_WINDOW_MINUTES = 15;
 const DATABASE_WARNING_LATENCY_MS = 250;
 const DATABASE_CRITICAL_LATENCY_MS = 1000;
@@ -548,7 +554,7 @@ function toNullableString(value: unknown): string | null {
   return text || null;
 }
 
-function toNullableRestrictionText(
+function toNullableEncryptedString(
   value: unknown,
   transformer: ValueTransformer,
 ): string | null {
@@ -569,6 +575,20 @@ function toNullableRestrictionText(
   } catch {
     return null;
   }
+}
+
+function toDecryptedStringValue(
+  value: unknown,
+  transformer: ValueTransformer,
+): string {
+  return toNullableEncryptedString(value, transformer) ?? '';
+}
+
+function toNullableRestrictionText(
+  value: unknown,
+  transformer: ValueTransformer,
+): string | null {
+  return toNullableEncryptedString(value, transformer);
 }
 
 function toBooleanValue(value: unknown): boolean {
@@ -4063,23 +4083,11 @@ export class AdminService {
     now: Date,
   ): Promise<AdminOperationsMonitoringResponse['backendHealth']> {
     const checkedAt = now.toISOString();
-    const [database, userTraffic] = await Promise.all([
+    const [api, database, userTraffic] = await Promise.all([
+      this.getBackendApiHealthComponent(now, checkedAt),
       this.getDatabaseHealthComponent(checkedAt),
       this.getUserApiTrafficHealthComponent(now, checkedAt),
     ]);
-    const api: AdminOperationsMonitoringResponse['backendHealth']['components'][number] =
-      {
-        checkedAt,
-        errorRate: null,
-        id: 'api',
-        label: 'Backend API',
-        latencyMs: null,
-        message: 'The Ritora API process responded to admin monitoring.',
-        p95LatencyMs: null,
-        requestCount: null,
-        status: AdminJobStatus.Healthy,
-        windowMinutes: null,
-      };
     const components = [api, database, userTraffic];
 
     return {
@@ -4089,6 +4097,82 @@ export class AdminService {
         components.map((component) => component.status),
       ),
     };
+  }
+
+  private async getBackendApiHealthComponent(
+    now: Date,
+    checkedAt: string,
+  ): Promise<
+    AdminOperationsMonitoringResponse['backendHealth']['components'][number]
+  > {
+    const since = new Date(
+      now.getTime() - BACKEND_API_HEALTH_WINDOW_MINUTES * 60 * 1000,
+    );
+
+    try {
+      const row = await this.queryOne(
+        `
+          SELECT
+            COUNT(*)::int AS request_count,
+            COALESCE(
+              ROUND(
+                (
+                  SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END)::numeric
+                  / NULLIF(COUNT(*), 0)
+                ) * 100,
+                2
+              ),
+              0
+            )::float AS error_rate,
+            COALESCE(
+              percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms),
+              0
+            )::int AS p95_latency_ms
+          FROM http_request_metrics
+          WHERE occurred_at >= $1
+            AND route NOT LIKE '/health%'
+            AND route NOT LIKE '/api/v1/health%'
+        `,
+        [since],
+      );
+      const requestCount = toNumber(row.request_count);
+      const errorRate = toNumber(row.error_rate);
+      const p95LatencyMs = toNumber(row.p95_latency_ms);
+      const status =
+        requestCount === 0
+          ? AdminJobStatus.Healthy
+          : resolveEndpointStatus(errorRate, p95LatencyMs);
+
+      return {
+        checkedAt,
+        errorRate,
+        id: 'api',
+        label: 'Backend API',
+        latencyMs: null,
+        message:
+          requestCount === 0
+            ? 'The Ritora API process responded; no recent request telemetry has been recorded.'
+            : 'The Ritora API process responded and recent request telemetry is being observed.',
+        p95LatencyMs,
+        requestCount,
+        status,
+        windowMinutes: BACKEND_API_HEALTH_WINDOW_MINUTES,
+      };
+    } catch {
+      return {
+        checkedAt,
+        errorRate: null,
+        id: 'api',
+        label: 'Backend API',
+        latencyMs: null,
+        message:
+          'The Ritora API process responded, but telemetry is unavailable.',
+        p95LatencyMs: null,
+        requestCount: null,
+        status: AdminJobStatus.Warning,
+        windowMinutes: BACKEND_API_HEALTH_WINDOW_MINUTES,
+      };
+    }
   }
 
   private async getDatabaseHealthComponent(
@@ -4464,9 +4548,15 @@ export class AdminService {
         name: createdBy?.name ?? '',
       },
       createdByAdminId: incident.created_by_admin_id,
-      description: toStringValue(incident.description),
+      description: toDecryptedStringValue(
+        incident.description,
+        encryptedIncidentDescriptionTransformer,
+      ),
       id: toStringValue(incident.id),
-      resolutionSummary: toNullableString(incident.resolution_summary),
+      resolutionSummary: toNullableEncryptedString(
+        incident.resolution_summary,
+        encryptedIncidentResolutionTransformer,
+      ),
       resolvedAt: toNullableIso(incident.resolved_at),
       resolvedBy: resolvedByAdminId
         ? {
@@ -5641,10 +5731,19 @@ export class AdminService {
       },
       createdByAdminId: toStringValue(row.created_by_admin_id),
       id: toStringValue(row.id),
-      internalNote: toNullableString(row.internal_note),
-      latestSignal: toNullableString(row.latest_signal),
+      internalNote: toNullableEncryptedString(
+        row.internal_note,
+        encryptedAccountMonitoringInternalNoteTransformer,
+      ),
+      latestSignal: toNullableEncryptedString(
+        row.latest_signal,
+        encryptedAccountMonitoringLatestSignalTransformer,
+      ),
       nextReviewAt: toNullableIso(row.next_review_at),
-      resolutionNote: toNullableString(row.resolution_note),
+      resolutionNote: toNullableEncryptedString(
+        row.resolution_note,
+        encryptedAccountMonitoringResolutionNoteTransformer,
+      ),
       resolvedAt: toNullableIso(row.resolved_at),
       resolvedBy: resolvedByAdminId
         ? {
@@ -5699,10 +5798,19 @@ export class AdminService {
       },
       createdByAdminId: flag.created_by_admin_id,
       id: flag.id,
-      internalNote: flag.internal_note,
-      latestSignal: flag.latest_signal,
+      internalNote: toNullableEncryptedString(
+        flag.internal_note,
+        encryptedAccountMonitoringInternalNoteTransformer,
+      ),
+      latestSignal: toNullableEncryptedString(
+        flag.latest_signal,
+        encryptedAccountMonitoringLatestSignalTransformer,
+      ),
       nextReviewAt: toNullableIso(flag.next_review_at),
-      resolutionNote: flag.resolution_note,
+      resolutionNote: toNullableEncryptedString(
+        flag.resolution_note,
+        encryptedAccountMonitoringResolutionNoteTransformer,
+      ),
       resolvedAt: toNullableIso(flag.resolved_at),
       resolvedBy: resolvedByAdminId
         ? (actors[resolvedByAdminId] ?? null)
@@ -5745,10 +5853,19 @@ export class AdminService {
       },
       createdByAdminId: flag.created_by_admin_id,
       id: flag.id,
-      internalNote: flag.internal_note,
-      latestSignal: flag.latest_signal,
+      internalNote: toNullableEncryptedString(
+        flag.internal_note,
+        encryptedAccountMonitoringInternalNoteTransformer,
+      ),
+      latestSignal: toNullableEncryptedString(
+        flag.latest_signal,
+        encryptedAccountMonitoringLatestSignalTransformer,
+      ),
       nextReviewAt: toNullableIso(flag.next_review_at),
-      resolutionNote: flag.resolution_note,
+      resolutionNote: toNullableEncryptedString(
+        flag.resolution_note,
+        encryptedAccountMonitoringResolutionNoteTransformer,
+      ),
       resolvedAt: toNullableIso(flag.resolved_at),
       resolvedBy: resolvedByAdminId
         ? (actors[resolvedByAdminId] ?? null)
