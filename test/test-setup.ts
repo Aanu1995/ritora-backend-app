@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { CataloguePhotoStorageService } from '../src/catalogue/catalogue-photo-storage.service';
+import { assertDestructiveTestDatabaseResetAllowed } from '../src/common/utils/destructive-database-guard';
 import { IngredientCatalogService } from '../src/ingredients/ingredient-catalog.service';
 import { IngredientsSeeder } from '../src/ingredients/seed/ingredients-seeder';
 import { MailService } from '../src/mail/mail.service';
@@ -143,32 +144,40 @@ export async function createTestApp(
   }
 
   const moduleFixture = await moduleBuilder.compile();
-
   const app = moduleFixture.createNestApplication();
-  const configService = app.get(ConfigService);
-  configureApp(app, configService);
 
-  // E2E tests run against a real Postgres database. Apply pending migrations
-  // before Nest lifecycle hooks run so boot-time catalogue refreshes see the
-  // same schema CI and local developers expect.
-  const dataSource = app.get(DataSource);
-  if (!dataSource.isInitialized) {
-    await dataSource.initialize();
+  try {
+    const configService = app.get(ConfigService);
+    configureApp(app, configService);
+
+    // E2E tests run against a real Postgres database. Apply pending migrations
+    // before Nest lifecycle hooks run so boot-time catalogue refreshes see the
+    // same schema CI and local developers expect.
+    const dataSource = app.get(DataSource);
+    if (!dataSource.isInitialized) {
+      await dataSource.initialize();
+    }
+    await dataSource.runMigrations({ transaction: 'each' });
+
+    await app.init();
+
+    // Seed + refresh the ingredient catalogue now that the app is up. These
+    // mirror what `IngredientsModule.onApplicationBootstrap` does at
+    // production startup — idempotent upsert + in-memory cache reload.
+    const seeder = app.get(IngredientsSeeder);
+    await seeder.run();
+    const catalog = app.get(IngredientCatalogService);
+    await catalog.refresh();
+
+    await truncateTables(app);
+
+    return app;
+  } catch (error) {
+    await app.close().catch(() => {
+      // Surface the original setup failure; close errors here are secondary.
+    });
+    throw error;
   }
-  await dataSource.runMigrations({ transaction: 'each' });
-
-  await app.init();
-
-  //
-  // Seed + refresh the ingredient catalogue now that the app is up. These
-  // mirror what `IngredientsModule.onApplicationBootstrap` does at
-  // production startup — idempotent upsert + in-memory cache reload.
-  const seeder = app.get(IngredientsSeeder);
-  await seeder.run();
-  const catalog = app.get(IngredientCatalogService);
-  await catalog.refresh();
-
-  return app;
 }
 
 const INGREDIENT_REFERENCE_TABLES = new Set([
@@ -207,6 +216,10 @@ function delay(ms: number): Promise<void> {
 
 export async function truncateTables(app: INestApplication): Promise<void> {
   const dataSource = app.get(DataSource);
+  assertDestructiveTestDatabaseResetAllowed({
+    databaseName: dataSource.options.database,
+    operation: 'E2E truncateTables',
+  });
   const entities = dataSource.entityMetadatas;
 
   // Ingredient catalogue rows are reference data — seeded once per test
@@ -264,6 +277,52 @@ export async function truncateTables(app: INestApplication): Promise<void> {
         await queryRunner.release();
       }
     }
+  }
+}
+
+function unknownErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+export async function closeTestApp(
+  app: INestApplication | null | undefined,
+): Promise<void> {
+  if (!app) {
+    return;
+  }
+
+  let cleanupError: unknown;
+  try {
+    await truncateTables(app);
+  } catch (error) {
+    cleanupError = error;
+  }
+
+  let closeError: unknown;
+  try {
+    await app.close();
+  } catch (error) {
+    closeError = error;
+  }
+
+  if (cleanupError && closeError) {
+    throw new Error(
+      `E2E cleanup and app close both failed. Cleanup: ${unknownErrorMessage(
+        cleanupError,
+      )}. Close: ${unknownErrorMessage(closeError)}.`,
+    );
+  }
+
+  if (cleanupError) {
+    throw toError(cleanupError);
+  }
+
+  if (closeError) {
+    throw toError(closeError);
   }
 }
 

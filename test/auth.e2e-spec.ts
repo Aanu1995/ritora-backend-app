@@ -2,7 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AuthService } from '../src/auth/auth.service';
-import { createTestApp, MockMailService, truncateTables } from './test-setup';
+import { closeTestApp, createTestApp, MockMailService } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
 
@@ -54,10 +54,7 @@ describe('Auth (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (app) {
-      await truncateTables(app);
-      await app.close();
-    }
+    await closeTestApp(app);
   });
 
   function authGet(path: string) {

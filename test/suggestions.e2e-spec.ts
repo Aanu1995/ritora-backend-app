@@ -19,11 +19,11 @@ import {
 } from '../src/suggestions/services/suggestion-ai-generator';
 import { SuggestionGenerationService } from '../src/suggestions/services/suggestion-generation.service';
 import {
+  closeTestApp,
   createCompletedSkinProfile,
   createTestApp,
   createTestInventoryProduct,
   MockMailService,
-  truncateTables,
 } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
@@ -170,9 +170,7 @@ describe('Suggestions on-demand (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (!app) return;
-    await truncateTables(app);
-    await app.close();
+    await closeTestApp(app);
   });
 
   it('queues, generates, records, and returns on-demand suggestions in history', async () => {

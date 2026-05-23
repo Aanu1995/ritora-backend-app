@@ -337,6 +337,7 @@ export const envValidationSchema = Joi.object({
   SKIN_JOURNAL_ANALYSIS_AI_MODEL: Joi.string().trim().allow('').required(),
   SUGGESTION_AI_MODEL: Joi.string().trim().allow('').required(),
   SMART_PICKS_AI_MODEL: Joi.string().trim().allow('').required(),
+  COMMUNITY_MODERATION_AI_MODEL: Joi.string().trim().allow('').required(),
   SMART_PICKS_QUEUE_DRIVER: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().valid('sqs').required(),

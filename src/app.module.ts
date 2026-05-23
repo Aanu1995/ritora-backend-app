@@ -16,6 +16,7 @@ import { AppBadgesModule } from './app-badges/app-badges.module';
 import { ApplicationTrackingModule } from './application-tracking/application-tracking.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogueModule } from './catalogue/catalogue.module';
+import { CommunityModule } from './community/community.module';
 import { HealthModule } from './health/health.module';
 import { IngredientsModule } from './ingredients/ingredients.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -50,6 +51,7 @@ import { UsersModule } from './users/users.module';
     HealthModule,
     AuthModule,
     CatalogueModule,
+    CommunityModule,
     IngredientsModule,
     InventoryModule,
     NotificationsModule,

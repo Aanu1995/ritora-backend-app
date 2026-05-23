@@ -19,11 +19,11 @@ import {
   type SmartPicksGapSnapshot,
 } from '../src/smart-picks/smart-picks.types';
 import {
+  closeTestApp,
   createCompletedSkinProfile,
   createTestApp,
   createTestInventoryProduct,
   MockMailService,
-  truncateTables,
 } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
@@ -194,9 +194,13 @@ describe('Smart Picks (e2e)', () => {
   });
 
   afterAll(async () => {
-    await workerModule.close();
-    await truncateTables(app);
-    await app.close();
+    try {
+      if (workerModule) {
+        await workerModule.close();
+      }
+    } finally {
+      await closeTestApp(app);
+    }
   });
 
   it('requires authentication for Smart Picks endpoints', async () => {

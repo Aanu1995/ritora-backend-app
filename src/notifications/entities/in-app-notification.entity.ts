@@ -23,7 +23,8 @@ export type NotificationKind =
   | 'recording_reminder'
   | 'product_nearing_expiry'
   | 'product_expired'
-  | 'smart_pick_ready';
+  | 'smart_pick_ready'
+  | 'community_moderation';
 
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 

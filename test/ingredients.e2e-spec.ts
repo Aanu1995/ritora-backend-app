@@ -9,6 +9,7 @@ import {
   ShelfStatus,
 } from '../src/shelf/shelf.types';
 import {
+  closeTestApp,
   createCompletedSkinProfile,
   createTestApp,
   MockMailService,
@@ -182,10 +183,7 @@ describe('Ingredients (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (app) {
-      await truncateTables(app);
-      await app.close();
-    }
+    await closeTestApp(app);
   });
 
   it('returns educational actives in focus mode', async () => {

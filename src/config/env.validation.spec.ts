@@ -71,6 +71,7 @@ function developmentEnv(
     SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'gpt-5.5',
     SUGGESTION_AI_MODEL: 'gpt-5.5',
     SMART_PICKS_AI_MODEL: 'gpt-5.5',
+    COMMUNITY_MODERATION_AI_MODEL: 'gpt-5.5',
     SMART_PICKS_QUEUE_DRIVER: 'database',
     SMART_PICKS_SQS_QUEUE_URL: '',
     SMART_PICKS_SQS_DLQ_URL: '',
@@ -244,6 +245,7 @@ describe('envValidationSchema', () => {
     expect(result.value.SKIN_JOURNAL_ANALYSIS_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.SUGGESTION_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.SMART_PICKS_AI_MODEL).toBe('gpt-5.5');
+    expect(result.value.COMMUNITY_MODERATION_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.INSIGHTS_AI_MODEL).toBe('gpt-5.5');
   });
 
