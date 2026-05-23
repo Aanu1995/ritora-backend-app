@@ -3,7 +3,6 @@ import Joi, { type CustomHelpers } from 'joi';
 const COOKIE_DOMAIN_PATTERN =
   /^(?:\.[a-z0-9-]+(?:\.[a-z0-9-]+)*|localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)*)$/i;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
-const HEX_64_PATTERN = /^[a-f0-9]{64}$/i;
 
 const environmentSecret = Joi.when('NODE_ENV', {
   is: 'production',
@@ -220,11 +219,7 @@ export const envValidationSchema = Joi.object({
     .custom(validateCorsOrigins, 'CORS origin validation'),
 
   ADMIN_ROOT_EMAIL: Joi.string().trim().email({ tlds: false }).required(),
-  ADMIN_ROOT_SETUP_TOKEN_HASH: Joi.string()
-    .trim()
-    .allow('')
-    .pattern(HEX_64_PATTERN)
-    .required(),
+  ADMIN_ROOT_SETUP_TOKEN_HASH: Joi.string().allow('').optional().strip(),
   ADMIN_ROOT_SETUP_TOKEN: Joi.string().valid('').optional().strip(),
   ADMIN_ROOT_SETUP_EXPIRY: Joi.string()
     .trim()

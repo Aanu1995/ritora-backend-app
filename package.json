@@ -26,6 +26,7 @@
     "migration:run": "npm run typeorm -- migration:run -d src/database/data-source.ts --transaction each",
     "migration:revert": "npm run typeorm -- migration:revert -d src/database/data-source.ts --transaction each",
     "migration:generate": "npm run typeorm -- migration:generate -d src/database/data-source.ts",
+    "migration:baseline-existing": "ts-node -r tsconfig-paths/register src/scripts/baseline-existing-migrations.ts",
     "start:dev:all": "ts-node -r tsconfig-paths/register src/scripts/start-dev-all.ts",
     "start:dev:all:evaluate": "npm run skin-journal:analysis-evaluate:dev; npm run start:dev:all",
     "skin-journal:analysis-worker:dev": "ts-node -r tsconfig-paths/register src/scripts/start-skin-journal-analysis-worker.ts",

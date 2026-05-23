@@ -32,6 +32,7 @@ export enum AdminAuditAction {
   SupportFeedbackNoteCreated = 'support_feedback_note_created',
   CommunityContentModerated = 'community_content_moderated',
   CommunityReportUpdated = 'community_report_updated',
+  CommunitySettingsUpdated = 'community_settings_updated',
   CommunityWarningUpdated = 'community_warning_updated',
   UserNoteCreated = 'user_note_created',
   UserRestricted = 'user_restricted',

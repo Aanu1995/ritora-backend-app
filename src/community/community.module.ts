@@ -26,6 +26,7 @@ import { CommunityRoutineAdaptation } from './entities/community-routine-adaptat
 import { CommunityRoutineStep } from './entities/community-routine-step.entity';
 import { CommunityRoutine } from './entities/community-routine.entity';
 import { CommunitySafetyScanResult } from './entities/community-safety-scan-result.entity';
+import { CommunitySettings } from './entities/community-settings.entity';
 import { CommunityWarning } from './entities/community-warning.entity';
 
 @Module({
@@ -51,6 +52,7 @@ import { CommunityWarning } from './entities/community-warning.entity';
       CommunityHelpfulnessVoteEntity,
       CommunityRoutineAdaptation,
       CommunitySafetyScanResult,
+      CommunitySettings,
       CommunityWarning,
       AdminAuditLog,
       AdminSession,

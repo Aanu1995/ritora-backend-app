@@ -192,6 +192,90 @@ describe('Community (e2e)', () => {
       .send(body ?? {});
   }
 
+  it('lets admins tune the minimum account age for community posting', async () => {
+    const settingsResponse = await adminGet('/admin/community/settings').expect(
+      200,
+    );
+    expect(settingsResponse.body).toEqual(
+      expect.objectContaining({
+        minimumAccountAgeDays: 3,
+        updatedByAdminId: null,
+      }),
+    );
+
+    const ageTestUser = {
+      ...TEST_USER,
+      email: 'community-age-setting@example.com',
+      firstName: 'Age',
+    };
+    const ageToken = await createUserAccessToken(app, mockMail, ageTestUser);
+    await createCompletedSkinProfile(app, ageToken);
+    await createTestInventoryProduct(app, ageToken);
+    await app.get(DataSource).query(
+      `
+        UPDATE "users"
+        SET "created_at" = now() - interval '2 days',
+            "updated_at" = now()
+        WHERE "canonical_email" = $1
+      `,
+      [ageTestUser.email.toLowerCase()],
+    );
+    await request(app.getHttpServer())
+      .post('/api/v1/community/guidelines/accept')
+      .set('Authorization', `Bearer ${ageToken}`)
+      .set('Origin', ORIGIN)
+      .expect(201);
+
+    const beforeUpdate = await request(app.getHttpServer())
+      .get('/api/v1/community/eligibility')
+      .set('Authorization', `Bearer ${ageToken}`)
+      .expect(200);
+    expect(beforeUpdate.body.minimumAccountAgeDays).toBe(3);
+    expect(beforeUpdate.body.eligible).toBe(false);
+
+    const updateResponse = await adminPatch('/admin/community/settings', {
+      minimumAccountAgeDays: 2,
+      reason: 'Tune launch posting trust gate for e2e.',
+    }).expect(200);
+    expect(updateResponse.body).toEqual(
+      expect.objectContaining({
+        minimumAccountAgeDays: 2,
+        updatedByAdminId: adminId,
+      }),
+    );
+
+    const afterUpdate = await request(app.getHttpServer())
+      .get('/api/v1/community/eligibility')
+      .set('Authorization', `Bearer ${ageToken}`)
+      .expect(200);
+    expect(afterUpdate.body.minimumAccountAgeDays).toBe(2);
+    expect(afterUpdate.body.eligible).toBe(true);
+
+    const auditRows = await app.get(DataSource).query(
+      `
+        SELECT "action", "metadata"
+        FROM "admin_audit_logs"
+        WHERE "action" = 'community_settings_updated'
+        ORDER BY "created_at" DESC
+        LIMIT 1
+      `,
+    );
+    expect(auditRows[0]).toEqual(
+      expect.objectContaining({
+        action: 'community_settings_updated',
+        metadata: expect.objectContaining({
+          minimumAccountAgeDays: 2,
+          previousMinimumAccountAgeDays: 3,
+        }),
+      }),
+    );
+
+    await adminPatch('/admin/community/settings', {
+      minimumAccountAgeDays: 3,
+      reason: 'Restore default community posting age after e2e.',
+    }).expect(200);
+  });
+
   it('blocks public posting until launch eligibility requirements are met', async () => {
     const youngUser = {
       ...TEST_USER,

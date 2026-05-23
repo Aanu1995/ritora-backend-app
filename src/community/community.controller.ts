@@ -23,6 +23,7 @@ import {
   AdminCommunityModerationQueryDto,
   AdminCommunityNoteDto,
   AdminCommunityReportStatusDto,
+  AdminCommunitySettingsDto,
   AdminCommunityWarningDto,
   CommunityHelpfulnessDto,
   CreateCommunityReportDto,
@@ -208,6 +209,25 @@ export class AdminCommunityController {
   @Get('reports')
   listReports() {
     return this.communityService.listAdminReports();
+  }
+
+  @Get('settings')
+  getSettings() {
+    return this.communityService.getCommunitySettings();
+  }
+
+  @Patch('settings')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  updateSettings(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: AdminCommunitySettingsDto,
+    @Req() req: Request,
+  ) {
+    return this.communityService.updateCommunitySettings(
+      user.id,
+      dto,
+      adminContext(user, req),
+    );
   }
 
   @Get('content/:id')

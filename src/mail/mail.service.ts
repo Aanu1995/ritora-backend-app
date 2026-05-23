@@ -393,6 +393,10 @@ export class MailService {
     });
   }
 
+  buildAdminPasswordResetUrl(token: string): string {
+    return this.buildAdminPathActionUrl('reset-password', token);
+  }
+
   async sendAdminAccountMonitoringAlertEmail(input: {
     email: string;
     flagId: string;

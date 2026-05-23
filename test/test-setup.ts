@@ -27,6 +27,8 @@ type TestAppProviderOverride = {
 export class MockMailService {
   verificationTokens = new Map<string, string>();
   resetTokens = new Map<string, string>();
+  adminInvitationTokens = new Map<string, string>();
+  adminResetTokens = new Map<string, string>();
   deletionConfirmTokens = new Map<string, string>();
   deletionCancelTokens = new Map<string, string>();
   deletionCancelledCounts = new Map<string, number>();
@@ -45,6 +47,26 @@ export class MockMailService {
     _firstName: string,
   ): Promise<void> {
     this.resetTokens.set(email, token);
+  }
+
+  async sendAdminInvitationEmail(
+    email: string,
+    token: string,
+    _invitedByName: string,
+  ): Promise<void> {
+    this.adminInvitationTokens.set(email, token);
+  }
+
+  async sendAdminPasswordResetEmail(
+    email: string,
+    token: string,
+    _name: string,
+  ): Promise<void> {
+    this.adminResetTokens.set(email, token);
+  }
+
+  buildAdminPasswordResetUrl(token: string): string {
+    return `http://localhost:3002/reset-password/${encodeURIComponent(token)}`;
   }
 
   async sendAccountDeletionConfirmationEmail(
@@ -79,6 +101,14 @@ export class MockMailService {
     return this.resetTokens.get(email);
   }
 
+  getAdminInvitationToken(email: string): string | undefined {
+    return this.adminInvitationTokens.get(email);
+  }
+
+  getAdminResetToken(email: string): string | undefined {
+    return this.adminResetTokens.get(email);
+  }
+
   getDeletionConfirmToken(email: string): string | undefined {
     return this.deletionConfirmTokens.get(email);
   }
@@ -94,6 +124,8 @@ export class MockMailService {
   clear(): void {
     this.verificationTokens.clear();
     this.resetTokens.clear();
+    this.adminInvitationTokens.clear();
+    this.adminResetTokens.clear();
     this.deletionConfirmTokens.clear();
     this.deletionCancelTokens.clear();
     this.deletionCancelledCounts.clear();

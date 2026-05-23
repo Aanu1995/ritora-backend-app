@@ -279,14 +279,25 @@ describe('envValidationSchema', () => {
     expect(result.error?.message).toContain('ADMIN_ROOT_EMAIL');
   });
 
-  it('allows the root setup token hash to be removed after production bootstrap', () => {
+  it('strips the legacy root setup token hash when present', () => {
     const result = validateEnv(
       productionEnv({
-        ADMIN_ROOT_SETUP_TOKEN_HASH: '',
+        ADMIN_ROOT_SETUP_TOKEN_HASH: 'legacy-no-longer-used',
       }),
     );
 
     expect(result.error).toBeUndefined();
+    expect(result.value.ADMIN_ROOT_SETUP_TOKEN_HASH).toBeUndefined();
+  });
+
+  it('allows the legacy root setup token hash to be omitted', () => {
+    const input = developmentEnv();
+    delete input.ADMIN_ROOT_SETUP_TOKEN_HASH;
+
+    const result = validateEnv(input);
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.ADMIN_ROOT_SETUP_TOKEN_HASH).toBeUndefined();
   });
 
   it('rejects raw root setup tokens in every environment', () => {
@@ -297,16 +308,6 @@ describe('envValidationSchema', () => {
     );
 
     expect(result.error?.message).toContain('ADMIN_ROOT_SETUP_TOKEN');
-  });
-
-  it('rejects malformed root setup token hashes', () => {
-    const result = validateEnv(
-      developmentEnv({
-        ADMIN_ROOT_SETUP_TOKEN_HASH: 'not-a-sha256-hash',
-      }),
-    );
-
-    expect(result.error?.message).toContain('ADMIN_ROOT_SETUP_TOKEN_HASH');
   });
 
   it('rejects malformed root admin emails', () => {

@@ -23,6 +23,7 @@ import {
   type AdminCommunityModerationDto,
   type AdminCommunityModerationQueryDto,
   type AdminCommunityReportStatusDto,
+  type AdminCommunitySettingsDto,
   type AdminCommunityWarningDto,
   type CommunityHelpfulnessDto,
   type CreateCommunityReportDto,
@@ -41,6 +42,11 @@ import { CommunityRoutineAdaptation } from './entities/community-routine-adaptat
 import { CommunityRoutineStep } from './entities/community-routine-step.entity';
 import { CommunityRoutine } from './entities/community-routine.entity';
 import { CommunitySafetyScanResult } from './entities/community-safety-scan-result.entity';
+import {
+  COMMUNITY_SETTINGS_ID,
+  DEFAULT_COMMUNITY_MIN_ACCOUNT_AGE_DAYS,
+  CommunitySettings,
+} from './entities/community-settings.entity';
 import { CommunityWarning } from './entities/community-warning.entity';
 import { CommunityAiModerationService } from './community-ai-moderation.service';
 import { CommunitySafetyService } from './community-safety.service';
@@ -102,10 +108,10 @@ const SEVERE_REPORT_REASONS = new Set<CommunityReportReason>([
 
 const REPORT_ESCALATION_THRESHOLD = 3;
 const COMMUNITY_GUIDELINES_VERSION = '1.0.0';
-const COMMUNITY_MIN_ACCOUNT_AGE_DAYS = 7;
 const COMMUNITY_ABUSE_LOOKBACK_DAYS = 30;
 const COMMUNITY_ABUSE_STATUS_THRESHOLD = 2;
 const COMMUNITY_ABUSE_SEVERE_REPORT_THRESHOLD = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type CommunityPostingEligibilityReason = {
   code:
@@ -144,6 +150,8 @@ export class CommunityService {
     private readonly adaptations: Repository<CommunityRoutineAdaptation>,
     @InjectRepository(CommunitySafetyScanResult)
     private readonly safetyScans: Repository<CommunitySafetyScanResult>,
+    @InjectRepository(CommunitySettings)
+    private readonly communitySettings: Repository<CommunitySettings>,
     @InjectRepository(CommunityWarning)
     private readonly warnings: Repository<CommunityWarning>,
     @InjectRepository(AdminAuditLog)
@@ -182,22 +190,30 @@ export class CommunityService {
   }
 
   async getPostingEligibility(userId: string) {
-    const [user, profile, shelfProductCount, guidelinesConsent, recentAbuse] =
-      await Promise.all([
-        this.users.findOne({ where: { id: userId } }),
-        this.skinProfiles.findOne({
-          where: { user_id: userId },
-          relations: ['user'],
-        }),
-        this.inventory.count({ where: { user_id: userId } }),
-        this.findActiveConsent(userId, UserConsentType.CommunityGuidelines),
-        this.hasRecentModerationAbuse(userId),
-      ]);
+    const [
+      user,
+      profile,
+      shelfProductCount,
+      guidelinesConsent,
+      recentAbuse,
+      settings,
+    ] = await Promise.all([
+      this.users.findOne({ where: { id: userId } }),
+      this.skinProfiles.findOne({
+        where: { user_id: userId },
+        relations: ['user'],
+      }),
+      this.inventory.count({ where: { user_id: userId } }),
+      this.findActiveConsent(userId, UserConsentType.CommunityGuidelines),
+      this.hasRecentModerationAbuse(userId),
+      this.getCommunitySettings(),
+    ]);
     if (!user) throw new NotFoundException('User not found');
 
     const now = Date.now();
     const ageMs = now - user.created_at.getTime();
-    const minimumAgeMs = COMMUNITY_MIN_ACCOUNT_AGE_DAYS * 24 * 60 * 60 * 1000;
+    const minimumAccountAgeDays = settings.minimumAccountAgeDays;
+    const minimumAgeMs = minimumAccountAgeDays * DAY_MS;
     const eligibleAt = new Date(user.created_at.getTime() + minimumAgeMs);
     const reasons: CommunityPostingEligibilityReason[] = [];
 
@@ -231,7 +247,7 @@ export class CommunityService {
     if (ageMs < minimumAgeMs) {
       reasons.push({
         code: 'account_too_new',
-        message: `Community posting unlocks ${COMMUNITY_MIN_ACCOUNT_AGE_DAYS} days after account creation.`,
+        message: `Community posting unlocks ${minimumAccountAgeDays} days after account creation.`,
       });
     }
     if (recentAbuse) {
@@ -244,8 +260,8 @@ export class CommunityService {
 
     return {
       eligible: reasons.length === 0,
-      minimumAccountAgeDays: COMMUNITY_MIN_ACCOUNT_AGE_DAYS,
-      accountAgeDays: Math.max(0, Math.floor(ageMs / (24 * 60 * 60 * 1000))),
+      minimumAccountAgeDays,
+      accountAgeDays: Math.max(0, Math.floor(ageMs / DAY_MS)),
       eligibleAt: eligibleAt.toISOString(),
       hasAcceptedGuidelines: Boolean(guidelinesConsent),
       hasCompletedSkinProfile,
@@ -1166,6 +1182,48 @@ export class CommunityService {
     return { reports: rows.map((report) => this.toReportResponse(report)) };
   }
 
+  async getCommunitySettings() {
+    const settings = await this.communitySettings.findOne({
+      where: { id: COMMUNITY_SETTINGS_ID },
+    });
+    return this.toCommunitySettingsResponse(settings);
+  }
+
+  async updateCommunitySettings(
+    adminId: string,
+    dto: AdminCommunitySettingsDto,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const settings =
+      (await this.communitySettings.findOne({
+        where: { id: COMMUNITY_SETTINGS_ID },
+      })) ??
+      this.communitySettings.create({
+        id: COMMUNITY_SETTINGS_ID,
+        minimum_account_age_days: DEFAULT_COMMUNITY_MIN_ACCOUNT_AGE_DAYS,
+      });
+    const previousMinimumAccountAgeDays = settings.minimum_account_age_days;
+    settings.minimum_account_age_days = dto.minimumAccountAgeDays;
+    settings.updated_by_admin_id = adminId;
+    const saved = await this.communitySettings.save(settings);
+
+    await this.writeCommunityAuditLog({
+      action: AdminAuditAction.CommunitySettingsUpdated,
+      actorAdminId: adminId,
+      contentId: COMMUNITY_SETTINGS_ID,
+      contentType: 'settings',
+      context,
+      reason: cleanText(dto.reason, 500) ?? 'Community settings updated',
+      targetUserId: null,
+      metadata: {
+        minimumAccountAgeDays: saved.minimum_account_age_days,
+        previousMinimumAccountAgeDays,
+      },
+    });
+
+    return this.toCommunitySettingsResponse(saved);
+  }
+
   async updateAdminReportStatus(
     adminId: string,
     reportId: string,
@@ -2059,6 +2117,20 @@ export class CommunityService {
     };
   }
 
+  private toCommunitySettingsResponse(settings: CommunitySettings | null) {
+    return {
+      minimumAccountAgeDays:
+        settings?.minimum_account_age_days ??
+        DEFAULT_COMMUNITY_MIN_ACCOUNT_AGE_DAYS,
+      updatedAt: (
+        settings?.updated_at ??
+        settings?.created_at ??
+        new Date(0)
+      ).toISOString(),
+      updatedByAdminId: settings?.updated_by_admin_id ?? null,
+    };
+  }
+
   private automationDecisionReason(
     automation: CommunityModerationAutomationSnapshot,
   ): string {
@@ -2293,6 +2365,7 @@ export class CommunityService {
     contentId: string;
     contentType: string;
     context?: AdminCommunityAuditContext;
+    metadata?: Record<string, unknown>;
     reason: string;
     targetUserId: string | null;
   }) {
@@ -2309,6 +2382,7 @@ export class CommunityService {
         metadata: {
           contentId: input.contentId,
           contentType: input.contentType,
+          ...(input.metadata ?? {}),
         },
       }),
     );

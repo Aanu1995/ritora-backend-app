@@ -4,9 +4,12 @@ import {
   IsBoolean,
   IsEnum,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -20,6 +23,7 @@ import {
   CommunityReportStatus,
   CommunitySafetySeverity,
 } from '../community.types';
+import { MAX_COMMUNITY_MIN_ACCOUNT_AGE_DAYS } from '../entities/community-settings.entity';
 
 export class CommunityRoutineStepDto {
   @IsIn(['am', 'pm', 'either'])
@@ -235,6 +239,18 @@ export class AdminCommunityAssignDto {
   @IsOptional()
   @IsString()
   assignedAdminId?: string | null;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
+}
+
+export class AdminCommunitySettingsDto {
+  @IsInt()
+  @Min(0)
+  @Max(MAX_COMMUNITY_MIN_ACCOUNT_AGE_DAYS)
+  minimumAccountAgeDays: number;
 
   @IsString()
   @MinLength(3)

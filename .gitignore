@@ -38,3 +38,4 @@ src/scripts/*
 scripts/
 !src/scripts/
 !src/scripts/evaluate-product-compare.ts
+!src/scripts/baseline-existing-migrations.ts
