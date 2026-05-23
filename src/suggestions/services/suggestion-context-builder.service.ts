@@ -5,8 +5,8 @@ import { ulid } from 'ulid';
 import { isPostgresUniqueConstraintError } from '../../common/utils/database-errors';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { IngredientIntelligenceService } from '../../ingredients/ingredient-intelligence.service';
 import type { ProductForAnalysis } from '../../ingredients/ingredients.types';
-import { MatchingService } from '../../ingredients/matching.service';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
@@ -43,14 +43,13 @@ import {
   hasMultiAngleJournalPhoto,
   hasUsableJournalReactionSignal,
 } from './suggestion-journal-context';
-
 @Injectable()
 export class SuggestionContextBuilder {
   constructor(
     @InjectRepository(SuggestionContextCache)
     private readonly contextCacheRepo: Repository<SuggestionContextCache>,
     @Optional()
-    private readonly matchingService?: MatchingService,
+    private readonly ingredientIntelligence?: IngredientIntelligenceService,
   ) {}
 
   async build(
@@ -99,8 +98,8 @@ export class SuggestionContextBuilder {
       normalizedInputs.targetDate,
     );
     const ingredientIntelligenceByProductId =
-      buildIngredientIntelligenceByProductId(
-        this.matchingService,
+      await buildIngredientIntelligenceByProductId(
+        this.ingredientIntelligence,
         normalizedInputs.shelfActiveProducts,
       );
     const environmentPolicy = buildEnvironmentAdaptationPolicy(
@@ -343,16 +342,18 @@ function buildRecentUseByProduct(logs: ApplicationLog[]): Map<string, number> {
   return map;
 }
 
-function buildIngredientIntelligenceByProductId(
-  matchingService: MatchingService | undefined,
+async function buildIngredientIntelligenceByProductId(
+  ingredientIntelligence: IngredientIntelligenceService | undefined,
   products: InventoryProduct[],
-): Map<string, ProductIngredientIntelligence> {
+): Promise<Map<string, ProductIngredientIntelligence>> {
   const map = new Map<string, ProductIngredientIntelligence>();
-  if (!matchingService) return map;
+  if (!ingredientIntelligence) return map;
 
-  for (const product of products) {
-    const match = matchingService.matchProduct(toAnalysisProduct(product));
-    map.set(product.id, {
+  const matches = await ingredientIntelligence.matchProducts(
+    products.map(toAnalysisProduct),
+  );
+  for (const match of matches) {
+    map.set(match.product.id, {
       matchedIngredientCount: match.matchedIngredients.length,
       totalIngredientCount: match.totalTokens,
     });

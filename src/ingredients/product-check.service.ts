@@ -1,11 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, Repository } from 'typeorm';
+import type { AppLanguage } from '../common/i18n/i18n';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { LookupConfidence, ShelfStatus } from '../shelf/shelf.types';
 import type { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { AnalysisService } from './analysis.service';
 import { CheckProductDto, CheckProductInputDto } from './dto/check-product.dto';
+import { IngredientAnalysisAiMetricSource } from './ingredient-analysis-ai-usage-metrics';
+import { IngredientIntelligenceService } from './ingredient-intelligence.service';
 import {
   AnalysisSeverity,
   type AnalysisResult,
@@ -13,7 +16,6 @@ import {
   type ProductForAnalysis,
   type ProductMatchResult,
 } from './ingredients.types';
-import { MatchingService } from './matching.service';
 import {
   PRODUCT_CHECK_AI_REVIEW_PORT,
   type ProductCheckAiReviewPort,
@@ -37,7 +39,6 @@ import {
 } from './product-check.utils';
 import { ProductVerdictService } from './product-verdict.service';
 import { SkinProfileAnalysisContextService } from './skin-profile-analysis-context.service';
-import type { AppLanguage } from '../common/i18n/i18n';
 
 export const CHECKED_PRODUCT_ID = 'checked-product';
 
@@ -74,7 +75,7 @@ export class ProductCheckService {
   constructor(
     private readonly analysisContext: SkinProfileAnalysisContextService,
     private readonly analysisService: AnalysisService,
-    private readonly matchingService: MatchingService,
+    private readonly ingredientIntelligence: IngredientIntelligenceService,
     private readonly verdictService: ProductVerdictService,
     @Inject(PRODUCT_CHECK_AI_REVIEW_PORT)
     private readonly aiReviewProvider: ProductCheckAiReviewPort,
@@ -106,8 +107,11 @@ export class ProductCheckService {
     options: ProductCheckEvaluationOptions = {},
   ): Promise<ProductCheckEvaluation> {
     const product = this.toAnalysisProduct(productInput);
-    const match = this.matchingService.matchProduct(product);
-    const [skinProfile, activeShelfContext] = await Promise.all([
+    const [match, skinProfile, activeShelfContext] = await Promise.all([
+      this.ingredientIntelligence.matchProduct(product, {
+        source: IngredientAnalysisAiMetricSource.QuickCheck,
+        userId,
+      }),
       this.analysisContext.loadForUser(userId),
       this.loadActiveShelfContext(userId, options.excludeShelfProductIds ?? []),
     ]);
@@ -123,12 +127,20 @@ export class ProductCheckService {
         products: [product, ...activeShelfProducts],
         skinProfile,
         language,
+        tracking: {
+          source: IngredientAnalysisAiMetricSource.QuickCheck,
+          userId,
+        },
         withExplanations: true,
       }),
       this.analysisService.analyze({
         products: [product],
         skinProfile,
         language,
+        tracking: {
+          source: IngredientAnalysisAiMetricSource.QuickCheck,
+          userId,
+        },
         withExplanations: false,
         focusProductId: CHECKED_PRODUCT_ID,
       }),

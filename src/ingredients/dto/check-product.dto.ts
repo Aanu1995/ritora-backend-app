@@ -17,6 +17,10 @@ import {
 import { SUPPORTED_LANGUAGES, type AppLanguage } from '../../common/i18n/i18n';
 import { EmptyStringToUndefined } from '../../common/dto/empty-string.transforms';
 import {
+  MAX_INCI_INGREDIENT_NAME_LENGTH,
+  MAX_INCI_INGREDIENTS_PER_PRODUCT,
+} from '../../common/constants/product-ingredient-limits';
+import {
   LookupConfidence,
   LookupWarningCode,
   ProductCategory,
@@ -56,11 +60,11 @@ export class CheckProductInputDto {
 
   @IsArray()
   @ArrayNotEmpty()
-  @ArrayMaxSize(120)
+  @ArrayMaxSize(MAX_INCI_INGREDIENTS_PER_PRODUCT)
   @IsString({ each: true })
   @IsNotEmpty({ each: true })
   @Matches(/\S/, { each: true })
-  @MaxLength(200, { each: true })
+  @MaxLength(MAX_INCI_INGREDIENT_NAME_LENGTH, { each: true })
   inciIngredients!: string[];
 
   @EmptyStringToUndefined()

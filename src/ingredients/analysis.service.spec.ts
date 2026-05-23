@@ -1,22 +1,37 @@
-import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ProductCategory } from '../shelf/shelf.types';
 import { AnalysisService } from './analysis.service';
 import type { ExplanationPort } from './explanation.port';
-import { buildStubCatalog } from './__tests__/catalog-fixtures';
-import { MatchingService } from './matching.service';
-import type { ProductForAnalysis } from './ingredients.types';
+import {
+  type IngredientClassification,
+  type IngredientClassifierPort,
+} from './ingredient-classifier.port';
+import { IngredientIntelligenceService } from './ingredient-intelligence.service';
+import {
+  AnalysisSeverity,
+  IngredientCategory,
+  type ProductForAnalysis,
+} from './ingredients.types';
 import { TranslationService } from './translation.service';
 
 function createService() {
-  const catalog = buildStubCatalog();
-  const matching = new MatchingService(catalog);
+  const classifier: IngredientClassifierPort = {
+    classify: jest.fn(async ({ tokens }) =>
+      tokens
+        .map((token) => testClassification(token))
+        .filter(
+          (classification): classification is IngredientClassification =>
+            classification !== null,
+        ),
+    ),
+  };
+  const intelligence = new IngredientIntelligenceService(classifier);
   const explanationProvider: ExplanationPort = {
     explainFindings: jest.fn(async () => null),
   };
   const translationService = new TranslationService(
-    new ConfigService(),
+    { get: () => '' } as never,
     {} as DataSource,
   );
   jest
@@ -26,8 +41,7 @@ function createService() {
     .spyOn(translationService, 'translateMany')
     .mockImplementation(async (texts: string[]) => [...texts]);
   return new AnalysisService(
-    matching,
-    catalog,
+    intelligence,
     translationService,
     explanationProvider,
   );
@@ -46,6 +60,91 @@ function createProduct(
     category,
     inciIngredients,
   };
+}
+
+function testClassification(token: string): IngredientClassification | null {
+  const normalized = token.toLowerCase();
+  const base = {
+    rawToken: token,
+    canonicalName: token,
+    confidence: 0.8,
+    summaryEn: `${token} classified for test analysis.`,
+    phSensitive: false,
+    photosensitizing: false,
+    requiresSpf: false,
+    irritationRisk: false,
+    overlapSeverity: AnalysisSeverity.Low,
+  };
+
+  if (normalized === 'retinol') {
+    return {
+      ...base,
+      category: IngredientCategory.Retinoid,
+      photosensitizing: true,
+      requiresSpf: true,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+  if (normalized === 'retinaldehyde') {
+    return {
+      ...base,
+      category: IngredientCategory.Retinoid,
+      photosensitizing: true,
+      requiresSpf: true,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+  if (normalized === 'glycolic acid') {
+    return {
+      ...base,
+      category: IngredientCategory.Aha,
+      photosensitizing: true,
+      requiresSpf: true,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+  if (normalized === 'salicylic acid') {
+    return {
+      ...base,
+      category: IngredientCategory.Bha,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+  if (normalized === 'l-ascorbic acid') {
+    return {
+      ...base,
+      canonicalName: 'Vitamin C',
+      category: IngredientCategory.VitaminC,
+      phSensitive: true,
+      overlapSeverity: AnalysisSeverity.Medium,
+    };
+  }
+  if (normalized === 'ascorbyl glucoside') {
+    return {
+      ...base,
+      category: IngredientCategory.VitaminC,
+    };
+  }
+  if (normalized === 'niacinamide') {
+    return {
+      ...base,
+      category: IngredientCategory.Niacinamide,
+    };
+  }
+  if (normalized === 'benzoyl peroxide') {
+    return {
+      ...base,
+      category: IngredientCategory.BenzoylPeroxide,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+
+  return null;
 }
 
 describe('AnalysisService', () => {
@@ -71,10 +170,32 @@ describe('AnalysisService', () => {
             code: 'RETINOID_AHA',
             severity: 'high',
             ingredientA: 'Retinol',
-            ingredientB: 'Glycolic acid',
+            ingredientB: 'Glycolic Acid',
           }),
         ]),
       );
+    });
+
+    it('does not require a seeded ingredient catalogue to detect category conflicts', async () => {
+      const result = await service.analyze({
+        products: [
+          createProduct('retinol', 'Retinol Serum', ['Retinol']),
+          createProduct('glycolic', 'Glycolic Toner', ['Glycolic Acid']),
+        ],
+        skinProfile: null,
+        language: 'en',
+        withExplanations: false,
+      });
+
+      expect(result.conflicts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'RETINOID_AHA',
+            severity: 'high',
+          }),
+        ]),
+      );
+      expect(result.productsMissingInci).toEqual([]);
     });
 
     it('flags benzoyl peroxide plus retinoid as high severity', async () => {
@@ -112,7 +233,7 @@ describe('AnalysisService', () => {
       expect(result.overlaps).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            ingredient: 'Salicylic acid',
+            ingredient: 'Salicylic Acid',
             severity: 'high',
             productIds: ['cleanser', 'toner'],
           }),
@@ -190,12 +311,7 @@ describe('AnalysisService', () => {
             displayName: 'Retinol',
             category: 'retinoid',
             avoidCategories: expect.arrayContaining(['aha', 'bha']),
-            avoidIngredients: expect.arrayContaining([
-              expect.objectContaining({
-                slug: 'ascorbic-acid',
-                displayName: 'Vitamin C',
-              }),
-            ]),
+            avoidIngredients: [],
           }),
         ]),
       );

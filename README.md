@@ -61,10 +61,11 @@ Important variable groups:
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`, feature-specific model keys such as `SUGGESTION_AI_MODEL`
 - Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
 - Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
+- Ingredient product analysis queue: `INGREDIENT_ANALYSIS_QUEUE_DRIVER` (`database` or `sqs`), `INGREDIENT_ANALYSIS_SQS_QUEUE_URL`, optional `INGREDIENT_ANALYSIS_SQS_DLQ_URL`
 - Skin Journal analysis cost metadata: `SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD`, `SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD`
 - Skin Journal analysis queue: `SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER` (`database` or `sqs`), `SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL`, optional `SKIN_JOURNAL_ANALYSIS_SQS_DLQ_URL`
 - Smart Picks queue: `SMART_PICKS_QUEUE_DRIVER` (`database` or `sqs`), `SMART_PICKS_SQS_QUEUE_URL`, optional `SMART_PICKS_SQS_DLQ_URL`
-- Smart Picks generation worker: run `npm run smart-picks:generation-worker` as a separate process so API instances enqueue work while the worker processes queued product generation jobs.
+- Workers: run `npm run start:workers` in the worker deployment so API instances enqueue background work while the worker service processes Skin Journal, Smart Picks, account, monitoring, and ingredient-analysis jobs.
 - Skin Journal operations: `SKIN_JOURNAL_OPERATIONS_TOKEN`
 - Product media: `AWS_REGION`, `PRODUCT_MEDIA_*`
 - Legal consent versions: `LEGAL_TERMS_VERSION`, `LEGAL_PRIVACY_VERSION`
@@ -76,6 +77,7 @@ Production validation requires:
 - `COOKIE_SECURE=true`
 - non-empty strong JWT secrets
 - a stable `MAIL_UNSUBSCRIBE_SECRET` with at least 32 characters
+- `INGREDIENT_ANALYSIS_QUEUE_DRIVER=sqs` with a non-empty HTTPS `INGREDIENT_ANALYSIS_SQS_QUEUE_URL`
 - `SMART_PICKS_QUEUE_DRIVER=sqs` with a non-empty HTTPS `SMART_PICKS_SQS_QUEUE_URL`
 - a valid `MAIL_FROM` for auth emails
 - a valid `NOTIFICATION_MAIL_FROM` for notification emails, different from `MAIL_FROM`
@@ -119,21 +121,7 @@ JWT_REFRESH_SECRET=dev-refresh-secret-change-me
 npm run migration:run
 ```
 
-5. Optional: seed Skin Journal and Notifications demo data.
-
-```bash
-npm run skin-journal:seed
-npm run skin-journal:analysis-worker
-```
-
-The seeder creates or reuses `demo@ritora.local` with password
-`Password123!`, grants Skin Progress consent, writes local demo journal photos,
-and prepopulates calendar entries, AI analysis states, events, insights,
-notification preferences, an active simplification warning, and notifications.
-Re-running the seeder resets Skin Journal and Notification demo data for the
-demo user only.
-
-6. Start the API.
+5. Start the API.
 
 ```bash
 npm run start:dev
@@ -143,10 +131,22 @@ To run the API and all local workers together during development, use the
 source-based dev runner. This avoids starting workers from `dist` while the Nest
 watch compiler is rebuilding that folder. When
 `ACCOUNT_MONITORING_QUEUE_DRIVER=sqs` and `ACCOUNT_MONITORING_SQS_QUEUE_URL` are
-configured, this also starts the account monitoring SQS worker.
+configured, this also starts the account monitoring SQS worker. The ingredient
+product analysis worker is included here so shelf product analysis is queued by
+the API and processed outside the API process. It also starts the Skin Journal
+analysis and insight workers so local insight generation matches the worker
+deployment shape.
 
 ```bash
 npm run start:dev:all
+```
+
+For deployment, keep the API service on the normal backend command and run all
+background workers from one worker service:
+
+```bash
+npm run start:prod
+npm run start:workers
 ```
 
 To run the Skin Journal analysis evaluation once before starting the API and
@@ -156,7 +156,7 @@ workers:
 npm run start:dev:all:evaluate
 ```
 
-7. Useful local URLs:
+6. Useful local URLs:
 
 - API base: `http://localhost:3001/api/v1`
 - Health: `http://localhost:3001/api/v1/health`
@@ -261,8 +261,6 @@ npm run test:e2e
 npm run migration:run
 npm run migration:revert
 npm run migration:generate -- src/database/migrations/YourMigrationName
-
-npm run skin-journal:seed
 ```
 
 Notes:

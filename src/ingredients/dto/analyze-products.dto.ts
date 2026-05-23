@@ -33,6 +33,11 @@ export class AnalyzeProductsDto {
 
   @EmptyStringToUndefined()
   @IsOptional()
+  @IsBoolean()
+  forceRefresh?: boolean = false;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
   @IsIn(SUPPORTED_LANGUAGES)
   language?: AppLanguage;
 }

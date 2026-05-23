@@ -326,6 +326,7 @@ export const envValidationSchema = Joi.object({
   }),
   OPENAI_MODEL: Joi.string().trim().allow('').required(),
   CATALOGUE_AI_MODEL: Joi.string().trim().allow('').required(),
+  INGREDIENT_ANALYSIS_AI_MODEL: Joi.string().trim().allow('').required(),
   INGREDIENT_EXPLANATION_AI_MODEL: Joi.string().trim().allow('').required(),
   INGREDIENT_TRANSLATION_AI_MODEL: Joi.string().trim().allow('').required(),
   INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: Joi.string().trim().required(),
@@ -333,6 +334,27 @@ export const envValidationSchema = Joi.object({
   SUGGESTION_AI_MODEL: Joi.string().trim().allow('').required(),
   SMART_PICKS_AI_MODEL: Joi.string().trim().allow('').required(),
   COMMUNITY_MODERATION_AI_MODEL: Joi.string().trim().allow('').required(),
+  INGREDIENT_ANALYSIS_QUEUE_DRIVER: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().valid('sqs').required(),
+    otherwise: Joi.string().valid('sqs', 'database').required(),
+  }),
+  INGREDIENT_ANALYSIS_SQS_QUEUE_URL: Joi.when(
+    'INGREDIENT_ANALYSIS_QUEUE_DRIVER',
+    {
+      is: 'sqs',
+      then: Joi.string()
+        .trim()
+        .uri({ scheme: ['https'] })
+        .required(),
+      otherwise: Joi.string().trim().allow('').required(),
+    },
+  ),
+  INGREDIENT_ANALYSIS_SQS_DLQ_URL: Joi.string()
+    .trim()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .required(),
   SMART_PICKS_QUEUE_DRIVER: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().valid('sqs').required(),

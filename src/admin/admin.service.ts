@@ -46,6 +46,7 @@ import {
   SuggestionGenerationStatus,
 } from '../suggestions/suggestions.constants';
 import { User } from '../users/entities/user.entity';
+import { IngredientProductAnalysisJobStatus } from '../ingredients/entities/ingredient-product-analysis-job.entity';
 import {
   AccountMonitoringEvent,
   AccountMonitoringEventType,
@@ -349,6 +350,17 @@ const JOB_HEALTH_CONFIGS: readonly JobHealthConfig[] = [
     label: 'Daily suggestions',
     tableName: 'suggestion_generation_jobs',
   },
+  {
+    activeStatuses: [
+      IngredientProductAnalysisJobStatus.Queued,
+      IngredientProductAnalysisJobStatus.Sent,
+      IngredientProductAnalysisJobStatus.Running,
+    ],
+    failedStatus: IngredientProductAnalysisJobStatus.Failed,
+    id: 'ingredient-analysis',
+    label: 'Ingredient analysis',
+    tableName: 'ingredient_product_analysis_jobs',
+  },
 ];
 
 const ADMIN_AI_COST_FEATURES = [
@@ -356,6 +368,7 @@ const ADMIN_AI_COST_FEATURES = [
   AdminAiCostFeatureFilter.JournalInsights,
   AdminAiCostFeatureFilter.DailySuggestions,
   AdminAiCostFeatureFilter.QuickCheck,
+  AdminAiCostFeatureFilter.IngredientAnalysis,
   AdminAiCostFeatureFilter.SmartPicks,
 ] as const satisfies readonly AdminAiCostMetricFeature[];
 
@@ -454,6 +467,30 @@ const ADMIN_AI_COST_ROLLUP_SQL: Record<
             ${requireUserId('quick_checks')}
             AND quick_checks.ai_estimated_cost_usd IS NOT NULL
           GROUP BY quick_checks.user_id
+        `,
+  [AdminAiCostFeatureFilter.IngredientAnalysis]: (
+    joinCandidateUsers,
+    requireUserId,
+  ) => `
+          SELECT
+            ingredient_usage.user_id,
+            'ingredient_analysis' AS feature,
+            COALESCE(SUM(ingredient_usage.ai_estimated_cost_usd), 0)::float AS month_to_date_cost_usd,
+            COALESCE(
+              SUM(ingredient_usage.ai_estimated_cost_usd) FILTER (
+                WHERE ingredient_usage.occurred_at >= bounds.today_start
+                  AND ingredient_usage.occurred_at < bounds.tomorrow_start
+              ),
+              0
+            )::float AS today_cost_usd
+          FROM ingredient_analysis_ai_usage_metrics ingredient_usage
+          ${joinCandidateUsers('ingredient_usage')}
+          CROSS JOIN bounds
+          WHERE ingredient_usage.occurred_at >= bounds.since_month
+            ${requireUserId('ingredient_usage')}
+            AND ingredient_usage.status = 'completed'
+            AND ingredient_usage.ai_estimated_cost_usd IS NOT NULL
+          GROUP BY ingredient_usage.user_id
         `,
   [AdminAiCostFeatureFilter.SmartPicks]: (
     joinCandidateUsers,
@@ -1134,6 +1171,31 @@ export class AdminService {
             )::float AS product_check_ai_cost_mtd,
             (
               SELECT COUNT(*)
+              FROM ingredient_analysis_ai_usage_metrics
+              WHERE status = 'completed'
+            )::int AS ingredient_analysis_completed_count,
+            (
+              SELECT COUNT(*)
+              FROM ingredient_analysis_ai_usage_metrics
+              WHERE status = 'failed'
+            )::int AS ingredient_analysis_failed_count,
+            (
+              SELECT COALESCE(SUM(ai_estimated_cost_usd), 0)
+              FROM ingredient_analysis_ai_usage_metrics, bounds
+              WHERE occurred_at >= bounds.today_start
+                AND occurred_at < bounds.tomorrow_start
+                AND status = 'completed'
+                AND ai_estimated_cost_usd IS NOT NULL
+            )::float AS ingredient_analysis_ai_cost_today,
+            (
+              SELECT COALESCE(SUM(ai_estimated_cost_usd), 0)
+              FROM ingredient_analysis_ai_usage_metrics, bounds
+              WHERE occurred_at >= bounds.since_month
+                AND status = 'completed'
+                AND ai_estimated_cost_usd IS NOT NULL
+            )::float AS ingredient_analysis_ai_cost_mtd,
+            (
+              SELECT COUNT(*)
               FROM smart_pick_generation_jobs
               WHERE status = $14
             )::int AS smart_pick_completed_count,
@@ -1471,6 +1533,8 @@ export class AdminService {
             COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'journal_insights'), 0)::float AS journal_insights_cost_today,
             COALESCE(SUM(month_to_date_cost_usd) FILTER (WHERE feature = 'quick_check'), 0)::float AS quick_check_cost_mtd,
             COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'quick_check'), 0)::float AS quick_check_cost_today,
+            COALESCE(SUM(month_to_date_cost_usd) FILTER (WHERE feature = 'ingredient_analysis'), 0)::float AS ingredient_analysis_cost_mtd,
+            COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'ingredient_analysis'), 0)::float AS ingredient_analysis_cost_today,
             COALESCE(SUM(month_to_date_cost_usd) FILTER (WHERE feature = 'smart_picks'), 0)::float AS smart_picks_cost_mtd,
             COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'smart_picks'), 0)::float AS smart_picks_cost_today
           FROM feature_rollups
@@ -1492,6 +1556,8 @@ export class AdminService {
           rollup.journal_insights_cost_today,
           rollup.quick_check_cost_mtd,
           rollup.quick_check_cost_today,
+          rollup.ingredient_analysis_cost_mtd,
+          rollup.ingredient_analysis_cost_today,
           rollup.smart_picks_cost_mtd,
           rollup.smart_picks_cost_today
         FROM rollup
@@ -3680,6 +3746,24 @@ export class AdminService {
               )
             )::int AS oldest_queued_age_seconds
           FROM suggestion_generation_jobs
+
+          UNION ALL
+
+          SELECT
+            3 AS sort_order,
+            'ingredient-analysis' AS id,
+            'Ingredient analysis' AS label,
+            COUNT(*) FILTER (WHERE status = ANY($8::text[]))::int AS queued,
+            COUNT(*) FILTER (WHERE status = $9)::int AS failed,
+            FLOOR(
+              EXTRACT(
+                EPOCH FROM (
+                  $7::timestamptz -
+                  MIN(run_after) FILTER (WHERE status = ANY($8::text[]))
+                )
+              )
+            )::int AS oldest_queued_age_seconds
+          FROM ingredient_product_analysis_jobs
         ) job_health
         ORDER BY sort_order
       `,
@@ -3691,6 +3775,8 @@ export class AdminService {
           [...JOB_HEALTH_CONFIGS[2].activeStatuses],
           JOB_HEALTH_CONFIGS[2].failedStatus,
           now,
+          [...JOB_HEALTH_CONFIGS[3].activeStatuses],
+          JOB_HEALTH_CONFIGS[3].failedStatus,
         ],
       ),
     );
@@ -3748,6 +3834,12 @@ export class AdminService {
       row.product_check_reviewed_count,
     );
     const productCheckFailedCount = toNumber(row.product_check_failed_count);
+    const ingredientAnalysisCompletedCount = toNumber(
+      row.ingredient_analysis_completed_count,
+    );
+    const ingredientAnalysisFailedCount = toNumber(
+      row.ingredient_analysis_failed_count,
+    );
     const smartPickCompletedCount = toNumber(row.smart_pick_completed_count);
     const smartPickFailedCount = toNumber(row.smart_pick_failed_count);
     const failedExportCount = toNumber(row.failed_export_count);
@@ -3759,12 +3851,14 @@ export class AdminService {
       suggestionReadyCount +
       insightCompletedCount +
       productCheckReviewedCount +
+      ingredientAnalysisCompletedCount +
       smartPickCompletedCount;
     const aiFailedCount =
       analysisFailedCount +
       suggestionFailedCount +
       insightFailedCount +
       productCheckFailedCount +
+      ingredientAnalysisFailedCount +
       smartPickFailedCount;
     const aiTotalCount = aiSuccessfulCount + aiFailedCount;
     const todayAiCostUsd =
@@ -3772,12 +3866,14 @@ export class AdminService {
       toNumber(row.suggestion_ai_cost_today) +
       toNumber(row.journal_insights_ai_cost_today) +
       toNumber(row.product_check_ai_cost_today) +
+      toNumber(row.ingredient_analysis_ai_cost_today) +
       toNumber(row.smart_pick_ai_cost_today);
     const monthToDateAiCostUsd =
       toNumber(row.journal_ai_cost_mtd) +
       toNumber(row.suggestion_ai_cost_mtd) +
       toNumber(row.journal_insights_ai_cost_mtd) +
       toNumber(row.product_check_ai_cost_mtd) +
+      toNumber(row.ingredient_analysis_ai_cost_mtd) +
       toNumber(row.smart_pick_ai_cost_mtd);
     const alerts = this.buildAlerts({
       failedExportCount,
@@ -3948,6 +4044,16 @@ export class AdminService {
           ),
         },
         {
+          id: 'ingredient_analysis',
+          label: 'Ingredient analysis',
+          todayCostUsd: toNumber(row.ingredient_analysis_ai_cost_today),
+          monthToDateCostUsd: toNumber(row.ingredient_analysis_ai_cost_mtd),
+          successRate: percentage(
+            ingredientAnalysisCompletedCount,
+            ingredientAnalysisCompletedCount + ingredientAnalysisFailedCount,
+          ),
+        },
+        {
           id: 'smart_picks',
           label: 'Smart Picks',
           todayCostUsd: toNumber(row.smart_pick_ai_cost_today),
@@ -3989,6 +4095,10 @@ export class AdminService {
         },
         {
           id: 'quick_check_ai_cost',
+          source: AdminMetricSource.Table,
+        },
+        {
+          id: 'ingredient_analysis_ai_cost',
           source: AdminMetricSource.Table,
         },
       ],
@@ -4376,6 +4486,29 @@ export class AdminService {
             UNION ALL
 
             SELECT
+              'ingredient-analysis' AS type,
+              'Ingredient analysis' AS label,
+              jobs.id,
+              jobs.user_id,
+              users.email AS user_email,
+              jobs.status::text AS status,
+              jobs.attempt_count,
+              jobs.run_after,
+              jobs.last_error,
+              jobs.created_at,
+              jobs.updated_at,
+              CASE
+                WHEN jobs.status = $8 THEN 'critical'
+                ELSE 'warning'
+              END AS severity
+            FROM ingredient_product_analysis_jobs jobs
+            LEFT JOIN users ON users.id = jobs.user_id
+            WHERE jobs.status = $8
+              OR (jobs.status = ANY($9::text[]) AND jobs.run_after <= $3)
+
+            UNION ALL
+
+            SELECT
               'journal-export' AS type,
               'Journal export' AS label,
               exports.id,
@@ -4390,7 +4523,7 @@ export class AdminService {
               'critical' AS severity
             FROM skin_journal_export_jobs exports
             LEFT JOIN users ON users.id = exports.user_id
-            WHERE exports.status = $8
+            WHERE exports.status = $10
 
             UNION ALL
 
@@ -4407,7 +4540,7 @@ export class AdminService {
               users.created_at,
               users.updated_at,
               CASE
-                WHEN users.account_deletion_scheduled_for <= $9 THEN 'critical'
+                WHEN users.account_deletion_scheduled_for <= $11 THEN 'critical'
                 ELSE 'warning'
               END AS severity
             FROM users
@@ -4421,7 +4554,7 @@ export class AdminService {
             END,
             work_items.run_after ASC NULLS LAST,
             work_items.updated_at DESC NULLS LAST
-          LIMIT $10
+          LIMIT $12
         `,
         [
           AnalysisJobStatusValue.Failed,
@@ -4441,6 +4574,12 @@ export class AdminService {
           [
             SuggestionGenerationJobStatus.Queued,
             SuggestionGenerationJobStatus.Running,
+          ],
+          IngredientProductAnalysisJobStatus.Failed,
+          [
+            IngredientProductAnalysisJobStatus.Queued,
+            IngredientProductAnalysisJobStatus.Sent,
+            IngredientProductAnalysisJobStatus.Running,
           ],
           ExportStatusValue.Failed,
           now,
@@ -5067,6 +5206,13 @@ export class AdminService {
           FROM product_check_ai_review_metrics
           WHERE user_id = $1
           UNION ALL
+          SELECT id, occurred_at, 'ingredient_analysis_ai_usage' AS event_type,
+            'ingredient_analysis_ai_usage_metrics' AS source_type,
+            'Ingredient analysis AI cost was recorded.' AS summary,
+            jsonb_build_object('source', source, 'operation', operation, 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float, 'status', status) AS metadata
+          FROM ingredient_analysis_ai_usage_metrics
+          WHERE user_id = $1
+          UNION ALL
           SELECT id, generated_at AS occurred_at, 'smart_picks_snapshot' AS event_type,
             'smart_pick_snapshots' AS source_type,
             'Smart Picks snapshot cost was recorded.' AS summary,
@@ -5170,6 +5316,10 @@ export class AdminService {
             FROM product_check_ai_review_metrics
             WHERE user_id IS NOT NULL AND occurred_at >= $1
             UNION ALL
+            SELECT user_id, occurred_at, COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
+            FROM ingredient_analysis_ai_usage_metrics
+            WHERE user_id IS NOT NULL AND occurred_at >= $1 AND status = 'completed'
+            UNION ALL
             SELECT user_id, generated_at AS occurred_at,
               COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
             FROM smart_pick_snapshots
@@ -5197,6 +5347,10 @@ export class AdminService {
             SELECT user_id, updated_at AS occurred_at, 0::float AS cost_usd
             FROM smart_pick_generation_jobs
             WHERE user_id IS NOT NULL AND updated_at >= $1 AND status = 'failed'
+            UNION ALL
+            SELECT user_id, occurred_at, 0::float AS cost_usd
+            FROM ingredient_analysis_ai_usage_metrics
+            WHERE user_id IS NOT NULL AND occurred_at >= $1 AND status = 'failed'
           ),
           auth_pressure_events AS (
             SELECT user_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
@@ -6049,6 +6203,12 @@ export class AdminService {
           label: 'Quick Check',
           monthToDateCostUsd: toNumber(row.quick_check_cost_mtd),
           todayCostUsd: toNumber(row.quick_check_cost_today),
+        },
+        {
+          id: 'ingredient_analysis',
+          label: 'Ingredient analysis',
+          monthToDateCostUsd: toNumber(row.ingredient_analysis_cost_mtd),
+          todayCostUsd: toNumber(row.ingredient_analysis_cost_today),
         },
         {
           id: 'smart_picks',

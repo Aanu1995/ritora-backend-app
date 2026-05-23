@@ -42,7 +42,11 @@ import {
   AdminNotificationType,
 } from './entities/admin-notification.entity';
 import { AdminUserNote } from './entities/admin-user-note.entity';
-import { AdminJobStatus, AdminUserRestrictionFilter } from './admin.types';
+import {
+  AdminAiCostFeatureFilter,
+  AdminJobStatus,
+  AdminUserRestrictionFilter,
+} from './admin.types';
 import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
 import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitoring.dto';
 import { UserRestrictionCapability } from '../users/user-restrictions';
@@ -455,6 +459,10 @@ describe('AdminService', () => {
           analysis_failed_count: '2',
           insight_completed_count: '70',
           insight_failed_count: '5',
+          ingredient_analysis_ai_cost_mtd: '1.2',
+          ingredient_analysis_ai_cost_today: '0.2',
+          ingredient_analysis_completed_count: '44',
+          ingredient_analysis_failed_count: '4',
           verified_users: '1000',
           weekly_active_users: '320',
           active_user_trend: [
@@ -511,6 +519,13 @@ describe('AdminService', () => {
           oldest_queued_age_seconds: '120',
           queued: '2',
         },
+        {
+          failed: '1',
+          id: 'ingredient-analysis',
+          label: 'Ingredient analysis',
+          oldest_queued_age_seconds: '300',
+          queued: '4',
+        },
       ]);
     const service = new AdminService({ query } as unknown as DataSource);
 
@@ -522,11 +537,11 @@ describe('AdminService', () => {
     expect(result.metrics).toEqual({
       activeRestrictions: 4,
       activationRate: 61,
-      aiSuccessRate: 99,
+      aiSuccessRate: 98,
       criticalAlerts: 2,
       dailyActiveUsers: 90,
       dailyCheckInRate: 10,
-      monthToDateAiCostUsd: 19.4,
+      monthToDateAiCostUsd: 20.6,
       monthlyActiveUsers: 690,
       newSignups30d: 240,
       newSignups7d: 84,
@@ -534,7 +549,7 @@ describe('AdminService', () => {
       productAddSuccessRate: 40,
       registeredUsers: 1240,
       routineAcceptanceRate: 61,
-      todayAiCostUsd: 3.3,
+      todayAiCostUsd: 3.5,
       verifiedUsers: 1000,
       weeklyActiveUsers: 320,
     });
@@ -656,6 +671,13 @@ describe('AdminService', () => {
         todayCostUsd: 0.6,
       },
       {
+        id: 'ingredient_analysis',
+        label: 'Ingredient analysis',
+        monthToDateCostUsd: 1.2,
+        successRate: 92,
+        todayCostUsd: 0.2,
+      },
+      {
         id: 'smart_picks',
         label: 'Smart Picks',
         monthToDateCostUsd: 3.5,
@@ -712,6 +734,10 @@ describe('AdminService', () => {
         id: 'quick_check_ai_cost',
         source: 'table',
       },
+      {
+        id: 'ingredient_analysis_ai_cost',
+        source: 'table',
+      },
     ]);
     expect(result.jobHealth[0]).toEqual({
       failed: 3,
@@ -750,6 +776,7 @@ describe('AdminService', () => {
     expect(metricsSql).toContain('http_request_metrics');
     expect(metricsSql).toContain('ai_estimated_cost_usd IS NOT NULL');
     expect(metricsSql).toContain('product_check_ai_review_metrics');
+    expect(metricsSql).toContain('ingredient_analysis_ai_usage_metrics');
     expect(metricsSql).toContain('skin_journal_insight_generation_runs');
     expect(metricsSql).toContain("event_type = 'data_accessed'");
     expect(metricsSql).not.toContain(
@@ -758,6 +785,7 @@ describe('AdminService', () => {
     const jobHealthSql = String(query.mock.calls[1]?.[0]);
     expect(jobHealthSql).toContain('UNION ALL');
     expect(jobHealthSql).toContain('skin_journal_analysis_jobs');
+    expect(jobHealthSql).toContain('ingredient_product_analysis_jobs');
     expect(query).toHaveBeenCalledTimes(2);
     expect(metricsSql).not.toContain('password_hash');
     expect(metricsSql).not.toContain('photo_object_key');
@@ -778,13 +806,15 @@ describe('AdminService', () => {
           journal_analysis_cost_today: '0.4',
           journal_insights_cost_mtd: '0.3',
           journal_insights_cost_today: '0.1',
+          ingredient_analysis_cost_mtd: '0.2',
+          ingredient_analysis_cost_today: '0.1',
           last_name: 'Doe',
-          month_to_date_cost_usd: '3.1',
+          month_to_date_cost_usd: '3.3',
           quick_check_cost_mtd: '0.6',
           quick_check_cost_today: '0.1',
           smart_picks_cost_mtd: '0.3',
           smart_picks_cost_today: '0',
-          today_cost_usd: '0.8',
+          today_cost_usd: '0.9',
           total_count: '1',
           user_id: '01USER',
         },
@@ -793,7 +823,7 @@ describe('AdminService', () => {
 
     await expect(
       service.listAiCostByUsers({
-        feature: 'quick_check',
+        feature: AdminAiCostFeatureFilter.IngredientAnalysis,
         limit: 10,
         page: 1,
         period: 'today',
@@ -835,15 +865,21 @@ describe('AdminService', () => {
               todayCostUsd: 0.1,
             },
             {
+              id: 'ingredient_analysis',
+              label: 'Ingredient analysis',
+              monthToDateCostUsd: 0.2,
+              todayCostUsd: 0.1,
+            },
+            {
               id: 'smart_picks',
               label: 'Smart Picks',
               monthToDateCostUsd: 0.3,
               todayCostUsd: 0,
             },
           ],
-          monthToDateCostUsd: 3.1,
+          monthToDateCostUsd: 3.3,
           name: 'Jane Doe',
-          todayCostUsd: 0.8,
+          todayCostUsd: 0.9,
           userId: '01USER',
         },
       ],
@@ -854,8 +890,9 @@ describe('AdminService', () => {
     expect(sql).toContain('INNER JOIN candidate_users cost_users');
     expect(sql).toContain('INNER JOIN candidate_users users');
     expect(sql).toContain('feature_rollups AS');
-    expect(sql).toContain('product_check_ai_review_metrics');
-    expect(sql).toContain('GROUP BY quick_checks.user_id');
+    expect(sql).toContain('ingredient_analysis_ai_usage_metrics');
+    expect(sql).toContain('GROUP BY ingredient_usage.user_id');
+    expect(sql).not.toContain('product_check_ai_review_metrics');
     expect(sql).not.toContain('skin_journal_entries');
     expect(sql).not.toContain('skin_journal_insight_generation_runs');
     expect(sql).not.toContain('suggestion_instances');
@@ -2295,6 +2332,13 @@ describe('AdminService', () => {
           oldest_queued_age_seconds: '60',
           queued: '1',
         },
+        {
+          failed: '1',
+          id: 'ingredient-analysis',
+          label: 'Ingredient analysis',
+          oldest_queued_age_seconds: '420',
+          queued: '2',
+        },
       ])
       .mockResolvedValueOnce([
         {
@@ -2347,6 +2391,14 @@ describe('AdminService', () => {
         status: AdminJobStatus.Critical,
       }),
     );
+    expect(result.jobHealth).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'ingredient-analysis',
+          label: 'Ingredient analysis',
+        }),
+      ]),
+    );
     expect(result.compliance).toEqual({
       failedExportCount: 1,
       pendingDeletionCount: 2,
@@ -2389,6 +2441,9 @@ describe('AdminService', () => {
         type: 'journal-analysis',
         userEmail: 'jane@example.com',
       }),
+    );
+    expect(String(query.mock.calls[2]?.[0])).toContain(
+      'ingredient_product_analysis_jobs',
     );
     expect(JSON.stringify(result)).not.toContain('payload');
   });

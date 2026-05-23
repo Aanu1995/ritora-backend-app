@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
 import {
   extractJsonObject,
   extractOutputText,
@@ -16,6 +17,13 @@ import type {
   ExplanationOutput,
   ExplanationPort,
 } from './explanation.port';
+import {
+  IngredientAnalysisAiMetricOperation,
+  IngredientAnalysisAiMetricStatus,
+  type IngredientAnalysisAiUsage,
+  normalizeIngredientAnalysisAiUsage,
+  recordIngredientAnalysisAiUsageMetric,
+} from './ingredient-analysis-ai-usage-metrics';
 
 export const OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS = 45_000;
 const DEFAULT_MODEL = 'gpt-5-mini';
@@ -60,8 +68,13 @@ const EXPLANATION_RESPONSE_FORMAT = {
 export class OpenAiExplanationProvider implements ExplanationPort {
   private readonly logger = new Logger(OpenAiExplanationProvider.name);
   private hasWarnedMissingModel = false;
+  private hasWarnedMetricWriteFailure = false;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional()
+    private readonly dataSource?: DataSource,
+  ) {}
 
   /**
    * Check once at boot whether the model env var is set. Emits a single WARN
@@ -169,10 +182,18 @@ export class OpenAiExplanationProvider implements ExplanationPort {
           model,
           durationMs,
         });
+        await this.recordMetric({
+          durationMs,
+          model,
+          status: IngredientAnalysisAiMetricStatus.Failed,
+          tracking: input.tracking,
+          usage: null,
+        });
         return null;
       }
 
       const payload = (await response.json()) as OpenAiResponsePayload;
+      const usage = normalizeIngredientAnalysisAiUsage(payload.usage);
       const outputText = extractOutputText(payload);
       if (!outputText) {
         this.logStructured('warn', {
@@ -181,18 +202,55 @@ export class OpenAiExplanationProvider implements ExplanationPort {
           model,
           durationMs,
         });
+        await this.recordMetric({
+          durationMs,
+          model,
+          status: IngredientAnalysisAiMetricStatus.Failed,
+          tracking: input.tracking,
+          usage,
+        });
         return null;
       }
 
-      const parsed = JSON.parse(extractJsonObject(outputText)) as Partial<{
+      let parsed: Partial<{
         conflicts: Array<{ id?: string; explanation?: string }>;
         overlaps: Array<{ id?: string; explanation?: string }>;
       }>;
+      try {
+        parsed = JSON.parse(extractJsonObject(outputText)) as Partial<{
+          conflicts: Array<{ id?: string; explanation?: string }>;
+          overlaps: Array<{ id?: string; explanation?: string }>;
+        }>;
+      } catch (error) {
+        this.logStructured('warn', {
+          event: 'explanation_failed',
+          reason: 'invalid_output',
+          message: error instanceof Error ? error.message : 'Unknown error',
+          model,
+          durationMs,
+        });
+        await this.recordMetric({
+          durationMs,
+          model,
+          status: IngredientAnalysisAiMetricStatus.Failed,
+          tracking: input.tracking,
+          usage,
+        });
+        return null;
+      }
 
-      return {
+      const output = {
         conflicts: this.toLookup(parsed.conflicts),
         overlaps: this.toLookup(parsed.overlaps),
       };
+      await this.recordMetric({
+        durationMs,
+        model,
+        status: IngredientAnalysisAiMetricStatus.Completed,
+        tracking: input.tracking,
+        usage,
+      });
+      return output;
     } catch (error) {
       this.logStructured('warn', {
         event: 'explanation_failed',
@@ -201,7 +259,39 @@ export class OpenAiExplanationProvider implements ExplanationPort {
         model,
         durationMs: Date.now() - startedAt,
       });
+      await this.recordMetric({
+        durationMs: Date.now() - startedAt,
+        model,
+        status: IngredientAnalysisAiMetricStatus.Failed,
+        tracking: input.tracking,
+        usage: null,
+      });
       return null;
+    }
+  }
+
+  private async recordMetric(input: {
+    durationMs: number;
+    model: string;
+    status: IngredientAnalysisAiMetricStatus;
+    tracking?: ExplanationInput['tracking'];
+    usage: IngredientAnalysisAiUsage | null;
+  }): Promise<void> {
+    const recorded = await recordIngredientAnalysisAiUsageMetric(
+      this.dataSource,
+      this.logger,
+      {
+        durationMs: input.durationMs,
+        model: input.model,
+        operation: IngredientAnalysisAiMetricOperation.Explanation,
+        status: input.status,
+        tracking: input.tracking,
+        usage: input.usage,
+      },
+      { logFailure: !this.hasWarnedMetricWriteFailure },
+    );
+    if (!recorded) {
+      this.hasWarnedMetricWriteFailure = true;
     }
   }
 

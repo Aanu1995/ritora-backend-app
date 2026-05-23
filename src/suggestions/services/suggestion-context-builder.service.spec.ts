@@ -10,7 +10,8 @@ import {
 } from '../../shelf/shelf.types';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
-import { MatchingService } from '../../ingredients/matching.service';
+import { IngredientIntelligenceService } from '../../ingredients/ingredient-intelligence.service';
+import type { ProductForAnalysis } from '../../ingredients/ingredients.types';
 import {
   EnvironmentAirQualityRisk,
   EnvironmentConfidence,
@@ -217,18 +218,22 @@ describe('SuggestionContextBuilder', () => {
   });
 
   it('carries shelf ingredient-intelligence gaps into product quality', async () => {
-    const matchingService = {
-      matchProduct: jest.fn((product) => ({
-        product,
-        matchedIngredients: [],
-        unresolvedTokens: [...product.inciIngredients],
-        totalTokens: product.inciIngredients.length,
-        resolvedTokens: 0,
-      })),
-    } as unknown as MatchingService;
+    const ingredientIntelligence = {
+      matchProducts: jest.fn((products: ProductForAnalysis[]) =>
+        Promise.resolve(
+          products.map((product) => ({
+            product,
+            matchedIngredients: [],
+            unresolvedTokens: [...product.inciIngredients],
+            totalTokens: product.inciIngredients.length,
+            resolvedTokens: 0,
+          })),
+        ),
+      ),
+    } as unknown as IngredientIntelligenceService;
     const builderWithIngredientIntelligence = new SuggestionContextBuilder(
       cacheRepo,
-      matchingService,
+      ingredientIntelligence,
     );
 
     const summary = await builderWithIngredientIntelligence.build({

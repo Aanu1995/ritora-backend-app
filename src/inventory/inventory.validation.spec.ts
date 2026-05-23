@@ -77,6 +77,23 @@ describe('assertValidInventoryDraft', () => {
     expect(() => assertValidInventoryDraft(draft)).not.toThrow();
   });
 
+  it('rejects oversized ingredient lists before they reach analysis', () => {
+    const draft = createValidDraft();
+    draft.identity.inciIngredients = Array.from(
+      { length: 121 },
+      (_, index) => `Ingredient ${index + 1}`,
+    );
+
+    expect(() => assertValidInventoryDraft(draft)).toThrow(BadRequestException);
+  });
+
+  it('rejects ingredient names that are too long for public analysis', () => {
+    const draft = createValidDraft();
+    draft.identity.inciIngredients = ['A'.repeat(201)];
+
+    expect(() => assertValidInventoryDraft(draft)).toThrow(BadRequestException);
+  });
+
   it('rejects manufacturer URLs with embedded credentials', () => {
     const draft = createValidDraft();
     draft.manufacturer.productUrl = 'https://user:pass@example.com/product';

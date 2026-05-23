@@ -1,8 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
-import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ProductCategory } from '../shelf/shelf.types';
 import { AnalysisService } from './analysis.service';
+import { IngredientProductAnalysisSnapshotService } from './ingredient-product-analysis-snapshot.service';
 import { IngredientsService } from './ingredients.service';
 import { SkinProfileAnalysisContextService } from './skin-profile-analysis-context.service';
 
@@ -28,6 +28,9 @@ describe('IngredientsService', () => {
   const analysisContext = {
     loadForUser: jest.fn(),
   };
+  const productAnalysisSnapshots = {
+    analyzeFocusProductForUser: jest.fn(),
+  };
   let service: IngredientsService;
 
   beforeEach(() => {
@@ -36,9 +39,13 @@ describe('IngredientsService', () => {
       inventoryRepository as never,
       analysisService as unknown as AnalysisService,
       analysisContext as unknown as SkinProfileAnalysisContextService,
+      productAnalysisSnapshots as unknown as IngredientProductAnalysisSnapshotService,
     );
     analysisService.analyze.mockResolvedValue({ status: 'ok' });
     analysisContext.loadForUser.mockResolvedValue(null);
+    productAnalysisSnapshots.analyzeFocusProductForUser.mockResolvedValue({
+      status: 'ok',
+    });
   });
 
   it('rejects ambiguous analyze requests before touching user data', async () => {
@@ -64,44 +71,45 @@ describe('IngredientsService', () => {
     expect(analysisContext.loadForUser).not.toHaveBeenCalled();
   });
 
-  it('runs focus analysis only for a product owned by the user', async () => {
-    const focusProduct = product('product-1');
-    const skinProfile = Object.assign(new SkinProfile(), {
-      has_health_context_consent: true,
-      safety_context: { conditions: ['eczema'] },
-    });
-    analysisContext.loadForUser.mockResolvedValue(skinProfile);
-    inventoryRepository.findOne.mockResolvedValue(focusProduct);
-
+  it('delegates focus analysis to the persisted product snapshot path', async () => {
     await service.analyzeForUser(
       'user-1',
       { focusProductId: 'product-1', withExplanations: true },
       'sv',
     );
 
-    expect(inventoryRepository.findOne).toHaveBeenCalledWith({
-      where: { id: 'product-1', user_id: 'user-1' },
+    expect(
+      productAnalysisSnapshots.analyzeFocusProductForUser,
+    ).toHaveBeenCalledWith('user-1', 'product-1', 'sv', true, {
+      forceRefresh: false,
     });
-    expect(analysisContext.loadForUser).toHaveBeenCalledWith('user-1');
-    expect(analysisService.analyze).toHaveBeenCalledWith({
-      products: [
-        {
-          id: 'product-1',
-          brand: 'Ritora Lab',
-          name: 'Product product-1',
-          category: ProductCategory.Serum,
-          inciIngredients: ['Niacinamide'],
-        },
-      ],
-      focusProductId: 'product-1',
-      skinProfile,
-      language: 'sv',
-      withExplanations: true,
+    expect(inventoryRepository.findOne).not.toHaveBeenCalled();
+    expect(analysisContext.loadForUser).not.toHaveBeenCalled();
+    expect(analysisService.analyze).not.toHaveBeenCalled();
+  });
+
+  it('passes force-refresh requests to the product snapshot path', async () => {
+    await service.analyzeForUser(
+      'user-1',
+      {
+        focusProductId: 'product-1',
+        withExplanations: false,
+        forceRefresh: true,
+      },
+      'en',
+    );
+
+    expect(
+      productAnalysisSnapshots.analyzeFocusProductForUser,
+    ).toHaveBeenCalledWith('user-1', 'product-1', 'en', false, {
+      forceRefresh: true,
     });
   });
 
   it('returns not found when the focus product does not belong to the user', async () => {
-    inventoryRepository.findOne.mockResolvedValue(null);
+    productAnalysisSnapshots.analyzeFocusProductForUser.mockRejectedValue(
+      new NotFoundException('Inventory product not found'),
+    );
 
     await expect(
       service.analyzeForUser(
@@ -137,7 +145,7 @@ describe('IngredientsService', () => {
   it('runs multi-product analysis for owned products and handles missing INCI safely', async () => {
     const first = product('product-1');
     const second = Object.assign(product('product-2'), { identity: null });
-    inventoryRepository.find.mockResolvedValue([first, second]);
+    inventoryRepository.find.mockResolvedValue([second, first]);
 
     await service.analyzeForUser(
       'user-1',
@@ -155,6 +163,10 @@ describe('IngredientsService', () => {
       ],
       skinProfile: null,
       language: 'en',
+      tracking: {
+        source: 'shelf_analysis',
+        userId: 'user-1',
+      },
       withExplanations: false,
     });
   });

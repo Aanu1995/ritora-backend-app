@@ -3,7 +3,7 @@ import { IngredientEntry } from './ingredient-entry.entity';
 
 /**
  * Regex fallback pattern for the matcher. Stored as a string; compiled to a
- * `RegExp` at cache-load time by the IngredientCatalogService.
+ * Legacy category pattern row kept for migration compatibility.
  */
 @Entity('ingredient_category_patterns')
 export class IngredientCategoryPattern {

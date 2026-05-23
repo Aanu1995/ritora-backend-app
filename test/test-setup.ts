@@ -7,8 +7,6 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { CataloguePhotoStorageService } from '../src/catalogue/catalogue-photo-storage.service';
 import { assertDestructiveTestDatabaseResetAllowed } from '../src/common/utils/destructive-database-guard';
-import { IngredientCatalogService } from '../src/ingredients/ingredient-catalog.service';
-import { IngredientsSeeder } from '../src/ingredients/seed/ingredients-seeder';
 import { MailService } from '../src/mail/mail.service';
 import {
   ApplicationMethod,
@@ -193,14 +191,6 @@ export async function createTestApp(
 
     await app.init();
 
-    // Seed + refresh the ingredient catalogue now that the app is up. These
-    // mirror what `IngredientsModule.onApplicationBootstrap` does at
-    // production startup — idempotent upsert + in-memory cache reload.
-    const seeder = app.get(IngredientsSeeder);
-    await seeder.run();
-    const catalog = app.get(IngredientCatalogService);
-    await catalog.refresh();
-
     await truncateTables(app);
 
     return app;
@@ -211,13 +201,6 @@ export async function createTestApp(
     throw error;
   }
 }
-
-const INGREDIENT_REFERENCE_TABLES = new Set([
-  'ingredient_entries',
-  'ingredient_aliases',
-  'ingredient_category_patterns',
-  'ingredient_conflict_rules',
-]);
 
 const TRUNCATE_TABLES_LOCK_KEY = 'ritora:e2e:truncate-tables';
 const TRUNCATE_LOCK_TIMEOUT_MS = 5000;
@@ -254,11 +237,7 @@ export async function truncateTables(app: INestApplication): Promise<void> {
   });
   const entities = dataSource.entityMetadatas;
 
-  // Ingredient catalogue rows are reference data — seeded once per test
-  // boot via IngredientsSeeder. Truncating them between tests would force
-  // a re-seed every time and doesn't match user-data semantics.
   const tableNames = entities
-    .filter((e) => !INGREDIENT_REFERENCE_TABLES.has(e.tableName))
     .map((e) => `"${e.tableName}"`)
     .sort()
     .join(', ');

@@ -7,9 +7,6 @@
     "assets": [
       {
         "include": "mail/templates/**/*"
-      },
-      {
-        "include": "ingredients/seed/*.json"
       }
     ]
   }
