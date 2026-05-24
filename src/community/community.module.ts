@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminAccount } from '../admin/entities/admin-account.entity';
 import { AdminAuditLog } from '../admin/entities/admin-audit-log.entity';
 import { AdminSession } from '../admin/entities/admin-session.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
@@ -56,6 +57,7 @@ import { CommunityWarning } from './entities/community-warning.entity';
       CommunitySafetyScanResult,
       CommunitySettings,
       CommunityWarning,
+      AdminAccount,
       AdminAuditLog,
       AdminSession,
       InAppNotification,

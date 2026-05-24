@@ -5,6 +5,11 @@ import type {
   Repository,
   UpdateResult,
 } from 'typeorm';
+import {
+  AdminAccount,
+  AdminAccountRole,
+  AdminAccountStatus,
+} from '../admin/entities/admin-account.entity';
 import { AdminAuditLog } from '../admin/entities/admin-audit-log.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { InAppNotification } from '../notifications/entities/in-app-notification.entity';
@@ -73,6 +78,7 @@ type DataSourceMock = DataSource & {
 };
 
 type CommunityRepositories = {
+  adminAccounts: Repository<AdminAccount> & MockRepository<AdminAccount>;
   profiles: Repository<CommunityProfile> & MockRepository<CommunityProfile>;
   routines: Repository<CommunityRoutine> & MockRepository<CommunityRoutine>;
   routineSteps: Repository<CommunityRoutineStep> &
@@ -127,6 +133,7 @@ function repositoryMock<T extends object>(): Repository<T> & MockRepository<T> {
 
 function createService() {
   const repositories: CommunityRepositories = {
+    adminAccounts: repositoryMock<AdminAccount>(),
     profiles: repositoryMock<CommunityProfile>(),
     routines: repositoryMock<CommunityRoutine>(),
     routineSteps: repositoryMock<CommunityRoutineStep>(),
@@ -196,6 +203,7 @@ function createService() {
     repositories.safetyScans,
     repositories.communitySettings,
     repositories.warnings,
+    repositories.adminAccounts,
     repositories.auditLogs,
     repositories.notifications,
     repositories.skinProfiles,
@@ -329,6 +337,40 @@ function settingsFixture(minimumAccountAgeDays: number): CommunitySettings {
   };
 }
 
+function adminAccountFixture(
+  overrides: Partial<AdminAccount> = {},
+): AdminAccount {
+  return {
+    id: 'admin_1',
+    email: 'ops@example.com',
+    canonical_email: 'ops@example.com',
+    name: 'Ops Admin',
+    role: AdminAccountRole.Admin,
+    status: AdminAccountStatus.Active,
+    password_hash: null,
+    invitation_token_hash: null,
+    invitation_expires_at: null,
+    password_reset_token_hash: null,
+    password_reset_expires: null,
+    mfa_totp_secret: null,
+    mfa_pending_totp_secret: null,
+    mfa_pending_expires_at: null,
+    mfa_enabled_at: null,
+    mfa_last_used_time_step: null,
+    mfa_recovery_code_hashes: null,
+    created_by_admin_id: null,
+    created_by_admin: null,
+    accepted_at: new Date(),
+    last_login_at: null,
+    deleted_at: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+    sessions: [],
+    generateId: jest.fn(),
+    ...overrides,
+  };
+}
+
 function inventoryProductFixture(
   overrides: Partial<InventoryProduct> = {},
 ): InventoryProduct {
@@ -396,6 +438,35 @@ function inventoryProductFixture(
 }
 
 describe('CommunityService posting eligibility', () => {
+  it('returns a human-readable admin label for community settings updates', async () => {
+    const { repositories, service } = createService();
+    repositories.communitySettings.findOne.mockResolvedValue(
+      settingsFixture(7),
+    );
+    repositories.adminAccounts.findOne.mockResolvedValue(adminAccountFixture());
+
+    const result = await service.getCommunitySettings();
+
+    expect(result).toMatchObject({
+      minimumAccountAgeDays: 7,
+      updatedByAdminId: 'admin_1',
+      updatedByAdminLabel: 'Ops Admin (ops@example.com)',
+    });
+  });
+
+  it('does not expose a raw admin id as the visible community settings label', async () => {
+    const { repositories, service } = createService();
+    repositories.communitySettings.findOne.mockResolvedValue(
+      settingsFixture(7),
+    );
+    repositories.adminAccounts.findOne.mockResolvedValue(null);
+
+    const result = await service.getCommunitySettings();
+
+    expect(result.updatedByAdminId).toBe('admin_1');
+    expect(result.updatedByAdminLabel).toBe('Former admin');
+  });
+
   it('returns every blocking reason for a new incomplete account', async () => {
     const { repositories, service } = createService();
     const user = userFixture({

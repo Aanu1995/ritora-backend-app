@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, ILike, In, IsNull, MoreThan, Repository } from 'typeorm';
 import { ulid } from 'ulid';
+import { AdminAccount } from '../admin/entities/admin-account.entity';
 import {
   AdminAuditAction,
   AdminAuditLog,
@@ -106,6 +107,13 @@ type AdminCommunityAuditContext = {
   userAgent?: string | null;
 };
 
+type CommunitySettingsResponse = {
+  minimumAccountAgeDays: number;
+  updatedAt: string;
+  updatedByAdminId: string | null;
+  updatedByAdminLabel: string | null;
+};
+
 const SEVERE_REPORT_REASONS = new Set<CommunityReportReason>([
   CommunityReportReason.UnsafeAdvice,
   CommunityReportReason.MedicalClaims,
@@ -169,6 +177,8 @@ export class CommunityService {
     private readonly communitySettings: Repository<CommunitySettings>,
     @InjectRepository(CommunityWarning)
     private readonly warnings: Repository<CommunityWarning>,
+    @InjectRepository(AdminAccount)
+    private readonly adminAccounts: Repository<AdminAccount>,
     @InjectRepository(AdminAuditLog)
     private readonly auditLogs: Repository<AdminAuditLog>,
     @InjectRepository(InAppNotification)
@@ -2968,7 +2978,16 @@ export class CommunityService {
     };
   }
 
-  private toCommunitySettingsResponse(settings: CommunitySettings | null) {
+  private async toCommunitySettingsResponse(
+    settings: CommunitySettings | null,
+  ): Promise<CommunitySettingsResponse> {
+    const updatedByAdminId = settings?.updated_by_admin_id ?? null;
+    const updatedByAdmin = updatedByAdminId
+      ? await this.adminAccounts.findOne({
+          where: { id: updatedByAdminId },
+        })
+      : null;
+
     return {
       minimumAccountAgeDays:
         settings?.minimum_account_age_days ??
@@ -2978,8 +2997,21 @@ export class CommunityService {
         settings?.created_at ??
         new Date(0)
       ).toISOString(),
-      updatedByAdminId: settings?.updated_by_admin_id ?? null,
+      updatedByAdminId,
+      updatedByAdminLabel: updatedByAdmin
+        ? this.toAdminDisplayLabel(updatedByAdmin)
+        : updatedByAdminId
+          ? 'Former admin'
+          : null,
     };
+  }
+
+  private toAdminDisplayLabel(admin: Pick<AdminAccount, 'email' | 'name'>) {
+    const name = cleanText(admin.name, 120);
+    const email = cleanText(admin.email, 255);
+
+    if (name && email) return `${name} (${email})`;
+    return name ?? email ?? 'Admin';
   }
 
   private automationDecisionReason(

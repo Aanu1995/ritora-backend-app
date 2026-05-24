@@ -200,6 +200,7 @@ describe('Community (e2e)', () => {
       expect.objectContaining({
         minimumAccountAgeDays: 3,
         updatedByAdminId: null,
+        updatedByAdminLabel: null,
       }),
     );
 
@@ -241,6 +242,7 @@ describe('Community (e2e)', () => {
       expect.objectContaining({
         minimumAccountAgeDays: 2,
         updatedByAdminId: adminId,
+        updatedByAdminLabel: 'Community Admin (community-admin@example.com)',
       }),
     );
 
