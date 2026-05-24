@@ -63,6 +63,63 @@ type CommunityOutcomeSignalCountRow = {
   count: number | string;
 };
 
+const COMMUNITY_CONTENT_TYPES = new Set<unknown>(
+  Object.values(CommunityContentType),
+);
+const COMMUNITY_HELPFULNESS_VOTES = new Set<unknown>(
+  Object.values(CommunityHelpfulnessVote),
+);
+const COMMUNITY_OUTCOME_SIGNALS = new Set<unknown>(
+  Object.values(CommunityOutcomeSignal),
+);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isCommunityContentReference(
+  value: unknown,
+): value is CommunityContentReference {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    COMMUNITY_CONTENT_TYPES.has(value.content_type) &&
+    typeof value.content_id === 'string'
+  );
+}
+
+function isCommunityHelpfulnessCountRow(
+  value: unknown,
+): value is CommunityHelpfulnessCountRow {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    COMMUNITY_HELPFULNESS_VOTES.has(value.vote) &&
+    isCommunityCountValue(value.count)
+  );
+}
+
+function isCommunityOutcomeSignalCountRow(
+  value: unknown,
+): value is CommunityOutcomeSignalCountRow {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    COMMUNITY_OUTCOME_SIGNALS.has(value.signal) &&
+    isCommunityCountValue(value.count)
+  );
+}
+
+function isCommunityCountValue(value: unknown): value is number | string {
+  return typeof value === 'number' || typeof value === 'string';
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -495,24 +552,28 @@ export class UsersService {
     manager: EntityManager,
     userId: string,
   ): Promise<void> {
-    const helpfulnessReferences = (await manager.query(
+    const helpfulnessReferences = await this.queryRawRows(
+      manager,
       `
         DELETE FROM "community_helpfulness_votes"
         WHERE "user_id" = $1
         RETURNING "content_type", "content_id"
       `,
       [userId],
-    )) as CommunityContentReference[];
+      isCommunityContentReference,
+    );
     await this.recountCommunityHelpfulness(manager, helpfulnessReferences);
 
-    const outcomeReferences = (await manager.query(
+    const outcomeReferences = await this.queryRawRows(
+      manager,
       `
         DELETE FROM "community_outcome_signal_votes"
         WHERE "user_id" = $1
         RETURNING "content_type", "content_id"
       `,
       [userId],
-    )) as CommunityContentReference[];
+      isCommunityContentReference,
+    );
     await this.recountCommunityOutcomeSignals(manager, outcomeReferences);
   }
 
@@ -521,7 +582,8 @@ export class UsersService {
     references: CommunityContentReference[],
   ): Promise<void> {
     for (const reference of this.uniqueCommunityContentReferences(references)) {
-      const rows = (await manager.query(
+      const rows = await this.queryRawRows(
+        manager,
         `
           SELECT "vote", COUNT(*)::int AS "count"
           FROM "community_helpfulness_votes"
@@ -529,7 +591,8 @@ export class UsersService {
           GROUP BY "vote"
         `,
         [reference.content_type, reference.content_id],
-      )) as CommunityHelpfulnessCountRow[];
+        isCommunityHelpfulnessCountRow,
+      );
       const helpfulCount = this.communityVoteCount(
         rows,
         CommunityHelpfulnessVote.Helpful,
@@ -555,7 +618,8 @@ export class UsersService {
     references: CommunityContentReference[],
   ): Promise<void> {
     for (const reference of this.uniqueCommunityContentReferences(references)) {
-      const rows = (await manager.query(
+      const rows = await this.queryRawRows(
+        manager,
         `
           SELECT "signal", COUNT(*)::int AS "count"
           FROM "community_outcome_signal_votes"
@@ -563,7 +627,8 @@ export class UsersService {
           GROUP BY "signal"
         `,
         [reference.content_type, reference.content_id],
-      )) as CommunityOutcomeSignalCountRow[];
+        isCommunityOutcomeSignalCountRow,
+      );
       const counts = this.emptyCommunityOutcomeSignalCounts();
       rows.forEach((row) => {
         counts[row.signal] = Number(row.count);
@@ -578,6 +643,18 @@ export class UsersService {
         [JSON.stringify(counts), reference.content_id],
       );
     }
+  }
+
+  private async queryRawRows<Row>(
+    manager: EntityManager,
+    query: string,
+    parameters: unknown[],
+    isRow: (value: unknown) => value is Row,
+  ): Promise<Row[]> {
+    const rawRows: unknown = await manager.query(query, parameters);
+    const rows: unknown[] = Array.isArray(rawRows) ? rawRows : [];
+
+    return rows.filter(isRow);
   }
 
   private communityVoteCount(
