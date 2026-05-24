@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, MoreThan, Repository } from 'typeorm';
+import { DataSource, ILike, In, IsNull, MoreThan, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import {
   AdminAuditAction,
@@ -26,6 +26,7 @@ import {
   type AdminCommunitySettingsDto,
   type AdminCommunityWarningDto,
   type CommunityHelpfulnessDto,
+  type CommunityOutcomeSignalDto,
   type CreateCommunityReportDto,
   type CreateCommunityReviewDto,
   type CreateCommunityRoutineDto,
@@ -34,6 +35,7 @@ import {
 } from './dto/community.dto';
 import { CommunityHelpfulnessVoteEntity } from './entities/community-helpfulness-vote.entity';
 import { CommunityModerationDecision } from './entities/community-moderation-decision.entity';
+import { CommunityOutcomeSignalVote } from './entities/community-outcome-signal-vote.entity';
 import { CommunityProfile } from './entities/community-profile.entity';
 import { CommunityReport } from './entities/community-report.entity';
 import { CommunityReviewContextProduct } from './entities/community-review-context-product.entity';
@@ -56,6 +58,11 @@ import {
   CommunityDisclosureType,
   CommunityHelpfulnessVote,
   CommunityModerationStatus,
+  CommunityOutcomeFollowedPart,
+  CommunityOutcomeIrritationLevel,
+  CommunityOutcomeSignal,
+  type CommunityOutcomeSignalContext,
+  CommunityOutcomeTrialDuration,
   CommunityReportStatus,
   CommunityReportReason,
   CommunitySafetySeverity,
@@ -111,6 +118,12 @@ const COMMUNITY_GUIDELINES_VERSION = '1.0.0';
 const COMMUNITY_ABUSE_LOOKBACK_DAYS = 30;
 const COMMUNITY_ABUSE_STATUS_THRESHOLD = 2;
 const COMMUNITY_ABUSE_SEVERE_REPORT_THRESHOLD = 3;
+const USER_EDITABLE_MODERATION_STATUSES = new Set<CommunityModerationStatus>([
+  CommunityModerationStatus.Draft,
+  CommunityModerationStatus.PendingReview,
+  CommunityModerationStatus.NeedsEdit,
+  CommunityModerationStatus.Rejected,
+]);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 type CommunityPostingEligibilityReason = {
@@ -146,6 +159,8 @@ export class CommunityService {
     private readonly decisions: Repository<CommunityModerationDecision>,
     @InjectRepository(CommunityHelpfulnessVoteEntity)
     private readonly votes: Repository<CommunityHelpfulnessVoteEntity>,
+    @InjectRepository(CommunityOutcomeSignalVote)
+    private readonly outcomeVotes: Repository<CommunityOutcomeSignalVote>,
     @InjectRepository(CommunityRoutineAdaptation)
     private readonly adaptations: Repository<CommunityRoutineAdaptation>,
     @InjectRepository(CommunitySafetyScanResult)
@@ -329,7 +344,7 @@ export class CommunityService {
     const routine = await this.routines.findOne({ where: { id } });
     if (
       !routine ||
-      !this.canRead(routine.moderation_status, routine.author_user_id, userId)
+      !this.canRead(routine, userId)
     ) {
       throw new NotFoundException('Community routine not found');
     }
@@ -339,6 +354,133 @@ export class CommunityService {
       order: { step_order: 'ASC' },
     });
     return this.toRoutineResponse(routine, steps, facets);
+  }
+
+  async getProductEvidence(userId: string, productId: string) {
+    const [product, viewer] = await Promise.all([
+      this.inventory.findOne({ where: { id: productId, user_id: userId } }),
+      this.getSafeFacets(userId),
+    ]);
+    if (!product) {
+      throw new NotFoundException('Shelf product not found');
+    }
+
+    const [reviewRows, matchingSteps] = await Promise.all([
+      this.reviews.find({
+        where: [
+          {
+            product_id: product.id,
+            moderation_status: CommunityModerationStatus.Published,
+          },
+          {
+            product_brand: ILike(product.brand),
+            product_name: ILike(product.name),
+            product_category: product.category,
+            moderation_status: CommunityModerationStatus.Published,
+          },
+        ],
+        order: { updated_at: 'DESC' },
+        take: DEFAULT_LIMIT,
+      }),
+      this.routineSteps.find({
+        where: [
+          { product_id: product.id },
+          {
+            product_brand: ILike(product.brand),
+            product_name: ILike(product.name),
+            category: product.category,
+          },
+        ],
+      }),
+    ]);
+    const reviews = Array.from(
+      new Map(reviewRows.map((review) => [review.id, review])).values(),
+    );
+    const routineIds = Array.from(
+      new Set(matchingSteps.map((step) => step.routine_id)),
+    );
+    const routines =
+      routineIds.length > 0
+        ? await this.routines.find({
+            where: {
+              id: In(routineIds),
+              moderation_status: CommunityModerationStatus.Published,
+            },
+            take: DEFAULT_LIMIT,
+          })
+        : [];
+    const contentVoteWhere = [
+      ...(routines.length > 0
+        ? [
+            {
+              content_type: CommunityContentType.Routine,
+              content_id: In(routines.map((routine) => routine.id)),
+            },
+          ]
+        : []),
+      ...(reviews.length > 0
+        ? [
+            {
+              content_type: CommunityContentType.Review,
+              content_id: In(reviews.map((review) => review.id)),
+            },
+          ]
+        : []),
+    ];
+    const outcomeVotes =
+      contentVoteWhere.length > 0
+        ? await this.outcomeVotes.find({ where: contentVoteWhere })
+        : [];
+    const outcomeSignalCounts = this.defaultOutcomeSignalCounts({});
+    for (const routine of routines) {
+      this.addOutcomeSignalCounts(
+        outcomeSignalCounts,
+        routine.outcome_signal_counts,
+      );
+    }
+    for (const review of reviews) {
+      this.addOutcomeSignalCounts(
+        outcomeSignalCounts,
+        review.outcome_signal_counts,
+      );
+    }
+    const similarOutcomeSignalCounts = this.defaultOutcomeSignalCounts({});
+    for (const vote of outcomeVotes) {
+      if (this.isSimilarFacets(viewer, vote.safe_facets)) {
+        similarOutcomeSignalCounts[vote.signal] += 1;
+      }
+    }
+
+    return {
+      productId: product.id,
+      productBrand: product.brand,
+      productName: product.name,
+      reviewCount: reviews.length,
+      playbookCount: routines.length,
+      similarAuthorEvidenceCount: [
+        ...reviews.map((review) => review.safe_facets),
+        ...routines.map((routine) => routine.safe_facets),
+      ].filter((facets) => this.isSimilarFacets(viewer, facets)).length,
+      similarOutcomeConfirmationCount: Object.values(
+        similarOutcomeSignalCounts,
+      ).reduce((sum, count) => sum + count, 0),
+      averageOverallRating: this.averageRating(
+        reviews.map((review) => review.overall_rating),
+      ),
+      averageEffectivenessRating: this.averageRating(
+        reviews.map((review) => review.effectiveness_rating),
+      ),
+      averageIrritationRating: this.averageRating(
+        reviews.map((review) => review.irritation_rating),
+      ),
+      outcomeSignalCounts,
+      similarOutcomeSignalCounts,
+      topGoals: this.topCounts(routines.flatMap((routine) => routine.goal_tags)),
+      topAvoids: this.topCounts(
+        routines.flatMap((routine) => routine.avoid_tags ?? []),
+      ),
+      topOutcomes: this.topCounts(reviews.flatMap((review) => review.outcomes)),
+    };
   }
 
   async createRoutine(userId: string, dto: CreateCommunityRoutineDto) {
@@ -368,19 +510,39 @@ export class CommunityService {
             'Routine step product must be on your shelf',
           );
         }
+        if (!step.productId && !cleanText(step.productName, 255)) {
+          throw new BadRequestException(
+            'Goal playbook steps require product names or shelf products',
+          );
+        }
         return {
           stepOrder: index + 1,
           slot: step.slot,
           productId: product?.id ?? null,
-          productBrand: product?.brand ?? null,
-          productName: product?.name ?? null,
+          productBrand: product?.brand ?? cleanText(step.productBrand, 255),
+          productName: product?.name ?? cleanText(step.productName, 255),
           category: product?.category ?? step.category,
           frequency: cleanText(step.frequency, 80),
           notes: cleanText(step.notes, 500),
         };
       },
     );
-    const scannedText = `${dto.title} ${dto.summary ?? ''} ${dto.steps.map((step) => step.notes ?? '').join(' ')}`;
+    const scannedText = [
+      dto.title,
+      dto.summary ?? '',
+      dto.goalResult ?? '',
+      dto.timeframe,
+      ...dto.goalTags,
+      ...normalizeTags(dto.avoidTags),
+      ...normalizeTags(dto.habitTags),
+      ...normalizeTags(dto.didNotWorkTags),
+      ...normalizeTags(dto.warningTags),
+      ...dto.steps.flatMap((step) => [
+        step.productBrand ?? '',
+        step.productName ?? '',
+        step.notes ?? '',
+      ]),
+    ].join(' ');
     const flags = [
       ...this.safety.scanText(scannedText),
       ...this.safety.scanRoutine(stepSnapshots),
@@ -406,6 +568,12 @@ export class CommunityService {
           summary: cleanText(dto.summary, 500),
           concern_tags: normalizeTags(dto.concernTags),
           goal_tags: normalizeTags(dto.goalTags),
+          goal_result: dto.goalResult ?? null,
+          timeframe: dto.timeframe,
+          avoid_tags: normalizeTags(dto.avoidTags),
+          habit_tags: normalizeTags(dto.habitTags),
+          did_not_work_tags: normalizeTags(dto.didNotWorkTags),
+          warning_tags: normalizeTags(dto.warningTags),
           disclosure_type: dto.disclosureType,
           moderation_status: status,
           safe_facets: profile.safe_facets,
@@ -466,34 +634,72 @@ export class CommunityService {
       where: { id: routineId, author_user_id: userId },
     });
     if (!routine) throw new NotFoundException('Community routine not found');
-    if (
-      routine.moderation_status !== CommunityModerationStatus.NeedsEdit &&
-      routine.moderation_status !== CommunityModerationStatus.Rejected &&
-      routine.moderation_status !== CommunityModerationStatus.Draft
-    ) {
+    if (!USER_EDITABLE_MODERATION_STATUSES.has(routine.moderation_status)) {
       throw new BadRequestException(
-        'Only draft or returned routines can be edited',
+        'Only draft, pending, or returned routines can be edited',
       );
     }
 
     routine.title = cleanText(dto.title, 120) ?? routine.title;
     routine.summary =
       dto.summary === undefined ? routine.summary : cleanText(dto.summary, 500);
-    const steps = await this.routineSteps.find({
+    routine.disclosure_type = dto.disclosureType ?? routine.disclosure_type;
+    routine.concern_tags =
+      dto.concernTags === undefined
+        ? routine.concern_tags
+        : normalizeTags(dto.concernTags);
+    routine.goal_tags =
+      dto.goalTags === undefined ? routine.goal_tags : normalizeTags(dto.goalTags);
+    routine.goal_result =
+      dto.goalResult === undefined ? routine.goal_result : dto.goalResult;
+    routine.timeframe =
+      dto.timeframe === undefined ? routine.timeframe : dto.timeframe;
+    routine.avoid_tags =
+      dto.avoidTags === undefined ? routine.avoid_tags : normalizeTags(dto.avoidTags);
+    routine.habit_tags =
+      dto.habitTags === undefined ? routine.habit_tags : normalizeTags(dto.habitTags);
+    routine.did_not_work_tags =
+      dto.didNotWorkTags === undefined
+        ? routine.did_not_work_tags
+        : normalizeTags(dto.didNotWorkTags);
+    routine.warning_tags =
+      dto.warningTags === undefined
+        ? routine.warning_tags
+        : normalizeTags(dto.warningTags);
+
+    const existingSteps = await this.routineSteps.find({
       where: { routine_id: routineId },
       order: { step_order: 'ASC' },
     });
-    const stepSnapshots = steps.map((step) => ({
-      stepOrder: step.step_order,
-      slot: step.slot,
-      productId: step.product_id,
-      productBrand: step.product_brand,
-      productName: step.product_name,
-      category: step.category,
-      frequency: step.frequency,
-      notes: step.notes,
-    }));
-    const scannedText = `${routine.title} ${routine.summary ?? ''} ${steps.map((step) => step.notes ?? '').join(' ')}`;
+    const stepSnapshots =
+      dto.steps === undefined
+        ? existingSteps.map((step) => ({
+            stepOrder: step.step_order,
+            slot: step.slot,
+            productId: step.product_id,
+            productBrand: step.product_brand,
+            productName: step.product_name,
+            category: step.category,
+            frequency: step.frequency,
+            notes: step.notes,
+          }))
+        : await this.buildRoutineStepSnapshots(userId, dto.steps);
+    const scannedText = [
+      routine.title,
+      routine.summary ?? '',
+      routine.goal_result ?? '',
+      routine.timeframe ?? '',
+      ...routine.goal_tags,
+      ...routine.avoid_tags,
+      ...routine.habit_tags,
+      ...routine.did_not_work_tags,
+      ...routine.warning_tags,
+      ...stepSnapshots.flatMap((step) => [
+        step.productBrand ?? '',
+        step.productName ?? '',
+        step.notes ?? '',
+      ]),
+    ].join(' ');
     const flags = [
       ...this.safety.scanText(scannedText),
       ...this.safety.scanRoutine(stepSnapshots),
@@ -519,6 +725,26 @@ export class CommunityService {
 
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(CommunityRoutine).save(routine);
+      if (dto.steps !== undefined) {
+        await manager
+          .getRepository(CommunityRoutineStep)
+          .delete({ routine_id: routine.id });
+        await manager.getRepository(CommunityRoutineStep).save(
+          stepSnapshots.map((step) =>
+            manager.getRepository(CommunityRoutineStep).create({
+              routine_id: routine.id,
+              step_order: step.stepOrder,
+              slot: step.slot,
+              product_id: step.productId,
+              product_brand: step.productBrand,
+              product_name: step.productName,
+              category: step.category,
+              frequency: step.frequency,
+              notes: step.notes,
+            }),
+          ),
+        );
+      }
       await this.recordDecision(manager, {
         contentType: CommunityContentType.Routine,
         contentId: routine.id,
@@ -579,6 +805,15 @@ export class CommunityService {
         'Review requires outcomes and routine context',
       );
     }
+    if (
+      dto.routineContext.some(
+        (item) => !item.productId && !cleanText(item.productName, 255),
+      )
+    ) {
+      throw new BadRequestException(
+        'Review routine context requires product names or shelf products',
+      );
+    }
     const profile = await this.ensureCommunityProfile(userId);
     const productIds = [
       ...(dto.productId ? [dto.productId] : []),
@@ -589,7 +824,17 @@ export class CommunityService {
       throw new BadRequestException('Reviewed product must be on your shelf');
     }
     const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
-    const scannedText = `${dto.productBrand} ${dto.productName} ${dto.body ?? ''}`;
+    const contextText = dto.routineContext
+      .map((item) => [item.productBrand, item.productName, item.category].filter(Boolean).join(' '))
+      .join(' ');
+    const scannedText = [
+      dto.productBrand,
+      dto.productName,
+      dto.skinResponse,
+      dto.outcomes.join(' '),
+      contextText,
+      dto.body ?? '',
+    ].join(' ');
     const flags = this.safety.scanText(scannedText);
     this.safety.resolveStatus({
       disclosureType: dto.disclosureType,
@@ -621,6 +866,13 @@ export class CommunityService {
           disclosure_type: dto.disclosureType,
           usage_duration: cleanText(dto.usageDuration, 30) ?? 'unspecified',
           frequency: cleanText(dto.frequency, 50) ?? 'unspecified',
+          routine_slot: dto.routineSlot,
+          skin_response: dto.skinResponse,
+          overall_rating: dto.overallRating,
+          effectiveness_rating: dto.effectivenessRating,
+          irritation_rating: dto.irritationRating,
+          texture_rating: dto.textureRating ?? null,
+          value_rating: dto.valueRating ?? null,
           outcomes: normalizeTags(dto.outcomes),
           repurchase: cleanText(dto.repurchase, 30) ?? 'unsure',
           body: cleanText(dto.body, 1200),
@@ -640,8 +892,8 @@ export class CommunityService {
           return manager.getRepository(CommunityReviewContextProduct).create({
             review_id: review.id,
             product_id: product?.id ?? null,
-            product_brand: product?.brand ?? null,
-            product_name: product?.name ?? null,
+            product_brand: product?.brand ?? cleanText(item.productBrand, 255),
+            product_name: product?.name ?? cleanText(item.productName, 255),
             category: product?.category ?? item.category,
           });
         }),
@@ -689,19 +941,112 @@ export class CommunityService {
       where: { id: reviewId, author_user_id: userId },
     });
     if (!review) throw new NotFoundException('Community review not found');
-    if (
-      review.moderation_status !== CommunityModerationStatus.NeedsEdit &&
-      review.moderation_status !== CommunityModerationStatus.Rejected &&
-      review.moderation_status !== CommunityModerationStatus.Draft
-    ) {
+    if (!USER_EDITABLE_MODERATION_STATUSES.has(review.moderation_status)) {
       throw new BadRequestException(
-        'Only draft or returned reviews can be edited',
+        'Only draft, pending, or returned reviews can be edited',
       );
     }
 
+    const productIds = [
+      ...(dto.productId ? [dto.productId] : []),
+      ...(dto.routineContext ?? [])
+        .map((item) => item.productId)
+        .filter(Boolean),
+    ] as string[];
+    const products = await this.loadOwnedProductMap(userId, productIds);
+    if (dto.productId && !products.has(dto.productId)) {
+      throw new BadRequestException('Reviewed product must be on your shelf');
+    }
+    const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
+    if (dto.routineContext) {
+      if (
+        dto.routineContext.some(
+          (item) => !item.productId && !cleanText(item.productName, 255),
+        )
+      ) {
+        throw new BadRequestException(
+          'Review routine context requires product names or shelf products',
+        );
+      }
+      for (const item of dto.routineContext) {
+        if (item.productId && !products.has(item.productId)) {
+          throw new BadRequestException(
+            'Routine context products must be on your shelf',
+          );
+        }
+      }
+    }
+
+    review.product_id =
+      dto.productId === undefined ? review.product_id : reviewedProduct?.id ?? null;
+    review.product_brand =
+      reviewedProduct?.brand ??
+      (dto.productBrand === undefined
+        ? review.product_brand
+        : cleanText(dto.productBrand, 255) ?? review.product_brand);
+    review.product_name =
+      reviewedProduct?.name ??
+      (dto.productName === undefined
+        ? review.product_name
+        : cleanText(dto.productName, 255) ?? review.product_name);
+    review.product_category =
+      reviewedProduct?.category ??
+      (dto.productCategory === undefined
+        ? review.product_category
+        : dto.productCategory);
+    review.disclosure_type = dto.disclosureType ?? review.disclosure_type;
+    review.usage_duration =
+      dto.usageDuration === undefined
+        ? review.usage_duration
+        : cleanText(dto.usageDuration, 30) ?? review.usage_duration;
+    review.frequency =
+      dto.frequency === undefined
+        ? review.frequency
+        : cleanText(dto.frequency, 50) ?? review.frequency;
+    review.routine_slot = dto.routineSlot ?? review.routine_slot;
+    review.skin_response = dto.skinResponse ?? review.skin_response;
+    review.overall_rating = dto.overallRating ?? review.overall_rating;
+    review.effectiveness_rating =
+      dto.effectivenessRating ?? review.effectiveness_rating;
+    review.irritation_rating = dto.irritationRating ?? review.irritation_rating;
+    review.texture_rating =
+      dto.textureRating === undefined ? review.texture_rating : dto.textureRating;
+    review.value_rating =
+      dto.valueRating === undefined ? review.value_rating : dto.valueRating;
+    review.outcomes =
+      dto.outcomes === undefined ? review.outcomes : normalizeTags(dto.outcomes);
+    review.repurchase =
+      dto.repurchase === undefined
+        ? review.repurchase
+        : cleanText(dto.repurchase, 30) ?? review.repurchase;
     review.body =
       dto.body === undefined ? review.body : cleanText(dto.body, 1200);
-    const scannedText = `${review.product_brand} ${review.product_name} ${review.body ?? ''}`;
+    const contextForScan = dto.routineContext
+      ? dto.routineContext.map((item) => {
+          const product = item.productId ? products.get(item.productId) : null;
+          return [
+            product?.brand ?? item.productBrand,
+            product?.name ?? item.productName,
+            product?.category ?? item.category,
+          ]
+            .filter(Boolean)
+            .join(' ');
+        })
+      : await this.reviewContext.find({ where: { review_id: reviewId } });
+    const scannedText = [
+      review.product_brand,
+      review.product_name,
+      review.skin_response ?? '',
+      review.outcomes.join(' '),
+      ...contextForScan.map((item) =>
+        typeof item === 'string'
+          ? item
+          : [item.product_brand, item.product_name, item.category]
+              .filter(Boolean)
+              .join(' '),
+      ),
+      review.body ?? '',
+    ].join(' ');
     const flags = this.safety.scanText(scannedText);
     const from = review.moderation_status;
     this.safety.resolveStatus({
@@ -723,6 +1068,26 @@ export class CommunityService {
         : null;
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(CommunityReview).save(review);
+      if (dto.routineContext !== undefined) {
+        await manager
+          .getRepository(CommunityReviewContextProduct)
+          .delete({ review_id: review.id });
+        await manager.getRepository(CommunityReviewContextProduct).save(
+          dto.routineContext.map((item) => {
+            const product = item.productId ? products.get(item.productId) : null;
+            return manager
+              .getRepository(CommunityReviewContextProduct)
+              .create({
+                review_id: review.id,
+                product_id: product?.id ?? null,
+                product_brand:
+                  product?.brand ?? cleanText(item.productBrand, 255),
+                product_name: product?.name ?? cleanText(item.productName, 255),
+                category: product?.category ?? item.category,
+              });
+          }),
+        );
+      }
       await this.recordDecision(manager, {
         contentType: CommunityContentType.Review,
         contentId: review.id,
@@ -864,11 +1229,71 @@ export class CommunityService {
     return this.vote(userId, CommunityContentType.Review, reviewId, dto.vote);
   }
 
+  async signalRoutineOutcome(
+    userId: string,
+    routineId: string,
+    dto: CommunityOutcomeSignalDto,
+  ) {
+    await this.assertActionLimit({
+      label: 'community outcome signals',
+      repository: this.outcomeVotes,
+      userColumn: 'user_id',
+      userId,
+      maxPerDay: 120,
+    });
+    const routine = await this.routines.findOne({ where: { id: routineId } });
+    if (
+      !routine ||
+      routine.moderation_status !== CommunityModerationStatus.Published
+    ) {
+      throw new NotFoundException('Community routine not found');
+    }
+    if (routine.author_user_id === userId) {
+      throw new ForbiddenException('You cannot signal your own content');
+    }
+    return this.signalOutcome(
+      userId,
+      CommunityContentType.Routine,
+      routineId,
+      dto,
+    );
+  }
+
+  async signalReviewOutcome(
+    userId: string,
+    reviewId: string,
+    dto: CommunityOutcomeSignalDto,
+  ) {
+    await this.assertActionLimit({
+      label: 'community outcome signals',
+      repository: this.outcomeVotes,
+      userColumn: 'user_id',
+      userId,
+      maxPerDay: 120,
+    });
+    const review = await this.reviews.findOne({ where: { id: reviewId } });
+    if (
+      !review ||
+      review.moderation_status !== CommunityModerationStatus.Published
+    ) {
+      throw new NotFoundException('Community review not found');
+    }
+    if (review.author_user_id === userId) {
+      throw new ForbiddenException('You cannot signal your own content');
+    }
+    return this.signalOutcome(
+      userId,
+      CommunityContentType.Review,
+      reviewId,
+      dto,
+    );
+  }
+
   async adaptRoutine(userId: string, routineId: string) {
     const routine = await this.routines.findOne({ where: { id: routineId } });
     if (
       !routine ||
-      !this.canRead(routine.moderation_status, routine.author_user_id, userId)
+      !this.canRead(routine, userId)
     ) {
       throw new NotFoundException('Community routine not found');
     }
@@ -1014,26 +1439,69 @@ export class CommunityService {
   async listMySubmissions(userId: string) {
     const [routines, reviews] = await Promise.all([
       this.routines.find({
-        where: { author_user_id: userId },
+        where: { author_user_id: userId, withdrawn_at: IsNull() },
         order: { updated_at: 'DESC' },
         take: DEFAULT_LIMIT,
       }),
       this.reviews.find({
-        where: { author_user_id: userId },
+        where: { author_user_id: userId, withdrawn_at: IsNull() },
         order: { updated_at: 'DESC' },
         take: DEFAULT_LIMIT,
       }),
     ]);
+    const [stepsByRoutine, contextByReview] = await Promise.all([
+      this.loadSteps(routines.map((item) => item.id)),
+      this.loadReviewContext(reviews.map((item) => item.id)),
+    ]);
     return {
       items: [
         ...routines.map((item) =>
-          this.toAdminContentItem(CommunityContentType.Routine, item),
+          this.toSubmissionItem(
+            CommunityContentType.Routine,
+            item,
+            stepsByRoutine.get(item.id) ?? [],
+          ),
         ),
         ...reviews.map((item) =>
-          this.toAdminContentItem(CommunityContentType.Review, item),
+          this.toSubmissionItem(
+            CommunityContentType.Review,
+            item,
+            contextByReview.get(item.id) ?? [],
+          ),
         ),
       ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     };
+  }
+
+  async withdrawContent(userId: string, contentId: string) {
+    const content = await this.findContent(contentId);
+    if (content.item.author_user_id !== userId) {
+      throw new NotFoundException('Community content not found');
+    }
+    if (content.item.withdrawn_at) {
+      return { deleted: true };
+    }
+
+    const from = content.item.moderation_status;
+    content.item.moderation_status = CommunityModerationStatus.Hidden;
+    content.item.assigned_admin_id = null;
+    content.item.withdrawn_at = new Date();
+    content.item.withdrawn_by_user_id = userId;
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(content.entity).save(content.item);
+      await this.recordDecision(manager, {
+        contentType: content.type,
+        contentId,
+        actorAdminId: null,
+        from,
+        to: CommunityModerationStatus.Hidden,
+        reason:
+          'User withdrew community content. Removed from public evidence and matching.',
+      });
+    });
+
+    return { deleted: true };
   }
 
   async resubmitContent(userId: string, contentId: string) {
@@ -1535,6 +2003,39 @@ export class CommunityService {
     return new Map(rows.map((row) => [row.id, row]));
   }
 
+  private async buildRoutineStepSnapshots(
+    userId: string,
+    steps: CreateCommunityRoutineDto['steps'],
+  ): Promise<CommunityRoutineStepSnapshot[]> {
+    const products = await this.loadOwnedProductMap(
+      userId,
+      steps.map((step) => step.productId).filter(Boolean) as string[],
+    );
+    return steps.map((step, index): CommunityRoutineStepSnapshot => {
+      const product = step.productId ? products.get(step.productId) : null;
+      if (step.productId && !product) {
+        throw new BadRequestException(
+          'Routine step product must be on your shelf',
+        );
+      }
+      if (!step.productId && !cleanText(step.productName, 255)) {
+        throw new BadRequestException(
+          'Goal playbook steps require product names or shelf products',
+        );
+      }
+      return {
+        stepOrder: index + 1,
+        slot: step.slot,
+        productId: product?.id ?? null,
+        productBrand: product?.brand ?? cleanText(step.productBrand, 255),
+        productName: product?.name ?? cleanText(step.productName, 255),
+        category: product?.category ?? step.category,
+        frequency: cleanText(step.frequency, 80),
+        notes: cleanText(step.notes, 500),
+      };
+    });
+  }
+
   private async loadSteps(ids: string[]) {
     if (ids.length === 0) return new Map<string, CommunityRoutineStep[]>();
     const rows = await this.routineSteps.find({
@@ -1566,8 +2067,9 @@ export class CommunityService {
     item: CommunitySafeProfileFacets,
     tags: string[],
     disclosureType: CommunityDisclosureType,
+    evidenceBoost = 0,
   ) {
-    let score = 0;
+    let score = evidenceBoost;
     if (viewer.skinType && viewer.skinType === item.skinType) score += 25;
     if (
       viewer.sensitivityLevel &&
@@ -1619,7 +2121,12 @@ export class CommunityService {
     steps: CommunityRoutineStep[],
     viewer: CommunitySafeProfileFacets,
   ) {
-    const tags = [...routine.concern_tags, ...routine.goal_tags];
+    const tags = [
+      ...routine.concern_tags,
+      ...routine.goal_tags,
+      ...(routine.avoid_tags ?? []),
+      ...(routine.habit_tags ?? []),
+    ];
     return {
       id: routine.id,
       type: CommunityContentType.Routine,
@@ -1629,10 +2136,19 @@ export class CommunityService {
       moderationStatus: routine.moderation_status,
       concernTags: routine.concern_tags,
       goalTags: routine.goal_tags,
+      goalResult: routine.goal_result,
+      timeframe: routine.timeframe,
+      avoidTags: routine.avoid_tags ?? [],
+      habitTags: routine.habit_tags ?? [],
+      didNotWorkTags: routine.did_not_work_tags ?? [],
+      warningTags: routine.warning_tags ?? [],
       safeFacets: routine.safe_facets,
       safetyFlags: routine.safety_flags,
       helpfulCount: routine.helpful_count,
       notHelpfulCount: routine.not_helpful_count,
+      outcomeSignalCounts: this.defaultOutcomeSignalCounts(
+        routine.outcome_signal_counts,
+      ),
       matchScore: this.matchScore(
         viewer,
         routine.safe_facets,
@@ -1664,6 +2180,13 @@ export class CommunityService {
       disclosureType: review.disclosure_type,
       usageDuration: review.usage_duration,
       frequency: review.frequency,
+      routineSlot: review.routine_slot,
+      skinResponse: review.skin_response,
+      overallRating: review.overall_rating,
+      effectivenessRating: review.effectiveness_rating,
+      irritationRating: review.irritation_rating,
+      textureRating: review.texture_rating,
+      valueRating: review.value_rating,
       outcomes: review.outcomes,
       repurchase: review.repurchase,
       body: review.body,
@@ -1673,20 +2196,176 @@ export class CommunityService {
       routineContext: context.map((item) => this.toReviewContextPublic(item)),
       helpfulCount: review.helpful_count,
       notHelpfulCount: review.not_helpful_count,
+      outcomeSignalCounts: this.defaultOutcomeSignalCounts(
+        review.outcome_signal_counts,
+      ),
       matchScore: this.matchScore(
         viewer,
         review.safe_facets,
         review.outcomes,
         review.disclosure_type,
+        this.reviewEvidenceBoost(review, context),
       ),
-      relevanceReasons: this.relevanceReasons(
-        viewer,
-        review.safe_facets,
-        review.outcomes,
-      ),
+      relevanceReasons: [
+        ...this.relevanceReasons(
+          viewer,
+          review.safe_facets,
+          review.outcomes,
+        ),
+        ...this.reviewEvidenceReasons(review, context),
+      ],
       createdAt: review.created_at.toISOString(),
       updatedAt: review.updated_at.toISOString(),
     };
+  }
+
+  private reviewEvidenceBoost(
+    review: CommunityReview,
+    context: CommunityReviewContextProduct[],
+  ) {
+    let score = 0;
+    if (review.overall_rating !== null) score += 4;
+    if (review.effectiveness_rating !== null) score += 4;
+    if (review.irritation_rating !== null) score += 4;
+    if (review.skin_response !== null) score += 4;
+    if (context.some((item) => item.product_name)) score += 6;
+    if (review.helpful_count > review.not_helpful_count) {
+      score += Math.min(
+        8,
+        (review.helpful_count - review.not_helpful_count) * 2,
+      );
+    }
+    return score;
+  }
+
+  private defaultOutcomeSignalCounts(
+    counts: Partial<Record<CommunityOutcomeSignal, number>> | null | undefined,
+  ): Record<CommunityOutcomeSignal, number> {
+    return {
+      [CommunityOutcomeSignal.WorkedForMeToo]:
+        counts?.[CommunityOutcomeSignal.WorkedForMeToo] ?? 0,
+      [CommunityOutcomeSignal.WorkedWithChanges]:
+        counts?.[CommunityOutcomeSignal.WorkedWithChanges] ?? 0,
+      [CommunityOutcomeSignal.MixedResult]:
+        counts?.[CommunityOutcomeSignal.MixedResult] ?? 0,
+      [CommunityOutcomeSignal.DidNotWork]:
+        counts?.[CommunityOutcomeSignal.DidNotWork] ?? 0,
+      [CommunityOutcomeSignal.CausedIrritation]:
+        counts?.[CommunityOutcomeSignal.CausedIrritation] ?? 0,
+      [CommunityOutcomeSignal.NotRelevant]:
+        counts?.[CommunityOutcomeSignal.NotRelevant] ?? 0,
+    };
+  }
+
+  private addOutcomeSignalCounts(
+    target: Record<CommunityOutcomeSignal, number>,
+    source: Partial<Record<CommunityOutcomeSignal, number>> | null | undefined,
+  ) {
+    const normalized = this.defaultOutcomeSignalCounts(source);
+    Object.values(CommunityOutcomeSignal).forEach((signal) => {
+      target[signal] += normalized[signal];
+    });
+  }
+
+  private toOutcomeSignalContext(
+    dto: CommunityOutcomeSignalDto,
+  ): CommunityOutcomeSignalContext {
+    const followedParts = Array.from(new Set(dto.followedParts)).filter(
+      (part) => Object.values(CommunityOutcomeFollowedPart).includes(part),
+    );
+    return {
+      sameGoal: dto.sameGoal,
+      trialDuration: Object.values(CommunityOutcomeTrialDuration).includes(
+        dto.trialDuration,
+      )
+        ? dto.trialDuration
+        : CommunityOutcomeTrialDuration.UnderTwoWeeks,
+      followedParts:
+        followedParts.length > 0
+          ? followedParts
+          : [CommunityOutcomeFollowedPart.Partial],
+      irritationLevel: Object.values(CommunityOutcomeIrritationLevel).includes(
+        dto.irritationLevel,
+      )
+        ? dto.irritationLevel
+        : CommunityOutcomeIrritationLevel.Mild,
+    };
+  }
+
+  private averageRating(values: Array<number | null>): number | null {
+    const ratings = values.filter((value): value is number => value !== null);
+    if (ratings.length === 0) return null;
+    const average =
+      ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+    return Number(average.toFixed(1));
+  }
+
+  private topCounts(values: string[]) {
+    const counts = new Map<string, number>();
+    values.filter(Boolean).forEach((value) => {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+      .slice(0, 5);
+  }
+
+  private isSimilarFacets(
+    viewer: CommunitySafeProfileFacets,
+    candidate: CommunitySafeProfileFacets | null | undefined,
+  ) {
+    if (!candidate) return false;
+    return this.safeFacetSimilarityScore(viewer, candidate) >= 35;
+  }
+
+  private safeFacetSimilarityScore(
+    viewer: CommunitySafeProfileFacets,
+    candidate: CommunitySafeProfileFacets,
+  ) {
+    let score = 0;
+    if (viewer.skinType && viewer.skinType === candidate.skinType) score += 20;
+    if (
+      viewer.sensitivityLevel &&
+      viewer.sensitivityLevel === candidate.sensitivityLevel
+    ) {
+      score += 15;
+    }
+    if (viewer.skinToneRange && viewer.skinToneRange === candidate.skinToneRange) {
+      score += 10;
+    }
+    if (viewer.climateBucket && viewer.climateBucket === candidate.climateBucket) {
+      score += 10;
+    }
+    if (viewer.routinePace && viewer.routinePace === candidate.routinePace) {
+      score += 10;
+    }
+    const concernOverlap = candidate.concernTags.filter((tag) =>
+      viewer.concernTags.includes(tag),
+    ).length;
+    const goalOverlap = candidate.goalTags.filter((tag) =>
+      viewer.goalTags.includes(tag),
+    ).length;
+    return score + Math.min(25, concernOverlap * 8 + goalOverlap * 8);
+  }
+
+  private reviewEvidenceReasons(
+    review: CommunityReview,
+    context: CommunityReviewContextProduct[],
+  ) {
+    const reasons: string[] = [];
+    if (
+      review.overall_rating !== null &&
+      review.effectiveness_rating !== null &&
+      review.irritation_rating !== null
+    ) {
+      reasons.push('rated experience');
+    }
+    if (review.skin_response !== null) reasons.push('reported skin response');
+    if (context.some((item) => item.product_name)) {
+      reasons.push('named routine context');
+    }
+    return reasons;
   }
 
   private toRoutineStepPublic(
@@ -1869,6 +2548,73 @@ export class CommunityService {
     return { vote };
   }
 
+  private async signalOutcome(
+    userId: string,
+    contentType: CommunityContentType,
+    contentId: string,
+    dto: CommunityOutcomeSignalDto,
+  ) {
+    const context = this.toOutcomeSignalContext(dto);
+    const safeFacets = await this.getSafeFacets(userId);
+    await this.dataSource.query(
+      `
+        INSERT INTO "community_outcome_signal_votes" (
+          "id",
+          "user_id",
+          "content_type",
+          "content_id",
+          "signal",
+          "context",
+          "safe_facets",
+          "created_at",
+          "updated_at"
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+        ON CONFLICT ("user_id", "content_type", "content_id")
+        DO UPDATE SET
+          "signal" = EXCLUDED."signal",
+          "context" = EXCLUDED."context",
+          "safe_facets" = EXCLUDED."safe_facets",
+          "updated_at" = now()
+      `,
+      [ulid(), userId, contentType, contentId, dto.signal, context, safeFacets],
+    );
+    const outcomeSignalCounts = await this.recountOutcomeSignals(
+      contentType,
+      contentId,
+    );
+    return { signal: dto.signal, context, outcomeSignalCounts };
+  }
+
+  private async recountOutcomeSignals(
+    contentType: CommunityContentType,
+    contentId: string,
+  ) {
+    const rows = await this.outcomeVotes
+      .createQueryBuilder('vote')
+      .select('vote.signal', 'signal')
+      .addSelect('COUNT(*)::int', 'count')
+      .where('vote.content_type = :contentType', { contentType })
+      .andWhere('vote.content_id = :contentId', { contentId })
+      .groupBy('vote.signal')
+      .getRawMany<{ signal: CommunityOutcomeSignal; count: number | string }>();
+    const counts = this.defaultOutcomeSignalCounts(
+      Object.fromEntries(
+        rows.map((row) => [row.signal, Number(row.count)]),
+      ) as Partial<Record<CommunityOutcomeSignal, number>>,
+    );
+    if (contentType === CommunityContentType.Routine) {
+      await this.routines.update(contentId, {
+        outcome_signal_counts: counts,
+      });
+    } else {
+      await this.reviews.update(contentId, {
+        outcome_signal_counts: counts,
+      });
+    }
+    return counts;
+  }
+
   private async recountVotes(
     contentType: CommunityContentType,
     contentId: string,
@@ -1899,13 +2645,16 @@ export class CommunityService {
   }
 
   private canRead(
-    status: CommunityModerationStatus,
-    authorUserId: string,
+    item: Pick<
+      CommunityRoutine | CommunityReview,
+      'author_user_id' | 'moderation_status' | 'withdrawn_at'
+    >,
     viewerUserId: string,
   ) {
+    if (item.withdrawn_at) return false;
     return (
-      status === CommunityModerationStatus.Published ||
-      authorUserId === viewerUserId
+      item.moderation_status === CommunityModerationStatus.Published ||
+      item.author_user_id === viewerUserId
     );
   }
 
@@ -2004,6 +2753,107 @@ export class CommunityService {
     };
   }
 
+  private toSubmissionItem(
+    type: CommunityContentType.Routine,
+    item: CommunityRoutine,
+    relations: CommunityRoutineStep[],
+  ): ReturnType<CommunityService['toAdminContentItem']> & {
+    editableRoutine: ReturnType<CommunityService['toEditableRoutineSubmission']>;
+    editableReview: null;
+  };
+  private toSubmissionItem(
+    type: CommunityContentType.Review,
+    item: CommunityReview,
+    relations: CommunityReviewContextProduct[],
+  ): ReturnType<CommunityService['toAdminContentItem']> & {
+    editableRoutine: null;
+    editableReview: ReturnType<CommunityService['toEditableReviewSubmission']>;
+  };
+  private toSubmissionItem(
+    type: CommunityContentType,
+    item: CommunityRoutine | CommunityReview,
+    relations: CommunityRoutineStep[] | CommunityReviewContextProduct[],
+  ) {
+    const base = this.toAdminContentItem(type, item);
+    if (type === CommunityContentType.Routine) {
+      return {
+        ...base,
+        editableRoutine: this.toEditableRoutineSubmission(
+          item as CommunityRoutine,
+          relations as CommunityRoutineStep[],
+        ),
+        editableReview: null,
+      };
+    }
+    return {
+      ...base,
+      editableRoutine: null,
+      editableReview: this.toEditableReviewSubmission(
+        item as CommunityReview,
+        relations as CommunityReviewContextProduct[],
+      ),
+    };
+  }
+
+  private toEditableRoutineSubmission(
+    routine: CommunityRoutine,
+    steps: CommunityRoutineStep[],
+  ) {
+    return {
+      title: routine.title,
+      summary: routine.summary,
+      disclosureType: routine.disclosure_type,
+      concernTags: routine.concern_tags ?? [],
+      goalTags: routine.goal_tags ?? [],
+      goalResult: routine.goal_result ?? null,
+      timeframe: routine.timeframe,
+      avoidTags: routine.avoid_tags ?? [],
+      habitTags: routine.habit_tags ?? [],
+      didNotWorkTags: routine.did_not_work_tags ?? [],
+      warningTags: routine.warning_tags ?? [],
+      steps: steps.map((step) => ({
+        slot: step.slot,
+        productId: step.product_id,
+        productBrand: step.product_brand,
+        productName: step.product_name,
+        category: step.category,
+        frequency: step.frequency,
+        notes: step.notes,
+      })),
+    };
+  }
+
+  private toEditableReviewSubmission(
+    review: CommunityReview,
+    context: CommunityReviewContextProduct[],
+  ) {
+    return {
+      productId: review.product_id,
+      productBrand: review.product_brand,
+      productName: review.product_name,
+      productCategory: review.product_category,
+      disclosureType: review.disclosure_type,
+      usageDuration: review.usage_duration,
+      frequency: review.frequency,
+      routineSlot: review.routine_slot,
+      skinResponse: review.skin_response,
+      overallRating: review.overall_rating,
+      effectivenessRating: review.effectiveness_rating,
+      irritationRating: review.irritation_rating,
+      textureRating: review.texture_rating,
+      valueRating: review.value_rating,
+      outcomes: review.outcomes,
+      repurchase: review.repurchase,
+      routineContext: context.map((item) => ({
+        productId: item.product_id,
+        productBrand: item.product_brand,
+        productName: item.product_name,
+        category: item.category,
+      })),
+      body: review.body,
+    };
+  }
+
   private queryAdminModerationRows<
     T extends CommunityRoutine | CommunityReview,
   >(
@@ -2016,7 +2866,8 @@ export class CommunityService {
       contentType === CommunityContentType.Routine ? 'routine' : 'review';
     const builder = repository
       .createQueryBuilder(alias)
-      .where(`${alias}.moderation_status IN (:...statuses)`, { statuses });
+      .where(`${alias}.moderation_status IN (:...statuses)`, { statuses })
+      .andWhere(`${alias}.withdrawn_at IS NULL`);
 
     if (query.disclosureType) {
       builder.andWhere(`${alias}.disclosure_type = :disclosureType`, {

@@ -50,6 +50,77 @@ export enum CommunityHelpfulnessVote {
   NotHelpful = 'not_helpful',
 }
 
+export enum CommunityGoalResult {
+  Achieved = 'achieved',
+  MostlyImproved = 'mostly_improved',
+  PartiallyImproved = 'partially_improved',
+  Maintained = 'maintained',
+  Mixed = 'mixed',
+}
+
+export enum CommunityGoalTimeframe {
+  TwoWeeks = '2-weeks',
+  FourWeeks = '4-weeks',
+  EightWeeks = '8-weeks',
+  ThreeMonths = '3-months',
+  ThreeMonthsPlus = '3-months-plus',
+  SixMonths = '6-months',
+  TwelveMonthsPlus = '12-months-plus',
+}
+
+export enum CommunityOutcomeSignal {
+  WorkedForMeToo = 'worked_for_me_too',
+  WorkedWithChanges = 'worked_with_changes',
+  MixedResult = 'mixed_result',
+  DidNotWork = 'did_not_work',
+  CausedIrritation = 'caused_irritation',
+  NotRelevant = 'not_relevant',
+}
+
+export enum CommunityOutcomeTrialDuration {
+  UnderTwoWeeks = 'under-2-weeks',
+  TwoWeeks = '2-weeks',
+  FourWeeks = '4-weeks',
+  EightWeeks = '8-weeks',
+  ThreeMonthsPlus = '3-months-plus',
+}
+
+export enum CommunityOutcomeFollowedPart {
+  Products = 'products',
+  RoutineTiming = 'routine-timing',
+  AvoidList = 'avoid-list',
+  Habits = 'habits',
+  Partial = 'partial',
+}
+
+export enum CommunityOutcomeIrritationLevel {
+  None = 'none',
+  Mild = 'mild',
+  Moderate = 'moderate',
+  Severe = 'severe',
+}
+
+export type CommunityOutcomeSignalContext = {
+  sameGoal: boolean;
+  trialDuration: CommunityOutcomeTrialDuration;
+  followedParts: CommunityOutcomeFollowedPart[];
+  irritationLevel: CommunityOutcomeIrritationLevel;
+};
+
+export enum CommunityReviewRoutineSlot {
+  AM = 'am',
+  PM = 'pm',
+  AMPM = 'am-pm',
+  Either = 'either',
+}
+
+export enum CommunityReviewSkinResponse {
+  Improved = 'improved',
+  NoChange = 'no_change',
+  Mixed = 'mixed',
+  Worsened = 'worsened',
+}
+
 export enum CommunityAdaptationChangeType {
   Kept = 'kept',
   Swapped = 'swapped',

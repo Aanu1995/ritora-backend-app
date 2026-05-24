@@ -29,6 +29,7 @@ import { CommunitySafetyService } from '../community-safety.service';
 import { CommunityService } from '../community.service';
 import { CommunityHelpfulnessVoteEntity } from '../entities/community-helpfulness-vote.entity';
 import { CommunityModerationDecision } from '../entities/community-moderation-decision.entity';
+import { CommunityOutcomeSignalVote } from '../entities/community-outcome-signal-vote.entity';
 import { CommunityProfile } from '../entities/community-profile.entity';
 import { CommunityReport } from '../entities/community-report.entity';
 import { CommunityReview } from '../entities/community-review.entity';
@@ -38,9 +39,17 @@ import { CommunitySafetyScanResult } from '../entities/community-safety-scan-res
 import {
   CommunityContentType,
   CommunityDisclosureType,
+  CommunityGoalResult,
+  CommunityGoalTimeframe,
   CommunityHelpfulnessVote,
   CommunityModerationStatus,
+  CommunityOutcomeFollowedPart,
+  CommunityOutcomeIrritationLevel,
+  CommunityOutcomeSignal,
+  CommunityOutcomeTrialDuration,
   CommunityReportReason,
+  CommunityReviewRoutineSlot,
+  CommunityReviewSkinResponse,
   CommunitySafetySeverity,
   type CommunityModerationAutomationSnapshot,
   type CommunitySafetyFlag,
@@ -336,6 +345,43 @@ async function evaluateGuardrailSimulations(input: {
     }
 
     fetchCalls = 0;
+    const manipulationCase = COMMUNITY_MODERATION_EVALUATION_CASES.find(
+      (item) => item.id === 'prompt_injection_request_edit',
+    );
+    if (manipulationCase) {
+      const flags = scanCase(input.safety, manipulationCase);
+      const result = await aiModeration.triage({
+        contentType: manipulationCase.contentType,
+        disclosureType: manipulationCase.disclosureType,
+        flags,
+        text: caseText(manipulationCase),
+      });
+      results.push(
+        simulationResult('llm_publish_overridden_for_moderation_manipulation', [
+          check(
+            'guardrail_overrides_publish',
+            result.status === CommunityModerationStatus.NeedsEdit &&
+              result.automation.action === 'request_edit',
+            CommunityModerationStatus.NeedsEdit,
+            result.status,
+          ),
+          check(
+            'provider_call_was_exercised',
+            fetchCalls > 0,
+            'fetch called',
+            fetchCalls,
+          ),
+          check(
+            'override_reason_is_visible',
+            /moderation-manipulation/i.test(result.automation.reason),
+            'moderation-manipulation override reason',
+            result.automation.reason,
+          ),
+        ]),
+      );
+    }
+
+    fetchCalls = 0;
     const criticalCase = COMMUNITY_MODERATION_EVALUATION_CASES.find(
       (item) => item.id === 'medical_claim_admin_review',
     );
@@ -496,7 +542,10 @@ async function evaluateDatabaseWorkflow(): Promise<CommunityWorkflowEvaluationRe
 
     const reviewResult = await service.createReview(
       author.userId,
-      safeReviewInput(),
+      safeReviewInput({
+        contextProductId: author.products.cleanser,
+        productId: author.products.moisturizer,
+      }),
     );
     created.contentIds.push(reviewResult.item.id);
     checks.push(
@@ -507,6 +556,34 @@ async function evaluateDatabaseWorkflow(): Promise<CommunityWorkflowEvaluationRe
         reviewResult.moderationStatus,
       ),
     );
+    checks.push(
+      check(
+        'review_shelf_selection_stores_snapshot_details',
+        reviewResult.item.product_id === author.products.moisturizer &&
+          reviewResult.item.product_brand === 'Ritora Eval' &&
+          reviewResult.item.product_name === 'Barrier Cream',
+        'shelf product id plus brand/name snapshot',
+        {
+          productId: reviewResult.item.product_id,
+          brand: reviewResult.item.product_brand,
+          name: reviewResult.item.product_name,
+        },
+      ),
+    );
+
+    const publishedReviewEditStatus = await rejectedStatus(() =>
+      service.updateReview(author.userId, reviewResult.item.id, {
+        body: 'A small typo fix after publication.',
+      }),
+    );
+    checks.push(
+      check(
+        'published_review_content_cannot_be_edited',
+        publishedReviewEditStatus === 400,
+        400,
+        publishedReviewEditStatus,
+      ),
+    );
 
     const safeRoutine = await service.createRoutine(author.userId, {
       title: 'Community evaluation safe AM routine',
@@ -514,6 +591,12 @@ async function evaluateDatabaseWorkflow(): Promise<CommunityWorkflowEvaluationRe
       disclosureType: CommunityDisclosureType.Ordinary,
       concernTags: ['barrier'],
       goalTags: ['maintenance'],
+      goalResult: CommunityGoalResult.MostlyImproved,
+      timeframe: CommunityGoalTimeframe.EightWeeks,
+      avoidTags: ['over-exfoliation'],
+      habitTags: ['consistent-sleep'],
+      didNotWorkTags: ['too-many-actives'],
+      warningTags: ['patch-test-first'],
       steps: [
         {
           slot: 'am',
@@ -577,22 +660,103 @@ async function evaluateDatabaseWorkflow(): Promise<CommunityWorkflowEvaluationRe
       ),
     );
 
+    const routineSignal = await service.signalRoutineOutcome(
+      reader.userId,
+      safeRoutine.id,
+      {
+        signal: CommunityOutcomeSignal.WorkedForMeToo,
+        sameGoal: true,
+        trialDuration: CommunityOutcomeTrialDuration.EightWeeks,
+        followedParts: [
+          CommunityOutcomeFollowedPart.Products,
+          CommunityOutcomeFollowedPart.RoutineTiming,
+          CommunityOutcomeFollowedPart.Habits,
+        ],
+        irritationLevel: CommunityOutcomeIrritationLevel.None,
+      },
+    );
+    checks.push(
+      check(
+        'routine_outcome_confirmation_tracks_context',
+        routineSignal.context.sameGoal &&
+          routineSignal.context.followedParts.includes(
+            CommunityOutcomeFollowedPart.Habits,
+          ) &&
+          routineSignal.outcomeSignalCounts[
+            CommunityOutcomeSignal.WorkedForMeToo
+          ] >= 1,
+        'same goal, habits followed, count incremented',
+        routineSignal,
+      ),
+    );
+
+    const reviewSignal = await service.signalReviewOutcome(
+      reader.userId,
+      reviewResult.item.id,
+      {
+        signal: CommunityOutcomeSignal.WorkedForMeToo,
+        sameGoal: true,
+        trialDuration: CommunityOutcomeTrialDuration.FourWeeks,
+        followedParts: [CommunityOutcomeFollowedPart.Products],
+        irritationLevel: CommunityOutcomeIrritationLevel.None,
+      },
+    );
+    checks.push(
+      check(
+        'review_outcome_confirmation_tracks_context',
+        reviewSignal.context.trialDuration ===
+          CommunityOutcomeTrialDuration.FourWeeks &&
+          reviewSignal.outcomeSignalCounts[
+            CommunityOutcomeSignal.WorkedForMeToo
+          ] >= 1,
+        'trial duration and count incremented',
+        reviewSignal,
+      ),
+    );
+
+    const productEvidence = await service.getProductEvidence(
+      author.userId,
+      author.products.moisturizer,
+    );
+    checks.push(
+      check(
+        'product_evidence_aggregates_reviews_playbooks_and_confirmations',
+        productEvidence.reviewCount >= 1 &&
+          productEvidence.playbookCount >= 1 &&
+          productEvidence.similarOutcomeConfirmationCount >= 2 &&
+          productEvidence.averageEffectivenessRating === 4 &&
+          productEvidence.topAvoids.some(
+            (item) => item.value === 'over-exfoliation',
+          ),
+        'review, playbook, similar confirmations, ratings, avoid tags',
+        productEvidence,
+      ),
+    );
+
     const riskyRoutine = await service.createRoutine(author.userId, {
       title: 'Community evaluation high-risk routine',
       summary: 'This cured my acne with nightly retinol and glycolic acid.',
       disclosureType: CommunityDisclosureType.Ordinary,
       concernTags: ['acne'],
       goalTags: ['texture'],
+      goalResult: CommunityGoalResult.Mixed,
+      timeframe: CommunityGoalTimeframe.FourWeeks,
+      avoidTags: ['over-exfoliation'],
+      habitTags: ['consistent-sleep'],
+      didNotWorkTags: ['nightly-acids'],
+      warningTags: ['go-slow-if-sensitive'],
       steps: [
         {
           slot: 'pm',
           category: ProductCategory.Treatment,
+          productName: 'Retinol treatment',
           frequency: 'nightly',
           notes: 'Retinol treatment.',
         },
         {
           slot: 'pm',
           category: ProductCategory.Exfoliant,
+          productName: 'Glycolic acid toner',
           frequency: 'nightly',
           notes: 'Glycolic acid toner.',
         },
@@ -629,6 +793,24 @@ async function evaluateDatabaseWorkflow(): Promise<CommunityWorkflowEvaluationRe
           CommunityModerationStatus.NeedsEdit,
         CommunityModerationStatus.NeedsEdit,
         needsEditReview.moderationStatus,
+      ),
+    );
+
+    const correctedReview = await service.updateReview(
+      author.userId,
+      needsEditReview.item.id,
+      {
+        disclosureType: CommunityDisclosureType.Affiliate,
+        body: 'Affiliate context is now disclosed. I used it for four weeks and results may vary.',
+      },
+    );
+    checks.push(
+      check(
+        'returned_review_can_be_edited_and_resubmitted',
+        correctedReview.moderationStatus ===
+          CommunityModerationStatus.Published,
+        CommunityModerationStatus.Published,
+        correctedReview.moderationStatus,
       ),
     );
 
@@ -711,6 +893,21 @@ async function evaluateDatabaseWorkflow(): Promise<CommunityWorkflowEvaluationRe
           !publicRoutinePayload.toLowerCase().includes('medical'),
         'no email, exact city, or medical context',
         publicRoutinePayload.slice(0, 500),
+      ),
+    );
+
+    await service.withdrawContent(author.userId, reviewResult.item.id);
+    const productEvidenceAfterWithdraw = await service.getProductEvidence(
+      author.userId,
+      author.products.moisturizer,
+    );
+    checks.push(
+      check(
+        'withdrawn_review_is_removed_from_product_evidence',
+        productEvidenceAfterWithdraw.reviewCount === 0 &&
+          productEvidenceAfterWithdraw.averageOverallRating === null,
+        'no review evidence after withdrawal',
+        productEvidenceAfterWithdraw,
       ),
     );
   } catch (error) {
@@ -1135,17 +1332,34 @@ async function createEvaluationAdmin(dataSource: DataSource, suffix: string) {
   return { adminId: admin.id };
 }
 
-function safeReviewInput() {
+function safeReviewInput(
+  input: {
+    contextProductId?: string;
+    productId?: string;
+  } = {},
+) {
   return {
+    productId: input.productId,
     productBrand: 'Ritora Eval',
     productName: 'Barrier Cream',
     productCategory: ProductCategory.Moisturizer,
     disclosureType: CommunityDisclosureType.Ordinary,
     usageDuration: '4-weeks',
     frequency: 'daily',
+    routineSlot: CommunityReviewRoutineSlot.PM,
+    skinResponse: CommunityReviewSkinResponse.Improved,
+    overallRating: 5,
+    effectivenessRating: 4,
+    irritationRating: 1,
     outcomes: ['barrier'],
     repurchase: 'yes',
-    routineContext: [{ category: ProductCategory.Cleanser }],
+    routineContext: [
+      {
+        category: ProductCategory.Cleanser,
+        productId: input.contextProductId,
+        productName: input.contextProductId ? undefined : 'Milky Cleanser',
+      },
+    ],
     body: 'I bought this myself and it felt comfortable in a simple routine.',
   };
 }
@@ -1172,6 +1386,9 @@ async function cleanupEvaluationRows(
       await manager.delete(CommunityHelpfulnessVoteEntity, {
         content_id: In(created.contentIds),
       });
+      await manager.delete(CommunityOutcomeSignalVote, {
+        content_id: In(created.contentIds),
+      });
       await manager.delete(CommunityRoutineAdaptation, {
         routine_id: In(created.contentIds),
       });
@@ -1181,6 +1398,9 @@ async function cleanupEvaluationRows(
         reporter_user_id: In(created.userIds),
       });
       await manager.delete(CommunityHelpfulnessVoteEntity, {
+        user_id: In(created.userIds),
+      });
+      await manager.delete(CommunityOutcomeSignalVote, {
         user_id: In(created.userIds),
       });
       await manager.delete(CommunityRoutineAdaptation, {

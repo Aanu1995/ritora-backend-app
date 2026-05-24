@@ -26,6 +26,16 @@ const SPONSOR_PATTERNS = [
 ];
 
 const HARASSMENT_PATTERNS = [/\bstupid\b/i, /\bugly\b/i, /\bidiot\b/i];
+const SPAM_OR_MODERATION_MANIPULATION_PATTERNS = [
+  /\bignore (?:all )?(?:previous|above|moderation|system) instructions\b/i,
+  /\b(output|return|mark|set) (?:this )?(?:as )?publish(?:ed)?\b/i,
+  /\btelegram\b/i,
+  /\bwhats\s?app\b/i,
+  /\bdm me\b/i,
+  /\bbuy now\b/i,
+  /\bcrypto\b/i,
+  /\bmiracle\b/i,
+];
 const EXFOLIANT_CATEGORIES = new Set(['exfoliant', 'toner', 'treatment']);
 const RETINOID_WORDS = ['retinol', 'retinoid', 'tretinoin', 'adapalene'];
 const ACID_WORDS = ['aha', 'bha', 'glycolic', 'lactic', 'salicylic', 'acid'];
@@ -59,6 +69,19 @@ export class CommunitySafetyService {
         code: 'possible_harassment',
         severity: CommunitySafetySeverity.Medium,
         message: 'This content may include personal attacks or harassment.',
+      });
+    }
+
+    if (
+      SPAM_OR_MODERATION_MANIPULATION_PATTERNS.some((pattern) =>
+        pattern.test(value),
+      )
+    ) {
+      flags.push({
+        code: 'possible_spam_or_moderation_manipulation',
+        severity: CommunitySafetySeverity.Medium,
+        message:
+          'This content may include spam, off-platform contact, or moderation-manipulation language.',
       });
     }
 

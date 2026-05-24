@@ -11,6 +11,9 @@ import { ulid } from 'ulid';
 import {
   CommunityDisclosureType,
   CommunityModerationStatus,
+  type CommunityOutcomeSignal,
+  CommunityReviewRoutineSlot,
+  CommunityReviewSkinResponse,
   type CommunitySafeProfileFacets,
   type CommunitySafetyFlag,
 } from '../community.types';
@@ -55,6 +58,27 @@ export class CommunityReview {
   @Column({ type: 'varchar', length: 50 })
   frequency: string;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  routine_slot: CommunityReviewRoutineSlot | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  skin_response: CommunityReviewSkinResponse | null;
+
+  @Column({ type: 'integer', nullable: true })
+  overall_rating: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  effectiveness_rating: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  irritation_rating: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  texture_rating: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  value_rating: number | null;
+
   @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
   outcomes: string[];
 
@@ -81,6 +105,15 @@ export class CommunityReview {
 
   @Column({ type: 'integer', default: 0 })
   not_helpful_count: number;
+
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  outcome_signal_counts: Partial<Record<CommunityOutcomeSignal, number>>;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  withdrawn_at: Date | null;
+
+  @Column({ type: 'varchar', length: 26, nullable: true })
+  withdrawn_by_user_id: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;

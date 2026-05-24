@@ -6,6 +6,11 @@ import {
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import {
+  CommunityContentType,
+  CommunityHelpfulnessVote,
+  CommunityOutcomeSignal,
+} from '../community/community.types';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 
@@ -22,6 +27,7 @@ function createMockEntityManager() {
   const manager = {
     delete: jest.fn(),
     remove: jest.fn(),
+    query: jest.fn().mockResolvedValue([]),
     transaction: jest.fn(),
   };
   manager.transaction.mockImplementation(
@@ -695,12 +701,31 @@ describe('UsersService', () => {
       const manager = repo.manager as unknown as {
         delete: jest.Mock;
         remove: jest.Mock;
+        query: jest.Mock;
       };
       repo.findOne.mockResolvedValue(user);
       manager.remove.mockResolvedValue(user);
 
       await service.remove('01');
 
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM "community_reports"'),
+        ['01', 'routine', 'review'],
+      );
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM "community_outcome_signal_votes"'),
+        ['01', 'routine', 'review'],
+      );
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM "community_routine_adaptations"'),
+        ['01'],
+      );
+      expect(manager.delete).toHaveBeenCalledWith('community_routines', {
+        author_user_id: '01',
+      });
+      expect(manager.delete).toHaveBeenCalledWith('community_reviews', {
+        author_user_id: '01',
+      });
       expect(manager.delete).toHaveBeenCalledWith(
         'push_notification_deliveries',
         { user_id: '01' },
@@ -710,6 +735,86 @@ describe('UsersService', () => {
         { user_id: '01' },
       );
       expect(manager.remove).toHaveBeenCalledWith(User, user);
+    });
+
+    it('removes the deleted user community signals and refreshes affected public counts', async () => {
+      const user = { id: '01' } as User;
+      const manager = repo.manager as unknown as {
+        delete: jest.Mock;
+        remove: jest.Mock;
+        query: jest.Mock;
+      };
+      repo.findOne.mockResolvedValue(user);
+      manager.remove.mockResolvedValue(user);
+      manager.query.mockImplementation(
+        async (sql: string, params: unknown[]) => {
+          if (
+            sql.includes('DELETE FROM "community_helpfulness_votes"') &&
+            sql.includes('WHERE "user_id" = $1')
+          ) {
+            return [
+              {
+                content_type: CommunityContentType.Routine,
+                content_id: 'routine_1',
+              },
+              {
+                content_type: CommunityContentType.Routine,
+                content_id: 'routine_1',
+              },
+            ];
+          }
+          if (
+            sql.includes('DELETE FROM "community_outcome_signal_votes"') &&
+            sql.includes('WHERE "user_id" = $1')
+          ) {
+            return [
+              {
+                content_type: CommunityContentType.Review,
+                content_id: 'review_1',
+              },
+            ];
+          }
+          if (sql.includes('SELECT "vote"')) {
+            expect(params).toEqual([
+              CommunityContentType.Routine,
+              'routine_1',
+            ]);
+            return [
+              { vote: CommunityHelpfulnessVote.Helpful, count: 2 },
+              { vote: CommunityHelpfulnessVote.NotHelpful, count: 1 },
+            ];
+          }
+          if (sql.includes('SELECT "signal"')) {
+            expect(params).toEqual([CommunityContentType.Review, 'review_1']);
+            return [
+              { signal: CommunityOutcomeSignal.WorkedForMeToo, count: 3 },
+              { signal: CommunityOutcomeSignal.DidNotWork, count: 1 },
+            ];
+          }
+          return [];
+        },
+      );
+
+      await service.remove('01');
+
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE "community_routines"'),
+        [2, 1, 'routine_1'],
+      );
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE "community_reviews"'),
+        [
+          JSON.stringify({
+            [CommunityOutcomeSignal.WorkedForMeToo]: 3,
+            [CommunityOutcomeSignal.WorkedWithChanges]: 0,
+            [CommunityOutcomeSignal.MixedResult]: 0,
+            [CommunityOutcomeSignal.DidNotWork]: 1,
+            [CommunityOutcomeSignal.CausedIrritation]: 0,
+            [CommunityOutcomeSignal.NotRelevant]: 0,
+          }),
+          'review_1',
+        ],
+      );
     });
 
     it('throws when removing a missing user', async () => {

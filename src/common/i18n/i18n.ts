@@ -115,7 +115,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Change your mind any time. Sign in again or use the cancellation link in your inbox.',
     'mail.accountDeletion.confirm.timeline3Title': 'After day 30',
     'mail.accountDeletion.confirm.timeline3Body':
-      'Your profile, photos, shelf, and history are permanently deleted.',
+      'Your profile, photos, shelf, history, and community posts are permanently deleted and removed from public evidence.',
     'mail.accountDeletion.confirm.note':
       'This link expires in 1 hour and can only be used once.',
     'mail.accountDeletion.confirm.fallbackIntro':
@@ -135,14 +135,14 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.scheduled.timelineTitle': 'Your 30-day grace period',
     'mail.accountDeletion.scheduled.timeline1Title': 'Today',
     'mail.accountDeletion.scheduled.timeline1Body':
-      'All sessions signed out. Your data is held safely and not used.',
+      'All sessions signed out. Your private account data is held safely during the grace period.',
     'mail.accountDeletion.scheduled.timeline2Title':
       'Anytime before {{scheduledFor}}',
     'mail.accountDeletion.scheduled.timeline2Body':
       'Tap "Cancel deletion" above, or simply sign in again to keep your account.',
     'mail.accountDeletion.scheduled.timeline3Title': 'On {{scheduledFor}}',
     'mail.accountDeletion.scheduled.timeline3Body':
-      'Your profile, photos, shelf, and history are permanently erased. This cannot be undone.',
+      'Your profile, photos, shelf, history, and community posts are permanently erased and removed from public evidence. This cannot be undone.',
     'mail.accountDeletion.scheduled.note':
       'If this was not you, cancel now and reset your password. Ritora will never ask for your password by email.',
     'mail.accountDeletion.scheduled.fallbackIntro':
@@ -503,7 +503,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Ångra dig när som helst. Logga in igen eller använd avbryt-länken i mejlet.',
     'mail.accountDeletion.confirm.timeline3Title': 'Efter dag 30',
     'mail.accountDeletion.confirm.timeline3Body':
-      'Din profil, dina bilder, hylla och historik raderas permanent.',
+      'Din profil, dina bilder, hylla, historik och gemenskapsinlägg raderas permanent och tas bort från offentliga bevis.',
     'mail.accountDeletion.confirm.note':
       'Länken gäller i 1 timme och kan bara användas en gång.',
     'mail.accountDeletion.confirm.fallbackIntro':
@@ -524,14 +524,14 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.scheduled.timelineTitle': 'Din 30-dagarsfrist',
     'mail.accountDeletion.scheduled.timeline1Title': 'Idag',
     'mail.accountDeletion.scheduled.timeline1Body':
-      'Alla sessioner är utloggade. Din data sparas säkert och används inte.',
+      'Alla sessioner är utloggade. Din privata kontodata sparas säkert under ångerfristen.',
     'mail.accountDeletion.scheduled.timeline2Title':
       'När som helst före den {{scheduledFor}}',
     'mail.accountDeletion.scheduled.timeline2Body':
       'Tryck på "Avbryt radering" ovan, eller logga in igen för att behålla kontot.',
     'mail.accountDeletion.scheduled.timeline3Title': 'Den {{scheduledFor}}',
     'mail.accountDeletion.scheduled.timeline3Body':
-      'Din profil, dina bilder, hylla och historik raderas permanent. Detta kan inte ångras.',
+      'Din profil, dina bilder, hylla, historik och gemenskapsinlägg raderas permanent och tas bort från offentliga bevis. Detta kan inte ångras.',
     'mail.accountDeletion.scheduled.note':
       'Var det inte du? Avbryt nu och återställ ditt lösenord. Ritora frågar aldrig efter ditt lösenord via e-post.',
     'mail.accountDeletion.scheduled.fallbackIntro':

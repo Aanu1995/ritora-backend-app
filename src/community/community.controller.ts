@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -26,6 +27,7 @@ import {
   AdminCommunitySettingsDto,
   AdminCommunityWarningDto,
   CommunityHelpfulnessDto,
+  CommunityOutcomeSignalDto,
   CreateCommunityReportDto,
   CreateCommunityReviewDto,
   CreateCommunityRoutineDto,
@@ -67,6 +69,14 @@ export class CommunityController {
     return this.communityService.getRoutine(userId, id);
   }
 
+  @Get('products/:id/evidence')
+  getProductEvidence(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.communityService.getProductEvidence(userId, id);
+  }
+
   @Post('routines')
   @UseGuards(OriginCheckGuard)
   createRoutine(
@@ -104,6 +114,16 @@ export class CommunityController {
     @Body() dto: CommunityHelpfulnessDto,
   ) {
     return this.communityService.voteRoutine(userId, id, dto);
+  }
+
+  @Post('routines/:id/outcome-signal')
+  @UseGuards(OriginCheckGuard)
+  signalRoutineOutcome(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: CommunityOutcomeSignalDto,
+  ) {
+    return this.communityService.signalRoutineOutcome(userId, id, dto);
   }
 
   @Post('routines/:id/adapt-to-shelf')
@@ -166,6 +186,16 @@ export class CommunityController {
     return this.communityService.voteReview(userId, id, dto);
   }
 
+  @Post('reviews/:id/outcome-signal')
+  @UseGuards(OriginCheckGuard)
+  signalReviewOutcome(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: CommunityOutcomeSignalDto,
+  ) {
+    return this.communityService.signalReviewOutcome(userId, id, dto);
+  }
+
   @Get('warnings')
   listWarnings() {
     return this.communityService.listWarnings();
@@ -191,6 +221,12 @@ export class CommunityController {
   @UseGuards(OriginCheckGuard)
   resubmitContent(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.communityService.resubmitContent(userId, id);
+  }
+
+  @Delete('content/:id')
+  @UseGuards(OriginCheckGuard)
+  withdrawContent(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.communityService.withdrawContent(userId, id);
   }
 }
 

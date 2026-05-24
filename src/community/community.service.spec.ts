@@ -1,18 +1,42 @@
-import { NotFoundException } from '@nestjs/common';
-import type { DataSource, Repository } from 'typeorm';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import type {
+  DataSource,
+  DeleteResult,
+  Repository,
+  UpdateResult,
+} from 'typeorm';
 import { AdminAuditLog } from '../admin/entities/admin-audit-log.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { InAppNotification } from '../notifications/entities/in-app-notification.entity';
 import { SkinProfileSexAtBirth } from '../skin-profile/dto/skin-profile.constants';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import {
+  DataProvenance,
+  ProductCategory,
+  ShelfStatus,
+} from '../shelf/shelf.types';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserConsentType } from '../users/user-consent.constants';
 import { CommunityAiModerationService } from './community-ai-moderation.service';
 import { CommunitySafetyService } from './community-safety.service';
 import { CommunityService } from './community.service';
+import {
+  CommunityContentType,
+  CommunityDisclosureType,
+  CommunityGoalResult,
+  CommunityGoalTimeframe,
+  CommunityModerationStatus,
+  CommunityOutcomeFollowedPart,
+  CommunityOutcomeIrritationLevel,
+  CommunityOutcomeSignal,
+  CommunityOutcomeTrialDuration,
+  CommunityReviewRoutineSlot,
+  CommunityReviewSkinResponse,
+} from './community.types';
 import { CommunityHelpfulnessVoteEntity } from './entities/community-helpfulness-vote.entity';
 import { CommunityModerationDecision } from './entities/community-moderation-decision.entity';
+import { CommunityOutcomeSignalVote } from './entities/community-outcome-signal-vote.entity';
 import { CommunityProfile } from './entities/community-profile.entity';
 import { CommunityReport } from './entities/community-report.entity';
 import { CommunityReviewContextProduct } from './entities/community-review-context-product.entity';
@@ -30,15 +54,21 @@ import { CommunityWarning } from './entities/community-warning.entity';
 type MockRepository<T extends object> = {
   count: jest.Mock<Promise<number>, [unknown?]>;
   create: jest.Mock<T, [Partial<T>]>;
+  delete: jest.Mock<Promise<DeleteResult>, [unknown]>;
   find: jest.Mock<Promise<T[]>, [unknown?]>;
   findOne: jest.Mock<Promise<T | null>, [unknown?]>;
   save: jest.Mock<Promise<T>, [T]>;
+  update: jest.Mock<Promise<UpdateResult>, [unknown, Partial<T>]>;
 };
 
 type DataSourceMock = DataSource & {
   query: jest.Mock<
     Promise<Array<{ count: number | string }>>,
     [string, unknown[]]
+  >;
+  transaction: jest.Mock<
+    Promise<unknown>,
+    [(manager: Pick<DataSource['manager'], 'getRepository'>) => Promise<unknown>]
   >;
 };
 
@@ -55,6 +85,8 @@ type CommunityRepositories = {
     MockRepository<CommunityModerationDecision>;
   votes: Repository<CommunityHelpfulnessVoteEntity> &
     MockRepository<CommunityHelpfulnessVoteEntity>;
+  outcomeVotes: Repository<CommunityOutcomeSignalVote> &
+    MockRepository<CommunityOutcomeSignalVote>;
   adaptations: Repository<CommunityRoutineAdaptation> &
     MockRepository<CommunityRoutineAdaptation>;
   safetyScans: Repository<CommunitySafetyScanResult> &
@@ -79,20 +111,21 @@ function repositoryMock<T extends object>(): Repository<T> & MockRepository<T> {
     create: jest
       .fn<T, [Partial<T>]>()
       .mockImplementation((value) => value as T),
+    delete: jest
+      .fn<Promise<DeleteResult>, [unknown]>()
+      .mockResolvedValue({ affected: 1, raw: [] }),
     find: jest.fn<Promise<T[]>, [unknown?]>().mockResolvedValue([]),
     findOne: jest.fn<Promise<T | null>, [unknown?]>().mockResolvedValue(null),
     save: jest.fn<Promise<T>, [T]>().mockImplementation(async (value) => value),
+    update: jest
+      .fn<Promise<UpdateResult>, [unknown, Partial<T>]>()
+      .mockResolvedValue({ affected: 1, generatedMaps: [], raw: [] }),
   };
 
   return mock as unknown as Repository<T> & MockRepository<T>;
 }
 
 function createService() {
-  const dataSource = {
-    query: jest
-      .fn<Promise<Array<{ count: number | string }>>, [string, unknown[]]>()
-      .mockResolvedValue([{ count: 0 }]),
-  } as DataSourceMock;
   const repositories: CommunityRepositories = {
     profiles: repositoryMock<CommunityProfile>(),
     routines: repositoryMock<CommunityRoutine>(),
@@ -102,6 +135,7 @@ function createService() {
     reports: repositoryMock<CommunityReport>(),
     decisions: repositoryMock<CommunityModerationDecision>(),
     votes: repositoryMock<CommunityHelpfulnessVoteEntity>(),
+    outcomeVotes: repositoryMock<CommunityOutcomeSignalVote>(),
     adaptations: repositoryMock<CommunityRoutineAdaptation>(),
     safetyScans: repositoryMock<CommunitySafetyScanResult>(),
     communitySettings: repositoryMock<CommunitySettings>(),
@@ -113,11 +147,42 @@ function createService() {
     users: repositoryMock<User>(),
     consents: repositoryMock<UserConsent>(),
   };
+  const transactionManager = {
+    getRepository: jest.fn((entity: unknown) => {
+      if (entity === CommunityRoutine) return repositories.routines;
+      if (entity === CommunityRoutineStep) return repositories.routineSteps;
+      if (entity === CommunityReview) return repositories.reviews;
+      if (entity === CommunityReviewContextProduct)
+        return repositories.reviewContext;
+      if (entity === CommunityModerationDecision) return repositories.decisions;
+      if (entity === CommunitySafetyScanResult) return repositories.safetyScans;
+      throw new Error('Unexpected transaction repository');
+    }),
+  };
+  const dataSource = {
+    query: jest
+      .fn<Promise<Array<{ count: number | string }>>, [string, unknown[]]>()
+      .mockResolvedValue([{ count: 0 }]),
+    transaction: jest.fn(async (operation) =>
+      operation(transactionManager as Pick<DataSource['manager'], 'getRepository'>),
+    ),
+  } as DataSourceMock;
+  const safety = {
+    resolveStatus: jest.fn(),
+    scanRoutine: jest.fn().mockReturnValue([]),
+    scanText: jest.fn().mockReturnValue([]),
+  } as unknown as CommunitySafetyService;
+  const aiModeration = {
+    triage: jest.fn().mockResolvedValue({
+      automation: { action: 'publish', handledBy: 'ai', reason: 'low risk' },
+      status: CommunityModerationStatus.Published,
+    }),
+  } as unknown as CommunityAiModerationService;
 
   const service = new CommunityService(
     dataSource,
-    {} as CommunitySafetyService,
-    {} as CommunityAiModerationService,
+    safety,
+    aiModeration,
     repositories.profiles,
     repositories.routines,
     repositories.routineSteps,
@@ -126,6 +191,7 @@ function createService() {
     repositories.reports,
     repositories.decisions,
     repositories.votes,
+    repositories.outcomeVotes,
     repositories.adaptations,
     repositories.safetyScans,
     repositories.communitySettings,
@@ -138,7 +204,7 @@ function createService() {
     repositories.consents,
   );
 
-  return { dataSource, repositories, service };
+  return { aiModeration, dataSource, repositories, safety, service };
 }
 
 function daysAgo(days: number): Date {
@@ -263,6 +329,72 @@ function settingsFixture(minimumAccountAgeDays: number): CommunitySettings {
   };
 }
 
+function inventoryProductFixture(
+  overrides: Partial<InventoryProduct> = {},
+): InventoryProduct {
+  return {
+    id: 'product_1',
+    user_id: 'user_community_1',
+    brand: 'Ritora',
+    name: 'Barrier Cream',
+    category: ProductCategory.Moisturizer,
+    barcode: null,
+    status: ShelfStatus.Active,
+    provenance: DataProvenance.PhotoLookup,
+    brand_search: 'ritora',
+    name_search: 'barrier cream',
+    search_document: 'ritora barrier cream moisturizer',
+    opened_at: null,
+    expires_at: null,
+    period_after_opening_months: null,
+    effective_expires_at: null,
+    identity: {
+      brand: 'Ritora',
+      name: 'Barrier Cream',
+      category: ProductCategory.Moisturizer,
+      barcode: null,
+      imageUrls: [],
+      sizeMl: 50,
+      description: null,
+      benefits: [],
+      suitedFor: [],
+      inciIngredients: [],
+      inciLastConfirmedAt: null,
+    },
+    guidance: {
+      applicationMethod: null,
+      quantity: null,
+      steps: [],
+      cautions: [],
+      waitMinutes: null,
+    },
+    manufacturer: {
+      brand: 'Ritora',
+      parentCompany: null,
+      countryOfOrigin: null,
+      countryOfManufacture: null,
+      supportEmail: null,
+      productUrl: null,
+      websiteUrl: null,
+    },
+    user_fields: {
+      openedAt: null,
+      expiresAt: null,
+      periodAfterOpeningMonths: null,
+      pricePaid: null,
+      pricePaidCurrency: null,
+      purchasedFrom: null,
+      personalNotes: null,
+      preferredTimeOfDay: null,
+    },
+    created_at: new Date(),
+    updated_at: new Date(),
+    user: userFixture(),
+    generateId: jest.fn(),
+    ...overrides,
+  };
+}
+
 describe('CommunityService posting eligibility', () => {
   it('returns every blocking reason for a new incomplete account', async () => {
     const { repositories, service } = createService();
@@ -361,5 +493,514 @@ describe('CommunityService posting eligibility', () => {
     await expect(service.getPostingEligibility('missing_user')).rejects.toThrow(
       NotFoundException,
     );
+  });
+});
+
+describe('CommunityService review evidence', () => {
+  it('rejects reviews that only provide a generic context category', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture();
+    repositories.users.findOne.mockResolvedValue(user);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+    repositories.inventory.count.mockResolvedValue(1);
+    repositories.consents.findOne.mockResolvedValue(consentFixture(user.id));
+
+    await expect(
+      service.createReview(user.id, {
+        productBrand: 'Ritora',
+        productName: 'Barrier Cream',
+        productCategory: 'moisturizer',
+        disclosureType: CommunityDisclosureType.Ordinary,
+        usageDuration: '8-weeks',
+        frequency: 'daily',
+        routineSlot: CommunityReviewRoutineSlot.PM,
+        skinResponse: CommunityReviewSkinResponse.Improved,
+        overallRating: 5,
+        effectivenessRating: 4,
+        irritationRating: 1,
+        outcomes: ['barrier-support'],
+        repurchase: 'yes',
+        routineContext: [{ category: 'cleanser' }],
+        body: 'It helped only when the rest of my routine stayed simple.',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('CommunityService content integrity policy', () => {
+  it('returns structured editable snapshots for author submissions', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture();
+    const now = new Date();
+    const routine = {
+      id: 'routine_needs_edit',
+      author_user_id: user.id,
+      community_profile_id: 'community_profile_1',
+      title: 'Barrier reset playbook',
+      summary: 'Kept the routine simple while my skin calmed down.',
+      concern_tags: ['acne'],
+      goal_tags: ['acne'],
+      goal_result: CommunityGoalResult.MostlyImproved,
+      timeframe: CommunityGoalTimeframe.EightWeeks,
+      avoid_tags: ['late-night-food'],
+      habit_tags: ['consistent-sleep'],
+      did_not_work_tags: ['daily-acids'],
+      warning_tags: ['patch-test-first'],
+      disclosure_type: CommunityDisclosureType.Ordinary,
+      moderation_status: CommunityModerationStatus.NeedsEdit,
+      assigned_admin_id: null,
+      safety_flags: [],
+      withdrawn_at: null,
+      withdrawn_by_user_id: null,
+      created_at: now,
+      updated_at: now,
+    } as unknown as CommunityRoutine;
+    const review = {
+      id: 'review_pending',
+      author_user_id: user.id,
+      community_profile_id: 'community_profile_1',
+      product_id: 'product_review_1',
+      product_brand: 'Ritora',
+      product_name: 'Barrier Cream',
+      product_category: 'moisturizer',
+      disclosure_type: CommunityDisclosureType.Ordinary,
+      usage_duration: '8-weeks',
+      frequency: 'daily',
+      routine_slot: CommunityReviewRoutineSlot.PM,
+      skin_response: CommunityReviewSkinResponse.Improved,
+      overall_rating: 5,
+      effectiveness_rating: 4,
+      irritation_rating: 1,
+      texture_rating: null,
+      value_rating: null,
+      outcomes: ['less stinging'],
+      repurchase: 'yes',
+      body: 'It worked best with a gentle cleanser.',
+      moderation_status: CommunityModerationStatus.PendingReview,
+      assigned_admin_id: null,
+      safety_flags: [],
+      withdrawn_at: null,
+      withdrawn_by_user_id: null,
+      created_at: now,
+      updated_at: now,
+    } as unknown as CommunityReview;
+    const step = {
+      id: 'step_1',
+      routine_id: routine.id,
+      product_id: 'product_step_1',
+      product_brand: 'Ritora',
+      product_name: 'Milky Cleanser',
+      category: 'cleanser',
+      step_order: 1,
+      slot: 'pm',
+      frequency: 'daily',
+      notes: 'Used before moisturizer.',
+    } as CommunityRoutineStep;
+    const contextProduct = {
+      id: 'context_1',
+      review_id: review.id,
+      product_id: 'product_context_1',
+      product_brand: 'Ritora',
+      product_name: 'Milky Cleanser',
+      category: 'cleanser',
+    } as CommunityReviewContextProduct;
+
+    repositories.routines.find.mockResolvedValue([routine]);
+    repositories.reviews.find.mockResolvedValue([review]);
+    repositories.routineSteps.find.mockResolvedValue([step]);
+    repositories.reviewContext.find.mockResolvedValue([contextProduct]);
+
+    const result = await service.listMySubmissions(user.id);
+    const routineItem = result.items.find((item) => item.id === routine.id);
+    const reviewItem = result.items.find((item) => item.id === review.id);
+
+    expect(routineItem).toMatchObject({
+      editableRoutine: {
+        title: routine.title,
+        summary: routine.summary,
+        disclosureType: routine.disclosure_type,
+        concernTags: routine.concern_tags,
+        goalTags: routine.goal_tags,
+        goalResult: routine.goal_result,
+        timeframe: routine.timeframe,
+        avoidTags: routine.avoid_tags,
+        habitTags: routine.habit_tags,
+        didNotWorkTags: routine.did_not_work_tags,
+        warningTags: routine.warning_tags,
+        steps: [
+          {
+            productId: step.product_id,
+            productBrand: step.product_brand,
+            productName: step.product_name,
+            category: step.category,
+            slot: step.slot,
+            frequency: step.frequency,
+            notes: step.notes,
+          },
+        ],
+      },
+    });
+    expect(reviewItem).toMatchObject({
+      editableReview: {
+        productId: review.product_id,
+        productBrand: review.product_brand,
+        productName: review.product_name,
+        productCategory: review.product_category,
+        disclosureType: review.disclosure_type,
+        usageDuration: review.usage_duration,
+        frequency: review.frequency,
+        routineSlot: review.routine_slot,
+        skinResponse: review.skin_response,
+        overallRating: review.overall_rating,
+        effectivenessRating: review.effectiveness_rating,
+        irritationRating: review.irritation_rating,
+        textureRating: review.texture_rating,
+        valueRating: review.value_rating,
+        outcomes: review.outcomes,
+        repurchase: review.repurchase,
+        routineContext: [
+          {
+            productId: contextProduct.product_id,
+            productBrand: contextProduct.product_brand,
+            productName: contextProduct.product_name,
+            category: contextProduct.category,
+          },
+        ],
+        body: review.body,
+      },
+    });
+  });
+
+  it('allows pending review edits but rejects edits after publication', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture();
+    const pendingReview = {
+      id: 'review_pending',
+      author_user_id: user.id,
+      community_profile_id: 'community_profile_1',
+      product_id: null,
+      product_brand: 'Ritora',
+      product_name: 'Barrier Cream',
+      product_category: 'moisturizer',
+      disclosure_type: CommunityDisclosureType.Ordinary,
+      usage_duration: '8-weeks',
+      frequency: 'daily',
+      routine_slot: CommunityReviewRoutineSlot.PM,
+      skin_response: CommunityReviewSkinResponse.Improved,
+      overall_rating: 5,
+      effectiveness_rating: 4,
+      irritation_rating: 1,
+      texture_rating: null,
+      value_rating: null,
+      outcomes: ['barrier-support'],
+      repurchase: 'yes',
+      body: 'Original careful wording.',
+      moderation_status: CommunityModerationStatus.PendingReview,
+      assigned_admin_id: null,
+      safe_facets: {
+        skinType: 'combination',
+        concernTags: ['acne'],
+        sensitivityLevel: null,
+        skinToneRange: 'medium',
+        climateBucket: null,
+        routinePace: 'cautious',
+        goalTags: ['acne'],
+      },
+      safety_flags: [],
+      helpful_count: 0,
+      not_helpful_count: 0,
+      outcome_signal_counts: {},
+      withdrawn_at: null,
+      withdrawn_by_user_id: null,
+      created_at: new Date(),
+      generateId: jest.fn(),
+      updated_at: new Date(),
+    } as CommunityReview;
+
+    repositories.reviews.findOne.mockResolvedValueOnce(pendingReview);
+    repositories.users.findOne.mockResolvedValue(user);
+    repositories.inventory.count.mockResolvedValue(1);
+    repositories.consents.findOne.mockResolvedValue(consentFixture(user.id));
+    repositories.reviewContext.find.mockResolvedValue([]);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+
+    await expect(
+      service.updateReview(user.id, pendingReview.id, {
+        body: 'Safer wording before publication.',
+      }),
+    ).resolves.toMatchObject({
+      id: pendingReview.id,
+      body: 'Safer wording before publication.',
+    });
+
+    repositories.reviews.findOne.mockResolvedValueOnce({
+      ...pendingReview,
+      id: 'review_published',
+      helpful_count: 3,
+      moderation_status: CommunityModerationStatus.Published,
+      outcome_signal_counts: {
+        [CommunityOutcomeSignal.WorkedForMeToo]: 2,
+      },
+    } as CommunityReview);
+
+    await expect(
+      service.updateReview(user.id, 'review_published', {
+        body: 'Changed after people rated it.',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('withdraws owned content without hard-deleting audit history', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture();
+    const routine = {
+      id: 'routine_published',
+      author_user_id: user.id,
+      moderation_status: CommunityModerationStatus.Published,
+      assigned_admin_id: 'admin_1',
+      disclosure_type: CommunityDisclosureType.Ordinary,
+      safety_flags: [],
+      helpful_count: 4,
+      not_helpful_count: 1,
+      outcome_signal_counts: {
+        [CommunityOutcomeSignal.WorkedForMeToo]: 3,
+      },
+      created_at: new Date(),
+      updated_at: new Date(),
+    } as unknown as CommunityRoutine;
+
+    repositories.routines.findOne.mockResolvedValueOnce(routine);
+
+    await expect(
+      service.withdrawContent(user.id, routine.id),
+    ).resolves.toEqual({ deleted: true });
+
+    expect(routine.moderation_status).toBe(CommunityModerationStatus.Hidden);
+    expect(routine.assigned_admin_id).toBeNull();
+    expect(routine.withdrawn_at).toBeInstanceOf(Date);
+    expect(routine.withdrawn_by_user_id).toBe(user.id);
+    expect(repositories.routines.save).toHaveBeenCalledWith(routine);
+    expect(repositories.decisions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor_admin_id: null,
+        content_id: routine.id,
+        content_type: CommunityContentType.Routine,
+        from_status: CommunityModerationStatus.Published,
+        to_status: CommunityModerationStatus.Hidden,
+      }),
+    );
+    expect(repositories.routines.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not expose withdrawn content to the author as readable content', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture();
+
+    repositories.routines.findOne.mockResolvedValueOnce({
+      id: 'routine_withdrawn',
+      author_user_id: user.id,
+      moderation_status: CommunityModerationStatus.Hidden,
+      withdrawn_at: new Date(),
+    } as unknown as CommunityRoutine);
+
+    await expect(
+      service.getRoutine(user.id, 'routine_withdrawn'),
+    ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('CommunityService product evidence aggregation', () => {
+  it('aggregates reviews, playbooks and similar-user confirmations for a shelf product', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture();
+    const viewerProfile = completeSkinProfile(user);
+    const similarFacets = {
+      skinType: 'combination',
+      concernTags: ['acne'],
+      sensitivityLevel: null,
+      skinToneRange: 'medium',
+      climateBucket: null,
+      routinePace: 'cautious',
+      goalTags: ['acne'],
+    };
+    const differentFacets = {
+      skinType: 'dry',
+      concernTags: ['dryness'],
+      sensitivityLevel: null,
+      skinToneRange: 'fair',
+      climateBucket: null,
+      routinePace: 'minimal',
+      goalTags: ['dryness'],
+    };
+    const review = {
+      id: 'review_1',
+      product_id: 'product_1',
+      product_brand: 'Ritora',
+      product_name: 'Barrier Cream',
+      product_category: 'moisturizer',
+      overall_rating: 5,
+      effectiveness_rating: 4,
+      irritation_rating: 1,
+      skin_response: CommunityReviewSkinResponse.Improved,
+      outcomes: ['barrier-support'],
+      disclosure_type: CommunityDisclosureType.Ordinary,
+      safe_facets: similarFacets,
+      outcome_signal_counts: {
+        [CommunityOutcomeSignal.WorkedForMeToo]: 2,
+      },
+      moderation_status: CommunityModerationStatus.Published,
+      created_at: new Date(),
+      updated_at: new Date(),
+    } as CommunityReview;
+    const routine = {
+      id: 'routine_1',
+      title: 'Barrier repair without actives',
+      disclosure_type: CommunityDisclosureType.Ordinary,
+      concern_tags: ['barrier'],
+      goal_tags: ['barrier-repair'],
+      goal_result: 'mostly_improved',
+      timeframe: '8-weeks',
+      avoid_tags: ['over-exfoliation'],
+      habit_tags: ['consistent-sleep'],
+      did_not_work_tags: ['daily-acids'],
+      warning_tags: ['patch-test-first'],
+      safe_facets: similarFacets,
+      moderation_status: CommunityModerationStatus.Published,
+      outcome_signal_counts: {
+        [CommunityOutcomeSignal.WorkedWithChanges]: 1,
+        [CommunityOutcomeSignal.DidNotWork]: 1,
+      },
+      created_at: new Date(),
+      updated_at: new Date(),
+    } as CommunityRoutine;
+    const routineStep = {
+      id: 'step_1',
+      routine_id: routine.id,
+      product_id: 'product_1',
+      product_brand: 'Ritora',
+      product_name: 'Barrier Cream',
+      category: 'moisturizer',
+      step_order: 1,
+      slot: 'pm',
+      frequency: 'daily',
+      notes: null,
+    } as CommunityRoutineStep;
+    const similarVote = {
+      id: 'vote_1',
+      user_id: 'similar_user',
+      content_type: CommunityContentType.Routine,
+      content_id: routine.id,
+      signal: CommunityOutcomeSignal.WorkedForMeToo,
+      context: {
+        sameGoal: true,
+        trialDuration: CommunityOutcomeTrialDuration.EightWeeks,
+        followedParts: [CommunityOutcomeFollowedPart.Products],
+        irritationLevel: CommunityOutcomeIrritationLevel.None,
+      },
+      safe_facets: similarFacets,
+      created_at: new Date(),
+      updated_at: new Date(),
+      generateId: jest.fn(),
+    } as CommunityOutcomeSignalVote;
+    const differentVote = {
+      ...similarVote,
+      id: 'vote_2',
+      user_id: 'different_user',
+      signal: CommunityOutcomeSignal.DidNotWork,
+      safe_facets: differentFacets,
+    } as CommunityOutcomeSignalVote;
+
+    repositories.inventory.findOne.mockResolvedValue(
+      inventoryProductFixture({ id: 'product_1', user_id: user.id }),
+    );
+    repositories.skinProfiles.findOne.mockResolvedValue(viewerProfile);
+    repositories.reviews.find.mockResolvedValue([review]);
+    repositories.routineSteps.find.mockResolvedValue([routineStep]);
+    repositories.routines.find.mockResolvedValue([routine]);
+    repositories.outcomeVotes.find.mockResolvedValue([similarVote, differentVote]);
+
+    const result = await service.getProductEvidence(user.id, 'product_1');
+
+    expect(result).toMatchObject({
+      productId: 'product_1',
+      reviewCount: 1,
+      playbookCount: 1,
+      similarAuthorEvidenceCount: 2,
+      similarOutcomeConfirmationCount: 1,
+      averageOverallRating: 5,
+      averageEffectivenessRating: 4,
+      averageIrritationRating: 1,
+    });
+    expect(result.outcomeSignalCounts.worked_for_me_too).toBe(2);
+    expect(result.outcomeSignalCounts.worked_with_changes).toBe(1);
+    expect(result.outcomeSignalCounts.did_not_work).toBe(1);
+    expect(result.similarOutcomeSignalCounts.worked_for_me_too).toBe(1);
+    expect(result.topGoals).toEqual([
+      { value: 'barrier-repair', count: 1 },
+    ]);
+    expect(result.topAvoids).toEqual([
+      { value: 'over-exfoliation', count: 1 },
+    ]);
+  });
+
+  it('stores privacy-safe viewer context when confirming an outcome', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture({ id: 'viewer_1' });
+    const author = userFixture({ id: 'author_1' });
+    const routine = {
+      id: 'routine_1',
+      author_user_id: author.id,
+      moderation_status: CommunityModerationStatus.Published,
+    } as CommunityRoutine;
+
+    repositories.routines.findOne.mockResolvedValue(routine);
+    repositories.skinProfiles.findOne.mockResolvedValue(completeSkinProfile(user));
+
+    const outcomeQueryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      groupBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        { signal: CommunityOutcomeSignal.WorkedForMeToo, count: '1' },
+      ]),
+    };
+    repositories.outcomeVotes.createQueryBuilder = jest
+      .fn()
+      .mockReturnValue(outcomeQueryBuilder);
+
+    const result = await service.signalRoutineOutcome(user.id, routine.id, {
+      signal: CommunityOutcomeSignal.WorkedForMeToo,
+      sameGoal: true,
+      trialDuration: CommunityOutcomeTrialDuration.EightWeeks,
+      followedParts: [CommunityOutcomeFollowedPart.Products],
+      irritationLevel: CommunityOutcomeIrritationLevel.None,
+    });
+
+    expect(dataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('"context"'),
+      expect.arrayContaining([
+        user.id,
+        CommunityContentType.Routine,
+        routine.id,
+        CommunityOutcomeSignal.WorkedForMeToo,
+        expect.objectContaining({
+          sameGoal: true,
+          trialDuration: CommunityOutcomeTrialDuration.EightWeeks,
+          followedParts: [CommunityOutcomeFollowedPart.Products],
+          irritationLevel: CommunityOutcomeIrritationLevel.None,
+        }),
+        expect.objectContaining({
+          skinType: 'combination',
+          concernTags: ['acne'],
+        }),
+      ]),
+    );
+    expect(result.outcomeSignalCounts.worked_for_me_too).toBe(1);
   });
 });

@@ -269,7 +269,8 @@ export class CommunityAiModerationService {
       !DISCLOSED_COMMERCIAL_LABELS.has(input.disclosureType);
     const fixableSafetyIssue =
       this.hasFlag(input.flags, 'missing_sunscreen') ||
-      this.hasFlag(input.flags, 'possible_harassment');
+      this.hasFlag(input.flags, 'possible_harassment') ||
+      this.hasFlag(input.flags, 'possible_spam_or_moderation_manipulation');
     if (
       (action === 'publish' || action === 'admin_review') &&
       (fixableDisclosureMismatch || fixableSafetyIssue)
@@ -333,6 +334,15 @@ export class CommunityAiModerationService {
     if (this.hasFlag(input.flags, 'possible_harassment')) {
       return this.requestEdit(
         'Automation found language that may be personal or hostile.',
+        model,
+        fallbackReason,
+        durationMs,
+      );
+    }
+
+    if (this.hasFlag(input.flags, 'possible_spam_or_moderation_manipulation')) {
+      return this.requestEdit(
+        'Automation found spam, off-platform contact, or moderation-manipulation language.',
         model,
         fallbackReason,
         durationMs,
@@ -409,7 +419,12 @@ export class CommunityAiModerationService {
           ? 'sunscreen context needs author edit'
           : this.hasFlag(input.flags, 'possible_harassment')
             ? 'tone needs author edit'
-            : 'deterministic policy requires safer handling')
+            : this.hasFlag(
+                  input.flags,
+                  'possible_spam_or_moderation_manipulation',
+                )
+              ? 'spam or moderation-manipulation language needs author edit'
+              : 'deterministic policy requires safer handling')
     );
   }
 
