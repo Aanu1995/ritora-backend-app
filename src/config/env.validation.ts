@@ -519,6 +519,7 @@ export const envValidationSchema = Joi.object({
     then: Joi.string().trim().email().required(),
     otherwise: Joi.string().trim().email().allow('').default(''),
   }),
+  SUPPORT_EMAIL: Joi.string().trim().email().required(),
   MAIL_UNSUBSCRIBE_SECRET: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().trim().min(32).required(),

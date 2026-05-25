@@ -425,6 +425,23 @@ describe('PushNotificationsService', () => {
     expect(sentBody).toContain('barriärläge');
   });
 
+  it('renders Spanish push copy for Spanish speakers on a generic kind', async () => {
+    subscriptions.find.mockResolvedValue([webSubscription()]);
+
+    await service.sendNotificationPush({
+      userId: 'user-1',
+      kind: 'reaction_detected',
+      titleKey: 'notificationsPage.kinds.reaction_detected.title',
+      bodyKey: 'notificationsPage.kinds.reaction_detected.body',
+      deepLink: '/today',
+      language: 'es',
+    });
+
+    const sentBody = sendNotification.mock.calls[0]?.[1] as string;
+    expect(sentBody).toContain('"title":"Pausamos tu rutina"');
+    expect(sentBody).toContain('modo barrera');
+  });
+
   it('renders Swedish product expiry copy when language is sv', async () => {
     subscriptions.find.mockResolvedValue([webSubscription()]);
 
@@ -446,6 +463,29 @@ describe('PushNotificationsService', () => {
     const sentBody = sendNotification.mock.calls[0]?.[1] as string;
     expect(sentBody).toContain('"title":"Produkt nära utgång"');
     expect(sentBody).toContain('går ut om 3 dagar');
+  });
+
+  it('renders Spanish product expiry copy when language is es', async () => {
+    subscriptions.find.mockResolvedValue([webSubscription()]);
+
+    await service.sendNotificationPush({
+      userId: 'user-1',
+      kind: 'product_nearing_expiry',
+      titleKey: 'notificationsPage.kinds.product_nearing_expiry.title',
+      bodyKey: 'notificationsPage.kinds.product_nearing_expiry.body',
+      payload: {
+        productName: 'CeraVe Retinol Serum',
+        expiresAt: '2026-05-10T00:00:00.000Z',
+        daysUntilExpiry: 3,
+      },
+      deepLink: '/shelf/product-1',
+      dedupeKey: 'product_nearing_expiry:product-1:2026-05-10',
+      language: 'es',
+    });
+
+    const sentBody = sendNotification.mock.calls[0]?.[1] as string;
+    expect(sentBody).toContain('"title":"Producto cerca de caducar"');
+    expect(sentBody).toContain('caduca en 3 días');
   });
 
   it('falls back to English when language is missing or unsupported', async () => {

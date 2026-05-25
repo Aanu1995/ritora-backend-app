@@ -1,4 +1,5 @@
 import type { ProductCategory } from '../shelf/shelf.types';
+import type { AppLanguage } from '../common/i18n/i18n';
 import type { AnalysisConfidence, AnalysisSeverity } from './ingredients.types';
 import type {
   ProductCheckContextSummary,
@@ -102,7 +103,7 @@ export type ProductCompareAiReview = {
 };
 
 export type ProductCompareAiReviewInput = {
-  language: 'en' | 'sv';
+  language: AppLanguage;
   goal: ProductCompareGoal;
   context: ProductCheckContextSummary;
   items: ProductCompareItemResult[];

@@ -261,7 +261,7 @@ export class InsightPolishService {
             {
               role: 'system',
               content:
-                'You polish skincare journal insights into safe localized user-facing copy. Return JSON matching the schema.',
+                'You polish skincare journal insights into safe localized user-facing copy. Keep JSON keys, facts_hash, text block indexes, caveat keys, and enum-like values exactly as provided by the schema/input. Translate only headline_text and text_blocks text. Return JSON matching the schema.',
             },
             {
               role: 'user',

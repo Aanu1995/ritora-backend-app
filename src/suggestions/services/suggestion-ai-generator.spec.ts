@@ -885,6 +885,48 @@ describe('SuggestionAiGenerator', () => {
       ]),
     );
   });
+
+  it('localizes deterministic fallback copy for Spanish suggestions', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.language = 'es';
+    inputs.shelfActiveProducts = inputs.shelfActiveProducts.filter(
+      (product) => product.id !== 'spf-1',
+    );
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.filter(
+        (score) => score.productId !== 'spf-1',
+      );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.explanation.headline).toBe('Usando tu estante hoy');
+    expect(result.explanation.inputs[0]).toEqual(
+      expect.objectContaining({
+        label: 'Evidencia',
+        detail: expect.stringContaining('fuentes fiables'),
+      }),
+    );
+    expect(result.gapRecommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ingredientOrCategory: 'Protector solar de amplio espectro SPF 30+',
+          reason:
+            'Las rutinas diurnas necesitan una opcion de protector solar.',
+        }),
+      ]),
+    );
+    expect(result.safetyFlags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining('protector solar'),
+        }),
+      ]),
+    );
+  });
 });
 
 function inputsWithScoredShelfProducts(

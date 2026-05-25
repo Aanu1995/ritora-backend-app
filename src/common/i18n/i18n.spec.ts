@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { resolveRequestLanguage } from './i18n';
+import { normalizeLanguage, resolveRequestLanguage, translate } from './i18n';
 
 describe('resolveRequestLanguage', () => {
   it('reads the authenticated user language when present on the request', () => {
@@ -22,5 +22,22 @@ describe('resolveRequestLanguage', () => {
     } as Request & { user: { preferred_language: string } };
 
     expect(resolveRequestLanguage(request)).toBe('sv');
+  });
+
+  it('reads Spanish from the Accept-Language header', () => {
+    const request = {
+      headers: { 'accept-language': 'es-ES,es;q=0.9,en;q=0.8' },
+      body: {},
+      query: {},
+    } as Request;
+
+    expect(resolveRequestLanguage(request)).toBe('es');
+  });
+
+  it('normalizes Spanish and translates supported backend messages', () => {
+    expect(normalizeLanguage('es')).toBe('es');
+    expect(translate('es', 'validation.language.unsupported')).toBe(
+      'Elige inglés, sueco o español',
+    );
   });
 });

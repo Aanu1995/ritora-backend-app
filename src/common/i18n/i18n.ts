@@ -1,6 +1,6 @@
 import type { Request } from 'express';
 
-export const SUPPORTED_LANGUAGES = ['en', 'sv'] as const;
+export const SUPPORTED_LANGUAGES = ['en', 'sv', 'es'] as const;
 
 export type AppLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
@@ -61,7 +61,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.verification.footerLineOne':
       'Sent from Ritora. We help you build a calmer skincare routine from the shelf you already own.',
     'mail.verification.footerLineTwo':
-      'Need a hand? Write to us at support@getritora.com.',
+      'Need a hand? Write to us at {{supportEmail}}.',
     'mail.passwordReset.previewText':
       'Reset your Ritora password. This link works for the next hour.',
     'mail.passwordReset.title': 'Reset your password',
@@ -76,7 +76,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.passwordReset.unexpectedBody':
       'You can ignore this email and your current password will keep working. Ritora will never ask for your password by email.',
     'mail.passwordReset.footerLine':
-      'Sent from Ritora. If you ever have questions about your account, the team is at support@getritora.com.',
+      'Sent from Ritora. If you ever have questions about your account, the team is at {{supportEmail}}.',
     'mail.adminInvitation.previewText':
       'Set your Ritora Admin password to accept your invitation.',
     'mail.adminInvitation.title': 'Accept your Ritora Admin invitation',
@@ -89,7 +89,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.adminInvitation.unexpectedBody':
       'Ignore this email if you were not expecting access. Ritora will never ask for your password by email.',
     'mail.adminInvitation.footerLine':
-      'Sent from Ritora for internal account safety. Questions? Write to support@getritora.com.',
+      'Sent from Ritora for internal account safety. Questions? Write to {{supportEmail}}.',
     'mail.adminPasswordReset.previewText':
       'Reset your Ritora Admin password. This link works for the next hour.',
     'mail.adminPasswordReset.title': 'Reset your admin password',
@@ -97,7 +97,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Hi {{firstName}}, we got a request to reset your Ritora Admin password.',
     'mail.adminPasswordReset.ctaLabel': 'Pick a new password',
     'mail.adminPasswordReset.footerLine':
-      'Sent from Ritora for internal account safety. Questions? Write to support@getritora.com.',
+      'Sent from Ritora for internal account safety. Questions? Write to {{supportEmail}}.',
     'mail.accountDeletion.confirm.previewText':
       'Tap to confirm you want to delete your Ritora account. The link expires in one hour.',
     'mail.accountDeletion.confirm.badgeLabel': 'Action needed',
@@ -123,7 +123,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.confirm.ignoreNote':
       'Did not ask for this? You can ignore this email. Your account stays active and nothing changes.',
     'mail.accountDeletion.confirm.footerLine':
-      'Sent from Ritora for account safety. Questions? Write to support@getritora.com.',
+      'Sent from Ritora for account safety. Questions? Write to {{supportEmail}}.',
     'mail.accountDeletion.scheduled.previewText':
       'Your Ritora account is scheduled for deletion on {{scheduledFor}}. Cancel anytime before then.',
     'mail.accountDeletion.scheduled.badgeLabel': 'Scheduled · {{scheduledFor}}',
@@ -148,7 +148,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.scheduled.fallbackIntro':
       'Button not working? Copy and paste this link into your browser.',
     'mail.accountDeletion.scheduled.footerLine':
-      'Sent from Ritora for account safety. Need help? Write to support@getritora.com.',
+      'Sent from Ritora for account safety. Need help? Write to {{supportEmail}}.',
     'mail.accountDeletion.cancelled.previewText':
       'Good news. Your Ritora account is staying and nothing was deleted.',
     'mail.accountDeletion.cancelled.badgeLabel': 'Cancelled',
@@ -164,11 +164,11 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.cancelled.recapItem3':
       'No further action needed. Sign in anytime to pick up where you left off',
     'mail.accountDeletion.cancelled.note':
-      'Did not cancel this yourself? Reset your password and review your active sessions. We will help — write to support@getritora.com.',
+      'Did not cancel this yourself? Reset your password and review your active sessions. We will help — write to {{supportEmail}}.',
     'mail.accountDeletion.cancelled.fallbackIntro':
       'Button not working? Copy and paste this link into your browser.',
     'mail.accountDeletion.cancelled.footerLine':
-      'Sent from Ritora for account safety. Questions? Write to support@getritora.com.',
+      'Sent from Ritora for account safety. Questions? Write to {{supportEmail}}.',
     'mail.notification.shared.manageLabel': 'Manage notification preferences',
     'mail.notification.shared.supportLine': 'Need help? Reach us at',
     'mail.daypart.morning': 'morning',
@@ -400,7 +400,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'validation.reason.maxLength':
       'Audit reason must be 500 characters or fewer',
     'validation.token.hex64': 'Token must be a 64-character hexadecimal string',
-    'validation.language.unsupported': 'Choose English or Swedish',
+    'validation.language.unsupported': 'Choose English, Swedish, or Spanish',
     'validation.name.required': 'This field is required',
     'validation.timeZone.unsupported': 'Choose a supported timezone',
   },
@@ -449,7 +449,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.verification.footerLineOne':
       'Skickat från Ritora. Vi hjälper dig att skapa en lugnare hudvårdsrutin utifrån produkterna du redan har.',
     'mail.verification.footerLineTwo':
-      'Behöver du hjälp? Skriv till oss på support@getritora.com.',
+      'Behöver du hjälp? Skriv till oss på {{supportEmail}}.',
     'mail.passwordReset.previewText':
       'Återställ ditt Ritora-lösenord. Den här länken fungerar i en timme.',
     'mail.passwordReset.title': 'Återställ ditt lösenord',
@@ -464,7 +464,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.passwordReset.unexpectedBody':
       'Du kan ignorera det här mejlet så fortsätter ditt nuvarande lösenord att fungera. Ritora kommer aldrig att be om ditt lösenord via e-post.',
     'mail.passwordReset.footerLine':
-      'Skickat från Ritora. Om du har frågor om ditt konto finns vi på support@getritora.com.',
+      'Skickat från Ritora. Om du har frågor om ditt konto finns vi på {{supportEmail}}.',
     'mail.adminInvitation.previewText':
       'Välj ett Ritora Admin-lösenord för att acceptera inbjudan.',
     'mail.adminInvitation.title': 'Acceptera din Ritora Admin-inbjudan',
@@ -477,7 +477,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.adminInvitation.unexpectedBody':
       'Ignorera mejlet om du inte förväntade dig åtkomst. Ritora kommer aldrig att be om ditt lösenord via e-post.',
     'mail.adminInvitation.footerLine':
-      'Skickat från Ritora för intern kontosäkerhet. Frågor? Skriv till support@getritora.com.',
+      'Skickat från Ritora för intern kontosäkerhet. Frågor? Skriv till {{supportEmail}}.',
     'mail.adminPasswordReset.previewText':
       'Återställ ditt Ritora Admin-lösenord. Länken fungerar i en timme.',
     'mail.adminPasswordReset.title': 'Återställ ditt adminlösenord',
@@ -485,7 +485,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Hej {{firstName}}, vi har fått en begäran om att återställa ditt Ritora Admin-lösenord.',
     'mail.adminPasswordReset.ctaLabel': 'Välj ett nytt lösenord',
     'mail.adminPasswordReset.footerLine':
-      'Skickat från Ritora för intern kontosäkerhet. Frågor? Skriv till support@getritora.com.',
+      'Skickat från Ritora för intern kontosäkerhet. Frågor? Skriv till {{supportEmail}}.',
     'mail.accountDeletion.confirm.previewText':
       'Tryck för att bekräfta att du vill radera ditt Ritora-konto. Länken gäller i en timme.',
     'mail.accountDeletion.confirm.badgeLabel': 'Åtgärd krävs',
@@ -511,7 +511,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.confirm.ignoreNote':
       'Var det inte du? Då kan du ignorera mejlet. Kontot är fortsatt aktivt och ingenting ändras.',
     'mail.accountDeletion.confirm.footerLine':
-      'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till support@getritora.com.',
+      'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till {{supportEmail}}.',
     'mail.accountDeletion.scheduled.previewText':
       'Ditt Ritora-konto raderas permanent den {{scheduledFor}}. Avbryt när som helst innan dess.',
     'mail.accountDeletion.scheduled.badgeLabel':
@@ -537,7 +537,7 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.scheduled.fallbackIntro':
       'Fungerar inte knappen? Kopiera och klistra in länken i din webbläsare.',
     'mail.accountDeletion.scheduled.footerLine':
-      'Skickat från Ritora för kontosäkerhet. Behöver du hjälp? Skriv till support@getritora.com.',
+      'Skickat från Ritora för kontosäkerhet. Behöver du hjälp? Skriv till {{supportEmail}}.',
     'mail.accountDeletion.cancelled.previewText':
       'Goda nyheter. Ditt Ritora-konto är kvar och ingenting har raderats.',
     'mail.accountDeletion.cancelled.badgeLabel': 'Avbruten',
@@ -553,11 +553,11 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
     'mail.accountDeletion.cancelled.recapItem3':
       'Inget mer behöver göras. Logga in när som helst för att fortsätta',
     'mail.accountDeletion.cancelled.note':
-      'Avbröt du inte själv? Återställ ditt lösenord och granska dina aktiva sessioner. Vi hjälper dig — skriv till support@getritora.com.',
+      'Avbröt du inte själv? Återställ ditt lösenord och granska dina aktiva sessioner. Vi hjälper dig — skriv till {{supportEmail}}.',
     'mail.accountDeletion.cancelled.fallbackIntro':
       'Fungerar inte knappen? Kopiera och klistra in länken i din webbläsare.',
     'mail.accountDeletion.cancelled.footerLine':
-      'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till support@getritora.com.',
+      'Skickat från Ritora för kontosäkerhet. Frågor? Skriv till {{supportEmail}}.',
     'mail.notification.shared.manageLabel': 'Hantera aviseringar',
     'mail.notification.shared.supportLine': 'Behöver du hjälp? Skriv till',
     'mail.daypart.morning': 'morgon',
@@ -784,9 +784,415 @@ const translations: Record<AppLanguage, TranslationDictionary> = {
       'Granskningsorsaken får vara högst 500 tecken',
     'validation.token.hex64':
       'Token måste vara en hexadecimal sträng med 64 tecken',
-    'validation.language.unsupported': 'Välj engelska eller svenska',
+    'validation.language.unsupported': 'Välj engelska, svenska eller spanska',
     'validation.name.required': 'Det här fältet är obligatoriskt',
     'validation.timeZone.unsupported': 'Välj en giltig tidszon',
+  },
+  es: {
+    'messages.auth.register.verifyEmail':
+      'Verifica tu correo electrónico para activar tu cuenta',
+    'messages.auth.verifyEmail.success':
+      'Correo electrónico verificado correctamente',
+    'messages.auth.resendVerification.success':
+      'Si el correo está registrado, se ha enviado un enlace de verificación',
+    'messages.auth.forgotPassword.success':
+      'Si el correo está registrado, se ha enviado un enlace para restablecer la contraseña',
+    'messages.auth.resetPassword.success':
+      'Contraseña restablecida correctamente',
+    'messages.adminAuth.forgotPassword.success':
+      'Si el correo está registrado, se ha enviado un enlace para restablecer la contraseña',
+    'messages.adminAuth.resetPassword.success':
+      'Contraseña restablecida correctamente',
+    'messages.auth.logout.success': 'Sesión cerrada',
+    'messages.auth.logoutAll.success': 'Todas las sesiones han sido revocadas',
+    'messages.auth.deleteAccount.success': 'Cuenta eliminada',
+    'messages.auth.deleteAccount.scheduled': 'Eliminación de cuenta programada',
+    'messages.auth.deleteAccount.confirmationRequired':
+      'Revisa tu correo para confirmar la eliminación de la cuenta',
+    'messages.auth.deleteAccount.cancelled':
+      'La eliminación de la cuenta ha sido cancelada',
+    'mail.subject.verification': 'Verifica tu cuenta de Ritora',
+    'mail.subject.passwordReset': 'Restablece tu contraseña de Ritora',
+    'mail.subject.adminInvitation':
+      'Has recibido una invitación a Ritora Admin',
+    'mail.subject.adminPasswordReset':
+      'Restablece tu contraseña de administrador de Ritora',
+    'mail.subject.accountDeletionConfirm':
+      'Confirma la eliminación de tu cuenta de Ritora',
+    'mail.subject.accountDeletionScheduled':
+      'Tu cuenta de Ritora se eliminará el {{scheduledFor}}',
+    'mail.subject.accountDeletionCancelled':
+      'Buenas noticias, tu cuenta de Ritora se mantiene',
+    'mail.verification.previewText':
+      'Bienvenido a Ritora. Toca el botón interior para confirmar tu correo electrónico y empezar a crear una rutina de cuidado de la piel más tranquila.',
+    'mail.verification.title': 'Bienvenido a Ritora, {{firstName}}',
+    'mail.verification.intro':
+      'Toque el botón a continuación para confirmar su correo electrónico y terminar de configurar su cuenta.',
+    'mail.verification.ctaLabel': 'Confirmar correo electrónico',
+    'mail.verification.expiry':
+      'Este enlace funciona durante las próximas 24 horas y solo se puede utilizar una vez.',
+    'mail.verification.fallbackIntro':
+      'Si el botón no se abre, copie y pegue este enlace en su navegador.',
+    'mail.verification.ignore':
+      'Si no se registró en Ritora, puede ignorar este correo electrónico. No le pasará nada a tu dirección.',
+    'mail.verification.footerLineOne':
+      'Enviado desde Ritora. Te ayudamos a crear una rutina de cuidado de la piel más tranquila desde el estante que ya tienes.',
+    'mail.verification.footerLineTwo':
+      '¿Necesitas una mano? Escríbanos a {{supportEmail}}.',
+    'mail.passwordReset.previewText':
+      'Restablece tu contraseña de Ritora. Este enlace funcionará durante la próxima hora.',
+    'mail.passwordReset.title': 'Restablece tu contraseña',
+    'mail.passwordReset.intro':
+      'Hola {{firstName}}, recibimos una solicitud para restablecer la contraseña de tu cuenta de Ritora. Toque el botón a continuación para elegir uno nuevo.',
+    'mail.passwordReset.ctaLabel': 'Elija una nueva contraseña',
+    'mail.passwordReset.expiry':
+      'Este enlace funciona durante la próxima hora y solo se puede utilizar una vez.',
+    'mail.passwordReset.fallbackIntro':
+      'Si el botón no se abre, copie y pegue este enlace en su navegador.',
+    'mail.passwordReset.unexpectedTitle': '¿No pediste esto?',
+    'mail.passwordReset.unexpectedBody':
+      'Puedes ignorar este correo electrónico y tu contraseña actual seguirá funcionando. Ritora nunca te pedirá tu contraseña por correo electrónico.',
+    'mail.passwordReset.footerLine':
+      'Enviado desde Ritora. Si alguna vez tiene preguntas sobre su cuenta, el equipo está en {{supportEmail}}.',
+    'mail.adminInvitation.previewText':
+      'Establezca su contraseña de administrador de Ritora para aceptar su invitación.',
+    'mail.adminInvitation.title':
+      'Acepte su invitación de administrador de Ritora',
+    'mail.adminInvitation.intro':
+      '{{invitedByName}} te invitó a ayudar a administrar Ritora. Establece una contraseña para aceptar la invitación.',
+    'mail.adminInvitation.ctaLabel': 'Establecer contraseña de administrador',
+    'mail.adminInvitation.expiry':
+      'Esta invitación funciona durante los próximos 7 días y solo se puede utilizar una vez.',
+    'mail.adminInvitation.unexpectedTitle': '¿No esperabas esto?',
+    'mail.adminInvitation.unexpectedBody':
+      'Ignore este correo electrónico si no esperaba acceso. Ritora nunca te pedirá tu contraseña por correo electrónico.',
+    'mail.adminInvitation.footerLine':
+      'Enviado desde Ritora para seguridad de la cuenta interna. ¿Preguntas? Escribe a {{supportEmail}}.',
+    'mail.adminPasswordReset.previewText':
+      'Restablezca su contraseña de administrador de Ritora. Este enlace funcionará durante la próxima hora.',
+    'mail.adminPasswordReset.title':
+      'Restablecer su contraseña de administrador',
+    'mail.adminPasswordReset.intro':
+      'Hola {{firstName}}, recibimos una solicitud para restablecer su contraseña de administrador de Ritora.',
+    'mail.adminPasswordReset.ctaLabel': 'Elija una nueva contraseña',
+    'mail.adminPasswordReset.footerLine':
+      'Enviado desde Ritora para seguridad de la cuenta interna. ¿Preguntas? Escribe a {{supportEmail}}.',
+    'mail.accountDeletion.confirm.previewText':
+      'Toque para confirmar que desea eliminar su cuenta de Ritora. El enlace caduca en una hora.',
+    'mail.accountDeletion.confirm.badgeLabel': 'Acción necesaria',
+    'mail.accountDeletion.confirm.title':
+      'Confirmar eliminación de cuenta, {{firstName}}',
+    'mail.accountDeletion.confirm.intro':
+      'Recibimos una solicitud para eliminar su cuenta de Ritora. Solo confirma a continuación si eres tú. El enlace funcionará durante la próxima hora.',
+    'mail.accountDeletion.confirm.ctaLabel': 'Confirmar eliminación',
+    'mail.accountDeletion.confirm.timelineTitle':
+      'Esto es lo que sucede a continuación',
+    'mail.accountDeletion.confirm.timeline1Title': 'Tu confirmas',
+    'mail.accountDeletion.confirm.timeline1Body':
+      'Lo desconectamos de cada dispositivo y comenzamos su período de gracia de 30 días.',
+    'mail.accountDeletion.confirm.timeline2Title': 'Los próximos 30 días',
+    'mail.accountDeletion.confirm.timeline2Body':
+      'Cambia de opinión en cualquier momento. Inicie sesión nuevamente o use el enlace de cancelación en su bandeja de entrada.',
+    'mail.accountDeletion.confirm.timeline3Title': 'Después del día 30',
+    'mail.accountDeletion.confirm.timeline3Body':
+      'Su perfil, fotos, estante, historial y publicaciones de la comunidad se eliminan permanentemente y se eliminan de la evidencia pública.',
+    'mail.accountDeletion.confirm.note':
+      'Este enlace caduca en 1 hora y solo se puede utilizar una vez.',
+    'mail.accountDeletion.confirm.fallbackIntro':
+      '¿El botón no funciona? Copie y pegue este enlace en su navegador.',
+    'mail.accountDeletion.confirm.ignoreNote':
+      '¿No pediste esto? Puedes ignorar este correo electrónico. Su cuenta permanece activa y nada cambia.',
+    'mail.accountDeletion.confirm.footerLine':
+      'Enviado desde Ritora para seguridad de la cuenta. ¿Preguntas? Escribe a {{supportEmail}}.',
+    'mail.accountDeletion.scheduled.previewText':
+      'Su cuenta Ritora está programada para ser eliminada el {{scheduledFor}}. Cancele en cualquier momento antes de esa fecha.',
+    'mail.accountDeletion.scheduled.badgeLabel':
+      'Programado · {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.title':
+      'Su cuenta está programada para ser eliminada',
+    'mail.accountDeletion.scheduled.intro':
+      'Hola {{firstName}}, tu cuenta de Ritora está configurada para eliminarse permanentemente en {{scheduledFor}}. Tienes 30 días para cambiar de opinión.',
+    'mail.accountDeletion.scheduled.ctaLabel': 'Cancelar eliminación',
+    'mail.accountDeletion.scheduled.timelineTitle':
+      'Su período de gracia de 30 días',
+    'mail.accountDeletion.scheduled.timeline1Title': 'hoy',
+    'mail.accountDeletion.scheduled.timeline1Body':
+      'Se cerraron todas las sesiones. Los datos de su cuenta privada se conservan de forma segura durante el período de gracia.',
+    'mail.accountDeletion.scheduled.timeline2Title':
+      'En cualquier momento antes de {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline2Body':
+      'Toca "Cancelar eliminación" arriba o simplemente inicia sesión nuevamente para conservar tu cuenta.',
+    'mail.accountDeletion.scheduled.timeline3Title': 'En {{scheduledFor}}',
+    'mail.accountDeletion.scheduled.timeline3Body':
+      'Su perfil, fotografías, estantería, historial y publicaciones de la comunidad se borran permanentemente y se eliminan de la evidencia pública. Esto no se puede deshacer.',
+    'mail.accountDeletion.scheduled.note':
+      'Si no eres tú, cancela ahora y restablece tu contraseña. Ritora nunca te pedirá tu contraseña por correo electrónico.',
+    'mail.accountDeletion.scheduled.fallbackIntro':
+      '¿El botón no funciona? Copie y pegue este enlace en su navegador.',
+    'mail.accountDeletion.scheduled.footerLine':
+      'Enviado desde Ritora para seguridad de la cuenta. ¿Necesitar ayuda? Escribe a {{supportEmail}}.',
+    'mail.accountDeletion.cancelled.previewText':
+      'Buenas noticias. Tu cuenta de Ritora permanece y no se eliminó nada.',
+    'mail.accountDeletion.cancelled.badgeLabel': 'Cancelado',
+    'mail.accountDeletion.cancelled.title':
+      'Bienvenido de nuevo, {{firstName}}',
+    'mail.accountDeletion.cancelled.intro':
+      'Su solicitud de eliminación ha sido cancelada. Tu cuenta Ritora está activa y todo está exactamente donde lo dejaste.',
+    'mail.accountDeletion.cancelled.ctaLabel': 'Ritora abierta',
+    'mail.accountDeletion.cancelled.recapTitle': 'Un resumen rápido',
+    'mail.accountDeletion.cancelled.recapItem1':
+      'Tu perfil, fotos e historial de rutinas están seguros',
+    'mail.accountDeletion.cancelled.recapItem2':
+      'Su estante, horario y sugerencias estarán listos cuando usted lo esté.',
+    'mail.accountDeletion.cancelled.recapItem3':
+      'No se necesitan más acciones. Inicia sesión en cualquier momento para continuar donde lo dejaste',
+    'mail.accountDeletion.cancelled.note':
+      '¿No cancelaste esto tú mismo? Restablece tu contraseña y revisa tus sesiones activas. Le ayudaremos: escriba a {{supportEmail}}.',
+    'mail.accountDeletion.cancelled.fallbackIntro':
+      '¿El botón no funciona? Copie y pegue este enlace en su navegador.',
+    'mail.accountDeletion.cancelled.footerLine':
+      'Enviado desde Ritora para seguridad de la cuenta. ¿Preguntas? Escribe a {{supportEmail}}.',
+    'mail.notification.shared.manageLabel':
+      'Administrar preferencias de notificación',
+    'mail.notification.shared.supportLine': '¿Necesitar ayuda? Contáctenos en',
+    'mail.daypart.morning': 'mañana',
+    'mail.daypart.noon': 'mediodía',
+    'mail.daypart.evening': 'tarde',
+    'mail.subject.photo_reminder': 'Añadir la foto de piel de hoy',
+    'mail.notification.photo_reminder.previewText':
+      'Una foto rápida de hoy mantiene tu progreso honesto.',
+    'mail.notification.photo_reminder.title':
+      'Hora de la foto de hoy, {{firstName}}',
+    'mail.notification.photo_reminder.intro':
+      'Una foto rápida con luz fija es todo lo que tu piel necesita hoy. Ritora lo lee en busca de reacciones, sigue cómo van las cosas y da forma a las sugerencias que se avecinan.',
+    'mail.notification.photo_reminder.payloadLabel': 'HOY · {{date}}',
+    'mail.notification.photo_reminder.payloadTitle':
+      'Aún no se ha registrado ninguna foto',
+    'mail.notification.photo_reminder.payloadMeta':
+      'Última foto: {{lastPhotoLabel}}',
+    'mail.notification.photo_reminder.ctaLabel': 'Añade la foto de hoy',
+    'mail.notification.photo_reminder.tipNote':
+      'Misma ventana, misma luz. Ritora compara tus fotos de los últimos 14 días para detectar los pequeños cambios que te perderías.',
+    'mail.notification.photo_reminder.footerWhy':
+      'Recibes esto porque los recordatorios de fotos diarios están activados.',
+    'mail.notification.photo_reminder.unsubscribeLabel':
+      'Darse de baja de los recordatorios de fotos',
+    'mail.subject.suggestion_ready': 'Tu rutina {{slot}} está lista',
+    'mail.notification.suggestion_ready.previewText':
+      'Tu rutina está configurada y esperando en la página Hoy.',
+    'mail.notification.suggestion_ready.title': 'Tu rutina {{slot}} está lista',
+    'mail.notification.suggestion_ready.intro':
+      'Le dio forma a su piel hoy, lo que aplicó anoche y los ingredientes que ya están en su estante.',
+    'mail.notification.suggestion_ready.slotLabel': '{{slot}} · {{slotTime}}',
+    'mail.notification.suggestion_ready.stepSummary':
+      '{{stepCount}} pasos, aproximadamente {{minutes}} minutos',
+    'mail.notification.suggestion_ready.ctaLabel': 'Abrir el plan de hoy',
+    'mail.notification.suggestion_ready.rationale':
+      '¿Por qué estos? Ritora omitió todo lo que entre en conflicto con los activos de anoche y mantuvo su barrera ligera para que el SPF de hoy pueda hacer su trabajo.',
+    'mail.notification.suggestion_ready.footerWhy':
+      'Recibes esto porque las alertas de sugerencias están activadas.',
+    'mail.notification.suggestion_ready.unsubscribeLabel':
+      'Darse de baja de las alertas de sugerencias',
+    'mail.subject.slot_start': 'Es hora de tu rutina {{slot}}',
+    'mail.notification.slot_start.previewText':
+      'Tu rutina {{slot}} está lista y esperando.',
+    'mail.notification.slot_start.title':
+      'Ya es hora, {{firstName}}. Rutina {{slot}}.',
+    'mail.notification.slot_start.intro':
+      '{{minutes}} minutos, {{stepCount}} pasos, entonces tu día es tuyo. Le daremos un empujón en 30 si olvida iniciar sesión.',
+    'mail.notification.slot_start.payloadLabel': 'RANURA AHORA · {{slot}}',
+    'mail.notification.slot_start.payloadTitle': '{{stepFlow}}',
+    'mail.notification.slot_start.payloadMeta':
+      'Aproximadamente {{minutes}} mín. Suave con tu barrera. Termina con SPF.',
+    'mail.notification.slot_start.ctaLabel': 'Aplicar ahora',
+    'mail.notification.slot_start.footerWhy':
+      'Recibes esto porque las alertas de inicio de tragamonedas están activadas.',
+    'mail.notification.slot_start.unsubscribeLabel':
+      'Cancelar la suscripción a las alertas de inicio de tragamonedas',
+    'mail.subject.recording_reminder': 'Registro rápido: ¿aplicaste tu rutina?',
+    'mail.notification.recording_reminder.previewText':
+      'Diez segundos para registrar lo que realmente aplicó este {{slot}}.',
+    'mail.notification.recording_reminder.title':
+      '¿Aplicaste tu rutina {{slot}}?',
+    'mail.notification.recording_reminder.intro':
+      'Diez segundos es todo lo que se necesita. Registre lo que realmente sucedió para que la siguiente sugerencia sepa por dónde empezar.',
+    'mail.notification.recording_reminder.slotLabel':
+      'RANURA {{slot}} · {{slotTime}}',
+    'mail.notification.recording_reminder.statusLabel': 'Esperando registro',
+    'mail.notification.recording_reminder.stepsMeta':
+      '{{stepCount}} pasos sugeridos. Lista de verificación ya completa. Unos 10 segundos para confirmar.',
+    'mail.notification.recording_reminder.ctaLabel': 'Grabar {{slot}} ahora',
+    'mail.notification.recording_reminder.skipNote':
+      '¿Se saltó hoy? <a class="email-link email-secondary-link" href="{{skipUrl}}" style="color: #6b7361; text-decoration: underline;">Marcar este espacio como omitido</a>. Nos adaptaremos sin regañar.',
+    'mail.notification.recording_reminder.footerWhy':
+      'Recibes esto porque los recordatorios de grabación están activados.',
+    'mail.notification.recording_reminder.unsubscribeLabel':
+      'Darse de baja de los recordatorios de grabación',
+    'mail.subject.reaction_detected': 'Tu rutina ha sido pausada',
+    'mail.notification.reaction_detected.previewText':
+      'La rutina se detuvo. Tu barrera es la prioridad para los próximos días.',
+    'mail.notification.reaction_detected.title':
+      'Pausamos tu rutina por un momento.',
+    'mail.notification.reaction_detected.intro':
+      'Hola {{firstName}}. Su última foto muestra algunos cambios que no estaban presentes ayer. Hemos pausado tus activos y te hemos cambiado al modo barrera mientras tu piel se calma.',
+    'mail.notification.reaction_detected.reassurance':
+      'Esto no es un diagnóstico. Solo Ritora siendo cautelosa. La mayoría de las reacciones se calman en 2 a 4 días con un cuidado más suave.',
+    'mail.notification.reaction_detected.pausedLabel': 'PAUSADO POR AHORA',
+    'mail.notification.reaction_detected.pausedTitle':
+      '{{count}} activos retenidos de tu rutina',
+    'mail.notification.reaction_detected.guidanceTitle':
+      'Para los próximos días',
+    'mail.notification.reaction_detected.guidanceBody':
+      'Limpiador, hidratante, SPF. Eso es todo. Evite los exfoliantes, el agua caliente y cualquier cosa nueva. Sigue tomando tu foto como de costumbre para que podamos ver cuándo estás listo para volver a ponerte la capa.',
+    'mail.notification.reaction_detected.ctaLabel': 'Ver lo que cambió',
+    'mail.notification.reaction_detected.disclaimer':
+      'Si la reacción empeora, se propaga o presenta hinchazón o dolor, comuníquese con un dermatólogo. La señal de Ritora es de apoyo, no médica.',
+    'mail.notification.reaction_detected.footerWhy':
+      'Estás recibiendo esto porque las alertas de reacción son críticas y permanecen activas para todos.',
+    'mail.subject.simplification_started': 'Tu rutina ahora está simplificada',
+    'mail.notification.simplification_started.previewText':
+      'Su rutina se ha simplificado para ayudar a que su barrera se recupere.',
+    'mail.notification.simplification_started.title':
+      'Tu rutina ahora está simplificada',
+    'mail.notification.simplification_started.intro':
+      'Hemos reducido tu rutina a lo esencial para que tu barrera pueda descansar. Los activos todavía están en su estante. Volverán tan pronto como su piel esté lista.',
+    'mail.notification.simplification_started.routineLabel':
+      'RUTINA SIMPLIFICADA · {{stepCount}} PASOS',
+    'mail.notification.simplification_started.routineSummary': '{{flow}}',
+    'mail.notification.simplification_started.ctaLabel':
+      'Ver rutina simplificada',
+    'mail.notification.simplification_started.recoveryNote':
+      'Ritora observará tus fotos y recuperará los activos uno a la vez una vez que tu piel muestre que está lista. Generalmente de 3 a 7 días.',
+    'mail.notification.simplification_started.footerWhy':
+      'Recibes esto porque las alertas de simplificación están activadas.',
+    'mail.notification.simplification_started.unsubscribeLabel':
+      'Darse de baja de las alertas de simplificación',
+    'mail.subject.insight_ready': 'Una nueva visión sobre tu piel',
+    'mail.notification.insight_ready.previewText':
+      'Tus fotos cuentan una historia tranquila.',
+    'mail.notification.insight_ready.title': 'Una nueva visión, {{firstName}}',
+    'mail.notification.insight_ready.intro':
+      'Después de tus últimos días de fotos y registros, tu piel nos cuenta algo concreto. Esto es lo que encontramos.',
+    'mail.notification.insight_ready.disclaimer':
+      'Las ideas no son afirmaciones médicas. Son patrones que Ritora notó en tus propios datos. Abra la vista interior para ver la metodología y los días detrás del número.',
+    'mail.notification.insight_ready.ctaLabel': 'Leer información completa',
+    'mail.notification.insight_ready.footerWhy':
+      'Recibes esto porque las alertas de información están activadas.',
+    'mail.notification.insight_ready.unsubscribeLabel':
+      'Cancelar la suscripción a las alertas de información',
+    'mail.subject.doctor_referral':
+      'Una sugerencia de derivación a un especialista',
+    'mail.notification.doctor_referral.previewText':
+      'Un patrón que Ritora no puede leer completamente por sí sola. Un especialista podría hacerlo.',
+    'mail.notification.doctor_referral.title':
+      'Vale la pena ver un {{specialistType}}',
+    'mail.notification.doctor_referral.intro':
+      'Ritora ha estado observando un patrón recurrente que no responde a la rutina habitual de barrera y descanso. Un especialista podrá examinarlo adecuadamente. Esta es una sugerencia, no un diagnóstico.',
+    'mail.notification.doctor_referral.specialistLabel':
+      'ESPECIALISTA SUGERIDO',
+    'mail.notification.doctor_referral.specialistTitle':
+      '{{specialistType}} · {{consultMode}}',
+    'mail.notification.doctor_referral.prepTitle': 'que traer',
+    'mail.notification.doctor_referral.prepBody':
+      'Ritora puede preparar un resumen de una página. Tu estante, tu historial de rutina, las fotos alrededor del patrón y la línea de tiempo. El especialista obtiene el contexto en 30 segundos y usted se salta la parte "¿Qué has probado?".',
+    'mail.notification.doctor_referral.ctaLabel': 'Ver sugerencia + resumen',
+    'mail.notification.doctor_referral.disclaimer':
+      'Ritora no es un servicio médico. Sacamos señales a la superficie. Los especialistas hacen llamadas. Si siente algo urgente, como dolor, hinchazón o fiebre, no espere una cita.',
+    'mail.notification.doctor_referral.footerWhy':
+      'Recibes esto porque las sugerencias de referencias están activadas.',
+    'mail.notification.doctor_referral.unsubscribeLabel':
+      'Darse de baja de sugerencias de referencias',
+    'mail.subject.wrapped_ready': 'Tu semana en piel · Ritora',
+    'mail.notification.wrapped_ready.previewText':
+      'Tu semana en piel. Pequeñas victorias, brechas honestas y una cosa que intentar a continuación.',
+    'mail.notification.wrapped_ready.title': 'Tu semana en piel, {{firstName}}',
+    'mail.notification.wrapped_ready.intro':
+      'Una pequeña historia esta semana. Aquí está el resumen.',
+    'mail.notification.wrapped_ready.weekLabel': '{{weekRange}}',
+    'mail.notification.wrapped_ready.ctaLabel':
+      'Abrir el resumen de esta semana',
+    'mail.notification.wrapped_ready.footnote':
+      'Dentro del envoltorio, encontrarás tus fotos día a día, lo que aplicaste, la curva de enrojecimiento y la razón detrás de cada cambio de sugerencia.',
+    'mail.notification.wrapped_ready.footerWhy':
+      'Obtienes esto porque Wrapped está activado.',
+    'mail.notification.wrapped_ready.unsubscribeLabel':
+      'Darse de baja de Envuelto',
+    'errors.internalServer': 'Error interno del servidor',
+    'errors.originNotAllowed': 'Origen no permitido',
+    'errors.userNotFound': 'Usuario no encontrado',
+    'errors.skinProfileUserNotVerified':
+      'Verifica tu correo electrónico antes de crear tu perfil de skin',
+    'errors.skinProfileAlreadyExists': 'El perfil de piel ya existe',
+    'errors.skinProfileNotFound': 'Perfil de piel no encontrado',
+    'errors.skinProfileCountryRequired':
+      'Se requiere el código de país cuando se proporciona una ciudad',
+    'errors.inventory.brandRequired': 'Se requiere marca',
+    'errors.inventory.nameRequired': 'El nombre del producto es obligatorio.',
+    'errors.inventory.descriptionRequired':
+      'Se requiere descripción del producto',
+    'errors.inventory.benefitsRequired':
+      'Se requiere al menos un beneficio de producto',
+    'errors.inventory.suitedForRequired':
+      'Se requiere al menos un valor adecuado',
+    'errors.inventory.inciRequired': 'Se requiere al menos un ingrediente INCI',
+    'errors.inventory.guidanceRequired':
+      'Se requiere al menos un paso de orientación',
+    'errors.inventory.expiryBeforeOpened':
+      'La fecha de vencimiento no puede ser anterior a la fecha de apertura.',
+    'errors.inventory.notFound': 'Producto de inventario no encontrado',
+    'errors.schedule.slotConflict': 'Ya existe un slot ese día y hora',
+    'errors.schedule.moveConflict':
+      'Ya existe un slot en el día y hora de destino',
+    'errors.schedule.tooManySteps': 'No se pueden agregar más de 10 pasos',
+    'errors.schedule.customLabelRequired':
+      'Las etiquetas de pasos personalizadas deben incluir un nombre',
+    'errors.schedule.productsNotOwned':
+      'Algunos productos seleccionados no están en tu estantería.',
+    'errors.schedule.requiresProduct':
+      'Agregue al menos un producto antes de crear un cronograma',
+    'errors.schedule.slotNotFound': 'Ranura no encontrada',
+    'errors.cursor.invalid': 'Cursor no válido',
+    'errors.cursor.requestMismatch': 'El cursor no coincide con esta solicitud',
+    'errors.cursor.missingItem': 'El cursor ya no apunta a un elemento válido',
+    'errors.catalogue.invalidBarcode': 'Código de barras no válido',
+    'errors.url.safeExternal':
+      '{{fieldName}} debe ser una URL HTTP(S) externa segura',
+    'errors.auth.termsRequired':
+      'Debes aceptar los términos de servicio y la política de privacidad',
+    'errors.auth.emailInUse': 'El correo electrónico ya está en uso',
+    'errors.auth.invalidCredentials': 'Credenciales no válidas',
+    'errors.auth.emailNotVerified': 'Correo electrónico no verificado',
+    'errors.auth.invalidRefreshToken': 'Token de actualización no válido',
+    'errors.auth.revokedRefreshToken':
+      'El token de actualización fue revocado; todas las sesiones han sido invalidadas',
+    'errors.auth.expiredRefreshToken': 'El token de actualización ha caducado',
+    'errors.auth.invalidVerificationToken': 'Token de verificación no válido',
+    'errors.auth.expiredVerificationToken':
+      'El token de verificación ha caducado',
+    'errors.auth.invalidResetToken': 'Token de restablecimiento no válido',
+    'errors.auth.expiredResetToken': 'El token de restablecimiento ha caducado',
+    'errors.auth.invalidPassword': 'Contraseña no válida',
+    'errors.auth.noRefreshToken': 'No se encontró token de actualización',
+    'errors.auth.accountRestricted':
+      'Esta cuenta tiene restricciones. Contacta con soporte si crees que es un error.',
+    'validation.email.invalid': 'Introduce un correo electrónico válido',
+    'validation.email.maxLength':
+      'El correo electrónico debe tener como máximo 255 caracteres',
+    'validation.password.minLength':
+      'La contraseña debe tener al menos 8 caracteres',
+    'validation.password.required': 'Introduce tu contraseña',
+    'validation.password.maxLength':
+      'La contraseña debe tener como máximo 72 caracteres',
+    'validation.password.strong':
+      'La contraseña debe incluir al menos una mayúscula, una minúscula y un número',
+    'validation.reason.required': 'Introduce un motivo de revisión',
+    'validation.reason.maxLength':
+      'El motivo de revisión debe tener como máximo 500 caracteres',
+    'validation.token.hex64':
+      'El token debe ser una cadena hexadecimal de 64 caracteres',
+    'validation.language.unsupported': 'Elige inglés, sueco o español',
+    'validation.name.required': 'Este campo es obligatorio',
+    'validation.timeZone.unsupported': 'Elige una zona horaria válida',
   },
 };
 
@@ -876,7 +1282,9 @@ export function normalizeLanguage(
   }
 
   const normalized = value.trim().toLowerCase();
-  return normalized === 'sv' ? 'sv' : 'en';
+  return (SUPPORTED_LANGUAGES as readonly string[]).includes(normalized)
+    ? (normalized as AppLanguage)
+    : DEFAULT_LANGUAGE;
 }
 
 function readHeaderValue(header: string | string[] | undefined): string | null {
@@ -897,8 +1305,13 @@ export function resolveRequestLanguage(request: Request): AppLanguage {
   const requestQuery = request.query as Record<string, unknown> | undefined;
   const acceptLanguage = readHeaderValue(request.headers['accept-language']);
 
-  if (acceptLanguage?.toLowerCase().startsWith('sv')) {
-    return 'sv';
+  const headerLanguage = acceptLanguage
+    ?.split(',')
+    .map((tag) => tag.split(';')[0].trim().toLowerCase().split('-')[0])
+    .find((tag) => (SUPPORTED_LANGUAGES as readonly string[]).includes(tag));
+
+  if (headerLanguage) {
+    return headerLanguage as AppLanguage;
   }
 
   const preferredLanguage =
@@ -925,7 +1338,9 @@ export function translate(
   values: Record<string, string | number> = {},
 ): string {
   const template =
-    translations[language][key] ?? translations[DEFAULT_LANGUAGE][key] ?? key;
+    translations[language]?.[key] ??
+    translations[DEFAULT_LANGUAGE]?.[key] ??
+    key;
 
   return interpolate(template, values);
 }

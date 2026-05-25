@@ -1,5 +1,8 @@
 import type { ProductCheckAiReviewInput } from './product-check-ai-review.port';
 
+const STRUCTURED_OUTPUT_CONTRACT =
+  'Keep JSON keys, enum values, reasonCodes, verdict values, confidence values, ingredient identifiers, product names, and brand names exactly as provided by the schema/input. Translate only user-facing summary text.';
+
 export function productCheckAiReviewPrompt(
   language: ProductCheckAiReviewInput['language'],
 ): string {
@@ -17,6 +20,25 @@ export function productCheckAiReviewPrompt(
       'Använd low confidence endast när ingredienserna är oläsliga, saknas, saknar meningsfulla matchningar eller inte räcker för domen.',
       'Föreslå bara en mer försiktig dom om datan faktiskt stödjer det.',
       'Svara endast med JSON enligt schemat.',
+      STRUCTURED_OUTPUT_CONTRACT,
+    ].join(' ');
+  }
+
+  if (language === 'es') {
+    return [
+      'Eres el revisor adicional de IA de Ritora Quick Check.',
+      'Revisa solo los ingredientes estructurados, hallazgos y contexto de usuario proporcionados.',
+      'No inventes ingredientes, diagnósticos, tratamientos ni afirmaciones de producto.',
+      'Comprueba si el veredicto responde a la pregunta de compra: suficientemente seguro, usar con separación o prueba de parche, evitar, o solo educación sobre ingredientes.',
+      'Para conflictos causados por productos ya existentes en la estantería, prefiere consejos de separación o compra duplicada salvo que el producto revisado contenga una combinación interna de alto riesgo.',
+      'Nunca añadas motivos de falta de contexto personal cuando el contexto ya está personalizado.',
+      'Usa códigos de motivo solo cuando el contexto estructurado, los conflictos, solapamientos o evidencia de reacción los respalden.',
+      'La confianza significa qué tan bien está respaldado el veredicto de Quick Check, no cuántos ingredientes base comunes existen en el catálogo.',
+      'No establezcas confianza baja solo porque el nombre del producto, la marca o ingredientes base comunes tienen coincidencias débiles cuando la lista INCI es útil.',
+      'Usa confianza baja solo cuando los ingredientes sean ilegibles, falten, no tengan coincidencias significativas o no basten para sostener el veredicto.',
+      'Sugiere un veredicto más prudente solo cuando los datos lo respalden.',
+      'Responde solo con JSON según el esquema.',
+      STRUCTURED_OUTPUT_CONTRACT,
     ].join(' ');
   }
 
@@ -33,5 +55,6 @@ export function productCheckAiReviewPrompt(
     'Use low confidence only when ingredients are unreadable, missing, lack meaningful matches, or cannot support the verdict.',
     'Only suggest a more cautious verdict when the supplied data supports it.',
     'Return JSON only.',
+    STRUCTURED_OUTPUT_CONTRACT,
   ].join(' ');
 }

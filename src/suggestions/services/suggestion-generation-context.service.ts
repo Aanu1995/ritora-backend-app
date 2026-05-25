@@ -9,6 +9,7 @@ import { ShelfStatus } from '../../shelf/shelf.types';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { DEFAULT_TIME_ZONE } from '../../common/timezone/timezone.utils';
+import { normalizeLanguage } from '../../common/i18n/i18n';
 import { User } from '../../users/entities/user.entity';
 import { UserDataAccessLogService } from '../../users/user-data-access-log.service';
 import {
@@ -132,6 +133,7 @@ export class SuggestionGenerationContextService {
     });
 
     return {
+      language: normalizeLanguage(user.preferred_language),
       slotId: slot.id,
       requestSource: SuggestionRequestSource.Scheduled,
       requestContext: null,
@@ -198,6 +200,7 @@ export class SuggestionGenerationContextService {
     });
 
     return {
+      language: normalizeLanguage(user.preferred_language),
       slotId: null,
       requestSource: SuggestionRequestSource.OnDemand,
       requestContext: suggestion.request_context,

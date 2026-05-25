@@ -27,6 +27,8 @@ import {
 
 export const OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS = 45_000;
 const DEFAULT_MODEL = 'gpt-5-mini';
+const EXPLANATION_JSON_CONTRACT =
+  'Keep JSON keys exactly as schema keys: conflicts, overlaps, id, explanation. Keep ids exactly as provided. Translate only explanation string values.';
 const EXPLANATION_RESPONSE_FORMAT = {
   type: 'json_schema',
   name: 'ingredient_explanations',
@@ -305,10 +307,23 @@ export class OpenAiExplanationProvider implements ExplanationPort {
 
   private systemPrompt(language: ExplanationInput['language']): string {
     if (language === 'sv') {
-      return 'Du skriver korta, tydliga hudvårdsförklaringar på svenska. Håll dig strikt till de strukturerade fynden. Hitta inte på nya risker eller instruktioner. Svara endast med JSON.';
+      return [
+        'Du skriver korta, tydliga hudvårdsförklaringar på svenska. Håll dig strikt till de strukturerade fynden. Hitta inte på nya risker eller instruktioner. Svara endast med JSON.',
+        EXPLANATION_JSON_CONTRACT,
+      ].join(' ');
     }
 
-    return 'You write short, clear skincare explanations in English. Stay strictly within the structured findings. Do not invent any new risk or instruction. Return JSON only.';
+    if (language === 'es') {
+      return [
+        'Escribes explicaciones breves y claras de cuidado de la piel en español. Mantente estrictamente dentro de los hallazgos estructurados. No inventes nuevos riesgos ni instrucciones. Responde solo con JSON.',
+        EXPLANATION_JSON_CONTRACT,
+      ].join(' ');
+    }
+
+    return [
+      'You write short, clear skincare explanations in English. Stay strictly within the structured findings. Do not invent any new risk or instruction. Return JSON only.',
+      EXPLANATION_JSON_CONTRACT,
+    ].join(' ');
   }
 
   private logStructured(

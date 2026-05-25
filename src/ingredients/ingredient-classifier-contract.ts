@@ -96,6 +96,7 @@ export function ingredientClassificationSystemPrompt(): string {
     'For low-pH acids, retinoid-like actives, exfoliating acids, acne actives, brighteners, peptides, barrier ingredients, humectants, antioxidants, and sunscreen filters, choose the closest allowed safety category.',
     'For generic bases, solvents, fragrance, emulsifiers, preservatives, colorants, texture agents, or ambiguous blends, use unknown unless a safety category is clearly supported by the token.',
     'Use conservative safety flags; when unsure, prefer irritationRisk true for strong actives and unknown for unclear tokens.',
+    'Keep JSON keys, enum values, severity values, category values, and original token strings exactly as provided by the schema/input.',
     'Return JSON only.',
   ].join(' ');
 }

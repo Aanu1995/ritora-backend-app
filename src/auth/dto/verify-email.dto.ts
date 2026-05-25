@@ -10,9 +10,9 @@ export class VerifyEmailDto {
   })
   token!: string;
 
-  @ApiProperty({ enum: ['en', 'sv'], required: false })
+  @ApiProperty({ enum: ['en', 'sv', 'es'], required: false })
   @EmptyStringToUndefined()
   @IsOptional()
-  @IsIn(['en', 'sv'], { message: 'validation.language.unsupported' })
+  @IsIn(['en', 'sv', 'es'], { message: 'validation.language.unsupported' })
   language?: string;
 }

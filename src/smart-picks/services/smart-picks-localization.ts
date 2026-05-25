@@ -106,6 +106,27 @@ const COVERAGE_ROLE_LABELS = {
     'goal-primary': 'målprodukt',
     'goal-support': 'målstöd',
   },
+  es: {
+    cleanse: 'limpieza',
+    hydrate: 'hidratación',
+    treat: 'tratamiento',
+    moisturise: 'hidratante',
+    spf: 'SPF',
+    eye: 'cuidado de ojos',
+    'treatment-secondary': 'segundo tratamiento',
+    'dark-spot-treatment': 'tratamiento de manchas',
+    antioxidant: 'antioxidante',
+    'exfoliation-mask': 'mascarilla o exfoliante',
+    'acne-treatment': 'tratamiento de acné',
+    'barrier-support': 'soporte de barrera',
+    'congestion-mask': 'mascarilla para congestión',
+    'texture-exfoliant': 'exfoliante de textura',
+    retinoid: 'retinoide',
+    peptide: 'soporte con péptidos',
+    'recovery-mask': 'mascarilla de recuperación',
+    'goal-primary': 'producto objetivo',
+    'goal-support': 'apoyo al objetivo',
+  },
 } satisfies Record<AppLanguage, Record<SmartPicksCoverageRole, string>>;
 
 const ACTIVE_TAG_LABELS = {
@@ -139,6 +160,21 @@ const ACTIVE_TAG_LABELS = {
     spf: 'SPF',
     salicylic_acid: 'salicylsyra',
   },
+  es: {
+    retinoid: 'retinoide',
+    aha: 'AHA',
+    bha: 'BHA',
+    pha: 'PHA',
+    vitamin_c: 'vitamina C',
+    benzoyl_peroxide: 'peróxido de benzoilo',
+    azelaic_acid: 'ácido azelaico',
+    niacinamide: 'niacinamida',
+    ceramide: 'ceramida',
+    humectant: 'humectante',
+    barrier_support: 'soporte de barrera',
+    spf: 'SPF',
+    salicylic_acid: 'ácido salicílico',
+  },
 } satisfies Record<AppLanguage, Record<SmartPicksActiveTag, string>>;
 
 const GAP_COPY_BY_LANGUAGE: Record<
@@ -146,6 +182,7 @@ const GAP_COPY_BY_LANGUAGE: Record<
   Record<string, LocalizedGapCopy>
 > = {
   en: {},
+  es: {},
   sv: buildGapCopyMap([
     [
       'Gentle fragrance-free cleanser',
@@ -607,6 +644,11 @@ export function smartPicksRedundancyHint(
     return `Du har ${productCount} ${noun} med signaler för ${tagLabel}. Använd upp en innan du lägger till en till.`;
   }
 
+  if (language === 'es') {
+    const noun = productCount === 1 ? 'producto' : 'productos';
+    return `Tienes ${productCount} ${noun} con señales de ${tagLabel}. Termina uno antes de añadir otro.`;
+  }
+
   const noun = productCount === 1 ? 'product' : 'products';
   return `You have ${productCount} ${noun} with ${tagLabel} signals. Finish one before adding another.`;
 }
@@ -620,6 +662,12 @@ export function smartPicksStarterKitSummary(
     return activeProductCount === 0
       ? 'Börja med grunderna. Lägg till behandling sist.'
       : 'Gör klart de saknade startstegen innan du lägger till extra produkter.';
+  }
+
+  if (language === 'es') {
+    return activeProductCount === 0
+      ? 'Empieza con lo esencial. Añade tratamiento al final.'
+      : 'Completa los pasos básicos que faltan antes de añadir productos extra.';
   }
 
   return activeProductCount === 0
@@ -648,6 +696,12 @@ export function smartPicksStarterStepTitle(
       spf: 'Skydda',
       treat: 'Behandla',
     },
+    es: {
+      cleanse: 'Limpiar',
+      moisturise: 'Hidratar',
+      spf: 'Proteger',
+      treat: 'Tratar',
+    },
   };
 
   return (
@@ -666,6 +720,12 @@ export function smartPicksStarterCoveredReason(
       : 'Du har redan det här startsteget täckt.';
   }
 
+  if (language === 'es') {
+    return productName
+      ? `Ya tienes este paso inicial cubierto con ${productName}.`
+      : 'Ya tienes este paso inicial cubierto.';
+  }
+
   return productName
     ? `You already have this starter step covered by ${productName}.`
     : 'You already have this starter step covered.';
@@ -682,6 +742,12 @@ export function smartPicksStarterWaitReason(
       : 'Vänta med det här steget tills din startrutin har grunderna på plats.';
   }
 
+  if (language === 'es') {
+    return role === 'treat'
+      ? 'Tu objetivo actual todavía no necesita un producto de tratamiento. Construye primero limpiador, hidratante y protector solar.'
+      : 'Espera con este paso hasta que tu rutina inicial tenga los básicos cubiertos.';
+  }
+
   return role === 'treat'
     ? 'Your current goal does not need a treatment product yet. Build cleanser, moisturizer, and sunscreen first.'
     : 'Wait on this step until your starter routine has the basics covered.';
@@ -691,6 +757,10 @@ function smartPicksCoveredReason(role: string, language: AppLanguage): string {
   const roleLabel = smartPicksCoverageRoleLabel(role, language);
   if (language === 'sv') {
     return `Täcker rollen ${roleLabel}.`;
+  }
+
+  if (language === 'es') {
+    return `Cubre tu rol de ${roleLabel}.`;
   }
 
   return `Covers your ${roleLabel} role.`;

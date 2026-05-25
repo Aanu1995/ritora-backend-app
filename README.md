@@ -57,7 +57,7 @@ Important variable groups:
 - JWT: `JWT_SECRET`, `JWT_REFRESH_SECRET`, expiry, issuer, audience
 - Cookies: `COOKIE_*`
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
-- Mail: `RESEND_API_KEY`, `MAIL_FROM`, `NOTIFICATION_MAIL_FROM`, `MAIL_UNSUBSCRIBE_SECRET`
+- Mail: `RESEND_API_KEY`, `MAIL_FROM`, `NOTIFICATION_MAIL_FROM`, `SUPPORT_EMAIL`, `MAIL_UNSUBSCRIBE_SECRET`
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`, feature-specific model keys such as `SUGGESTION_AI_MODEL`
 - Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
 - Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
@@ -81,6 +81,7 @@ Production validation requires:
 - `SMART_PICKS_QUEUE_DRIVER=sqs` with a non-empty HTTPS `SMART_PICKS_SQS_QUEUE_URL`
 - a valid `MAIL_FROM` for auth emails
 - a valid `NOTIFICATION_MAIL_FROM` for notification emails, different from `MAIL_FROM`
+- a valid `SUPPORT_EMAIL` for support links in email copy
 - valid `CORS_ORIGINS` when configured
 
 ## Local development

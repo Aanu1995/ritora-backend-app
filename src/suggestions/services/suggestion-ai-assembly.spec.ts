@@ -1,6 +1,11 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
-import { ProductCategory, ShelfStatus } from '../../shelf/shelf.types';
+import {
+  ApplicationMethod,
+  ProductCategory,
+  Quantity,
+  ShelfStatus,
+} from '../../shelf/shelf.types';
 import { SuggestionContextSummary } from '../suggestion-context.types';
 import {
   buildAssemblyContext,
@@ -78,6 +83,39 @@ describe('suggestion AI assembly validation', () => {
     expect(resolved?.explanation).not.toContain('treat');
     expect(resolved?.explanation?.length).toBeLessThanOrEqual(140);
     expect(resolved?.chips[0].text.length).toBeLessThanOrEqual(32);
+  });
+
+  it('localizes deterministic guidance labels for Swedish suggestions', () => {
+    const inputs = generationInputs([]);
+    inputs.language = 'sv';
+    inputs.shelfActiveProducts = [
+      {
+        ...product(),
+        guidance: {
+          applicationMethod: ApplicationMethod.CottonPad,
+          quantity: Quantity.PeaSize,
+        },
+      } as InventoryProduct,
+    ];
+    const context = buildAssemblyContext(inputs);
+
+    const resolved = resolveRawStep(
+      {
+        stepOrder: 0,
+        inventoryProductId: 'product-1',
+        stepLabel: ProductCategory.Cleanser,
+        provenance: 'ai_added',
+      },
+      0,
+      context,
+    );
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        applicationMethod: 'Bomullsrondell',
+        quantity: 'En arta',
+      }),
+    );
   });
 
   it('sanitizes explanation copy into concise user-facing text', () => {

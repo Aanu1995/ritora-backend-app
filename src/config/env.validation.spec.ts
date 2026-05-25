@@ -104,6 +104,7 @@ function developmentEnv(
     SKIN_PROFILE_FIELD_ENCRYPTION_KEY_ID: 'primary',
     MAIL_FROM: 'onboarding@resend.dev',
     NOTIFICATION_MAIL_FROM: '',
+    SUPPORT_EMAIL: 'support@getritora.com',
     MAIL_UNSUBSCRIBE_SECRET: '',
     WEB_APP_URL: 'http://localhost:3000',
     API_PUBLIC_URL: '',
@@ -230,6 +231,7 @@ describe('envValidationSchema', () => {
       JWT_REFRESH_SECRET: 'dev-refresh-secret-change-me',
       MAIL_FROM: 'onboarding@resend.dev',
       NOTIFICATION_MAIL_FROM: '',
+      SUPPORT_EMAIL: 'support@getritora.com',
       COOKIE_DOMAIN: '',
       SWAGGER_ENABLED: true,
     });
@@ -337,6 +339,16 @@ describe('envValidationSchema', () => {
     );
 
     expect(result.error?.message).toContain('MAIL_UNSUBSCRIBE_SECRET');
+  });
+
+  it('requires a valid support email in every environment', () => {
+    const result = validateEnv(
+      developmentEnv({
+        SUPPORT_EMAIL: 'not-an-email',
+      }),
+    );
+
+    expect(result.error?.message).toContain('SUPPORT_EMAIL');
   });
 
   it('requires a separate notification email sender in production', () => {

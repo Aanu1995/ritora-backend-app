@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Not, Repository } from 'typeorm';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
+import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../common/i18n/i18n';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
@@ -102,7 +103,9 @@ export class SuggestionGenerationPersistenceService {
       });
       const savedInstance = await suggestionRepo.save(instance);
 
-      await stepRepo.save(buildStepRows(stepRepo, savedInstance.id, output));
+      await stepRepo.save(
+        buildStepRows(stepRepo, savedInstance.id, inputs, output),
+      );
       return savedInstance;
     });
   }
@@ -132,7 +135,9 @@ export class SuggestionGenerationPersistenceService {
         visible_at: suggestion.visible_at ?? new Date(),
       });
 
-      await stepRepo.save(buildStepRows(stepRepo, savedInstance.id, output));
+      await stepRepo.save(
+        buildStepRows(stepRepo, savedInstance.id, inputs, output),
+      );
       return savedInstance;
     });
   }
@@ -185,8 +190,10 @@ function buildReadySuggestionFields(
 function buildStepRows(
   stepRepo: Repository<SuggestionStep>,
   suggestionInstanceId: string,
+  inputs: SuggestionGenerationInputs,
   output: SuggestionGenerationOutput,
 ): SuggestionStep[] {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
   return output.steps.map((step) =>
     stepRepo.create({
       suggestion_instance_id: suggestionInstanceId,
@@ -207,11 +214,11 @@ function buildStepRows(
         SUGGESTION_STEP_CUSTOM_LABEL_MAX_LENGTH,
       ),
       application_method: fitNullableColumnText(
-        toHumanApplicationMethod(step.applicationMethod),
+        toHumanApplicationMethod(step.applicationMethod, language),
         SUGGESTION_STEP_METHOD_MAX_LENGTH,
       ),
       quantity: fitNullableColumnText(
-        toHumanQuantity(step.quantity),
+        toHumanQuantity(step.quantity, language),
         SUGGESTION_STEP_QUANTITY_MAX_LENGTH,
       ),
       wait_after_minutes: step.waitAfterMinutes,

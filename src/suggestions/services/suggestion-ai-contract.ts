@@ -1,4 +1,6 @@
 import { toDateOnlyString } from '../../common/utils/date';
+import type { AppLanguage } from '../../common/i18n/i18n';
+import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../common/i18n/i18n';
 import {
   SuggestionEvidenceSourceId,
   SuggestionExplanationJson,
@@ -39,8 +41,15 @@ export const SYSTEM_PROMPT = [
   '11. Gap recommendations must be directly relevant to this suggestion. Do not add evening sunscreen gaps unless a photosensitizing active is being used or the user goal/context makes daytime pigment or UV protection central.',
   '12. If the profile or request asks for a minimal/beginner routine, prefer cleanser, moisturizer, and SPF basics. Do not add optional serums or strong actives unless a specialist-locked step requires them.',
   '13. Output is strictly valid JSON conforming to the provided schema.',
-  '14. Write like a calm skincare app, not a report. Keep copy short and human: headlines under 8 words, step reasons under 18 words, safety and gap reasons under 22 words. Do not mention prompts, schemas, tokens, fallback internals, or legal wording.',
+  '14. Write every user-facing string in the requested response language. Keep product names, brand names, ingredient slugs, enum values, IDs, sourceIds, and JSON keys unchanged.',
+  '15. Write like a calm skincare app, not a report. Keep copy short and human: headlines under 8 words, step reasons under 18 words, safety and gap reasons under 22 words. Do not mention prompts, schemas, tokens, fallback internals, or legal wording.',
 ].join(' ');
+
+const RESPONSE_LANGUAGE_LABELS: Record<AppLanguage, string> = {
+  en: 'English',
+  sv: 'Swedish',
+  es: 'Spanish',
+};
 
 const SOURCE_ID_ENUM = Object.values(SuggestionEvidenceSourceId);
 
@@ -289,6 +298,7 @@ export function defaultExplanation(): SuggestionExplanationJson {
 }
 
 export function buildPrompt(inputs: SuggestionGenerationInputs): string {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
   const skin = inputs.skinProfile;
   const shelf = inputs.shelfActiveProducts.map(formatShelfProduct).join('\n');
   const lockedSteps = inputs.routineSteps
@@ -335,6 +345,7 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
       : formatScheduledSlotContext(inputs);
 
   return [
+    `Response language: ${RESPONSE_LANGUAGE_LABELS[language]} (${language}). All user-facing copy in explanation, step explanations, chips, safety flags, skipped reasons, input labels/details, gap recommendations, and goalAlignment must be written in this language. Keep product names, brand names, ingredient slugs, sourceIds, IDs, and enum values unchanged.`,
     `Request source: ${inputs.requestSource}. ${requestContext}`,
     `Target date: ${inputs.targetDate}, time: ${inputs.targetTime} (${inputs.daypart}).`,
     `Skin profile summary:\n${formatSkinProfileForPrompt(skin)}`,

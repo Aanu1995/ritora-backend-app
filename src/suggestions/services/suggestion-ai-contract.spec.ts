@@ -58,6 +58,7 @@ describe('suggestion AI contract', () => {
   it('includes minimized trusted evidence and scored product context in the prompt', () => {
     const prompt = buildPrompt(generationInputs());
 
+    expect(prompt).toContain('Response language: English (en)');
     expect(prompt).toContain('Trusted evidence summaries');
     expect(prompt).toContain('plain user-facing words');
     expect(prompt).toContain(SuggestionEvidenceSourceId.AadSunscreenSelection);
@@ -69,6 +70,16 @@ describe('suggestion AI contract', () => {
     expect(prompt).not.toContain('data:image');
     expect(prompt).not.toContain('Stockholm');
     expect(prompt).not.toContain('59.33');
+  });
+
+  it('instructs the model to return Swedish user-facing suggestion copy', () => {
+    const prompt = buildPrompt({ ...generationInputs(), language: 'sv' });
+
+    expect(prompt).toContain('Response language: Swedish (sv)');
+    expect(prompt).toContain(
+      'All user-facing copy in explanation, step explanations, chips, safety flags, skipped reasons, input labels/details, gap recommendations, and goalAlignment must be written in this language.',
+    );
+    expect(prompt).toContain('Keep product names');
   });
 
   it('includes multi-angle photo coverage in recent journal prompt context', () => {

@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import {
+  DEFAULT_LANGUAGE,
+  normalizeLanguage,
+  type AppLanguage,
+} from '../../common/i18n/i18n';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ProductCategory } from '../../shelf/shelf.types';
 import { StepLabel } from '../../schedule/dto/schedule.constants';
@@ -56,6 +61,7 @@ export const SUGGESTION_AI_TIMEOUT_MS = 45_000;
 export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 1500;
 
 export interface SuggestionGenerationInputs {
+  language?: AppLanguage;
   slotId: string | null;
   requestSource: SuggestionRequestSource;
   requestContext: SuggestionRequestContextJson | null;
@@ -372,8 +378,9 @@ function buildManualBaselineSteps(
   orderedSteps: RoutineStep[],
   fallbackReason: string | null,
 ): SuggestionGenerationStepOutput[] {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
   const routineOutputs = orderedSteps.map((step, index) =>
-    routineStepToOutput(step, index),
+    routineStepToOutput(step, index, { language }),
   );
   if (
     fallbackReason !== 'missing_barrier_moisturizer' ||

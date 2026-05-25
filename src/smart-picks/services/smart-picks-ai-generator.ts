@@ -530,6 +530,7 @@ const STARTER_TREATMENT_SYSTEM_PROMPT = [
   'Never diagnose, treat, cure, or prescribe. Photo and journal trends are only decision support.',
   'Respect disliked ingredients, known reaction triggers, active tolerances, pregnancy status, prescribed-active overlap, and dermatologist-care context.',
   'Reasoning about skin tone must be concrete and cautious: use phrases such as PIH-aware, white-cast checked, low-irritation intro, or tint/finish checked. Do not say trusted on an ethnicity or suited to a race.',
+  'Keep JSON keys, enum values, IDs, sourceIds, and product/category identifiers exactly as provided by the schema/input. Only user-facing reason text may be localized.',
   'Return strictly valid JSON matching the schema.',
 ].join(' ');
 
@@ -543,6 +544,7 @@ const PLAN_SYSTEM_PROMPT = [
   'Never recommend or imply need for ingredients the user dislikes, cannot tolerate, has reacted to, or should avoid from pregnancy/safety context.',
   'Never mark an unowned product as filled in coverage. Filled coverage must reference an active shelf product id from the prompt.',
   'Starter Kit must also be AI-decided: choose the essential first routine steps for this exact user, not a generic fixed kit.',
+  'Keep JSON keys, enum values, IDs, sourceIds, normalizedKey, priority, gapKind, and coverage role values exactly as provided by the schema/input. Only user-facing reason text may be localized.',
   'Return strictly valid JSON matching the schema.',
 ].join(' ');
 
@@ -561,6 +563,7 @@ const SYSTEM_PROMPT = [
   'If the user is under dermatologist care, do not replace or contradict that care; prefer supportive over-the-counter products and flag possible overlap with prescribed actives cautiously.',
   'Reasoning about skin tone must be concrete and cautious: use phrases such as PIH-aware, white-cast checked, low-irritation intro, or tint/finish checked. Do not say trusted on an ethnicity or suited to a race.',
   'Never recommend products matching owned products, disliked ingredients, disliked brands, or known reaction triggers supplied by the user.',
+  'Keep JSON keys, enum values, IDs, sourceIds, normalizedKey, budgetTier values, sellerNames, product names, and brand names exactly as provided by the schema/input. Only user-facing reason text may be localized.',
   'Return strictly valid JSON matching the schema.',
 ].join(' ');
 

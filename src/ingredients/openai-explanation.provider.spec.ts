@@ -326,6 +326,46 @@ describe('OpenAiExplanationProvider', () => {
     );
   });
 
+  it('keeps explanation JSON keys and IDs stable for localized responses', async () => {
+    const input = buildInput({ language: 'es' });
+    const provider = new OpenAiExplanationProvider(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_EXPLANATION_AI_MODEL: 'ingredient-explanation-model',
+      }),
+    );
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output_text: JSON.stringify({
+          conflicts: [
+            {
+              id: input.conflicts[0]?.id,
+              explanation: 'Usa estos activos en noches separadas.',
+            },
+          ],
+          overlaps: [],
+        }),
+      }),
+    });
+
+    await provider.explainFindings(input);
+
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(String(init.body)) as {
+      input?: Array<{
+        role?: string;
+        content?: Array<{ text?: string }>;
+      }>;
+    };
+    const systemText = body.input?.[0]?.content?.[0]?.text ?? '';
+    expect(systemText).toContain(
+      'Keep JSON keys exactly as schema keys: conflicts, overlaps, id, explanation.',
+    );
+    expect(systemText).toContain('Keep ids exactly as provided.');
+    expect(systemText).toContain('Translate only explanation string values.');
+  });
+
   it('short-circuits with null when there are no findings', async () => {
     const provider = new OpenAiExplanationProvider(
       buildConfig({
