@@ -33,9 +33,3 @@ coverage/
 
 .claude
 
-src/scripts/*
-!src/scripts/start-account-deletion-worker.ts
-scripts/
-!src/scripts/
-!src/scripts/evaluate-product-compare.ts
-!src/scripts/baseline-existing-migrations.ts
