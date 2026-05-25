@@ -26,20 +26,11 @@ import {
   dispatchSuggestionReadyNotification,
   recordSuggestionGenerationOutcome,
 } from './suggestion-generation-events';
-
-type SuggestionJobSubjects = {
-  targetDate: string;
-  targetTime: string;
-  slot: ScheduleSlot;
-  user: User;
-};
-
-type OnDemandSuggestionJobSubjects = {
-  targetDate: string;
-  targetTime: string;
-  suggestion: SuggestionInstance;
-  user: User;
-};
+import { sanitizeSuggestionGenerationOutput } from './suggestion-generation-output-sanitizer';
+import type {
+  OnDemandSuggestionJobSubjects,
+  SuggestionJobSubjects,
+} from './suggestion-generation-subjects';
 
 const SCHEDULE_SLOT_UNAVAILABLE_JOB_REASON = 'schedule_slot_unavailable';
 const SCHEDULE_SLOT_CHANGED_JOB_REASON = 'schedule_slot_changed';
@@ -63,7 +54,6 @@ export class SuggestionGenerationService {
     private readonly userRepo: Repository<User>,
     private readonly routineBreakService: RoutineBreakService,
   ) {}
-
   async generateForJob(job: SuggestionGenerationJob): Promise<void> {
     if (job.request_source === SuggestionRequestSource.OnDemand) {
       await this.generateOnDemandForJob(job);
@@ -72,7 +62,6 @@ export class SuggestionGenerationService {
 
     const subjects = await this.loadScheduledJobSubjects(job);
     if (!subjects) return;
-
     const { targetDate, targetTime, slot, user } = subjects;
     if (await this.suppressScheduledIfRoutineBreakStarted(user.id, job)) {
       return;
@@ -88,8 +77,9 @@ export class SuggestionGenerationService {
       targetDate,
       targetTime,
     });
-
-    const output = await this.aiGenerator.generate(inputs);
+    const output = sanitizeSuggestionGenerationOutput(
+      await this.aiGenerator.generate(inputs),
+    );
     if (await this.suppressScheduledIfRoutineBreakStarted(user.id, job)) {
       return;
     }
@@ -150,7 +140,9 @@ export class SuggestionGenerationService {
       targetDate,
       targetTime,
     });
-    const output = await this.aiGenerator.generate(inputs);
+    const output = sanitizeSuggestionGenerationOutput(
+      await this.aiGenerator.generate(inputs),
+    );
     if (await this.failOnDemandIfRoutineBreakStarted(user.id, job)) {
       return;
     }

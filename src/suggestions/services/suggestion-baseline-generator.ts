@@ -25,6 +25,11 @@ import {
   toHumanApplicationMethod,
   toHumanQuantity,
 } from './suggestion-language';
+import {
+  requiresOwnedDaytimeSpf,
+  shouldApplyStableRepeatPolicy,
+  stableSameDaypartRepeatProductIds,
+} from './suggestion-routine-repeat-policy';
 
 const baselineCopy = {
   noStepsHeadline: {
@@ -56,6 +61,11 @@ const baselineCopy = {
     en: 'Sunscreen is missing from your shelf, so it stays a gap instead of an invented step.',
     sv: 'Solskydd saknas pa din hylla, sa det blir ett gap i stallet for ett hittat steg.',
     es: 'Falta protector solar en tu estante, asi que queda como carencia y no como paso inventado.',
+  },
+  medicationCaution: {
+    en: 'Medication or pregnancy context: keep retinoids paused unless your clinician clears them.',
+    sv: 'Medicin- eller graviditetslage: pausa retinoider om specialist inte har godkant dem.',
+    es: 'Contexto de medicacion o embarazo: pausa retinoides salvo que tu especialista los autorice.',
   },
   pigmentSpfGap: {
     en: 'For dark marks or uneven tone, that SPF gap is essential for daytime care.',
@@ -185,6 +195,9 @@ export function deterministicExplanation(
       inputs.requestSource === SuggestionRequestSource.OnDemand
         ? onDemandFallbackDetail(inputs, language)
         : baselineCopy.scheduledDetail[language],
+      ...(hasPregnancyOrMedicationCaution(inputs)
+        ? [baselineCopy.medicationCaution[language]]
+        : []),
       ...(steps.length === 0 ? [baselineCopy.noActiveProducts[language]] : []),
       ...(missingSunscreen ? [baselineCopy.missingSunscreen[language]] : []),
       ...(missingSunscreen && needsPigmentProtection(inputs)
@@ -503,6 +516,15 @@ function selectBaselineProducts(
         : true,
     );
 
+  const stableRepeatProducts = selectStableRepeatProducts(
+    inputs,
+    candidates,
+    preferredOrder,
+  );
+  if (stableRepeatProducts.length > 0) {
+    return stableRepeatProducts;
+  }
+
   for (const category of preferredOrder) {
     const match = candidates.find(
       (score) =>
@@ -520,6 +542,39 @@ function selectBaselineProducts(
         : 2
       : 4;
   return selected.slice(0, limit);
+}
+
+function selectStableRepeatProducts(
+  inputs: SuggestionGenerationInputs,
+  candidates: SuggestionProductScore[],
+  preferredOrder: ProductCategory[],
+): SuggestionProductScore[] {
+  if (!shouldApplyStableRepeatPolicy(inputs)) {
+    return [];
+  }
+  const stableProductIds = new Set(
+    stableSameDaypartRepeatProductIds(inputs.contextSummary),
+  );
+  const stableCandidates = preferredOrder.flatMap((category) =>
+    candidates.filter(
+      (score) =>
+        score.category === category && stableProductIds.has(score.productId),
+    ),
+  );
+  if (
+    requiresOwnedDaytimeSpf(inputs) &&
+    !stableCandidates.some(
+      (score) => score.category === ProductCategory.SunProtection,
+    )
+  ) {
+    const spfCandidate = candidates.find(
+      (score) => score.category === ProductCategory.SunProtection,
+    );
+    if (spfCandidate) {
+      stableCandidates.push(spfCandidate);
+    }
+  }
+  return stableCandidates;
 }
 
 function preferredCategoryOrder(
@@ -601,6 +656,9 @@ function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
     inputs.contextSummary.reaction.barrierCompromised ||
     inputs.contextSummary.routineBreak.recentlyResumed ||
     inputs.contextSummary.applicationPatterns.conservativeRestart ||
+    inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /space_strong_actives|avoid_strong_actives|photosensit/i.test(constraint),
+    ) ||
     hasPregnancyOrMedicationCaution(inputs)
   );
 }
@@ -615,25 +673,6 @@ function hasPregnancyOrMedicationCaution(
     inputs.skinProfile?.under_dermatologist_care ?? '',
   ]).toLowerCase();
   return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(text);
-}
-
-function requiresOwnedDaytimeSpf(inputs: SuggestionGenerationInputs): boolean {
-  if (
-    inputs.daypart !== SuggestionDaypart.Morning &&
-    inputs.daypart !== SuggestionDaypart.Noon
-  ) {
-    return false;
-  }
-  if (
-    /\b(indoor|indoors|inside|at home all day|no daylight)\b/i.test(
-      inputs.requestContext?.note ?? '',
-    )
-  ) {
-    return false;
-  }
-  return inputs.contextSummary.productScores.some(
-    (score) => score.category === ProductCategory.SunProtection,
-  );
 }
 
 function prefersMinimalRoutine(inputs: SuggestionGenerationInputs): boolean {

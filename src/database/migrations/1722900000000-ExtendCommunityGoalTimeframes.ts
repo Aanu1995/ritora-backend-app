@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class ExtendCommunityGoalTimeframes1722900000000
-  implements MigrationInterface
-{
+export class ExtendCommunityGoalTimeframes1722900000000 implements MigrationInterface {
   name = 'ExtendCommunityGoalTimeframes1722900000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

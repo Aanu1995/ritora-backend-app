@@ -225,7 +225,10 @@ export function buildDeterministicSafetyFlags(
     steps,
     language,
   );
-  if (inputs.skinProfile?.pregnancy_status) {
+  if (
+    hasPregnancyOrMedicationCaution(inputs) &&
+    !flags.some((flag) => /pregnancy|medication/i.test(flag.message))
+  ) {
     flags.push({
       severity: 'info',
       message: localizedPregnancySafetyMessage(language),
@@ -234,6 +237,22 @@ export function buildDeterministicSafetyFlags(
     });
   }
   return flags;
+}
+
+function hasPregnancyOrMedicationCaution(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(
+    JSON.stringify([
+      inputs.skinProfile?.pregnancy_status ?? '',
+      inputs.skinProfile?.safety_context?.conditions ?? [],
+      inputs.skinProfile?.safety_context?.medications ?? [],
+      inputs.skinProfile?.safety_context?.photosensitizing_other
+        ? 'photosensitizing medication'
+        : '',
+      inputs.skinProfile?.under_dermatologist_care ?? '',
+    ]),
+  );
 }
 
 function localizedSpecialistLocked(language: AppLanguage): string {

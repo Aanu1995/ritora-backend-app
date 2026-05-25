@@ -53,8 +53,27 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
         entry.analysis_input_image_count,
         entry.has_reaction_signal,
         entry.needs_retake,
+        entry.overall_feel,
+        entry.sleep_band,
+        entry.stress_today,
+        entry.sun_exposure_today,
+        entry.sweat_exercise_today,
+        entry.cycle_marker,
+        entry.recent_change,
+        entry.complaint_note,
+        entry.ratings,
         entry.analysis_summary,
         entry.analysis_concern_keys ?? [],
+        entry.analysis_observations?.reaction_signals ?? null,
+        entry.analysis_observations?.barrier_signs ?? null,
+        entry.analysis_observations?.image_quality?.needs_retake ?? null,
+        entry.analysis_observations?.overall_change_from_previous ?? null,
+        entry.analysis_observations?.detected_concerns?.map((concern) => [
+          concern.concern,
+          concern.severity,
+          concern.locations,
+          concern.change_from_previous ?? null,
+        ]) ?? [],
         entry.analysis_observations?.per_angle_quality?.map((quality) => [
           quality.angle,
           quality.used_for_analysis,
@@ -83,8 +102,69 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
             item.item_source,
             item.inventory_product_id,
             item.substituted_with_product_id,
+            item.product_brand_snapshot,
+            item.product_name_snapshot,
+            item.ad_hoc_brand,
+            item.ad_hoc_name,
+            item.step_label,
             item.suggestion_step_id,
             item.is_ad_hoc,
+            item.substitution_reason,
+            item.applied_at?.toISOString() ?? null,
+            item.recommended_snapshot,
+            item.applied_snapshot,
+            item.product
+              ? [
+                  item.product.id,
+                  item.product.brand,
+                  item.product.name,
+                  item.product.category,
+                ]
+              : null,
+            item.substituted_with_product
+              ? [
+                  item.substituted_with_product.id,
+                  item.substituted_with_product.brand,
+                  item.substituted_with_product.name,
+                  item.substituted_with_product.category,
+                ]
+              : null,
+          ]),
+      ]),
+    suggestions: (inputs.recentSuggestions ?? [])
+      .slice()
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((suggestion) => [
+        suggestion.id,
+        suggestion.updated_at?.toISOString() ?? null,
+        suggestion.target_date,
+        suggestion.target_time,
+        suggestion.daypart,
+        suggestion.mode,
+        suggestion.generation_status,
+        (suggestion.steps ?? [])
+          .slice()
+          .sort(
+            (a, b) =>
+              a.step_order - b.step_order ||
+              (a.id ?? '').localeCompare(b.id ?? ''),
+          )
+          .map((step) => [
+            step.id,
+            step.step_order,
+            step.inventory_product_id,
+            step.product_brand_snapshot,
+            step.product_name_snapshot,
+            step.step_label,
+            step.provenance,
+            step.product
+              ? [
+                  step.product.id,
+                  step.product.brand,
+                  step.product.name,
+                  step.product.category,
+                ]
+              : null,
           ]),
       ]),
     routineBreaks: routineBreakCacheParts(inputs.recentRoutineBreaks ?? []),

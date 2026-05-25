@@ -169,6 +169,8 @@ export type SuggestionObservabilityEventKind =
   | 'on_demand_duplicate_request'
   | 'on_demand_retry_requested'
   | 'generation_completed'
+  | 'generation_context_loaded'
+  | 'generation_context_threshold_exceeded'
   | 'generation_failed'
   | 'generation_fallback'
   | 'job_recovered'

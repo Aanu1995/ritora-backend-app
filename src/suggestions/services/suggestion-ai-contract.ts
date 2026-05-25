@@ -2,14 +2,12 @@ import { toDateOnlyString } from '../../common/utils/date';
 import type { AppLanguage } from '../../common/i18n/i18n';
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../common/i18n/i18n';
 import {
-  SuggestionEvidenceSourceId,
   SuggestionExplanationJson,
   SuggestionGapRecommendationJson,
   SuggestionRequestSource,
   SuggestionSafetyFlagJson,
   SuggestionStepChipJson,
   SuggestionStepProvenance,
-  SUGGESTION_STEP_CHIP_TONES,
 } from '../suggestions.constants';
 import {
   formatOnDemandContext,
@@ -23,9 +21,24 @@ import {
   currentJournalPhotoAngleLabels,
   hasUsableJournalReactionSignal,
 } from './suggestion-journal-context';
+import {
+  formatAppliedProductHistoryForPrompt,
+  formatEnvironmentSignalsForPrompt,
+  formatGoalSignalsForPrompt,
+  formatJournalSignalsForPrompt,
+  formatPromptJson,
+  formatRoutineMemoryForPrompt,
+  formatScoredContextForPrompt,
+  formatSkinProfileForPrompt,
+} from './suggestion-ai-prompt-context';
+export { RESPONSE_FORMAT } from './suggestion-ai-response-format';
+
+export const SUGGESTION_PROMPT_MAX_CHARS = 60_000;
+const PROMPT_BUDGET_TRUNCATION_NOTE =
+  '\n\n[Prompt context trimmed to fit the safe payload budget.]';
 
 export const SYSTEM_PROMPT = [
-  'You are a skincare suggestion engine for the Ritora app.',
+  "You are Ritora's dermatologist-informed skincare assistant for personalized skincare routine suggestions.",
   'Scheduled suggestions are anchored to user-defined schedule slots. On-demand suggestions answer a current situation without creating a fake schedule slot.',
   'Hard rules:',
   '1. Specialist-locked steps are immutable. They MUST appear in the output with provenance="specialist_locked", same routineStepId, same product, same label, and in their original relative order. You may add other steps around them.',
@@ -40,9 +53,10 @@ export const SYSTEM_PROMPT = [
   '10. For morning/noon or high-UV contexts, include owned sunscreen as a direct application step when available; if unavailable, add a sunscreen gap. Do not make SPF merely conditional on going outside unless the request explicitly says the user will remain indoors.',
   '11. Gap recommendations must be directly relevant to this suggestion. Do not add evening sunscreen gaps unless a photosensitizing active is being used or the user goal/context makes daytime pigment or UV protection central.',
   '12. If the profile or request asks for a minimal/beginner routine, prefer cleanser, moisturizer, and SPF basics. Do not add optional serums or strong actives unless a specialist-locked step requires them.',
-  '13. Output is strictly valid JSON conforming to the provided schema.',
-  '14. Write every user-facing string in the requested response language. Keep product names, brand names, ingredient slugs, enum values, IDs, sourceIds, and JSON keys unchanged.',
-  '15. Write like a calm skincare app, not a report. Keep copy short and human: headlines under 8 words, step reasons under 18 words, safety and gap reasons under 22 words. Do not mention prompts, schemas, tokens, fallback internals, or legal wording.',
+  '13. Respect the goal hierarchy: safety first, primary goal second, then secondary concerns and user preferences.',
+  '14. Output is strictly valid JSON conforming to the provided schema.',
+  '15. Write every user-facing string in the requested response language. Keep product names, brand names, ingredient slugs, enum values, IDs, sourceIds, and JSON keys unchanged.',
+  '16. Write like a calm skincare app, not a report. Keep copy short and human: headlines under 8 words, step reasons under 18 words, safety and gap reasons under 22 words. Do not mention prompts, schemas, tokens, fallback internals, or legal wording.',
 ].join(' ');
 
 const RESPONSE_LANGUAGE_LABELS: Record<AppLanguage, string> = {
@@ -50,206 +64,6 @@ const RESPONSE_LANGUAGE_LABELS: Record<AppLanguage, string> = {
   sv: 'Swedish',
   es: 'Spanish',
 };
-
-const SOURCE_ID_ENUM = Object.values(SuggestionEvidenceSourceId);
-
-export const RESPONSE_FORMAT = {
-  type: 'json_schema',
-  name: 'suggestion_response',
-  strict: true,
-  schema: {
-    type: 'object',
-    additionalProperties: false,
-    required: [
-      'simplifiedForReaction',
-      'explanation',
-      'steps',
-      'gapRecommendations',
-      'safetyFlags',
-    ],
-    properties: {
-      simplifiedForReaction: { type: 'boolean' },
-      explanation: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['headline', 'body', 'perStepReasons', 'skipped', 'inputs'],
-        properties: {
-          headline: { type: 'string' },
-          body: { type: 'array', items: { type: 'string' } },
-          perStepReasons: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['stepOrder', 'reason'],
-              properties: {
-                stepOrder: { type: 'integer' },
-                reason: { type: 'string' },
-              },
-            },
-          },
-          skipped: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['name', 'reason'],
-              properties: {
-                name: { type: 'string' },
-                reason: { type: 'string' },
-              },
-            },
-          },
-          inputs: {
-            type: 'array',
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['label', 'detail'],
-              properties: {
-                label: { type: 'string' },
-                detail: { type: 'string' },
-              },
-            },
-          },
-        },
-      },
-      steps: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: [
-            'stepOrder',
-            'routineStepId',
-            'inventoryProductId',
-            'productBrand',
-            'productName',
-            'stepLabel',
-            'customLabel',
-            'applicationMethod',
-            'quantity',
-            'waitAfterMinutes',
-            'explanation',
-            'provenance',
-            'chips',
-            'safetyWarnings',
-          ],
-          properties: {
-            stepOrder: { type: 'integer' },
-            routineStepId: { type: ['string', 'null'] },
-            inventoryProductId: { type: ['string', 'null'] },
-            productBrand: { type: ['string', 'null'] },
-            productName: { type: ['string', 'null'] },
-            stepLabel: { type: 'string' },
-            customLabel: { type: ['string', 'null'] },
-            applicationMethod: { type: ['string', 'null'] },
-            quantity: { type: ['string', 'null'] },
-            waitAfterMinutes: { type: ['integer', 'null'] },
-            explanation: { type: ['string', 'null'] },
-            provenance: {
-              type: 'string',
-              enum: ['specialist_locked', 'user_routine', 'ai_added'],
-            },
-            chips: {
-              type: 'array',
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['tone', 'text'],
-                properties: {
-                  tone: {
-                    type: 'string',
-                    enum: SUGGESTION_STEP_CHIP_TONES,
-                  },
-                  text: { type: 'string' },
-                },
-              },
-            },
-            safetyWarnings: {
-              type: 'array',
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: [
-                  'severity',
-                  'message',
-                  'ingredientSlugs',
-                  'sourceIds',
-                ],
-                properties: {
-                  severity: {
-                    type: 'string',
-                    enum: ['info', 'warning', 'critical'],
-                  },
-                  message: { type: 'string' },
-                  ingredientSlugs: {
-                    type: 'array',
-                    items: { type: 'string' },
-                  },
-                  sourceIds: {
-                    type: 'array',
-                    items: { type: 'string', enum: SOURCE_ID_ENUM },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      gapRecommendations: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: [
-            'ingredientOrCategory',
-            'reason',
-            'budgetTier',
-            'goalAlignment',
-            'sourceIds',
-          ],
-          properties: {
-            ingredientOrCategory: { type: 'string' },
-            reason: { type: 'string' },
-            budgetTier: {
-              type: ['string', 'null'],
-              enum: ['starter', 'mid', 'premium', null],
-            },
-            goalAlignment: { type: ['string', 'null'] },
-            sourceIds: {
-              type: 'array',
-              items: { type: 'string', enum: SOURCE_ID_ENUM },
-            },
-          },
-        },
-      },
-      safetyFlags: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['severity', 'message', 'ingredientSlugs', 'sourceIds'],
-          properties: {
-            severity: {
-              type: 'string',
-              enum: ['info', 'warning', 'critical'],
-            },
-            message: { type: 'string' },
-            ingredientSlugs: {
-              type: 'array',
-              items: { type: 'string' },
-            },
-            sourceIds: {
-              type: 'array',
-              items: { type: 'string', enum: SOURCE_ID_ENUM },
-            },
-          },
-        },
-      },
-    },
-  },
-} as const;
 
 export interface OpenAiResponsePayload {
   output?: {
@@ -344,67 +158,56 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
       ? formatOnDemandContext(inputs)
       : formatScheduledSlotContext(inputs);
 
-  return [
-    `Response language: ${RESPONSE_LANGUAGE_LABELS[language]} (${language}). All user-facing copy in explanation, step explanations, chips, safety flags, skipped reasons, input labels/details, gap recommendations, and goalAlignment must be written in this language. Keep product names, brand names, ingredient slugs, sourceIds, IDs, and enum values unchanged.`,
-    `Request source: ${inputs.requestSource}. ${requestContext}`,
-    `Target date: ${inputs.targetDate}, time: ${inputs.targetTime} (${inputs.daypart}).`,
-    `Skin profile summary:\n${formatSkinProfileForPrompt(skin)}`,
-    `Active shelf products:\n${shelf || '(none)'}`,
-    `Specialist-locked steps (must remain exactly, in this order):\n${
-      lockedSteps || '(none)'
-    }`,
-    `User-defined unlocked steps:\n${userSteps || '(none)'}`,
-    `Recent journal summaries:\n${recentJournal || '(none)'}`,
-    `Recent application summaries:\n${recentApplications || '(none)'}`,
-    `Trusted evidence summaries:\n${evidenceSources || '(none)'}`,
-    `Scored context summary:\n${JSON.stringify(
-      {
-        reaction: inputs.contextSummary.reaction,
-        onDemand: inputs.contextSummary.onDemand,
-        routineBreak: inputs.contextSummary.routineBreak,
-        productScores: inputs.contextSummary.productScores.slice(0, 20),
-        environment: inputs.contextSummary.environment,
-        applicationPatterns: inputs.contextSummary.applicationPatterns,
-        safetyConstraints: inputs.contextSummary.safetyConstraints,
-        governance: inputs.contextSummary.governance,
-        skippedCandidates: inputs.contextSummary.skippedCandidates,
-      },
-      null,
-      2,
-    )}`,
-    'Voice: use plain user-facing words, short sentences, and no verbose paragraphs.',
-    'Return strictly valid JSON matching the schema.',
-  ].join('\n\n');
+  return fitPromptBudget(
+    [
+      `Response language: ${RESPONSE_LANGUAGE_LABELS[language]} (${language}). All user-facing copy in explanation, step explanations, chips, safety flags, skipped reasons, input labels/details, gap recommendations, and goalAlignment must be written in this language. Keep product names, brand names, ingredient slugs, sourceIds, IDs, and enum values unchanged.`,
+      `Request source: ${inputs.requestSource}. ${requestContext}`,
+      `Target date: ${inputs.targetDate}, time: ${inputs.targetTime} (${inputs.daypart}).`,
+      `Skin profile summary:\n${formatSkinProfileForPrompt(skin)}`,
+      `Active shelf products:\n${shelf || '(none)'}`,
+      `Specialist-locked steps (must remain exactly, in this order):\n${
+        lockedSteps || '(none)'
+      }`,
+      `User-defined unlocked steps:\n${userSteps || '(none)'}`,
+      `Recent journal summaries:\n${recentJournal || '(none)'}`,
+      `Recent application summaries:\n${recentApplications || '(none)'}`,
+      `Goal signals:\n${formatPromptJson(
+        formatGoalSignalsForPrompt(inputs.contextSummary.goalSignals),
+      )}`,
+      `Applied product history:\n${formatPromptJson(
+        formatAppliedProductHistoryForPrompt(
+          inputs.contextSummary.appliedProductHistory,
+        ),
+      )}`,
+      `Journal signals:\n${formatPromptJson(
+        formatJournalSignalsForPrompt(inputs.contextSummary.journalSignals),
+      )}`,
+      `Routine memory:\n${formatPromptJson(
+        formatRoutineMemoryForPrompt(inputs.contextSummary.routineMemory),
+      )}`,
+      `Environment signals:\n${formatPromptJson(
+        formatEnvironmentSignalsForPrompt(
+          inputs.contextSummary.environmentSignals,
+        ),
+      )}`,
+      `Trusted evidence summaries:\n${evidenceSources || '(none)'}`,
+      `Scored context summary:\n${formatPromptJson(
+        formatScoredContextForPrompt(inputs.contextSummary),
+      )}`,
+      'Voice: use plain user-facing words, short sentences, and no verbose paragraphs.',
+      'Return strictly valid JSON matching the schema.',
+    ].join('\n\n'),
+  );
 }
 
-function formatSkinProfileForPrompt(
-  skin: SuggestionGenerationInputs['skinProfile'],
-): string {
-  if (!skin) return 'not set';
-  return JSON.stringify(
-    {
-      type: skin.skin_type ?? null,
-      tone: skin.skin_tone ?? null,
-      ethnicity: skin.ethnicity ?? null,
-      fitzpatrickPhototype: skin.fitzpatrick_phototype ?? null,
-      sensitivity: skin.sensitivity_level ?? null,
-      hydration: skin.hydration_level ?? null,
-      primaryGoal: skin.primary_goal ?? null,
-      currentConcerns: skin.current_concerns ?? [],
-      pregnancyStatus: skin.pregnancy_status ?? null,
-      underDermatologistCare: skin.under_dermatologist_care ?? null,
-      safetyContext: skin.safety_context ?? {},
-      reactionHistory: skin.reaction_history ?? {},
-      skinBehavior: skin.skin_behavior ?? {},
-      activeTolerances: skin.active_tolerances ?? {},
-      routinePreferences: skin.routine_preferences ?? {},
-      lifestyleContext: skin.lifestyle_context ?? {},
-      shoppingPreferences: skin.shopping_preferences ?? {},
-      hormonalContext: skin.hormonal_context ?? {},
-    },
-    null,
-    2,
-  );
+function fitPromptBudget(value: string): string {
+  if (value.length <= SUGGESTION_PROMPT_MAX_CHARS) return value;
+  return `${value
+    .slice(
+      0,
+      SUGGESTION_PROMPT_MAX_CHARS - PROMPT_BUDGET_TRUNCATION_NOTE.length,
+    )
+    .trimEnd()}${PROMPT_BUDGET_TRUNCATION_NOTE}`;
 }
 
 export function extractOutputText(

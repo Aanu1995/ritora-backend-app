@@ -775,10 +775,7 @@ describe('UsersService', () => {
             ];
           }
           if (sql.includes('SELECT "vote"')) {
-            expect(params).toEqual([
-              CommunityContentType.Routine,
-              'routine_1',
-            ]);
+            expect(params).toEqual([CommunityContentType.Routine, 'routine_1']);
             return [
               { vote: CommunityHelpfulnessVote.Helpful, count: 2 },
               { vote: CommunityHelpfulnessVote.NotHelpful, count: 1 },

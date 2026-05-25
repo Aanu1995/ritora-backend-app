@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddCommunityGoalPlaybooks1722700000000
-  implements MigrationInterface
-{
+export class AddCommunityGoalPlaybooks1722700000000 implements MigrationInterface {
   name = 'AddCommunityGoalPlaybooks1722700000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

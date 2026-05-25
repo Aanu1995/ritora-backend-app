@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddCommunityContentWithdrawal1723000000000
-  implements MigrationInterface
-{
+export class AddCommunityContentWithdrawal1723000000000 implements MigrationInterface {
   name = 'AddCommunityContentWithdrawal1723000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

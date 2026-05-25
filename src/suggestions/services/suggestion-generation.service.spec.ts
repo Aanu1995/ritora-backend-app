@@ -15,6 +15,7 @@ import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.e
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
+import { SuggestionStepChipTone } from '../suggestions.constants';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
 import { SuggestionContextSummary } from '../suggestion-context.types';
 import {
@@ -94,6 +95,7 @@ describe('SuggestionGenerationService', () => {
       skinProfileRepo,
       applicationLogRepo,
       routineBreakRepo,
+      suggestionRepo,
     );
     const persistence = new SuggestionGenerationPersistenceService(
       dataSource,
@@ -134,6 +136,7 @@ describe('SuggestionGenerationService', () => {
     } as never);
     routineBreakRepo.find.mockResolvedValue([]);
     routineBreakService.isRoutineBreakActive.mockResolvedValue(false);
+    suggestionRepo.find.mockResolvedValue([]);
     suggestionRepo.update.mockResolvedValue({ affected: 1 } as never);
   });
 
@@ -227,6 +230,157 @@ describe('SuggestionGenerationService', () => {
         userId: 'user-1',
       }),
     );
+  });
+
+  it('loads 30-day temporal context and backfills each history source to 30 records', async () => {
+    slotRepo.findOne.mockResolvedValue(slot());
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find
+      .mockResolvedValueOnce(journalHistory('window', 29, 0))
+      .mockResolvedValueOnce(journalHistory('backfill', 1, 31));
+    applicationLogRepo.find
+      .mockResolvedValueOnce(applicationHistory('window', 29, 0))
+      .mockResolvedValueOnce(applicationHistory('backfill', 1, 31));
+    suggestionRepo.find
+      .mockResolvedValueOnce(suggestionHistory('window', 29, 0))
+      .mockResolvedValueOnce(suggestionHistory('backfill', 1, 31));
+    routineBreakRepo.find
+      .mockResolvedValueOnce(routineBreakHistory('window', 29, 0))
+      .mockResolvedValueOnce(routineBreakHistory('backfill', 1, 31));
+    preferenceRepo.findOne.mockResolvedValue(null);
+    contextBuilder.build.mockResolvedValue(contextSummary());
+    aiGenerator.generate.mockResolvedValue(generationOutput());
+    txSuggestionRepo.findOne.mockResolvedValue(null);
+    txSuggestionRepo.createQueryBuilder.mockReturnValue(updateBuilder());
+    txSuggestionRepo.create.mockImplementation(
+      (value) => value as SuggestionInstance,
+    );
+    txSuggestionRepo.save.mockImplementation(
+      async (value) =>
+        ({
+          ...(value as SuggestionInstance),
+          id: 'suggestion-1',
+          created_at: new Date(),
+          updated_at: new Date(),
+        }) as SuggestionInstance,
+    );
+    txStepRepo.create.mockImplementation((value) => value as SuggestionStep);
+    mockSaveArray(txStepRepo).mockResolvedValue([]);
+
+    await service.generateForJob(job());
+
+    const buildInput = contextBuilder.build.mock.calls[0]?.[0];
+    expect(buildInput).toBeDefined();
+    if (!buildInput) throw new Error('context builder was not called');
+    expect(buildInput).toEqual(
+      expect.objectContaining({
+        recentJournalEntries: expect.arrayContaining([
+          expect.objectContaining({ id: 'journal-backfill-0' }),
+        ]),
+        recentApplications: expect.arrayContaining([
+          expect.objectContaining({ id: 'application-backfill-0' }),
+        ]),
+        recentSuggestions: expect.arrayContaining([
+          expect.objectContaining({ id: 'suggestion-backfill-0' }),
+        ]),
+        recentRoutineBreaks: expect.arrayContaining([
+          expect.objectContaining({ id: 'break-backfill-0' }),
+        ]),
+      }),
+    );
+    expect(buildInput.recentJournalEntries).toHaveLength(30);
+    expect(buildInput.recentApplications).toHaveLength(30);
+    expect(buildInput.recentSuggestions).toHaveLength(30);
+    expect(buildInput.recentRoutineBreaks).toHaveLength(30);
+    expect(journalRepo.find).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ take: 1 }),
+    );
+    expect(applicationLogRepo.find).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ take: 1 }),
+    );
+    expect(suggestionRepo.find).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ take: 1 }),
+    );
+    expect(routineBreakRepo.find).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ take: 1 }),
+    );
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'generation_context_loaded',
+        userId: 'user-1',
+        jobId: 'job-1',
+        metadata: expect.objectContaining({
+          sensitiveContextRead: true,
+          journalRows: 30,
+          journalBackfillRows: 1,
+          applicationRows: 30,
+          applicationBackfillRows: 1,
+          suggestionRows: 30,
+          suggestionBackfillRows: 1,
+          routineBreakRows: 30,
+          routineBreakBackfillRows: 1,
+          contextLoadDurationMs: expect.any(Number),
+        }),
+      }),
+    );
+  });
+
+  it('uses all records from a dense 30-day window without backfill queries', async () => {
+    slotRepo.findOne.mockResolvedValue(slot());
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find.mockResolvedValueOnce(journalHistory('window', 31, 0));
+    applicationLogRepo.find.mockResolvedValueOnce(
+      applicationHistory('window', 32, 0),
+    );
+    suggestionRepo.find.mockResolvedValueOnce(
+      suggestionHistory('window', 33, 0),
+    );
+    routineBreakRepo.find.mockResolvedValueOnce(
+      routineBreakHistory('window', 34, 0),
+    );
+    preferenceRepo.findOne.mockResolvedValue(null);
+    contextBuilder.build.mockResolvedValue(contextSummary());
+    aiGenerator.generate.mockResolvedValue(generationOutput());
+    txSuggestionRepo.findOne.mockResolvedValue(null);
+    txSuggestionRepo.createQueryBuilder.mockReturnValue(updateBuilder());
+    txSuggestionRepo.create.mockImplementation(
+      (value) => value as SuggestionInstance,
+    );
+    txSuggestionRepo.save.mockImplementation(
+      async (value) =>
+        ({
+          ...(value as SuggestionInstance),
+          id: 'suggestion-1',
+          created_at: new Date(),
+          updated_at: new Date(),
+        }) as SuggestionInstance,
+    );
+    txStepRepo.create.mockImplementation((value) => value as SuggestionStep);
+    mockSaveArray(txStepRepo).mockResolvedValue([]);
+
+    await service.generateForJob(job());
+
+    const buildInput = contextBuilder.build.mock.calls[0]?.[0];
+    expect(buildInput?.recentJournalEntries).toHaveLength(31);
+    expect(buildInput?.recentApplications).toHaveLength(32);
+    expect(buildInput?.recentSuggestions).toHaveLength(33);
+    expect(buildInput?.recentRoutineBreaks).toHaveLength(34);
+    expect(journalRepo.find).toHaveBeenCalledTimes(1);
+    expect(applicationLogRepo.find).toHaveBeenCalledTimes(1);
+    expect(suggestionRepo.find).toHaveBeenCalledTimes(1);
+    expect(routineBreakRepo.find).toHaveBeenCalledTimes(1);
   });
 
   it('does not generate a scheduled suggestion after the slot time has elapsed', async () => {
@@ -346,6 +500,94 @@ describe('SuggestionGenerationService', () => {
     ]);
   });
 
+  it('sanitizes generated public copy before persistence and notification dispatch', async () => {
+    const output = generationOutput();
+    output.explanation = {
+      headline: 'Diagnose and cure acne',
+      body: ['This treats breakouts and prescribes a cure.'],
+      perStepReasons: [{ stepOrder: 0, reason: 'Treats the area quickly.' }],
+      skipped: [{ name: 'Retinol', reason: 'Prescribed treatment paused.' }],
+      inputs: [{ label: 'Goal', detail: 'Cure dark marks.' }],
+    };
+    output.gapRecommendations = [
+      {
+        ingredientOrCategory: 'Acne treatment',
+        reason: 'Treats acne and cures marks.',
+        budgetTier: null,
+        goalAlignment: 'Prescribed to cure acne.',
+        sourceIds: [],
+      },
+    ];
+    output.safetyFlags = [
+      {
+        severity: 'warning',
+        message: 'Do not treat this as a prescription.',
+        ingredientSlugs: [],
+        sourceIds: [],
+      },
+    ];
+    output.steps[0].explanation = 'Treats acne and cures marks.';
+    output.steps[0].chips = [
+      { tone: SuggestionStepChipTone.Reason, text: 'Cure step' },
+    ];
+    output.steps[0].safetyWarnings = [
+      {
+        severity: 'info',
+        message: 'Prescription treatment caution.',
+        ingredientSlugs: [],
+        sourceIds: [],
+      },
+    ];
+
+    slotRepo.findOne.mockResolvedValue(slot());
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find.mockResolvedValue([]);
+    applicationLogRepo.find.mockResolvedValue([]);
+    preferenceRepo.findOne.mockResolvedValue(null);
+    contextBuilder.build.mockResolvedValue(contextSummary());
+    aiGenerator.generate.mockResolvedValue(output);
+    txSuggestionRepo.findOne.mockResolvedValue(null);
+    txSuggestionRepo.createQueryBuilder.mockReturnValue(updateBuilder());
+    txSuggestionRepo.create.mockImplementation(
+      (value) => value as SuggestionInstance,
+    );
+    txSuggestionRepo.save.mockImplementation(
+      async (value) =>
+        ({
+          ...(value as SuggestionInstance),
+          id: 'suggestion-1',
+          created_at: new Date(),
+          updated_at: new Date(),
+        }) as SuggestionInstance,
+    );
+    txStepRepo.create.mockImplementation((value) => value as SuggestionStep);
+    mockSaveArray(txStepRepo).mockResolvedValue([]);
+
+    await service.generateForJob(job());
+
+    const persistedSuggestion = txSuggestionRepo.save.mock.calls[0]?.[0];
+    const persistedSteps = txStepRepo.save.mock.calls[0]?.[0];
+    const notificationInput = notifications.dispatch.mock.calls[0]?.[0];
+    const unsafeCopyPattern =
+      /\b(diagnos(?:e|es|ed|ing|is)|treat(?:s|ed|ing|ment)?|cure(?:s|d|ing)?|prescrib(?:e|es|ed|ing)|prescription)\b/i;
+
+    expect(JSON.stringify(persistedSuggestion?.ai_explanation)).not.toMatch(
+      unsafeCopyPattern,
+    );
+    expect(
+      JSON.stringify(persistedSuggestion?.gap_recommendations),
+    ).not.toMatch(unsafeCopyPattern);
+    expect(JSON.stringify(persistedSuggestion?.safety_flags)).not.toMatch(
+      unsafeCopyPattern,
+    );
+    expect(JSON.stringify(persistedSteps)).not.toMatch(unsafeCopyPattern);
+    expect(JSON.stringify(notificationInput)).not.toMatch(unsafeCopyPattern);
+  });
+
   it('degrades without explicit AI suggestion consent and avoids sensitive context reads', async () => {
     consentService.evaluate.mockResolvedValue({
       aiPersonalizationAllowed: false,
@@ -385,6 +627,7 @@ describe('SuggestionGenerationService', () => {
     expect(skinProfileRepo.findOne).not.toHaveBeenCalled();
     expect(journalRepo.find).not.toHaveBeenCalled();
     expect(applicationLogRepo.find).not.toHaveBeenCalled();
+    expect(suggestionRepo.find).not.toHaveBeenCalled();
     expect(
       todayActionService.shouldIgnoreReactionContext,
     ).not.toHaveBeenCalled();
@@ -394,6 +637,7 @@ describe('SuggestionGenerationService', () => {
         skinProfile: null,
         recentJournalEntries: [],
         recentApplications: [],
+        recentSuggestions: [],
         aiPersonalizationAllowed: false,
         aiPersonalizationBlockedReason:
           'ai_suggestion_processing_consent_missing',
@@ -762,6 +1006,75 @@ function applicationLog(): ApplicationLog {
     target_date: '2026-05-03',
     items: [],
   } as unknown as ApplicationLog;
+}
+
+function journalHistory(
+  prefix: string,
+  count: number,
+  offsetStart: number,
+): SkinJournalEntry[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `journal-${prefix}-${index}`,
+    user_id: 'user-1',
+    entry_date: dateBeforeTarget(offsetStart + index),
+    photo_object_key: `journal-${prefix}-${index}.webp`,
+    analysis_concern_keys: [],
+  })) as unknown as SkinJournalEntry[];
+}
+
+function applicationHistory(
+  prefix: string,
+  count: number,
+  offsetStart: number,
+): ApplicationLog[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `application-${prefix}-${index}`,
+    user_id: 'user-1',
+    target_date: dateBeforeTarget(offsetStart + index),
+    items: [],
+  })) as unknown as ApplicationLog[];
+}
+
+function suggestionHistory(
+  prefix: string,
+  count: number,
+  offsetStart: number,
+): SuggestionInstance[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `suggestion-${prefix}-${index}`,
+    user_id: 'user-1',
+    target_date: dateBeforeTarget(offsetStart + index),
+    target_time: '08:00',
+    daypart: 'morning',
+    generation_status: 'ready',
+    steps: [],
+    created_at: new Date(
+      `${dateBeforeTarget(offsetStart + index)}T06:00:00.000Z`,
+    ),
+    updated_at: new Date(
+      `${dateBeforeTarget(offsetStart + index)}T06:00:00.000Z`,
+    ),
+  })) as unknown as SuggestionInstance[];
+}
+
+function routineBreakHistory(
+  prefix: string,
+  count: number,
+  offsetStart: number,
+): RoutineBreak[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `break-${prefix}-${index}`,
+    user_id: 'user-1',
+    starts_at: new Date(
+      `${dateBeforeTarget(offsetStart + index)}T06:00:00.000Z`,
+    ),
+  })) as RoutineBreak[];
+}
+
+function dateBeforeTarget(days: number): string {
+  const date = new Date('2026-05-04T00:00:00.000Z');
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
 }
 
 function contextSummary(): SuggestionContextSummary {

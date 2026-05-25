@@ -73,7 +73,11 @@ type DataSourceMock = DataSource & {
   >;
   transaction: jest.Mock<
     Promise<unknown>,
-    [(manager: Pick<DataSource['manager'], 'getRepository'>) => Promise<unknown>]
+    [
+      (
+        manager: Pick<DataSource['manager'], 'getRepository'>,
+      ) => Promise<unknown>,
+    ]
   >;
 };
 
@@ -171,7 +175,9 @@ function createService() {
       .fn<Promise<Array<{ count: number | string }>>, [string, unknown[]]>()
       .mockResolvedValue([{ count: 0 }]),
     transaction: jest.fn(async (operation) =>
-      operation(transactionManager as Pick<DataSource['manager'], 'getRepository'>),
+      operation(
+        transactionManager as Pick<DataSource['manager'], 'getRepository'>,
+      ),
     ),
   } as DataSourceMock;
   const safety = {
@@ -846,9 +852,9 @@ describe('CommunityService content integrity policy', () => {
 
     repositories.routines.findOne.mockResolvedValueOnce(routine);
 
-    await expect(
-      service.withdrawContent(user.id, routine.id),
-    ).resolves.toEqual({ deleted: true });
+    await expect(service.withdrawContent(user.id, routine.id)).resolves.toEqual(
+      { deleted: true },
+    );
 
     expect(routine.moderation_status).toBe(CommunityModerationStatus.Hidden);
     expect(routine.assigned_admin_id).toBeNull();
@@ -992,7 +998,10 @@ describe('CommunityService product evidence aggregation', () => {
     repositories.reviews.find.mockResolvedValue([review]);
     repositories.routineSteps.find.mockResolvedValue([routineStep]);
     repositories.routines.find.mockResolvedValue([routine]);
-    repositories.outcomeVotes.find.mockResolvedValue([similarVote, differentVote]);
+    repositories.outcomeVotes.find.mockResolvedValue([
+      similarVote,
+      differentVote,
+    ]);
 
     const result = await service.getProductEvidence(user.id, 'product_1');
 
@@ -1010,12 +1019,8 @@ describe('CommunityService product evidence aggregation', () => {
     expect(result.outcomeSignalCounts.worked_with_changes).toBe(1);
     expect(result.outcomeSignalCounts.did_not_work).toBe(1);
     expect(result.similarOutcomeSignalCounts.worked_for_me_too).toBe(1);
-    expect(result.topGoals).toEqual([
-      { value: 'barrier-repair', count: 1 },
-    ]);
-    expect(result.topAvoids).toEqual([
-      { value: 'over-exfoliation', count: 1 },
-    ]);
+    expect(result.topGoals).toEqual([{ value: 'barrier-repair', count: 1 }]);
+    expect(result.topAvoids).toEqual([{ value: 'over-exfoliation', count: 1 }]);
   });
 
   it('stores privacy-safe viewer context when confirming an outcome', async () => {
@@ -1029,7 +1034,9 @@ describe('CommunityService product evidence aggregation', () => {
     } as CommunityRoutine;
 
     repositories.routines.findOne.mockResolvedValue(routine);
-    repositories.skinProfiles.findOne.mockResolvedValue(completeSkinProfile(user));
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
 
     const outcomeQueryBuilder = {
       select: jest.fn().mockReturnThis(),
@@ -1037,9 +1044,11 @@ describe('CommunityService product evidence aggregation', () => {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       groupBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([
-        { signal: CommunityOutcomeSignal.WorkedForMeToo, count: '1' },
-      ]),
+      getRawMany: jest
+        .fn()
+        .mockResolvedValue([
+          { signal: CommunityOutcomeSignal.WorkedForMeToo, count: '1' },
+        ]),
     };
     repositories.outcomeVotes.createQueryBuilder = jest
       .fn()

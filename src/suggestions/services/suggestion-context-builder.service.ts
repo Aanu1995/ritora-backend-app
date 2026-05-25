@@ -6,7 +6,6 @@ import { isPostgresUniqueConstraintError } from '../../common/utils/database-err
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { IngredientIntelligenceService } from '../../ingredients/ingredient-intelligence.service';
-import type { ProductForAnalysis } from '../../ingredients/ingredients.types';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
@@ -15,9 +14,9 @@ import type { EnvironmentContextSummary } from '../../environment-intelligence/e
 import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
 import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
+import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
 import {
-  SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS,
   SUGGESTION_SAFETY_POLICY_REVIEWED_AT,
   SUGGESTION_SAFETY_POLICY_VERSION,
   SuggestionDaypart,
@@ -32,17 +31,27 @@ import {
   getSuggestionEvidenceSources,
   mergeEvidenceSourceIds,
 } from './suggestion-evidence-sources';
-import {
-  scoreProductForSuggestion,
-  type ProductIngredientIntelligence,
-} from './suggestion-product-intelligence';
+import { scoreProductForSuggestion } from './suggestion-product-intelligence';
 import { buildRoutineBreakSummary } from './suggestion-routine-break-context';
 import { buildSuggestionContextCacheKey } from './suggestion-context-cache-key';
 import {
-  currentJournalPhotoAngleCount,
-  hasMultiAngleJournalPhoto,
-  hasUsableJournalReactionSignal,
-} from './suggestion-journal-context';
+  buildApplicationPatterns,
+  buildApplicationProductSignals,
+  buildAppliedProductHistory,
+  buildRecentUseByProduct,
+} from './suggestion-application-history';
+import { buildEnvironmentSignals } from './suggestion-environment-signals';
+import { buildIngredientIntelligenceByProductId } from './suggestion-ingredient-context';
+import {
+  buildJournalSignals,
+  buildReactionSummary,
+} from './suggestion-journal-signals';
+import {
+  buildGoalSignals,
+  buildProfileSignals,
+} from './suggestion-profile-context';
+import { buildRoutineMemory } from './suggestion-routine-memory-context';
+
 @Injectable()
 export class SuggestionContextBuilder {
   constructor(
@@ -79,6 +88,23 @@ export class SuggestionContextBuilder {
       return cached.summary;
     }
 
+    const goalSignals = buildGoalSignals(normalizedInputs.skinProfile);
+    const profileSignals = buildProfileSignals(normalizedInputs.skinProfile);
+    const journalSignals = buildJournalSignals(
+      normalizedInputs.recentJournalEntries,
+    );
+    const appliedProductHistory = buildAppliedProductHistory(
+      normalizedInputs.recentApplications,
+      normalizedInputs.targetDate,
+    );
+    const routineMemory = buildRoutineMemory(
+      normalizedInputs.recentApplications,
+      normalizedInputs.recentSuggestions ?? [],
+      normalizedInputs.daypart,
+    );
+    const applicationProductSignals = buildApplicationProductSignals(
+      normalizedInputs.recentApplications,
+    );
     const recentUseByProduct = buildRecentUseByProduct(
       normalizedInputs.recentApplications,
     );
@@ -110,9 +136,22 @@ export class SuggestionContextBuilder {
         scoreProductForSuggestion(product, {
           daypart: normalizedInputs.daypart,
           primaryGoal: normalizedInputs.skinProfile?.primary_goal ?? null,
+          secondaryGoals: goalSignals.secondaryGoals.map(
+            (signal) => signal.concern,
+          ),
           sensitivityLevel:
             normalizedInputs.skinProfile?.sensitivity_level ?? null,
           recentUseCount: recentUseByProduct.get(product.id) ?? 0,
+          adherenceCount:
+            applicationProductSignals.get(product.id)?.adheredCount ?? 0,
+          skipCount: applicationProductSignals.get(product.id)?.skipCount ?? 0,
+          substitutionCount:
+            applicationProductSignals.get(product.id)?.substitutedAwayCount ??
+            0,
+          recentSameDaypartSuggestionCount:
+            routineMemory.recentSameDaypartFingerprints.filter((fingerprint) =>
+              fingerprint.productIds.includes(product.id),
+            ).length,
           hasReactionSignal: reaction.hasSignal,
           lockedProductIds,
           conservativeRestart: applicationPatterns.conservativeRestart,
@@ -120,6 +159,7 @@ export class SuggestionContextBuilder {
             product.id,
           ),
           environment: normalizedInputs.environment,
+          targetDate: normalizedInputs.targetDate,
         }),
       )
       .sort((a, b) => b.suitabilityScore - a.suitabilityScore);
@@ -139,12 +179,18 @@ export class SuggestionContextBuilder {
         activeConcerns: normalizedInputs.skinProfile?.current_concerns ?? [],
         pregnancyStatus: normalizedInputs.skinProfile?.pregnancy_status ?? null,
       },
+      goalSignals,
+      profileSignals,
       reaction,
+      journalSignals,
       routineBreak: buildRoutineBreakSummary(
         normalizedInputs.recentRoutineBreaks ?? [],
         normalizedInputs.targetDate,
       ),
       environment: normalizedInputs.environment,
+      environmentSignals: buildEnvironmentSignals(environmentPolicy),
+      appliedProductHistory,
+      routineMemory,
       productScores,
       applicationPatterns,
       safetyConstraints: [],
@@ -160,7 +206,7 @@ export class SuggestionContextBuilder {
       skippedCandidates: [],
     };
     const skippedCandidates = skippedReasonsFromPolicy(baseContext);
-    const summary = {
+    const summary: SuggestionContextSummary = {
       ...baseContext,
       safetyConstraints: [
         ...buildSafetyConstraints(baseContext),
@@ -227,174 +273,9 @@ export interface SuggestionContextBuilderInput {
   routineSteps: RoutineStep[];
   recentJournalEntries: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
+  recentSuggestions?: SuggestionInstance[];
   recentRoutineBreaks?: RoutineBreak[];
   environment?: EnvironmentContextSummary | null;
   aiPersonalizationAllowed?: boolean;
   aiPersonalizationBlockedReason?: string | null;
-}
-
-function buildReactionSummary(
-  entries: SkinJournalEntry[],
-  targetDate: string,
-): SuggestionContextSummary['reaction'] {
-  const reactionEntries = entries
-    .slice()
-    .sort(compareJournalRecency)
-    .filter(hasUsableJournalReactionSignal);
-  const latest = reactionEntries[0] ?? null;
-  const observations = latest?.analysis_observations ?? null;
-  const concerns = entries.flatMap(
-    (entry) => entry.analysis_observations?.detected_concerns ?? [],
-  );
-  const photoInputImages = entries.reduce(
-    (sum, entry) => sum + currentJournalPhotoAngleCount(entry),
-    0,
-  );
-  const reactionConcerns = concerns.filter((concern) =>
-    [
-      'redness_inflammation',
-      'dryness',
-      'skin_barrier_damage',
-      'eczema_indicator',
-      'acne',
-    ].includes(concern.concern),
-  );
-  return {
-    hasSignal: Boolean(latest),
-    severity: observations?.reaction_signals?.reaction_severity ?? null,
-    confidence: observations?.reaction_signals?.confidence ?? null,
-    indicators: [
-      ...(observations?.reaction_signals?.indicators ?? []),
-      ...(observations?.barrier_signs?.indicators ?? []),
-    ],
-    affectedZones: unique(
-      reactionConcerns.flatMap((concern) => concern.locations),
-    ),
-    concernKeys: unique(reactionConcerns.map((concern) => concern.concern)),
-    daysSinceLatestSignal: latest
-      ? daysBetween(latest.entry_date, targetDate)
-      : null,
-    barrierCompromised: Boolean(
-      observations?.barrier_signs?.barrier_compromise ||
-      reactionConcerns.some(
-        (concern) => concern.concern === 'skin_barrier_damage',
-      ),
-    ),
-    photoInputImages,
-    multiAnglePhotoEntries: entries.filter(hasMultiAngleJournalPhoto).length,
-  };
-}
-
-function buildApplicationPatterns(
-  logs: ApplicationLog[],
-  targetDate: string,
-): SuggestionContextSummary['applicationPatterns'] {
-  const skippedByCategory: Record<string, number> = {};
-  const substitutedByCategory: Record<string, number> = {};
-  const adherenceByCategory: Record<string, number> = {};
-  let addedOffShelfCount = 0;
-  let editedLogCount = 0;
-  const applicationDates = logs
-    .map((log) => toDateOnlyString(log.target_date))
-    .filter((date) => date <= toDateOnlyString(targetDate))
-    .sort((a, b) => (a < b ? 1 : -1));
-  const daysSinceLastApplication = applicationDates[0]
-    ? daysBetween(applicationDates[0], targetDate)
-    : null;
-  for (const log of logs) {
-    if (log.has_been_edited) editedLogCount += 1;
-    for (const item of log.items ?? []) {
-      const category = item.step_label ?? 'unknown';
-      if (item.status === 'skipped') increment(skippedByCategory, category);
-      if (item.status === 'substituted')
-        increment(substitutedByCategory, category);
-      if (item.status === 'applied') increment(adherenceByCategory, category);
-      if (item.is_ad_hoc) addedOffShelfCount += 1;
-    }
-  }
-  return {
-    days: unique(logs.map((log) => toDateOnlyString(log.target_date))).length,
-    daysSinceLastApplication,
-    conservativeRestart:
-      daysSinceLastApplication === null ||
-      daysSinceLastApplication >= SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS,
-    skippedByCategory,
-    substitutedByCategory,
-    addedOffShelfCount,
-    editedLogCount,
-    adherenceByCategory,
-  };
-}
-
-function buildRecentUseByProduct(logs: ApplicationLog[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const log of logs) {
-    for (const item of log.items ?? []) {
-      const productId =
-        item.status === 'substituted'
-          ? item.substituted_with_product_id
-          : item.inventory_product_id;
-      if (productId && item.status !== 'skipped') {
-        map.set(productId, (map.get(productId) ?? 0) + 1);
-      }
-    }
-  }
-  return map;
-}
-
-async function buildIngredientIntelligenceByProductId(
-  ingredientIntelligence: IngredientIntelligenceService | undefined,
-  products: InventoryProduct[],
-): Promise<Map<string, ProductIngredientIntelligence>> {
-  const map = new Map<string, ProductIngredientIntelligence>();
-  if (!ingredientIntelligence) return map;
-
-  const matches = await ingredientIntelligence.matchProducts(
-    products.map(toAnalysisProduct),
-  );
-  for (const match of matches) {
-    map.set(match.product.id, {
-      matchedIngredientCount: match.matchedIngredients.length,
-      totalIngredientCount: match.totalTokens,
-    });
-  }
-  return map;
-}
-
-function toAnalysisProduct(product: InventoryProduct): ProductForAnalysis {
-  return {
-    id: product.id,
-    brand: product.brand,
-    name: product.name,
-    category: product.category,
-    inciIngredients: product.identity?.inciIngredients ?? [],
-  };
-}
-
-function daysBetween(fromDate: string, toDate: string): number {
-  const from = new Date(`${toDateOnlyString(fromDate)}T00:00:00Z`).getTime();
-  const to = new Date(`${toDateOnlyString(toDate)}T00:00:00Z`).getTime();
-  return Math.max(0, Math.round((to - from) / 86_400_000));
-}
-
-function compareJournalRecency(
-  first: SkinJournalEntry,
-  second: SkinJournalEntry,
-): number {
-  const firstDate = toDateOnlyString(first.entry_date);
-  const secondDate = toDateOnlyString(second.entry_date);
-  if (firstDate !== secondDate) {
-    return firstDate < secondDate ? 1 : -1;
-  }
-  const firstUpdated = first.updated_at?.getTime() ?? 0;
-  const secondUpdated = second.updated_at?.getTime() ?? 0;
-  return secondUpdated - firstUpdated;
-}
-
-function increment(target: Record<string, number>, key: string): void {
-  target[key] = (target[key] ?? 0) + 1;
-}
-
-function unique<T>(values: T[]): T[] {
-  return Array.from(new Set(values));
 }

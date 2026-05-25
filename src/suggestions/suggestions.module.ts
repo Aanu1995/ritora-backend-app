@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminModule } from '../admin/admin.module';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { ApplicationLogItem } from '../application-tracking/entities/application-log-item.entity';
 import { CatalogueModule } from '../catalogue/catalogue.module';
@@ -41,6 +42,7 @@ import { SuggestionGenerationService } from './services/suggestion-generation.se
 import { SuggestionGenerationWorker } from './services/suggestion-generation-worker.service';
 import { SuggestionHistoryExportService } from './services/suggestion-history-export.service';
 import { SuggestionHistoryReader } from './services/suggestion-history-reader.service';
+import { SuggestionObservabilityAlertService } from './services/suggestion-observability-alert.service';
 import { SuggestionObservabilityService } from './services/suggestion-observability.service';
 import { SuggestionOnDemandService } from './services/suggestion-on-demand.service';
 import { SuggestionRegenerationService } from './services/suggestion-regeneration.service';
@@ -55,6 +57,7 @@ import { SuggestionsController } from './suggestions.controller';
 
 @Module({
   imports: [
+    AdminModule,
     TypeOrmModule.forFeature([
       SuggestionInstance,
       SuggestionStep,
@@ -103,6 +106,7 @@ import { SuggestionsController } from './suggestions.controller';
     SuggestionGenerationWorker,
     SuggestionScheduler,
     SuggestionReminderWorker,
+    SuggestionObservabilityAlertService,
     SuggestionObservabilityService,
     SuggestionOnDemandService,
     SuggestionRegenerationService,

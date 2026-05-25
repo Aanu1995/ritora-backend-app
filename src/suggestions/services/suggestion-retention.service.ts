@@ -5,7 +5,13 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeleteResult, LessThan, Repository, UpdateResult } from 'typeorm';
+import {
+  DeleteResult,
+  LessThan,
+  QueryDeepPartialEntity,
+  Repository,
+  UpdateResult,
+} from 'typeorm';
 import {
   ENVIRONMENT_LOCATION_CACHE_TTL_DAYS,
   ENVIRONMENT_SNAPSHOT_RETENTION_DAYS,
@@ -24,6 +30,21 @@ import {
   SUGGESTION_RETENTION_SWEEP_INTERVAL_MS,
 } from '../suggestions.constants';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
+
+const EXPIRED_SUGGESTION_SENSITIVE_FIELD_CLEAR: QueryDeepPartialEntity<SuggestionInstance> =
+  {
+    ai_explanation: () => 'NULL',
+    generation_context: () => 'NULL',
+    request_context: () => 'NULL',
+  };
+
+const USER_SUGGESTION_SENSITIVE_FIELD_CLEAR: QueryDeepPartialEntity<SuggestionInstance> =
+  {
+    ...EXPIRED_SUGGESTION_SENSITIVE_FIELD_CLEAR,
+    gap_recommendations: () => 'NULL',
+    safety_flags: () => 'NULL',
+    ai_error: () => 'NULL',
+  };
 
 @Injectable()
 export class SuggestionRetentionService
@@ -106,11 +127,7 @@ export class SuggestionRetentionService
     const contextResult = await this.suggestionRepo
       .createQueryBuilder()
       .update()
-      .set({
-        ai_explanation: null,
-        generation_context: null,
-        request_context: null,
-      })
+      .set(EXPIRED_SUGGESTION_SENSITIVE_FIELD_CLEAR)
       .where(
         '(ai_explanation IS NOT NULL OR generation_context IS NOT NULL OR request_context IS NOT NULL)',
       )
@@ -149,31 +166,54 @@ export class SuggestionRetentionService
     };
   }
 
-  async purgeUserSuggestionData(userId: string): Promise<void> {
-    await this.contextCacheRepo.delete({ user_id: userId });
-    await this.gapActionRepo.delete({ user_id: userId });
-    await this.overrideRepo.delete({ user_id: userId });
-    await this.reminderSnoozeRepo.delete({ user_id: userId });
-    await this.environmentSnapshotRepo.delete({ user_id: userId });
-    await this.environmentLocationRepo.delete({ user_id: userId });
-    await this.suggestionRepo
+  async purgeUserSuggestionData(userId: string): Promise<{
+    contextCachesDeleted: number;
+    gapActionsDeleted: number;
+    reactionOverridesDeleted: number;
+    reminderSnoozesDeleted: number;
+    environmentSnapshotsDeleted: number;
+    environmentLocationCachesDeleted: number;
+    suggestionFieldsCleared: number;
+  }> {
+    const cacheResult = await this.contextCacheRepo.delete({ user_id: userId });
+    const gapActionResult = await this.gapActionRepo.delete({
+      user_id: userId,
+    });
+    const overrideResult = await this.overrideRepo.delete({ user_id: userId });
+    const reminderSnoozeResult = await this.reminderSnoozeRepo.delete({
+      user_id: userId,
+    });
+    const environmentSnapshotResult = await this.environmentSnapshotRepo.delete(
+      {
+        user_id: userId,
+      },
+    );
+    const environmentLocationResult = await this.environmentLocationRepo.delete(
+      {
+        user_id: userId,
+      },
+    );
+    const suggestionResult = await this.suggestionRepo
       .createQueryBuilder()
       .update()
-      .set({
-        ai_explanation: null,
-        generation_context: null,
-        request_context: null,
-        gap_recommendations: null,
-        safety_flags: null,
-        ai_error: null,
-      })
+      .set(USER_SUGGESTION_SENSITIVE_FIELD_CLEAR)
       .where('user_id = :userId', { userId })
       .execute();
+    const result = {
+      contextCachesDeleted: affected(cacheResult),
+      gapActionsDeleted: affected(gapActionResult),
+      reactionOverridesDeleted: affected(overrideResult),
+      reminderSnoozesDeleted: affected(reminderSnoozeResult),
+      environmentSnapshotsDeleted: affected(environmentSnapshotResult),
+      environmentLocationCachesDeleted: affected(environmentLocationResult),
+      suggestionFieldsCleared: affected(suggestionResult),
+    };
     await this.observability.record({
       kind: 'retention_purged',
       userId,
-      metadata: { userScopedPurge: true },
+      metadata: { userScopedPurge: true, ...result },
     });
+    return result;
   }
 
   private schedule(delayMs: number): void {

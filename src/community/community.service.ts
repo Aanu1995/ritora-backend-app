@@ -352,10 +352,7 @@ export class CommunityService {
 
   async getRoutine(userId: string, id: string) {
     const routine = await this.routines.findOne({ where: { id } });
-    if (
-      !routine ||
-      !this.canRead(routine, userId)
-    ) {
+    if (!routine || !this.canRead(routine, userId)) {
       throw new NotFoundException('Community routine not found');
     }
     const facets = await this.getSafeFacets(userId);
@@ -485,7 +482,9 @@ export class CommunityService {
       ),
       outcomeSignalCounts,
       similarOutcomeSignalCounts,
-      topGoals: this.topCounts(routines.flatMap((routine) => routine.goal_tags)),
+      topGoals: this.topCounts(
+        routines.flatMap((routine) => routine.goal_tags),
+      ),
       topAvoids: this.topCounts(
         routines.flatMap((routine) => routine.avoid_tags ?? []),
       ),
@@ -659,15 +658,21 @@ export class CommunityService {
         ? routine.concern_tags
         : normalizeTags(dto.concernTags);
     routine.goal_tags =
-      dto.goalTags === undefined ? routine.goal_tags : normalizeTags(dto.goalTags);
+      dto.goalTags === undefined
+        ? routine.goal_tags
+        : normalizeTags(dto.goalTags);
     routine.goal_result =
       dto.goalResult === undefined ? routine.goal_result : dto.goalResult;
     routine.timeframe =
       dto.timeframe === undefined ? routine.timeframe : dto.timeframe;
     routine.avoid_tags =
-      dto.avoidTags === undefined ? routine.avoid_tags : normalizeTags(dto.avoidTags);
+      dto.avoidTags === undefined
+        ? routine.avoid_tags
+        : normalizeTags(dto.avoidTags);
     routine.habit_tags =
-      dto.habitTags === undefined ? routine.habit_tags : normalizeTags(dto.habitTags);
+      dto.habitTags === undefined
+        ? routine.habit_tags
+        : normalizeTags(dto.habitTags);
     routine.did_not_work_tags =
       dto.didNotWorkTags === undefined
         ? routine.did_not_work_tags
@@ -835,7 +840,11 @@ export class CommunityService {
     }
     const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
     const contextText = dto.routineContext
-      .map((item) => [item.productBrand, item.productName, item.category].filter(Boolean).join(' '))
+      .map((item) =>
+        [item.productBrand, item.productName, item.category]
+          .filter(Boolean)
+          .join(' '),
+      )
       .join(' ');
     const scannedText = [
       dto.productBrand,
@@ -988,17 +997,19 @@ export class CommunityService {
     }
 
     review.product_id =
-      dto.productId === undefined ? review.product_id : reviewedProduct?.id ?? null;
+      dto.productId === undefined
+        ? review.product_id
+        : (reviewedProduct?.id ?? null);
     review.product_brand =
       reviewedProduct?.brand ??
       (dto.productBrand === undefined
         ? review.product_brand
-        : cleanText(dto.productBrand, 255) ?? review.product_brand);
+        : (cleanText(dto.productBrand, 255) ?? review.product_brand));
     review.product_name =
       reviewedProduct?.name ??
       (dto.productName === undefined
         ? review.product_name
-        : cleanText(dto.productName, 255) ?? review.product_name);
+        : (cleanText(dto.productName, 255) ?? review.product_name));
     review.product_category =
       reviewedProduct?.category ??
       (dto.productCategory === undefined
@@ -1008,11 +1019,11 @@ export class CommunityService {
     review.usage_duration =
       dto.usageDuration === undefined
         ? review.usage_duration
-        : cleanText(dto.usageDuration, 30) ?? review.usage_duration;
+        : (cleanText(dto.usageDuration, 30) ?? review.usage_duration);
     review.frequency =
       dto.frequency === undefined
         ? review.frequency
-        : cleanText(dto.frequency, 50) ?? review.frequency;
+        : (cleanText(dto.frequency, 50) ?? review.frequency);
     review.routine_slot = dto.routineSlot ?? review.routine_slot;
     review.skin_response = dto.skinResponse ?? review.skin_response;
     review.overall_rating = dto.overallRating ?? review.overall_rating;
@@ -1020,15 +1031,19 @@ export class CommunityService {
       dto.effectivenessRating ?? review.effectiveness_rating;
     review.irritation_rating = dto.irritationRating ?? review.irritation_rating;
     review.texture_rating =
-      dto.textureRating === undefined ? review.texture_rating : dto.textureRating;
+      dto.textureRating === undefined
+        ? review.texture_rating
+        : dto.textureRating;
     review.value_rating =
       dto.valueRating === undefined ? review.value_rating : dto.valueRating;
     review.outcomes =
-      dto.outcomes === undefined ? review.outcomes : normalizeTags(dto.outcomes);
+      dto.outcomes === undefined
+        ? review.outcomes
+        : normalizeTags(dto.outcomes);
     review.repurchase =
       dto.repurchase === undefined
         ? review.repurchase
-        : cleanText(dto.repurchase, 30) ?? review.repurchase;
+        : (cleanText(dto.repurchase, 30) ?? review.repurchase);
     review.body =
       dto.body === undefined ? review.body : cleanText(dto.body, 1200);
     const contextForScan = dto.routineContext
@@ -1084,17 +1099,17 @@ export class CommunityService {
           .delete({ review_id: review.id });
         await manager.getRepository(CommunityReviewContextProduct).save(
           dto.routineContext.map((item) => {
-            const product = item.productId ? products.get(item.productId) : null;
-            return manager
-              .getRepository(CommunityReviewContextProduct)
-              .create({
-                review_id: review.id,
-                product_id: product?.id ?? null,
-                product_brand:
-                  product?.brand ?? cleanText(item.productBrand, 255),
-                product_name: product?.name ?? cleanText(item.productName, 255),
-                category: product?.category ?? item.category,
-              });
+            const product = item.productId
+              ? products.get(item.productId)
+              : null;
+            return manager.getRepository(CommunityReviewContextProduct).create({
+              review_id: review.id,
+              product_id: product?.id ?? null,
+              product_brand:
+                product?.brand ?? cleanText(item.productBrand, 255),
+              product_name: product?.name ?? cleanText(item.productName, 255),
+              category: product?.category ?? item.category,
+            });
           }),
         );
       }
@@ -1301,10 +1316,7 @@ export class CommunityService {
 
   async adaptRoutine(userId: string, routineId: string) {
     const routine = await this.routines.findOne({ where: { id: routineId } });
-    if (
-      !routine ||
-      !this.canRead(routine, userId)
-    ) {
+    if (!routine || !this.canRead(routine, userId)) {
       throw new NotFoundException('Community routine not found');
     }
     const steps = await this.routineSteps.find({
@@ -2217,11 +2229,7 @@ export class CommunityService {
         this.reviewEvidenceBoost(review, context),
       ),
       relevanceReasons: [
-        ...this.relevanceReasons(
-          viewer,
-          review.safe_facets,
-          review.outcomes,
-        ),
+        ...this.relevanceReasons(viewer, review.safe_facets, review.outcomes),
         ...this.reviewEvidenceReasons(review, context),
       ],
       createdAt: review.created_at.toISOString(),
@@ -2341,10 +2349,16 @@ export class CommunityService {
     ) {
       score += 15;
     }
-    if (viewer.skinToneRange && viewer.skinToneRange === candidate.skinToneRange) {
+    if (
+      viewer.skinToneRange &&
+      viewer.skinToneRange === candidate.skinToneRange
+    ) {
       score += 10;
     }
-    if (viewer.climateBucket && viewer.climateBucket === candidate.climateBucket) {
+    if (
+      viewer.climateBucket &&
+      viewer.climateBucket === candidate.climateBucket
+    ) {
       score += 10;
     }
     if (viewer.routinePace && viewer.routinePace === candidate.routinePace) {
@@ -2609,9 +2623,7 @@ export class CommunityService {
       .groupBy('vote.signal')
       .getRawMany<{ signal: CommunityOutcomeSignal; count: number | string }>();
     const counts = this.defaultOutcomeSignalCounts(
-      Object.fromEntries(
-        rows.map((row) => [row.signal, Number(row.count)]),
-      ) as Partial<Record<CommunityOutcomeSignal, number>>,
+      Object.fromEntries(rows.map((row) => [row.signal, Number(row.count)])),
     );
     if (contentType === CommunityContentType.Routine) {
       await this.routines.update(contentId, {
@@ -2768,7 +2780,9 @@ export class CommunityService {
     item: CommunityRoutine,
     relations: CommunityRoutineStep[],
   ): ReturnType<CommunityService['toAdminContentItem']> & {
-    editableRoutine: ReturnType<CommunityService['toEditableRoutineSubmission']>;
+    editableRoutine: ReturnType<
+      CommunityService['toEditableRoutineSubmission']
+    >;
     editableReview: null;
   };
   private toSubmissionItem(

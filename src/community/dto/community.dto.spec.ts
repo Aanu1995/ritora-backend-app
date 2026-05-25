@@ -178,10 +178,7 @@ describe('CreateCommunityRoutineDto goal playbooks', () => {
     const errors = await validate(dto, validationOptions);
 
     expect(errors.map((error) => error.property)).toEqual(
-      expect.arrayContaining([
-        'timeframe',
-        'steps',
-      ]),
+      expect.arrayContaining(['timeframe', 'steps']),
     );
     expect(errors.map((error) => error.property)).not.toEqual(
       expect.arrayContaining(['goalResult', 'avoidTags']),

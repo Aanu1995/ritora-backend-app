@@ -55,6 +55,10 @@ import {
   deterministicExplanation,
 } from './suggestion-baseline-generator';
 import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
+import {
+  hasUnjustifiedHistoryNoveltyStep,
+  requiresOwnedDaytimeSpf,
+} from './suggestion-routine-repeat-policy';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
 export const SUGGESTION_AI_TIMEOUT_MS = 45_000;
@@ -155,6 +159,15 @@ export class SuggestionAiGenerator {
         startedAt,
         'deterministic-baseline',
         'all_specialist_locked',
+      );
+    }
+
+    if (hasNoUsableShelfOptions(inputs)) {
+      return this.buildBaseline(
+        inputs,
+        startedAt,
+        'deterministic-baseline',
+        'no_usable_shelf_limited_data',
       );
     }
 
@@ -447,6 +460,14 @@ function hasReactionSignalInInputs(
   );
 }
 
+function hasNoUsableShelfOptions(inputs: SuggestionGenerationInputs): boolean {
+  return (
+    inputs.routineSteps.length === 0 &&
+    (inputs.shelfActiveProducts.length === 0 ||
+      inputs.contextSummary.productScores.length === 0)
+  );
+}
+
 type GenerationMetadata = Omit<
   SuggestionGenerationOutput['metadata'],
   'promptVersion'
@@ -494,6 +515,13 @@ function resolveHardSafetyFallbackReason(
     return 'conditional_required_daytime_spf';
   }
   if (
+    selectedScores.some((score) =>
+      hasDaytimeStrongActiveConflict(inputs, score),
+    )
+  ) {
+    return 'unsafe_daytime_strong_active';
+  }
+  if (
     requiresBarrierMoisturizer(inputs) &&
     !selectedScores.some(
       (score) => score.category === ProductCategory.Moisturizer,
@@ -513,7 +541,35 @@ function resolveHardSafetyFallbackReason(
   ) {
     return 'overlayered_minimal_routine';
   }
+  if (hasUnjustifiedHistoryNoveltyStep(inputs, steps)) {
+    return 'unjustified_history_novelty';
+  }
   return null;
+}
+
+function hasDaytimeStrongActiveConflict(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  if (inputs.daypart === SuggestionDaypart.Evening || !hasStrongActive(score)) {
+    return false;
+  }
+  if (
+    score.activeTags.some((tag) =>
+      ['retinoid', 'retinol', 'adapalene', 'tretinoin'].includes(
+        tag.toLowerCase(),
+      ),
+    )
+  ) {
+    return true;
+  }
+  return /(space_strong_actives|photosensit|very_high|high_uv|daytime|sun)/i.test(
+    JSON.stringify([
+      score.cautionReasons,
+      inputs.contextSummary.safetyConstraints,
+      inputs.contextSummary.environment?.uvRisk ?? '',
+    ]),
+  );
 }
 
 function selectedProductScores(
@@ -602,6 +658,12 @@ function resolveCopyFallbackReason(
     return 'no_shelf_gap_only_copy';
   }
   if (
+    hasPregnancyOrMedicationCaution(inputs) &&
+    !hasMedicationCautionMainGuidance(explanation)
+  ) {
+    return 'missing_medication_caution_copy';
+  }
+  if (
     steps.length > 1 &&
     explanation.body.some((line) => /\bonly\b/i.test(line))
   ) {
@@ -610,22 +672,11 @@ function resolveCopyFallbackReason(
   return null;
 }
 
-function requiresOwnedDaytimeSpf(inputs: SuggestionGenerationInputs): boolean {
-  if (
-    inputs.daypart !== SuggestionDaypart.Morning &&
-    inputs.daypart !== SuggestionDaypart.Noon
-  ) {
-    return false;
-  }
-  if (
-    /\b(indoor|indoors|inside|at home all day|no daylight)\b/i.test(
-      inputs.requestContext?.note ?? '',
-    )
-  ) {
-    return false;
-  }
-  return inputs.contextSummary.productScores.some(
-    (score) => score.category === ProductCategory.SunProtection,
+function hasMedicationCautionMainGuidance(
+  explanation: SuggestionExplanationJson,
+): boolean {
+  return /\b(medication|pregnan|breastfeed|clinician|specialist|doctor|prescrib)\b/i.test(
+    explanation.body.join(' '),
   );
 }
 

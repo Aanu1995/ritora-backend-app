@@ -1,13 +1,19 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
+import {
+  ApplicationItemSource,
+  ApplicationItemStatus,
+} from '../src/application-tracking/application-tracking.constants';
 import { ENVIRONMENT_PROVIDER } from '../src/environment-intelligence/environment-provider.interface';
 import { EnvironmentProviderName } from '../src/environment-intelligence/environment-intelligence.constants';
 import { SlotModeValue } from '../src/schedule/dto/schedule.constants';
 import { ProductCategory } from '../src/shelf/shelf.types';
 import { SuggestionGenerationJob } from '../src/suggestions/entities/suggestion-generation-job.entity';
+import { SuggestionObservabilityEvent } from '../src/suggestions/entities/suggestion-observability-event.entity';
 import {
   SuggestionGenerationJobStatus,
+  SuggestionGenerationStatus,
   SuggestionMode,
   SuggestionRequestSource,
   SuggestionStepProvenance,
@@ -298,6 +304,303 @@ describe('Suggestions on-demand (e2e)', () => {
     );
   });
 
+  it('builds Today suggestions from seeded 30-plus day application, journal, and suggestion history', async () => {
+    const { timeZone, slotTime } = openTodaySlotWindow(55);
+    await setCurrentUserTimeZone(timeZone);
+    const targetDate = readString(
+      (await authGet('/suggestions/today', timeZone).expect(200)).body,
+      'date',
+    );
+    const createdSlot = await authPost('/schedule/slots', {
+      dayOfWeek: dayOfWeekForIsoDate(targetDate, timeZone),
+      slotTime,
+      mode: SlotModeValue.Manual,
+    }).expect(201);
+    const slotId = readString(createdSlot.body, 'id');
+
+    await authPut(`/schedule/slots/${slotId}/steps`, {
+      steps: [
+        {
+          stepOrder: 0,
+          inventoryProductId: productId,
+          stepLabel: ProductCategory.Moisturizer,
+          customLabel: null,
+          notes: null,
+          optional: false,
+          isSpecialistLocked: false,
+        },
+      ],
+    }).expect(200);
+
+    const dataSource = app.get(DataSource);
+    const userId = await loadCurrentUserId(dataSource);
+    await cleanupSeededSuggestionContextHistory(dataSource, 'hist');
+    await seedThirtyDaySuggestionContextHistory({
+      dataSource,
+      userId,
+      slotId,
+      productId,
+      targetDate,
+      targetTime: slotTime,
+    });
+
+    try {
+      const callsBeforeGeneration = aiGenerator.generate.mock.calls.length;
+      await generateScheduledSuggestion(slotId, targetDate, slotTime);
+
+      const generationCalls = aiGenerator.generate.mock.calls.slice(
+        callsBeforeGeneration,
+      );
+      expect(generationCalls).toHaveLength(1);
+      const generationInput = generationCalls[0]?.[0];
+      expect(
+        generationInput?.contextSummary.appliedProductHistory
+          ?.recordsConsidered,
+      ).toBeGreaterThanOrEqual(32);
+      expect(
+        generationInput?.contextSummary.journalSignals?.recordsConsidered,
+      ).toBe(30);
+      expect(
+        generationInput?.contextSummary.routineMemory?.recordsConsidered,
+      ).toBeGreaterThanOrEqual(62);
+      const appliedProduct =
+        generationInput?.contextSummary.appliedProductHistory?.products.find(
+          (product) => product.productId === productId,
+        );
+      expect(appliedProduct).toEqual(
+        expect.objectContaining({
+          name: 'Schedule Fixture Moisturizer',
+        }),
+      );
+      expect(appliedProduct?.useCount).toBeGreaterThanOrEqual(32);
+      expect(
+        generationInput?.contextSummary.routineMemory
+          ?.recentSameDaypartFingerprints,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            productNames: ['Ritora Schedule Fixture Moisturizer'],
+          }),
+        ]),
+      );
+
+      const todayResponse = await authGet(
+        '/suggestions/today',
+        timeZone,
+      ).expect(200);
+      const today = todayResponse.body as TodayResponse;
+      expect(
+        today.slots.find((item) => item.slotId === slotId)?.suggestion,
+      ).toEqual(
+        expect.objectContaining({
+          requestSource: SuggestionRequestSource.Scheduled,
+        }),
+      );
+    } finally {
+      await cleanupSeededSuggestionContextHistory(dataSource, 'hist');
+    }
+  });
+
+  it('backfills older records when Today suggestion history has only 29 records in the 30-day window', async () => {
+    const { timeZone, slotTime } = openTodaySlotWindow(65);
+    await setCurrentUserTimeZone(timeZone);
+    const targetDate = readString(
+      (await authGet('/suggestions/today', timeZone).expect(200)).body,
+      'date',
+    );
+    const createdSlot = await authPost('/schedule/slots', {
+      dayOfWeek: dayOfWeekForIsoDate(targetDate, timeZone),
+      slotTime,
+      mode: SlotModeValue.Manual,
+    }).expect(201);
+    const slotId = readString(createdSlot.body, 'id');
+
+    await authPut(`/schedule/slots/${slotId}/steps`, {
+      steps: [
+        {
+          stepOrder: 0,
+          inventoryProductId: productId,
+          stepLabel: ProductCategory.Moisturizer,
+          customLabel: null,
+          notes: null,
+          optional: false,
+          isSpecialistLocked: false,
+        },
+      ],
+    }).expect(200);
+
+    const dataSource = app.get(DataSource);
+    const userId = await loadCurrentUserId(dataSource);
+    await moveExistingContextOutsideWindow(dataSource, userId, targetDate);
+    await cleanupSeededSuggestionContextHistory(dataSource, 'bfctx');
+    await seedBackfilledSuggestionContextHistory({
+      dataSource,
+      userId,
+      slotId,
+      productId,
+      targetDate,
+      targetTime: slotTime,
+      prefix: 'bfctx',
+    });
+
+    try {
+      const callsBeforeGeneration = aiGenerator.generate.mock.calls.length;
+      const jobId = await generateScheduledSuggestion(
+        slotId,
+        targetDate,
+        slotTime,
+      );
+      const generationInput = aiGenerator.generate.mock.calls.slice(
+        callsBeforeGeneration,
+      )[0]?.[0];
+      const event = await dataSource
+        .getRepository(SuggestionObservabilityEvent)
+        .findOne({
+          where: {
+            user_id: userId,
+            job_id: jobId,
+            kind: 'generation_context_loaded',
+          },
+        });
+
+      expect(
+        generationInput?.recentJournalEntries.map((entry) => entry.id),
+      ).toContain('bfctx-j-bf');
+      expect(
+        generationInput?.recentApplications.map((log) => log.id),
+      ).toContain('bfctx-l-bf');
+      expect(
+        generationInput?.contextSummary.journalSignals?.recordsConsidered,
+      ).toBe(30);
+      expect(
+        generationInput?.contextSummary.appliedProductHistory
+          ?.recordsConsidered,
+      ).toBeGreaterThanOrEqual(30);
+      expect(
+        generationInput?.contextSummary.routineMemory?.previousSuggestionCount,
+      ).toBeGreaterThanOrEqual(30);
+      expect(event?.metadata).toEqual(
+        expect.objectContaining({
+          journalBackfillRows: 1,
+          applicationBackfillRows: 1,
+          suggestionBackfillRows: 1,
+          routineBreakBackfillRows: 1,
+        }),
+      );
+    } finally {
+      await cleanupSeededSuggestionContextHistory(dataSource, 'bfctx');
+    }
+  });
+
+  it('excludes sensitive profile, journal, application, and suggestion history from Today generation without AI consent', async () => {
+    const { timeZone, slotTime } = openTodaySlotWindow(75);
+    await setCurrentUserTimeZone(timeZone);
+    const targetDate = readString(
+      (await authGet('/suggestions/today', timeZone).expect(200)).body,
+      'date',
+    );
+    const createdSlot = await authPost('/schedule/slots', {
+      dayOfWeek: dayOfWeekForIsoDate(targetDate, timeZone),
+      slotTime,
+      mode: SlotModeValue.Manual,
+    }).expect(201);
+    const slotId = readString(createdSlot.body, 'id');
+
+    await authPut(`/schedule/slots/${slotId}/steps`, {
+      steps: [
+        {
+          stepOrder: 0,
+          inventoryProductId: productId,
+          stepLabel: ProductCategory.Moisturizer,
+          customLabel: null,
+          notes: null,
+          optional: false,
+          isSpecialistLocked: false,
+        },
+      ],
+    }).expect(200);
+
+    const dataSource = app.get(DataSource);
+    const userId = await loadCurrentUserId(dataSource);
+    await moveExistingContextOutsideWindow(dataSource, userId, targetDate);
+    await cleanupSeededSuggestionContextHistory(dataSource, 'noconsent');
+    await seedBackfilledSuggestionContextHistory({
+      dataSource,
+      userId,
+      slotId,
+      productId,
+      targetDate,
+      targetTime: slotTime,
+      prefix: 'noconsent',
+    });
+    await authPost('/suggestions/ai-consent', { granted: false }).expect(200);
+
+    try {
+      const callsBeforeGeneration = aiGenerator.generate.mock.calls.length;
+      const jobId = await generateScheduledSuggestion(
+        slotId,
+        targetDate,
+        slotTime,
+      );
+      const generationInput = aiGenerator.generate.mock.calls.slice(
+        callsBeforeGeneration,
+      )[0]?.[0];
+      const event = await dataSource
+        .getRepository(SuggestionObservabilityEvent)
+        .findOne({
+          where: {
+            user_id: userId,
+            job_id: jobId,
+            kind: 'generation_context_loaded',
+          },
+        });
+
+      expect(generationInput).toEqual(
+        expect.objectContaining({
+          skinProfile: null,
+          recentJournalEntries: [],
+          recentApplications: [],
+          aiPersonalizationAllowed: false,
+          aiPersonalizationBlockedReason:
+            'ai_suggestion_processing_consent_missing',
+        }),
+      );
+      expect(generationInput?.contextSummary).toEqual(
+        expect.objectContaining({
+          skinProfile: expect.objectContaining({
+            primaryGoal: null,
+            activeConcerns: [],
+          }),
+          governance: expect.objectContaining({
+            aiPersonalizationAllowed: false,
+            aiPersonalizationBlockedReason:
+              'ai_suggestion_processing_consent_missing',
+          }),
+        }),
+      );
+      expect(generationInput?.contextSummary.appliedProductHistory).toEqual(
+        expect.objectContaining({ recordsConsidered: 0, products: [] }),
+      );
+      expect(generationInput?.contextSummary.routineMemory).toEqual(
+        expect.objectContaining({
+          previousSuggestionCount: 0,
+          recordsConsidered: expect.any(Number),
+        }),
+      );
+      expect(event?.metadata).toEqual(
+        expect.objectContaining({
+          sensitiveContextRead: false,
+          journalRows: 0,
+          applicationRows: 0,
+          suggestionRows: 0,
+        }),
+      );
+    } finally {
+      await authPost('/suggestions/ai-consent', { granted: true }).expect(200);
+      await cleanupSeededSuggestionContextHistory(dataSource, 'noconsent');
+    }
+  });
+
   function authGet(path: string, timeZone = 'Europe/Stockholm') {
     return request(app.getHttpServer())
       .get(`/api/v1${path}`)
@@ -338,7 +641,7 @@ describe('Suggestions on-demand (e2e)', () => {
     slotId: string,
     targetDate: string,
     targetTime: string,
-  ): Promise<void> {
+  ): Promise<string> {
     const dataSource = app.get(DataSource);
     const userId = await loadCurrentUserId(dataSource);
     const jobRepo = dataSource.getRepository(SuggestionGenerationJob);
@@ -360,6 +663,7 @@ describe('Suggestions on-demand (e2e)', () => {
       }),
     );
     await app.get(SuggestionGenerationService).generateForJob(job);
+    return job.id;
   }
 
   async function loadCurrentUserId(dataSource: DataSource): Promise<string> {
@@ -405,6 +709,437 @@ describe('Suggestions on-demand (e2e)', () => {
       [applicationLogId, targetDate],
     );
   }
+
+  async function seedThirtyDaySuggestionContextHistory(input: {
+    dataSource: DataSource;
+    userId: string;
+    slotId: string;
+    productId: string;
+    targetDate: string;
+    targetTime: string;
+  }): Promise<void> {
+    const { dataSource, userId, slotId, productId, targetDate, targetTime } =
+      input;
+    await dataSource.transaction(async (manager) => {
+      for (let index = 0; index < 30; index += 1) {
+        const date = shiftIsoDate(targetDate, -index);
+        await manager.query(
+          `
+            INSERT INTO skin_journal_entries (
+              id, user_id, entry_date, time_zone, analysis_status,
+              analysis_concern_keys, has_reaction_signal, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, 'completed', $5, false, $6, $6)
+          `,
+          [
+            `hist-journal-${padHistoryIndex(index)}`,
+            userId,
+            date,
+            'Europe/Stockholm',
+            index % 2 === 0 ? ['dryness'] : ['acne'],
+            new Date(`${date}T06:00:00.000Z`),
+          ],
+        );
+      }
+
+      for (let index = 0; index < 32; index += 1) {
+        const date = shiftIsoDate(targetDate, -((index % 29) + 1));
+        const logId = `hist-log-${padHistoryIndex(index)}`;
+        await manager.query(
+          `
+            INSERT INTO application_logs (
+              id, user_id, slot_id, target_date, target_time, daypart,
+              applied_at, has_been_edited, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, 'morning', $6, $7, $6, $6)
+          `,
+          [
+            logId,
+            userId,
+            slotId,
+            date,
+            targetTime,
+            new Date(`${date}T07:30:00.000Z`),
+            index % 7 === 0,
+          ],
+        );
+        await manager.query(
+          `
+            INSERT INTO application_log_items (
+              id, application_log_id, step_order, inventory_product_id,
+              product_brand_snapshot, product_name_snapshot, step_label,
+              status, item_source, applied_at, created_at, updated_at
+            )
+            VALUES ($1, $2, 0, $3, 'Ritora', 'Schedule Fixture Moisturizer',
+              $4, $5, $6, $7, $7, $7)
+          `,
+          [
+            `hist-log-item-${padHistoryIndex(index)}`,
+            logId,
+            productId,
+            ProductCategory.Moisturizer,
+            ApplicationItemStatus.Applied,
+            ApplicationItemSource.Recommended,
+            new Date(`${date}T07:31:00.000Z`),
+          ],
+        );
+      }
+
+      for (let index = 0; index < 30; index += 1) {
+        const date = shiftIsoDate(targetDate, -((index % 29) + 1));
+        const suggestionId = `hist-sugg-${padHistoryIndex(index)}`;
+        await manager.query(
+          `
+            INSERT INTO suggestion_instances (
+              id, user_id, slot_id, request_source, target_date, target_time,
+              daypart, mode, generation_status, visible_at, generated_at,
+              has_reaction_signal, simplified_for_reaction, ai_retry_count,
+              created_at, updated_at
+            )
+            VALUES ($1, $2, null, $3, $4, $5, 'morning', $6, $7, $8, $8,
+              false, false, 0, $8, $8)
+          `,
+          [
+            suggestionId,
+            userId,
+            SuggestionRequestSource.OnDemand,
+            date,
+            targetTime,
+            SuggestionMode.Ai,
+            SuggestionGenerationStatus.Ready,
+            new Date(`${date}T06:45:00.000Z`),
+          ],
+        );
+        await manager.query(
+          `
+            INSERT INTO suggestion_steps (
+              id, suggestion_instance_id, step_order, routine_step_id,
+              inventory_product_id, product_brand_snapshot,
+              product_name_snapshot, step_label, custom_label,
+              application_method, quantity, wait_after_minutes, explanation,
+              routine_note_snapshot, provenance, chips, safety_warnings,
+              created_at
+            )
+            VALUES ($1, $2, 0, null, $3, 'Ritora',
+              'Schedule Fixture Moisturizer', $4, null, null, null, null,
+              null, null, $5, null, null, $6)
+          `,
+          [
+            `hist-sugg-step-${padHistoryIndex(index)}`,
+            suggestionId,
+            productId,
+            ProductCategory.Moisturizer,
+            SuggestionStepProvenance.AiAdded,
+            new Date(`${date}T06:46:00.000Z`),
+          ],
+        );
+      }
+    });
+  }
+
+  async function seedBackfilledSuggestionContextHistory(input: {
+    dataSource: DataSource;
+    userId: string;
+    slotId: string;
+    productId: string;
+    targetDate: string;
+    targetTime: string;
+    prefix: string;
+  }): Promise<void> {
+    const {
+      dataSource,
+      userId,
+      slotId,
+      productId,
+      targetDate,
+      targetTime,
+      prefix,
+    } = input;
+    await dataSource.transaction(async (manager) => {
+      for (let index = 0; index < 29; index += 1) {
+        const date = shiftIsoDate(targetDate, -index);
+        await insertHistoryJournal(manager, {
+          id: `${prefix}-j-${padHistoryIndex(index)}`,
+          userId,
+          date,
+          concerns: index % 2 === 0 ? ['dryness'] : ['texture'],
+        });
+      }
+      await insertHistoryJournal(manager, {
+        id: `${prefix}-j-bf`,
+        userId,
+        date: shiftIsoDate(targetDate, -45),
+        concerns: ['barrier'],
+      });
+
+      for (let index = 0; index < 29; index += 1) {
+        const date = shiftIsoDate(targetDate, -(index + 1));
+        await insertHistoryApplication(manager, {
+          logId: `${prefix}-l-${padHistoryIndex(index)}`,
+          itemId: `${prefix}-li-${padHistoryIndex(index)}`,
+          userId,
+          slotId,
+          productId,
+          date,
+          targetTime,
+        });
+      }
+      await insertHistoryApplication(manager, {
+        logId: `${prefix}-l-bf`,
+        itemId: `${prefix}-li-bf`,
+        userId,
+        slotId,
+        productId,
+        date: shiftIsoDate(targetDate, -45),
+        targetTime,
+      });
+
+      for (let index = 0; index < 29; index += 1) {
+        const date = shiftIsoDate(targetDate, -(index + 1));
+        await insertHistorySuggestion(manager, {
+          suggestionId: `${prefix}-s-${padHistoryIndex(index)}`,
+          stepId: `${prefix}-ss-${padHistoryIndex(index)}`,
+          userId,
+          productId,
+          date,
+          targetTime,
+        });
+      }
+      await insertHistorySuggestion(manager, {
+        suggestionId: `${prefix}-s-bf`,
+        stepId: `${prefix}-ss-bf`,
+        userId,
+        productId,
+        date: shiftIsoDate(targetDate, -45),
+        targetTime,
+      });
+
+      for (let index = 0; index < 29; index += 1) {
+        const date = shiftIsoDate(targetDate, -(index + 1));
+        await insertHistoryRoutineBreak(manager, {
+          id: `${prefix}-b-${padHistoryIndex(index)}`,
+          userId,
+          date,
+        });
+      }
+      await insertHistoryRoutineBreak(manager, {
+        id: `${prefix}-b-bf`,
+        userId,
+        date: shiftIsoDate(targetDate, -45),
+      });
+    });
+  }
+
+  async function cleanupSeededSuggestionContextHistory(
+    dataSource: DataSource,
+    prefix: string,
+  ): Promise<void> {
+    const pattern = `${prefix}-%`;
+    await dataSource.query(
+      'DELETE FROM application_log_items WHERE id LIKE $1',
+      [pattern],
+    );
+    await dataSource.query('DELETE FROM application_logs WHERE id LIKE $1', [
+      pattern,
+    ]);
+    await dataSource.query('DELETE FROM suggestion_steps WHERE id LIKE $1', [
+      pattern,
+    ]);
+    await dataSource.query(
+      'DELETE FROM suggestion_instances WHERE id LIKE $1',
+      [pattern],
+    );
+    await dataSource.query('DELETE FROM routine_breaks WHERE id LIKE $1', [
+      pattern,
+    ]);
+    await dataSource.query(
+      'DELETE FROM skin_journal_entries WHERE id LIKE $1',
+      [pattern],
+    );
+  }
+
+  async function moveExistingContextOutsideWindow(
+    dataSource: DataSource,
+    userId: string,
+    targetDate: string,
+  ): Promise<void> {
+    const outsideWindowDate = shiftIsoDate(targetDate, -60);
+    const protectedHistoryPattern = 'bfctx-%';
+    await dataSource.query(
+      `
+        UPDATE application_logs
+        SET target_date = $3
+        WHERE user_id = $1 AND id NOT LIKE $2
+      `,
+      [userId, protectedHistoryPattern, outsideWindowDate],
+    );
+    await dataSource.query(
+      `
+        UPDATE suggestion_instances
+        SET target_date = $3
+        WHERE user_id = $1 AND id NOT LIKE $2
+      `,
+      [userId, protectedHistoryPattern, outsideWindowDate],
+    );
+  }
+
+  async function insertHistoryJournal(
+    manager: EntityManager,
+    input: {
+      id: string;
+      userId: string;
+      date: string;
+      concerns: string[];
+    },
+  ): Promise<void> {
+    await manager.query(
+      `
+        INSERT INTO skin_journal_entries (
+          id, user_id, entry_date, time_zone, analysis_status,
+          analysis_concern_keys, has_reaction_signal, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, 'completed', $5, false, $6, $6)
+      `,
+      [
+        input.id,
+        input.userId,
+        input.date,
+        'Europe/Stockholm',
+        input.concerns,
+        new Date(`${input.date}T06:00:00.000Z`),
+      ],
+    );
+  }
+
+  async function insertHistoryApplication(
+    manager: EntityManager,
+    input: {
+      logId: string;
+      itemId: string;
+      userId: string;
+      slotId: string;
+      productId: string;
+      date: string;
+      targetTime: string;
+    },
+  ): Promise<void> {
+    await manager.query(
+      `
+        INSERT INTO application_logs (
+          id, user_id, slot_id, target_date, target_time, daypart,
+          applied_at, has_been_edited, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, 'morning', $6, false, $6, $6)
+      `,
+      [
+        input.logId,
+        input.userId,
+        input.slotId,
+        input.date,
+        input.targetTime,
+        new Date(`${input.date}T07:30:00.000Z`),
+      ],
+    );
+    await manager.query(
+      `
+        INSERT INTO application_log_items (
+          id, application_log_id, step_order, inventory_product_id,
+          product_brand_snapshot, product_name_snapshot, step_label,
+          status, item_source, applied_at, created_at, updated_at
+        )
+        VALUES ($1, $2, 0, $3, 'Ritora', 'Schedule Fixture Moisturizer',
+          $4, $5, $6, $7, $7, $7)
+      `,
+      [
+        input.itemId,
+        input.logId,
+        input.productId,
+        ProductCategory.Moisturizer,
+        ApplicationItemStatus.Applied,
+        ApplicationItemSource.Recommended,
+        new Date(`${input.date}T07:31:00.000Z`),
+      ],
+    );
+  }
+
+  async function insertHistorySuggestion(
+    manager: EntityManager,
+    input: {
+      suggestionId: string;
+      stepId: string;
+      userId: string;
+      productId: string;
+      date: string;
+      targetTime: string;
+    },
+  ): Promise<void> {
+    await manager.query(
+      `
+        INSERT INTO suggestion_instances (
+          id, user_id, slot_id, request_source, target_date, target_time,
+          daypart, mode, generation_status, visible_at, generated_at,
+          has_reaction_signal, simplified_for_reaction, ai_retry_count,
+          created_at, updated_at
+        )
+        VALUES ($1, $2, null, $3, $4, $5, 'morning', $6, $7, $8, $8,
+          false, false, 0, $8, $8)
+      `,
+      [
+        input.suggestionId,
+        input.userId,
+        SuggestionRequestSource.OnDemand,
+        input.date,
+        input.targetTime,
+        SuggestionMode.Ai,
+        SuggestionGenerationStatus.Ready,
+        new Date(`${input.date}T06:45:00.000Z`),
+      ],
+    );
+    await manager.query(
+      `
+        INSERT INTO suggestion_steps (
+          id, suggestion_instance_id, step_order, routine_step_id,
+          inventory_product_id, product_brand_snapshot,
+          product_name_snapshot, step_label, custom_label,
+          application_method, quantity, wait_after_minutes, explanation,
+          routine_note_snapshot, provenance, chips, safety_warnings,
+          created_at
+        )
+        VALUES ($1, $2, 0, null, $3, 'Ritora',
+          'Schedule Fixture Moisturizer', $4, null, null, null, null,
+          null, null, $5, null, null, $6)
+      `,
+      [
+        input.stepId,
+        input.suggestionId,
+        input.productId,
+        ProductCategory.Moisturizer,
+        SuggestionStepProvenance.AiAdded,
+        new Date(`${input.date}T06:46:00.000Z`),
+      ],
+    );
+  }
+
+  async function insertHistoryRoutineBreak(
+    manager: EntityManager,
+    input: { id: string; userId: string; date: string },
+  ): Promise<void> {
+    await manager.query(
+      `
+        INSERT INTO routine_breaks (
+          id, user_id, starts_at, ends_at, reason, status, resumed_at,
+          created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, null, 'resumed', $4, $3, $4)
+      `,
+      [
+        input.id,
+        input.userId,
+        new Date(`${input.date}T04:00:00.000Z`),
+        new Date(`${input.date}T05:00:00.000Z`),
+      ],
+    );
+  }
 });
 
 function readString(value: unknown, key: string): string {
@@ -425,7 +1160,10 @@ function dayOfWeekForIsoDate(date: string, timeZone: string): string {
   return weekday.toLowerCase();
 }
 
-function openTodaySlotWindow(): { timeZone: string; slotTime: string } {
+function openTodaySlotWindow(minutesAhead = 30): {
+  timeZone: string;
+  slotTime: string;
+} {
   const candidates = [
     'Europe/Stockholm',
     'UTC',
@@ -434,8 +1172,8 @@ function openTodaySlotWindow(): { timeZone: string; slotTime: string } {
   ];
   for (const timeZone of candidates) {
     const minutes = localMinutesOfDay(new Date(), timeZone);
-    if (minutes <= 23 * 60 + 20) {
-      return { timeZone, slotTime: minutesToSlotTime(minutes + 30) };
+    if (minutes <= 23 * 60 + (59 - minutesAhead)) {
+      return { timeZone, slotTime: minutesToSlotTime(minutes + minutesAhead) };
     }
   }
   return { timeZone: 'UTC', slotTime: '23:59' };
@@ -468,6 +1206,10 @@ function shiftIsoDate(date: string, days: number): string {
   const current = new Date(`${date}T00:00:00.000Z`);
   current.setUTCDate(current.getUTCDate() + days);
   return current.toISOString().slice(0, 10);
+}
+
+function padHistoryIndex(index: number): string {
+  return index.toString().padStart(2, '0');
 }
 
 function buildOutput(

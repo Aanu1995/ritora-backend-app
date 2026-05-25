@@ -322,7 +322,9 @@ describe('Community (e2e)', () => {
         irritationRating: 1,
         outcomes: ['barrier'],
         repurchase: 'yes',
-        routineContext: [{ category: 'cleanser', productName: 'Milky Cleanser' }],
+        routineContext: [
+          { category: 'cleanser', productName: 'Milky Cleanser' },
+        ],
         body: 'This felt comfortable in my routine.',
       })
       .expect(403);

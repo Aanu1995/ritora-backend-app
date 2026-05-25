@@ -26,6 +26,7 @@ import {
   EnvironmentWaterSensitivity,
 } from '../../environment-intelligence/environment-intelligence.constants';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
+import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionEvidenceSourceId } from '../suggestions.constants';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
 
@@ -63,6 +64,7 @@ describe('SuggestionContextBuilder', () => {
       ],
       recentJournalEntries: [reactionJournalEntry()],
       recentApplications: [applicationLog()],
+      recentSuggestions: [previousSuggestion()],
       environment: highUvDryEnvironment(),
     });
 
@@ -81,6 +83,105 @@ describe('SuggestionContextBuilder', () => {
         affectedZones: ['cheeks'],
         photoInputImages: 3,
         multiAnglePhotoEntries: 1,
+      }),
+    );
+    expect(summary.goalSignals).toEqual(
+      expect.objectContaining({
+        mainGoal: 'fade hyperpigmentation',
+        primaryGoal: 'fade hyperpigmentation',
+        selectedGoals: ['redness', 'dark spots'],
+        activeConcernCount: 2,
+        secondaryGoals: expect.arrayContaining([
+          expect.objectContaining({
+            concern: 'dark spots',
+            priority: 1,
+            severity: 'moderate',
+            durationMonths: 10,
+            locations: ['cheeks'],
+          }),
+        ]),
+      }),
+    );
+    expect(summary.profileSignals).toEqual(
+      expect.objectContaining({
+        routinePreferences: expect.objectContaining({
+          pace: 'slow',
+          maxActiveNightsPerWeek: 2,
+          fragranceFree: true,
+        }),
+        skinBehavior: expect.objectContaining({
+          pihTendency: 'high',
+          sunscreenHabit: 'daily',
+        }),
+      }),
+    );
+    expect(summary.journalSignals).toEqual(
+      expect.objectContaining({
+        recordsConsidered: 1,
+        checkIns: expect.objectContaining({
+          stressCounts: { high: 1 },
+          sleepCounts: { lt5h: 1 },
+          sunExposureCounts: { lots: 1 },
+          sweatExerciseDays: 1,
+          recentChangeKinds: ['started_new_product'],
+          complaintNotes: ['Stinging around cheeks after yesterday.'],
+        }),
+        trendSignals: expect.arrayContaining([
+          'reaction_signal_present',
+          'barrier_compromised',
+          'sun_exposure_recent',
+          'sweat_exercise_recent',
+          'new_product_recently_started',
+        ]),
+      }),
+    );
+    expect(summary.appliedProductHistory).toEqual(
+      expect.objectContaining({
+        windowStartDate: '2026-03-31',
+        windowEndDate: '2026-04-29',
+        recordsConsidered: 1,
+        products: expect.arrayContaining([
+          expect.objectContaining({
+            productId: 'spf-1',
+            brand: 'North Sun',
+            name: 'Daily SPF 50 Sunscreen',
+            statuses: ['substituted'],
+            sourceTypes: ['added_off_shelf'],
+            dayparts: ['morning'],
+            useCount: 1,
+            isOffShelf: true,
+            isSubstitution: true,
+          }),
+        ]),
+      }),
+    );
+    expect(summary.routineMemory).toEqual(
+      expect.objectContaining({
+        previousSuggestionCount: 1,
+        sameDaypartSuggestionCount: 1,
+        skippedProducts: { 'retinoid-1': 1 },
+        substitutedProducts: { 'spf-1': 1 },
+        adheredProducts: { 'spf-1': 1 },
+        editedLogCount: 1,
+        offShelfUseCount: 1,
+      }),
+    );
+    expect(summary.routineMemory?.recentSameDaypartFingerprints[0]).toEqual(
+      expect.objectContaining({
+        productIds: ['spf-1'],
+        productNames: ['North Sun Daily SPF 50 Sunscreen'],
+      }),
+    );
+    expect(summary.environmentSignals).toEqual(
+      expect.objectContaining({
+        signalKinds: expect.arrayContaining([
+          EnvironmentSignalKind.HighUv,
+          EnvironmentSignalKind.LowHumidity,
+        ]),
+        safetyConstraints: expect.arrayContaining([
+          'environment_high_uv',
+          'environment_barrier_support',
+        ]),
       }),
     );
     expect(summary.applicationPatterns).toEqual(
@@ -271,8 +372,54 @@ function skinProfile(): SkinProfile {
     sensitivity_level: 'high',
     current_concerns: ['redness', 'dark spots'],
     pregnancy_status: null,
+    concern_details: {
+      per_concern: [
+        {
+          concern: 'dark spots',
+          severity: 'moderate',
+          duration_months: 10,
+          priority: 1,
+          locations: ['cheeks'],
+          subtype: 'post-inflammatory hyperpigmentation',
+          triggers: ['sun exposure'],
+        },
+        {
+          concern: 'redness',
+          severity: 'mild',
+          duration_months: 2,
+          priority: 2,
+          locations: ['cheeks'],
+        },
+      ],
+    },
+    safety_context: {
+      conditions: ['eczema-prone'],
+      medications: [],
+      photosensitizing_other: false,
+      recent_procedures: [],
+    },
+    routine_preferences: {
+      pace: 'slow',
+      max_active_nights_per_week: 2,
+      fragrance_free: true,
+      non_comedogenic: true,
+      sunscreen_filter: 'mineral',
+      sunscreen_finish: 'natural',
+    },
+    skin_behavior: {
+      pih_tendency: 'high',
+      sunscreen_habit: 'daily',
+      sunscreen_tolerance: 'good',
+    },
+    shopping_preferences: {
+      ingredient_dislikes: ['fragrance'],
+      texture_preferences: ['lightweight'],
+    },
+    active_tolerances: {
+      retinal: { tolerance: 'low', last_used: '2026-04-21' },
+    },
     updated_at: new Date('2026-04-28T10:00:00.000Z'),
-  } as SkinProfile;
+  } as unknown as SkinProfile;
 }
 
 function emptyInput() {
@@ -413,7 +560,30 @@ function reactionJournalEntry(): SkinJournalEntry {
     entry_date: '2026-04-29',
     photo_object_key: 'skin-journal/user-1/2026-04-29.jpg',
     has_reaction_signal: true,
+    overall_feel: 'bad',
+    sleep_band: 'lt5h',
+    stress_today: 'high',
+    sun_exposure_today: 'lots',
+    sweat_exercise_today: true,
+    cycle_marker: 'late_cycle',
+    recent_change: {
+      kind: 'started_new_product',
+      related_inventory_product_id: 'retinoid-1',
+    },
+    complaint_note: 'Stinging around cheeks after yesterday.',
+    ratings: {
+      dryness: 4,
+      irritation: 4,
+      sensitivity: 4,
+    },
     analysis_observations: {
+      image_quality: {
+        face_detected: true,
+        lighting_quality: 'good',
+        framing_quality: 'good',
+        blur_detected: false,
+        issues: [],
+      },
       per_angle_quality: [
         { angle: 'head_on' },
         { angle: 'left_profile' },
@@ -445,6 +615,7 @@ function applicationLog(): ApplicationLog {
   return {
     id: 'log-1',
     target_date: '2026-04-28',
+    daypart: 'morning',
     has_been_edited: true,
     updated_at: new Date('2026-04-28T20:00:00.000Z'),
     items: [
@@ -458,8 +629,35 @@ function applicationLog(): ApplicationLog {
         status: 'substituted',
         step_label: ProductCategory.Serum,
         is_ad_hoc: true,
+        item_source: 'added_off_shelf',
         substituted_with_product_id: 'spf-1',
+        applied_snapshot: {
+          product_id: 'spf-1',
+          brand: 'North Sun',
+          name: 'Daily SPF 50 Sunscreen',
+          step_label: ProductCategory.SunProtection,
+        },
+        applied_at: new Date('2026-04-28T07:45:00.000Z'),
       },
     ],
   } as unknown as ApplicationLog;
+}
+
+function previousSuggestion(): SuggestionInstance {
+  return {
+    id: 'suggestion-1',
+    target_date: '2026-04-28',
+    target_time: '08:00',
+    daypart: 'morning',
+    steps: [
+      {
+        id: 'suggestion-step-1',
+        step_order: 0,
+        inventory_product_id: 'spf-1',
+        product_brand_snapshot: 'North Sun',
+        product_name_snapshot: 'Daily SPF 50 Sunscreen',
+      },
+    ],
+    created_at: new Date('2026-04-28T06:00:00.000Z'),
+  } as SuggestionInstance;
 }

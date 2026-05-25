@@ -315,7 +315,11 @@ export class MailService {
     await this.sendEmail({
       from: this.authFrom,
       to: email,
-      subject: translate(language, 'mail.subject.verification', translateValues),
+      subject: translate(
+        language,
+        'mail.subject.verification',
+        translateValues,
+      ),
       html,
     });
   }
@@ -1157,11 +1161,7 @@ export class MailService {
       sectionTitle: translate(input.language, input.sectionTitleKey, values),
       sectionItems,
       sectionStyle: input.sectionStyle,
-      note: translate(
-        input.language,
-        `${input.translationBase}.note`,
-        values,
-      ),
+      note: translate(input.language, `${input.translationBase}.note`, values),
       fallbackIntro: translate(
         input.language,
         `${input.translationBase}.fallbackIntro`,

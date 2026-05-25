@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddCommunityReviewEvidenceFields1722600000000
-  implements MigrationInterface
-{
+export class AddCommunityReviewEvidenceFields1722600000000 implements MigrationInterface {
   name = 'AddCommunityReviewEvidenceFields1722600000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

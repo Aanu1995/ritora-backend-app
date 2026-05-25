@@ -22,6 +22,48 @@ import {
 } from './todays-suggestion-evaluation.runner';
 
 describe("Today's Suggestion evaluation hard checks", () => {
+  it('keeps public-readiness golden cases for the highest-risk Today suggestion scenarios', () => {
+    expect(TODAYS_SUGGESTION_GOLDEN_CASES.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        'pregnancy_retinoid_caution',
+        'medication_active_caution',
+        'active_reaction_barrier_damage',
+        'acne_pigment_priority_conflict',
+        'sparse_history_partial_shelf',
+        'repeated_morning_routine_history',
+      ]),
+    );
+  });
+
+  it('gives repeated-routine golden cases structured product and routine history', () => {
+    const evaluationCase = goldenCase('repeated_morning_routine_history');
+
+    expect(evaluationCase.inputs.contextSummary.routineMemory).toEqual(
+      expect.objectContaining({
+        sameDaypartSuggestionCount: 30,
+        adheredProducts: expect.objectContaining({
+          'cleanser-1': 30,
+          'moisturizer-1': 30,
+          'spf-1': 30,
+        }),
+        exactRepeatCountByFingerprint: expect.objectContaining({
+          'cleanser-1|moisturizer-1|spf-1': 30,
+        }),
+      }),
+    );
+    expect(
+      evaluationCase.inputs.contextSummary.appliedProductHistory?.products,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'spf-1',
+          name: 'Daily SPF 50',
+          useCount: 30,
+        }),
+      ]),
+    );
+  });
+
   it('passes a source-backed missing-SPF gap case', () => {
     const evaluationCase = goldenCase('dark_marks_no_spf_gap');
     const checks = runTodaysSuggestionHardChecks(

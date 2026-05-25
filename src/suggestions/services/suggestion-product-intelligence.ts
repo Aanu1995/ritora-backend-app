@@ -19,6 +19,12 @@ import {
   mergeEvidenceSourceIds,
   sourceIdsForActiveTags,
 } from './suggestion-evidence-sources';
+import {
+  scoreSuggestionProductGoalFit,
+  SuggestionProductGoalFitReason,
+} from './suggestion-goal-intelligence';
+
+export { SuggestionProductGoalFitReason } from './suggestion-goal-intelligence';
 
 export enum SuggestionProductDataWarning {
   IngredientListMissing = 'ingredient list missing',
@@ -69,13 +75,19 @@ export function scoreProductForSuggestion(
   options: {
     daypart: SuggestionDaypart;
     primaryGoal: string | null;
+    secondaryGoals?: string[];
     sensitivityLevel: string | null;
     recentUseCount: number;
+    adherenceCount?: number;
+    skipCount?: number;
+    substitutionCount?: number;
+    recentSameDaypartSuggestionCount?: number;
     hasReactionSignal: boolean;
     lockedProductIds: Set<string>;
     conservativeRestart: boolean;
     ingredientIntelligence?: ProductIngredientIntelligence;
     environment?: EnvironmentContextSummary | null;
+    targetDate?: string;
   },
 ): SuggestionProductScore {
   const activeTags = detectActiveTags(product);
@@ -111,9 +123,37 @@ export function scoreProductForSuggestion(
       cautions,
     );
   }
-  if (matchesGoal(product, options.primaryGoal)) {
-    score += 12;
-    reasons.push('matches primary skin goal');
+  const goalFit = scoreSuggestionProductGoalFit(product, {
+    primaryGoal: options.primaryGoal,
+    secondaryGoals: options.secondaryGoals ?? [],
+    activeTags,
+  });
+  if (goalFit.primaryMatch) {
+    score += 16;
+    reasons.push(SuggestionProductGoalFitReason.PrimarySelectedGoal);
+  }
+  if (goalFit.secondaryMatch) {
+    score += 8;
+    reasons.push(SuggestionProductGoalFitReason.SecondarySelectedGoal);
+  }
+  if ((options.adherenceCount ?? 0) > 0) {
+    score += Math.min(8, (options.adherenceCount ?? 0) * 2);
+    reasons.push('recently applied by user');
+  }
+  if ((options.skipCount ?? 0) > 0) {
+    score -= Math.min(16, (options.skipCount ?? 0) * 8);
+    cautions.push('recently skipped by user');
+  }
+  if ((options.substitutionCount ?? 0) > 0) {
+    score -= Math.min(12, (options.substitutionCount ?? 0) * 6);
+    cautions.push('recently substituted by user');
+  }
+  if (
+    (options.recentSameDaypartSuggestionCount ?? 0) > 0 &&
+    !isRepeatProtectedProduct(product, activeTags, options)
+  ) {
+    score -= Math.min(16, (options.recentSameDaypartSuggestionCount ?? 0) * 8);
+    cautions.push('recent same-daypart repeat');
   }
   if (options.recentUseCount > 4 && activeTags.some(isStrongActiveTag)) {
     score -= 18;
@@ -157,6 +197,10 @@ export function scoreProductForSuggestion(
       reasons,
       cautions,
     );
+  }
+  if (isExpiredForTargetDate(product, options.targetDate)) {
+    score -= 20;
+    cautions.push('product may be expired');
   }
 
   return {
@@ -287,6 +331,37 @@ function isDaytimeSuggestion(daypart: SuggestionDaypart): boolean {
   );
 }
 
+function isRepeatProtectedProduct(
+  product: InventoryProduct,
+  activeTags: string[],
+  options: {
+    daypart: SuggestionDaypart;
+    lockedProductIds: Set<string>;
+    hasReactionSignal: boolean;
+    recentUseCount: number;
+  },
+): boolean {
+  return (
+    options.lockedProductIds.has(product.id) ||
+    product.category === ProductCategory.SunProtection ||
+    (options.hasReactionSignal &&
+      (product.category === ProductCategory.Moisturizer ||
+        activeTags.some(
+          (tag) => tag === 'barrier_support' || tag === 'ceramide',
+        ))) ||
+    options.recentUseCount >= 6
+  );
+}
+
+function isExpiredForTargetDate(
+  product: InventoryProduct,
+  targetDate: string | undefined,
+): boolean {
+  if (!targetDate || !product.effective_expires_at) return false;
+  const targetEnd = new Date(`${targetDate}T23:59:59.999Z`).getTime();
+  return product.effective_expires_at.getTime() < targetEnd;
+}
+
 function applyEnvironmentReasons(
   category: ProductCategory,
   environment: EnvironmentContextSummary,
@@ -311,23 +386,4 @@ function applyEnvironmentReasons(
   ) {
     cautions.push('dry air can make exfoliation feel harsher');
   }
-}
-
-function matchesGoal(
-  product: InventoryProduct,
-  primaryGoal: string | null,
-): boolean {
-  if (!primaryGoal) return false;
-  const goal = primaryGoal.toLowerCase();
-  const text = [
-    product.category,
-    ...(product.identity?.benefits ?? []),
-    ...(product.identity?.suitedFor ?? []),
-  ]
-    .join(' ')
-    .toLowerCase();
-  return goal
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .some((token) => token.length > 3 && text.includes(token));
 }

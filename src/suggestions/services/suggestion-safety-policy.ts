@@ -23,7 +23,13 @@ import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
 import { isStrongActiveTag } from './suggestion-product-intelligence';
 
 export function buildSafetyConstraints(
-  context: Pick<SuggestionContextSummary, 'reaction' | 'productScores'>,
+  context: Pick<SuggestionContextSummary, 'reaction' | 'productScores'> &
+    Partial<
+      Pick<
+        SuggestionContextSummary,
+        'profileSignals' | 'safetyConstraints' | 'skinProfile'
+      >
+    >,
 ): string[] {
   const constraints: string[] = [];
   if (context.reaction.hasSignal || context.reaction.barrierCompromised) {
@@ -41,6 +47,9 @@ export function buildSafetyConstraints(
     )
   ) {
     constraints.push('space_strong_actives');
+  }
+  if (hasPregnancyOrMedicationCaution(context)) {
+    constraints.push('pregnancy_or_medication_active_caution');
   }
   return constraints;
 }
@@ -298,11 +307,22 @@ function localizedEnvironmentSignalMessage(
 }
 
 function hasPregnancyOrMedicationCaution(
-  context: SuggestionContextSummary,
+  context: Partial<
+    Pick<
+      SuggestionContextSummary,
+      'profileSignals' | 'safetyConstraints' | 'skinProfile'
+    >
+  >,
 ): boolean {
+  const safety = context.profileSignals?.safety;
   return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(
     JSON.stringify([
-      context.skinProfile.pregnancyStatus ?? '',
+      context.skinProfile?.pregnancyStatus ?? '',
+      safety?.pregnancyStatus ?? '',
+      safety?.conditions ?? [],
+      safety?.medications ?? [],
+      safety?.photosensitizingOther ? 'photosensitizing medication' : '',
+      safety?.underDermatologistCare ?? '',
       context.safetyConstraints,
     ]),
   );

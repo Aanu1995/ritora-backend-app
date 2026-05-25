@@ -1,0 +1,355 @@
+import { toDateOnlyString } from '../../common/utils/date';
+import {
+  ApplicationItemSource,
+  ApplicationItemStatus,
+} from '../../application-tracking/application-tracking.constants';
+import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { ApplicationLogItem } from '../../application-tracking/entities/application-log-item.entity';
+import { SuggestionContextSummary } from '../suggestion-context.types';
+import { SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS } from '../suggestions.constants';
+import { suggestionHistoryWindow } from './suggestion-historical-window';
+import { daysBetween, increment, unique } from './suggestion-context-common';
+
+export type ApplicationProductSignal = {
+  adheredCount: number;
+  skipCount: number;
+  substitutedAwayCount: number;
+  substitutedInCount: number;
+};
+
+export type ResolvedApplicationProduct = {
+  productId: string | null;
+  brand: string | null;
+  name: string | null;
+  category: string | null;
+  stepLabel: string | null;
+  sourceType: string;
+  status: string;
+  isOffShelf: boolean;
+  isSubstitution: boolean;
+  appliedAt: string | null;
+};
+
+type AppliedProductAccumulator = {
+  productId: string | null;
+  brand: string | null;
+  name: string | null;
+  category: string | null;
+  stepLabel: string | null;
+  sourceTypes: Set<string>;
+  dayparts: Set<string>;
+  statuses: Set<string>;
+  useCount: number;
+  lastAppliedDate: string | null;
+  lastAppliedAt: string | null;
+  isOffShelf: boolean;
+  isSubstitution: boolean;
+};
+
+export function buildAppliedProductHistory(
+  logs: ApplicationLog[],
+  targetDate: string,
+): NonNullable<SuggestionContextSummary['appliedProductHistory']> {
+  const { fromDate, toDate } = suggestionHistoryWindow(targetDate);
+  const byProduct = new Map<string, AppliedProductAccumulator>();
+
+  for (const log of logs) {
+    for (const item of log.items ?? []) {
+      const product = resolveAppliedProduct(item);
+      if (!product) continue;
+      const key = applicationProductKey(product);
+      const existing =
+        byProduct.get(key) ??
+        ({
+          productId: product.productId,
+          brand: product.brand,
+          name: product.name,
+          category: product.category,
+          stepLabel: product.stepLabel,
+          sourceTypes: new Set<string>(),
+          dayparts: new Set<string>(),
+          statuses: new Set<string>(),
+          useCount: 0,
+          lastAppliedDate: null,
+          lastAppliedAt: null,
+          isOffShelf: false,
+          isSubstitution: false,
+        } satisfies AppliedProductAccumulator);
+      existing.sourceTypes.add(product.sourceType);
+      if (log.daypart) existing.dayparts.add(log.daypart);
+      existing.statuses.add(product.status);
+      existing.useCount += 1;
+      existing.isOffShelf = existing.isOffShelf || product.isOffShelf;
+      existing.isSubstitution =
+        existing.isSubstitution || product.isSubstitution;
+      existing.category = existing.category ?? product.category;
+      existing.stepLabel = existing.stepLabel ?? product.stepLabel;
+      const appliedDate = toDateOnlyString(log.target_date);
+      if (!existing.lastAppliedDate || existing.lastAppliedDate < appliedDate) {
+        existing.lastAppliedDate = appliedDate;
+      }
+      const appliedAt =
+        product.appliedAt ??
+        log.applied_at?.toISOString() ??
+        log.updated_at?.toISOString() ??
+        null;
+      if (
+        appliedAt &&
+        (!existing.lastAppliedAt || existing.lastAppliedAt < appliedAt)
+      ) {
+        existing.lastAppliedAt = appliedAt;
+      }
+      byProduct.set(key, existing);
+    }
+  }
+
+  return {
+    windowStartDate: fromDate,
+    windowEndDate: toDate,
+    recordsConsidered: logs.length,
+    products: Array.from(byProduct.values())
+      .map((product) => ({
+        productId: product.productId,
+        brand: product.brand,
+        name: product.name,
+        category: product.category,
+        stepLabel: product.stepLabel,
+        sourceTypes: Array.from(product.sourceTypes),
+        dayparts: Array.from(product.dayparts),
+        statuses: Array.from(product.statuses),
+        useCount: product.useCount,
+        lastAppliedDate: product.lastAppliedDate,
+        lastAppliedAt: product.lastAppliedAt,
+        isOffShelf: product.isOffShelf,
+        isSubstitution: product.isSubstitution,
+      }))
+      .sort(compareAppliedProductHistory)
+      .slice(0, 50),
+  };
+}
+
+export function buildApplicationProductSignals(
+  logs: ApplicationLog[],
+): Map<string, ApplicationProductSignal> {
+  const map = new Map<string, ApplicationProductSignal>();
+  for (const log of logs) {
+    for (const item of log.items ?? []) {
+      const applied = resolveAppliedProduct(item);
+      const recommended = resolveRecommendedProduct(item);
+      if (
+        item.status === ApplicationItemStatus.Skipped &&
+        recommended?.productId
+      ) {
+        productSignal(map, recommended.productId).skipCount += 1;
+      }
+      if (
+        item.status === ApplicationItemStatus.Substituted &&
+        recommended?.productId
+      ) {
+        productSignal(map, recommended.productId).substitutedAwayCount += 1;
+      }
+      if (
+        item.status === ApplicationItemStatus.Substituted &&
+        applied?.productId
+      ) {
+        productSignal(map, applied.productId).substitutedInCount += 1;
+        productSignal(map, applied.productId).adheredCount += 1;
+      }
+      if (item.status === ApplicationItemStatus.Applied && applied?.productId) {
+        productSignal(map, applied.productId).adheredCount += 1;
+      }
+    }
+  }
+  return map;
+}
+
+export function buildApplicationPatterns(
+  logs: ApplicationLog[],
+  targetDate: string,
+): SuggestionContextSummary['applicationPatterns'] {
+  const skippedByCategory: Record<string, number> = {};
+  const substitutedByCategory: Record<string, number> = {};
+  const adherenceByCategory: Record<string, number> = {};
+  let addedOffShelfCount = 0;
+  let editedLogCount = 0;
+  const applicationDates = logs
+    .map((log) => toDateOnlyString(log.target_date))
+    .filter((date) => date <= toDateOnlyString(targetDate))
+    .sort((a, b) => (a < b ? 1 : -1));
+  const daysSinceLastApplication = applicationDates[0]
+    ? daysBetween(applicationDates[0], targetDate)
+    : null;
+  for (const log of logs) {
+    if (log.has_been_edited) editedLogCount += 1;
+    for (const item of log.items ?? []) {
+      const category = item.step_label ?? 'unknown';
+      if (item.status === 'skipped') increment(skippedByCategory, category);
+      if (item.status === 'substituted')
+        increment(substitutedByCategory, category);
+      if (item.status === 'applied') increment(adherenceByCategory, category);
+      if (item.is_ad_hoc) addedOffShelfCount += 1;
+    }
+  }
+  return {
+    days: unique(logs.map((log) => toDateOnlyString(log.target_date))).length,
+    daysSinceLastApplication,
+    conservativeRestart:
+      daysSinceLastApplication === null ||
+      daysSinceLastApplication >= SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS,
+    skippedByCategory,
+    substitutedByCategory,
+    addedOffShelfCount,
+    editedLogCount,
+    adherenceByCategory,
+  };
+}
+
+export function buildRecentUseByProduct(
+  logs: ApplicationLog[],
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const log of logs) {
+    for (const item of log.items ?? []) {
+      const product = resolveAppliedProduct(item);
+      if (product?.productId) {
+        map.set(product.productId, (map.get(product.productId) ?? 0) + 1);
+      }
+    }
+  }
+  return map;
+}
+
+export function resolveAppliedProduct(
+  item: ApplicationLogItem,
+): ResolvedApplicationProduct | null {
+  if (item.status === ApplicationItemStatus.Skipped) return null;
+  const snapshot =
+    item.applied_snapshot ??
+    (item.status === ApplicationItemStatus.Applied
+      ? item.recommended_snapshot
+      : null);
+  const product =
+    item.status === ApplicationItemStatus.Substituted
+      ? item.substituted_with_product
+      : item.product;
+  const productId =
+    snapshot?.product_id ??
+    (item.status === ApplicationItemStatus.Substituted
+      ? item.substituted_with_product_id
+      : item.inventory_product_id) ??
+    product?.id ??
+    null;
+  const brand =
+    snapshot?.brand ??
+    product?.brand ??
+    item.ad_hoc_brand ??
+    item.product_brand_snapshot ??
+    null;
+  const name =
+    snapshot?.name ??
+    product?.name ??
+    item.ad_hoc_name ??
+    item.product_name_snapshot ??
+    null;
+  if (!productId && !brand && !name) return null;
+  return {
+    productId,
+    brand,
+    name,
+    category: product?.category ?? null,
+    stepLabel:
+      snapshot?.step_label ?? item.step_label ?? product?.category ?? null,
+    sourceType: item.item_source ?? ApplicationItemSource.Recommended,
+    status: item.status,
+    isOffShelf:
+      item.is_ad_hoc ||
+      item.item_source === ApplicationItemSource.AddedOffShelf ||
+      (!productId && Boolean(brand || name)),
+    isSubstitution: item.status === ApplicationItemStatus.Substituted,
+    appliedAt: item.applied_at?.toISOString() ?? null,
+  };
+}
+
+export function applicationProductKey(
+  product: ResolvedApplicationProduct,
+): string {
+  if (product.productId) return product.productId;
+  return [product.brand, product.name, product.category, product.stepLabel]
+    .filter(Boolean)
+    .join(':')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function productSignal(
+  map: Map<string, ApplicationProductSignal>,
+  productId: string,
+): ApplicationProductSignal {
+  const existing = map.get(productId);
+  if (existing) return existing;
+  const created = {
+    adheredCount: 0,
+    skipCount: 0,
+    substitutedAwayCount: 0,
+    substitutedInCount: 0,
+  };
+  map.set(productId, created);
+  return created;
+}
+
+function compareAppliedProductHistory(
+  first: NonNullable<
+    SuggestionContextSummary['appliedProductHistory']
+  >['products'][number],
+  second: NonNullable<
+    SuggestionContextSummary['appliedProductHistory']
+  >['products'][number],
+): number {
+  if (first.useCount !== second.useCount)
+    return second.useCount - first.useCount;
+  const firstApplied = first.lastAppliedAt ?? first.lastAppliedDate ?? '';
+  const secondApplied = second.lastAppliedAt ?? second.lastAppliedDate ?? '';
+  if (firstApplied !== secondApplied)
+    return firstApplied < secondApplied ? 1 : -1;
+  return (first.name ?? '').localeCompare(second.name ?? '');
+}
+export function resolveRecommendedProduct(
+  item: ApplicationLogItem,
+): ResolvedApplicationProduct | null {
+  const snapshot = item.recommended_snapshot;
+  const productId =
+    snapshot?.product_id ??
+    item.inventory_product_id ??
+    item.product?.id ??
+    null;
+  const brand =
+    snapshot?.brand ??
+    item.product?.brand ??
+    item.product_brand_snapshot ??
+    item.ad_hoc_brand ??
+    null;
+  const name =
+    snapshot?.name ??
+    item.product?.name ??
+    item.product_name_snapshot ??
+    item.ad_hoc_name ??
+    null;
+  if (!productId && !brand && !name) return null;
+  return {
+    productId,
+    brand,
+    name,
+    category: item.product?.category ?? null,
+    stepLabel:
+      snapshot?.step_label ?? item.step_label ?? item.product?.category ?? null,
+    sourceType: item.item_source ?? ApplicationItemSource.Recommended,
+    status: item.status,
+    isOffShelf:
+      item.is_ad_hoc ||
+      item.item_source === ApplicationItemSource.AddedOffShelf ||
+      (!productId && Boolean(brand || name)),
+    isSubstitution: false,
+    appliedAt: item.applied_at?.toISOString() ?? null,
+  };
+}

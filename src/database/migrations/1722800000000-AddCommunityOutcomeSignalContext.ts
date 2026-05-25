@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddCommunityOutcomeSignalContext1722800000000
-  implements MigrationInterface
-{
+export class AddCommunityOutcomeSignalContext1722800000000 implements MigrationInterface {
   name = 'AddCommunityOutcomeSignalContext1722800000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

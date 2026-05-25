@@ -29,6 +29,14 @@ import { normalizeJournalEntriesForSuggestions } from './suggestion-journal-cont
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { SuggestionTodayActionService } from './suggestion-today-action.service';
 import { deriveSuggestionDaypart } from './suggestion-helpers';
+import {
+  emptySuggestionHistoryLoadResult,
+  loadSuggestionApplicationHistory,
+  loadSuggestionInstanceHistory,
+  loadSuggestionJournalHistory,
+  loadSuggestionRoutineBreakHistory,
+} from './suggestion-generation-history-loader';
+import { recordSuggestionContextLoad } from './suggestion-context-load-observability';
 
 type SuggestionConsentDecision = Awaited<
   ReturnType<SuggestionConsentService['evaluate']>
@@ -49,6 +57,7 @@ type GenerationContextData = {
   finishedProductIds: string[];
   recentJournal: SkinJournalEntry[];
   recentApplications: ApplicationLog[];
+  recentSuggestions: SuggestionInstance[];
   recentRoutineBreaks: RoutineBreak[];
 };
 
@@ -88,8 +97,9 @@ export class SuggestionGenerationContextService {
     private readonly applicationLogRepo: Repository<ApplicationLog>,
     @InjectRepository(RoutineBreak)
     private readonly routineBreakRepo: Repository<RoutineBreak>,
+    @InjectRepository(SuggestionInstance)
+    private readonly suggestionRepo: Repository<SuggestionInstance>,
   ) {}
-
   async buildScheduled(
     input: ScheduledSuggestionGenerationContextBuildInput,
   ): Promise<SuggestionGenerationInputs> {
@@ -100,12 +110,12 @@ export class SuggestionGenerationContextService {
       targetDate,
       job.last_error,
       personalization.consentDecision,
+      job.id,
     );
     await this.recordRecommendationDataAccess(
       user.id,
       personalization.consentDecision.activeSensitiveConsentTypes,
     );
-
     const daypart = deriveSuggestionDaypart(slot.slot_time);
     const environment = await this.environmentContext.buildContext({
       userId: user.id,
@@ -126,12 +136,12 @@ export class SuggestionGenerationContextService {
       routineSteps: slot.steps ?? [],
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
+      recentSuggestions: contextData.recentSuggestions,
       recentRoutineBreaks: contextData.recentRoutineBreaks,
       environment: environment.summary,
       aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
       aiPersonalizationBlockedReason: personalization.blockedReason,
     });
-
     return {
       language: normalizeLanguage(user.preferred_language),
       slotId: slot.id,
@@ -167,12 +177,12 @@ export class SuggestionGenerationContextService {
       targetDate,
       job.last_error,
       personalization.consentDecision,
+      job.id,
     );
     await this.recordRecommendationDataAccess(
       user.id,
       personalization.consentDecision.activeSensitiveConsentTypes,
     );
-
     const daypart = deriveSuggestionDaypart(targetTime);
     const environment = await this.environmentContext.buildContext({
       userId: user.id,
@@ -193,12 +203,12 @@ export class SuggestionGenerationContextService {
       routineSteps: [],
       recentJournalEntries: contextData.recentJournal,
       recentApplications: contextData.recentApplications,
+      recentSuggestions: contextData.recentSuggestions,
       recentRoutineBreaks: contextData.recentRoutineBreaks,
       environment: environment.summary,
       aiPersonalizationAllowed: personalization.aiPersonalizationAllowed,
       aiPersonalizationBlockedReason: personalization.blockedReason,
     });
-
     return {
       language: normalizeLanguage(user.preferred_language),
       slotId: null,
@@ -287,7 +297,9 @@ export class SuggestionGenerationContextService {
     targetDate: string,
     lastError: string | null,
     consentDecision: SuggestionConsentDecision,
+    jobId: string,
   ): Promise<GenerationContextData> {
+    const startedAtMs = Date.now();
     const canReadSensitiveContext = consentDecision.canReadSensitiveContext;
     const ignoreReactionContextPromise = canReadSensitiveContext
       ? this.todayActionService.shouldIgnoreReactionContext(
@@ -299,21 +311,20 @@ export class SuggestionGenerationContextService {
     const recentJournalRowsPromise = ignoreReactionContextPromise.then(
       (ignoreReactionContext) =>
         canReadSensitiveContext && !ignoreReactionContext
-          ? this.journalRepo.find({
-              where: { user_id: userId },
-              order: { entry_date: 'DESC' },
-              take: 7,
-            })
-          : Promise.resolve([]),
+          ? loadSuggestionJournalHistory(this.journalRepo, userId, targetDate)
+          : Promise.resolve(
+              emptySuggestionHistoryLoadResult<SkinJournalEntry>(),
+            ),
     );
 
     const [
       skinProfile,
       activeProducts,
       finishedProducts,
-      recentJournalRows,
-      recentApplications,
-      recentRoutineBreaks,
+      recentJournalHistory,
+      recentApplicationHistory,
+      recentSuggestionHistory,
+      recentRoutineBreakHistory,
     ] = await Promise.all([
       canReadSensitiveContext
         ? this.skinProfileRepo.findOne({
@@ -329,29 +340,47 @@ export class SuggestionGenerationContextService {
       }),
       recentJournalRowsPromise,
       canReadSensitiveContext
-        ? this.applicationLogRepo.find({
-            where: { user_id: userId },
-            relations: ['items'],
-            order: { target_date: 'DESC' },
-            take: 30,
-          })
-        : Promise.resolve([]),
-      this.routineBreakRepo.find({
-        where: { user_id: userId },
-        order: { starts_at: 'DESC' },
-        take: 3,
-      }),
+        ? loadSuggestionApplicationHistory(
+            this.applicationLogRepo,
+            userId,
+            targetDate,
+          )
+        : Promise.resolve(emptySuggestionHistoryLoadResult<ApplicationLog>()),
+      canReadSensitiveContext
+        ? loadSuggestionInstanceHistory(this.suggestionRepo, userId, targetDate)
+        : Promise.resolve(
+            emptySuggestionHistoryLoadResult<SuggestionInstance>(),
+          ),
+      loadSuggestionRoutineBreakHistory(
+        this.routineBreakRepo,
+        userId,
+        targetDate,
+      ),
     ]);
-    const recentJournal =
-      normalizeJournalEntriesForSuggestions(recentJournalRows);
+    const recentJournal = normalizeJournalEntriesForSuggestions(
+      recentJournalHistory.rows,
+    );
+
+    await recordSuggestionContextLoad({
+      observability: this.observability,
+      userId,
+      jobId,
+      startedAtMs,
+      sensitiveContextRead: canReadSensitiveContext,
+      journalHistory: recentJournalHistory,
+      applicationHistory: recentApplicationHistory,
+      suggestionHistory: recentSuggestionHistory,
+      routineBreakHistory: recentRoutineBreakHistory,
+    });
 
     return {
       skinProfile,
       activeProducts,
       finishedProductIds: finishedProducts.map((product) => product.id),
       recentJournal,
-      recentApplications,
-      recentRoutineBreaks,
+      recentApplications: recentApplicationHistory.rows,
+      recentSuggestions: recentSuggestionHistory.rows,
+      recentRoutineBreaks: recentRoutineBreakHistory.rows,
     };
   }
 
