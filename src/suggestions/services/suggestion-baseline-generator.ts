@@ -1,6 +1,9 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ProductCategory } from '../../shelf/shelf.types';
-import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
+import {
+  buildEnvironmentAdaptationPolicy,
+  isHighUvRisk,
+} from '../../environment-intelligence/environment-adaptation-policy';
 import {
   DEFAULT_LANGUAGE,
   normalizeLanguage,
@@ -657,9 +660,25 @@ function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
     inputs.contextSummary.routineBreak.recentlyResumed ||
     inputs.contextSummary.applicationPatterns.conservativeRestart ||
     inputs.contextSummary.safetyConstraints.some((constraint) =>
-      /space_strong_actives|avoid_strong_actives|photosensit/i.test(constraint),
+      /avoid_strong_actives|avoid_new_strong_actives|photosensit/i.test(
+        constraint,
+      ),
     ) ||
+    shouldAvoidDaytimeStrongActives(inputs) ||
     hasPregnancyOrMedicationCaution(inputs)
+  );
+}
+
+function shouldAvoidDaytimeStrongActives(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  if (inputs.daypart === SuggestionDaypart.Evening) return false;
+  const uvRisk = inputs.contextSummary.environment?.uvRisk ?? null;
+  return (
+    (uvRisk ? isHighUvRisk(uvRisk) : false) ||
+    inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /space_strong_actives/i.test(constraint),
+    )
   );
 }
 

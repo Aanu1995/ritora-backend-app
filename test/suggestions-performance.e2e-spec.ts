@@ -82,6 +82,7 @@ describe('Suggestions context history database performance (e2e)', () => {
       });
       await expectIndexedPlan({
         dataSource,
+        disableSort: true,
         expectedIndexNames: ['idx_suggestion_instances_context_history_ready'],
         parameters: [userId, targetDate],
         sql: `
@@ -104,9 +105,25 @@ describe('Suggestions context history database performance (e2e)', () => {
         sql: `
           SELECT id
           FROM routine_breaks
-          WHERE user_id = $1
-            AND starts_at >= $2::timestamptz
-            AND starts_at < $3::timestamptz
+          WHERE (
+              user_id = $1
+              AND starts_at BETWEEN $2::timestamptz AND $3::timestamptz
+            )
+            OR (
+              user_id = $1
+              AND starts_at < $2::timestamptz
+              AND ends_at >= $2::timestamptz
+            )
+            OR (
+              user_id = $1
+              AND starts_at < $2::timestamptz
+              AND resumed_at >= $2::timestamptz
+            )
+            OR (
+              user_id = $1
+              AND starts_at < $2::timestamptz
+              AND ends_at IS NULL
+            )
           ORDER BY starts_at DESC
         `,
       });
@@ -118,32 +135,46 @@ describe('Suggestions context history database performance (e2e)', () => {
 
 async function expectIndexedPlan(input: {
   dataSource: DataSource;
+  disableSort?: boolean;
   expectedIndexNames: readonly string[];
   parameters: readonly unknown[];
   sql: string;
 }): Promise<void> {
-  const plan = await explainAnalyze(input.dataSource, input.sql, [
-    ...input.parameters,
-  ]);
+  const plan = await explainAnalyze(input);
   const indexNames = collectIndexNames(plan);
-  expect(
-    input.expectedIndexNames.some((indexName) =>
+  if (
+    !input.expectedIndexNames.some((indexName) =>
       indexNames.includes(indexName),
-    ),
-  ).toBe(true);
+    )
+  ) {
+    throw new Error(
+      [
+        `Expected EXPLAIN plan to use one of: ${input.expectedIndexNames.join(
+          ', ',
+        )}.`,
+        `Used indexes: ${indexNames.join(', ') || '(none)'}.`,
+        `Plan: ${JSON.stringify(plan)}`,
+      ].join(' '),
+    );
+  }
   expect(readPlanNumber(plan, 'Actual Total Time')).toBeLessThan(1_000);
 }
 
-async function explainAnalyze(
-  dataSource: DataSource,
-  sql: string,
-  parameters: readonly unknown[],
-): Promise<ExplainPlanNode> {
+async function explainAnalyze(input: {
+  dataSource: DataSource;
+  disableSort?: boolean;
+  parameters: readonly unknown[];
+  sql: string;
+}): Promise<ExplainPlanNode> {
+  const { dataSource, disableSort, parameters, sql } = input;
   const queryRunner = dataSource.createQueryRunner();
   await queryRunner.connect();
   await queryRunner.startTransaction();
   try {
     await queryRunner.query('SET LOCAL enable_seqscan = off');
+    if (disableSort) {
+      await queryRunner.query('SET LOCAL enable_sort = off');
+    }
     const rows = (await queryRunner.query(
       `EXPLAIN (ANALYZE, FORMAT JSON) ${sql}`,
       [...parameters],

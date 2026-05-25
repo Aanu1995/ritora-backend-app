@@ -601,7 +601,7 @@ function isSkippedProductReturnedAsStep(
   step: SuggestionGenerationStepOutput,
 ): boolean {
   if (!step.inventoryProductId) return false;
-  return /\b(skip|skipped|delay|not use|avoid using|save for another)\b/i.test(
+  return /\b(skip|skipped|delay|not use|not now|avoid using|save for another|use later|keep (this|it) for (later|tonight|tomorrow|evening|another))\b/i.test(
     `${step.explanation ?? ''} ${step.routineNote ?? ''}`,
   );
 }
@@ -675,7 +675,7 @@ function resolveCopyFallbackReason(
 function hasMedicationCautionMainGuidance(
   explanation: SuggestionExplanationJson,
 ): boolean {
-  return /\b(medication|pregnan|breastfeed|clinician|specialist|doctor|prescrib)\b/i.test(
+  return /\b(medication|medicacion|medicin|medicine|pregnan|embarazo|gravid|breastfeed|clinician|clinica|klinisk|specialist|doctor|prescrib)\b/i.test(
     explanation.body.join(' '),
   );
 }

@@ -108,8 +108,36 @@ describe('suggestion generation history loaders', () => {
       '2026-05-04',
     );
 
-    expectIndexedWindowQuery(repo, 'starts_at');
+    expectIndexedRoutineBreakWindowQuery(repo);
     expect(result.rows).toHaveLength(1_000);
+  });
+
+  it('includes routine breaks that overlap the 30-day window after starting earlier', async () => {
+    const overlappingBreak = {
+      id: 'overlapping-break',
+      user_id: 'user-1',
+      starts_at: new Date('2026-04-01T04:00:00.000Z'),
+      ends_at: new Date('2026-04-20T04:00:00.000Z'),
+      resumed_at: null,
+    } as RoutineBreak;
+    const repo = mockRepo<RoutineBreak>([overlappingBreak], []);
+
+    const result = await loadSuggestionRoutineBreakHistory(
+      repo,
+      'user-1',
+      '2026-05-04',
+    );
+
+    expectIndexedRoutineBreakWindowQuery(repo);
+    expect(result.rows).toEqual([overlappingBreak]);
+    expect(repo.find).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: expect.objectContaining({ _type: 'not' }),
+        }),
+      }),
+    );
   });
 });
 
@@ -143,6 +171,36 @@ function expectIndexedWindowQuery<T extends ObjectLiteral>(
       user_id: 'user-1',
       [indexedDateField]: expect.objectContaining({ _type: 'between' }),
     }),
+  );
+}
+
+function expectIndexedRoutineBreakWindowQuery(
+  repo: jest.Mocked<Repository<RoutineBreak>>,
+): void {
+  const firstQuery = repo.find.mock.calls[0]?.[0];
+  const where = firstQuery?.where;
+  expect(where).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        user_id: 'user-1',
+        starts_at: expect.objectContaining({ _type: 'between' }),
+      }),
+      expect.objectContaining({
+        user_id: 'user-1',
+        starts_at: expect.objectContaining({ _type: 'lessThan' }),
+        ends_at: expect.objectContaining({ _type: 'moreThanOrEqual' }),
+      }),
+      expect.objectContaining({
+        user_id: 'user-1',
+        starts_at: expect.objectContaining({ _type: 'lessThan' }),
+        resumed_at: expect.objectContaining({ _type: 'moreThanOrEqual' }),
+      }),
+      expect.objectContaining({
+        user_id: 'user-1',
+        starts_at: expect.objectContaining({ _type: 'lessThan' }),
+        ends_at: expect.objectContaining({ _type: 'isNull' }),
+      }),
+    ]),
   );
 }
 

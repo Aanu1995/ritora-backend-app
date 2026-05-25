@@ -1,4 +1,12 @@
-import { Between, LessThan, Repository } from 'typeorm';
+import {
+  Between,
+  In,
+  IsNull,
+  LessThan,
+  MoreThanOrEqual,
+  Not,
+  Repository,
+} from 'typeorm';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { RoutineBreak } from '../entities/routine-break.entity';
@@ -121,13 +129,32 @@ export async function loadSuggestionRoutineBreakHistory(
 ): Promise<SuggestionHistoryLoadResult<RoutineBreak>> {
   const { from, to } = suggestionHistoryWindowInstants(targetDate);
   const windowRows = await routineBreakRepo.find({
-    where: { user_id: userId, starts_at: Between(from, to) },
+    where: [
+      { user_id: userId, starts_at: Between(from, to) },
+      {
+        user_id: userId,
+        starts_at: LessThan(from),
+        ends_at: MoreThanOrEqual(from),
+      },
+      {
+        user_id: userId,
+        starts_at: LessThan(from),
+        resumed_at: MoreThanOrEqual(from),
+      },
+      { user_id: userId, starts_at: LessThan(from), ends_at: IsNull() },
+    ],
     order: { starts_at: 'DESC' },
   });
   const backfillRows =
     windowRows.length < SUGGESTION_CONTEXT_BACKFILL_RECORDS
       ? await routineBreakRepo.find({
-          where: { user_id: userId, starts_at: LessThan(from) },
+          where: {
+            user_id: userId,
+            starts_at: LessThan(from),
+            ...(windowRows.length > 0
+              ? { id: Not(In(windowRows.map((row) => row.id))) }
+              : {}),
+          },
           order: { starts_at: 'DESC' },
           take: SUGGESTION_CONTEXT_BACKFILL_RECORDS - windowRows.length,
         })

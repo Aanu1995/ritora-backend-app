@@ -29,6 +29,7 @@ import { SuggestionContextCache } from '../entities/suggestion-context-cache.ent
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionEvidenceSourceId } from '../suggestions.constants';
 import { SuggestionContextBuilder } from './suggestion-context-builder.service';
+import { buildSuggestionContextCacheKey } from './suggestion-context-cache-key';
 
 describe('SuggestionContextBuilder', () => {
   const cacheRepo = repo<SuggestionContextCache>();
@@ -292,6 +293,77 @@ describe('SuggestionContextBuilder', () => {
     expect(summary).toBe(firstSummary);
     expect(cacheRepo.insert).not.toHaveBeenCalled();
     expect(cacheRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps private historical text out of cache-key invalidation inputs', () => {
+    const baseApplication = applicationLog();
+    const baseSuggestion = previousSuggestion();
+    const baseInput = {
+      ...emptyInput(),
+      recentJournalEntries: [reactionJournalEntry()],
+      recentApplications: [baseApplication],
+      recentSuggestions: [baseSuggestion],
+    };
+    const changedPrivateTextInput = {
+      ...baseInput,
+      recentJournalEntries: [
+        {
+          ...reactionJournalEntry(),
+          complaint_note: 'Different private journal note.',
+          analysis_summary: 'Different private analysis summary.',
+        } as unknown as SkinJournalEntry,
+      ],
+      recentApplications: [
+        {
+          ...baseApplication,
+          items: [
+            {
+              ...(baseApplication.items[0] ?? {}),
+              product_brand_snapshot: 'Private Brand',
+              product_name_snapshot: 'Private Product',
+              ad_hoc_name: 'Private off-shelf product',
+              substitution_reason: 'Private substitution reason.',
+              applied_snapshot: {
+                product_id: 'private-product',
+                brand: 'Private Brand',
+                name: 'Private Product',
+                step_label: ProductCategory.Serum,
+              },
+            },
+            ...(baseApplication.items.slice(1) ?? []),
+          ],
+        } as unknown as ApplicationLog,
+      ],
+      recentSuggestions: [
+        {
+          ...baseSuggestion,
+          steps: [
+            {
+              ...(baseSuggestion.steps[0] ?? {}),
+              product_brand_snapshot: 'Private Suggested Brand',
+              product_name_snapshot: 'Private Suggested Product',
+            },
+            ...(baseSuggestion.steps.slice(1) ?? []),
+          ],
+        } as SuggestionInstance,
+      ],
+    };
+    const changedVersionInput = {
+      ...baseInput,
+      recentJournalEntries: [
+        {
+          ...reactionJournalEntry(),
+          updated_at: new Date('2026-04-29T05:31:00.000Z'),
+        } as unknown as SkinJournalEntry,
+      ],
+    };
+
+    expect(buildSuggestionContextCacheKey(baseInput)).toBe(
+      buildSuggestionContextCacheKey(changedPrivateTextInput),
+    );
+    expect(buildSuggestionContextCacheKey(baseInput)).not.toBe(
+      buildSuggestionContextCacheKey(changedVersionInput),
+    );
   });
 
   it('marks first-use contexts as conservative and downgrades strong actives', async () => {

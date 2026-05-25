@@ -59,15 +59,16 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
         entry.sun_exposure_today,
         entry.sweat_exercise_today,
         entry.cycle_marker,
-        entry.recent_change,
-        entry.complaint_note,
-        entry.ratings,
-        entry.analysis_summary,
+        entry.recent_change
+          ? [
+              entry.recent_change.kind,
+              entry.recent_change.related_inventory_product_id ?? null,
+            ]
+          : null,
         entry.analysis_concern_keys ?? [],
         entry.analysis_observations?.reaction_signals ?? null,
         entry.analysis_observations?.barrier_signs ?? null,
         entry.analysis_observations?.image_quality?.needs_retake ?? null,
-        entry.analysis_observations?.overall_change_from_previous ?? null,
         entry.analysis_observations?.detected_concerns?.map((concern) => [
           concern.concern,
           concern.severity,
@@ -102,31 +103,24 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
             item.item_source,
             item.inventory_product_id,
             item.substituted_with_product_id,
-            item.product_brand_snapshot,
-            item.product_name_snapshot,
-            item.ad_hoc_brand,
-            item.ad_hoc_name,
             item.step_label,
             item.suggestion_step_id,
             item.is_ad_hoc,
-            item.substitution_reason,
+            item.updated_at?.toISOString() ?? null,
             item.applied_at?.toISOString() ?? null,
-            item.recommended_snapshot,
-            item.applied_snapshot,
             item.product
               ? [
                   item.product.id,
-                  item.product.brand,
-                  item.product.name,
                   item.product.category,
+                  item.product.updated_at?.toISOString() ?? null,
                 ]
               : null,
             item.substituted_with_product
               ? [
                   item.substituted_with_product.id,
-                  item.substituted_with_product.brand,
-                  item.substituted_with_product.name,
                   item.substituted_with_product.category,
+                  item.substituted_with_product.updated_at?.toISOString() ??
+                    null,
                 ]
               : null,
           ]),
@@ -151,18 +145,16 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
           )
           .map((step) => [
             step.id,
+            step.created_at?.toISOString() ?? null,
             step.step_order,
             step.inventory_product_id,
-            step.product_brand_snapshot,
-            step.product_name_snapshot,
             step.step_label,
             step.provenance,
             step.product
               ? [
                   step.product.id,
-                  step.product.brand,
-                  step.product.name,
                   step.product.category,
+                  step.product.updated_at?.toISOString() ?? null,
                 ]
               : null,
           ]),

@@ -89,6 +89,13 @@ export function hasUserHistoryIndication(
   ) {
     return true;
   }
+  const appliedProduct =
+    inputs.contextSummary.appliedProductHistory?.products.find(
+      (product) => product.productId === productId,
+    );
+  if ((appliedProduct?.useCount ?? 0) >= STABLE_REPEAT_MIN_ADHERENCE_COUNT) {
+    return true;
+  }
   const score = inputs.contextSummary.productScores.find(
     (productScore) => productScore.productId === productId,
   );

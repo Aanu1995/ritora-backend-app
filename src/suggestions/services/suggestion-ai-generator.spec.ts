@@ -454,6 +454,121 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('accepts localized medication caution in the main explanation', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Rutina suave',
+                    body: ['Contexto de medicacion: pausa retinoides hoy.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(
+                      1,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.language = 'es';
+    inputs.skinProfile = {
+      primary_goal: 'controlar acne con medicacion',
+      safety_context: {
+        medications: ['oral acne medication'],
+      },
+    } as unknown as SkinProfile;
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+  });
+
+  it('falls back when a step is actually copy for later use', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Noon support',
+                    body: ['Use sunscreen now.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'spf-1', ProductCategory.SunProtection),
+                    {
+                      ...aiProductStep(
+                        1,
+                        'moisturizer-1',
+                        ProductCategory.Moisturizer,
+                      ),
+                      explanation: 'Keep this for later.',
+                    },
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Noon),
+    );
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe(
+      'skipped_product_returned_as_step',
+    );
+  });
+
   it('falls back when daytime high-UV output selects a strong active', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -690,6 +805,81 @@ describe('SuggestionAiGenerator', () => {
     expect(result.metadata.fallbackReason).toBe('unjustified_history_novelty');
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
+      'moisturizer-1',
+      'spf-1',
+    ]);
+  });
+
+  it('allows a non-repeated product when applied history shows user use', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning plan',
+                    body: ['Keep SPF consistent and include familiar serum.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'serum-1', ProductCategory.Serum),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(3, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    addStableSameDaypartRepeatMemory(inputs);
+    inputs.contextSummary.appliedProductHistory?.products.push({
+      productId: 'serum-1',
+      brand: 'Ava Lab',
+      name: 'Niacinamide Serum',
+      category: ProductCategory.Serum,
+      stepLabel: ProductCategory.Serum,
+      sourceTypes: ['user_added'],
+      dayparts: [SuggestionDaypart.Morning],
+      statuses: ['applied'],
+      useCount: 5,
+      lastAppliedDate: '2026-04-27',
+      lastAppliedAt: '2026-04-27T08:01:00.000Z',
+      isOffShelf: false,
+      isSubstitution: false,
+    });
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'serum-1',
       'moisturizer-1',
       'spf-1',
     ]);

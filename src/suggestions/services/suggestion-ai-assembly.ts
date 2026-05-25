@@ -227,7 +227,7 @@ export function buildDeterministicSafetyFlags(
   );
   if (
     hasPregnancyOrMedicationCaution(inputs) &&
-    !flags.some((flag) => /pregnancy|medication/i.test(flag.message))
+    !flags.some((flag) => hasMedicalCautionText(flag.message))
   ) {
     flags.push({
       severity: 'info',
@@ -252,6 +252,12 @@ function hasPregnancyOrMedicationCaution(
         : '',
       inputs.skinProfile?.under_dermatologist_care ?? '',
     ]),
+  );
+}
+
+function hasMedicalCautionText(value: string): boolean {
+  return /\b(medication|medicacion|medicin|medicine|pregnan|embarazo|gravid|breastfeed|clinician|clinica|klinisk|specialist|doctor|prescrib)\b/i.test(
+    value,
   );
 }
 
