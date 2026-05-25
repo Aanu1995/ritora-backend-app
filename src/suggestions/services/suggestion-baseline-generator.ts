@@ -22,7 +22,6 @@ import {
 import { SuggestionProductScore } from '../suggestion-context.types';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
 import {
-  sanitizeSuggestionText,
   toHumanApplicationMethod,
   toHumanQuantity,
 } from './suggestion-language';
