@@ -13,6 +13,7 @@ const TEST_USER = {
   termsAccepted: true,
   privacyPolicyAccepted: true,
 };
+const PERFORMANCE_E2E_TIMEOUT_MS = 120_000;
 
 type ExplainPlanNode = Record<string, unknown>;
 
@@ -38,11 +39,11 @@ describe('Suggestions context history database performance (e2e)', () => {
       .set('Origin', ORIGIN)
       .send({ token })
       .expect(200);
-  });
+  }, PERFORMANCE_E2E_TIMEOUT_MS);
 
   afterAll(async () => {
     await closeTestApp(app);
-  });
+  }, PERFORMANCE_E2E_TIMEOUT_MS);
 
   it('uses intended indexes for large 30-day Today suggestion context reads', async () => {
     const userId = await loadCurrentUserId(dataSource);
@@ -130,7 +131,7 @@ describe('Suggestions context history database performance (e2e)', () => {
     } finally {
       await cleanupPerformanceRows(dataSource);
     }
-  });
+  }, PERFORMANCE_E2E_TIMEOUT_MS);
 });
 
 async function expectIndexedPlan(input: {

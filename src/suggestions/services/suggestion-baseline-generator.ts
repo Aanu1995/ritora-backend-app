@@ -33,6 +33,7 @@ import {
   shouldApplyStableRepeatPolicy,
   stableSameDaypartRepeatProductIds,
 } from './suggestion-routine-repeat-policy';
+import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
 
 const baselineCopy = {
   noStepsHeadline: {
@@ -215,7 +216,7 @@ export function deterministicExplanation(
       reason: step.explanation ?? baselineCopy.goodFit[language],
     })),
     skipped: inputs.contextSummary.skippedCandidates.map((candidate) => {
-      const product = inputs.contextSummary.productScores.find(
+      const product = resolveSuggestionProductScores(inputs).find(
         (score) => score.productId === candidate.productId,
       );
       return {
@@ -254,7 +255,7 @@ function needsMissingDaytimeSunscreen(
   return (
     (inputs.daypart === SuggestionDaypart.Morning ||
       inputs.daypart === SuggestionDaypart.Noon) &&
-    !inputs.contextSummary.productScores.some(
+    !resolveSuggestionProductScores(inputs).some(
       (score) => score.category === ProductCategory.SunProtection,
     )
   );
@@ -393,7 +394,7 @@ export function buildDeterministicGapRecommendations(
   inputs: SuggestionGenerationInputs,
 ): SuggestionGapRecommendationJson[] {
   const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
-  const productScores = inputs.contextSummary.productScores;
+  const productScores = resolveSuggestionProductScores(inputs);
   const hasSunscreen = productScores.some(
     (score) => score.category === ProductCategory.SunProtection,
   );
@@ -508,7 +509,7 @@ function selectBaselineProducts(
       (candidate) => candidate.productId,
     ),
   );
-  const candidates = inputs.contextSummary.productScores
+  const candidates = resolveSuggestionProductScores(inputs)
     .filter((score) => score.suitabilityScore >= 40)
     .filter((score) => !skippedProductIds.has(score.productId))
     .filter((score) =>

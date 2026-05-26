@@ -99,9 +99,12 @@ export function hasUserHistoryIndication(
   const score = inputs.contextSummary.productScores.find(
     (productScore) => productScore.productId === productId,
   );
+  const shelfProduct = inputs.shelfActiveProducts.find(
+    (product) => product.id === productId,
+  );
   return Boolean(
-    score &&
-    score.category === ProductCategory.SunProtection &&
+    (score?.category === ProductCategory.SunProtection ||
+      shelfProduct?.category === ProductCategory.SunProtection) &&
     requiresOwnedDaytimeSpf(inputs),
   );
 }
@@ -122,8 +125,13 @@ export function requiresOwnedDaytimeSpf(
   ) {
     return false;
   }
-  return inputs.contextSummary.productScores.some(
-    (score) => score.category === ProductCategory.SunProtection,
+  return (
+    inputs.contextSummary.productScores.some(
+      (score) => score.category === ProductCategory.SunProtection,
+    ) ||
+    inputs.shelfActiveProducts.some(
+      (product) => product.category === ProductCategory.SunProtection,
+    )
   );
 }
 

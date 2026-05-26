@@ -27,6 +27,7 @@ import {
   toHumanApplicationMethod,
   toHumanQuantity,
 } from './suggestion-language';
+import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
 
 export type AssemblyContext = {
   language: AppLanguage;
@@ -87,7 +88,9 @@ export function resolveRawStep(
     inventoryProductId: sourceProduct?.id ?? null,
     productBrand: sourceProduct?.brand ?? null,
     productName: sourceProduct?.name ?? null,
-    stepLabel: toStepLabel(rawStep.stepLabel ?? routineSource?.step_label),
+    stepLabel:
+      sourceProduct?.category ??
+      toStepLabel(rawStep.stepLabel ?? routineSource?.step_label),
     customLabel: rawStep.customLabel ?? routineSource?.custom_label ?? null,
     applicationMethod: toHumanApplicationMethod(
       rawStep.applicationMethod ??
@@ -220,8 +223,12 @@ export function buildDeterministicSafetyFlags(
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionSafetyFlagJson[] {
   const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
+  const contextWithResolvedScores = {
+    ...inputs.contextSummary,
+    productScores: resolveSuggestionProductScores(inputs),
+  };
   const flags: SuggestionSafetyFlagJson[] = buildPolicySafetyFlags(
-    inputs.contextSummary,
+    contextWithResolvedScores,
     steps,
     language,
   );

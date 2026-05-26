@@ -49,6 +49,12 @@ describe('suggestion AI contract', () => {
     );
     expect(SYSTEM_PROMPT).not.toContain('specialist dermatologist');
     expect(SYSTEM_PROMPT).toContain('Respect the goal hierarchy');
+    expect(SYSTEM_PROMPT).toContain('exact inventoryProductId');
+    expect(SYSTEM_PROMPT).toContain(
+      'do not also add it as a gapRecommendation',
+    );
+    expect(SYSTEM_PROMPT).toContain('Do not write "only"');
+    expect(SYSTEM_PROMPT).toContain('include a short caution');
     expect(SYSTEM_PROMPT).not.toContain(
       'Use product names and recent applied/substituted/off-shelf product history when deciding whether repetition is justified.',
     );
@@ -85,6 +91,21 @@ describe('suggestion AI contract', () => {
     expect(prompt).not.toContain('data:image');
     expect(prompt).not.toContain('Stockholm');
     expect(prompt).not.toContain('59.33');
+  });
+
+  it('rebuilds prompt product scores from active shelf when score context is missing', () => {
+    const inputs = generationInputs();
+    const prompt = buildPrompt({
+      ...inputs,
+      contextSummary: {
+        ...inputs.contextSummary,
+        productScores: [],
+      },
+    });
+
+    expect(prompt).toContain('"productId": "spf-1"');
+    expect(prompt).toContain('"category": "sun-protection"');
+    expect(prompt).toContain('"active shelf fallback score"');
   });
 
   it('minimizes sensitive historical notes in prompt context', () => {

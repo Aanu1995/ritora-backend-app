@@ -192,6 +192,22 @@ export function buildPolicySafetyFlags(
       ],
     });
   }
+  if (
+    selectedProducts.some(
+      (product) => product.category === ProductCategory.SunProtection,
+    ) &&
+    needsPigmentProtection(context)
+  ) {
+    flags.push({
+      severity: 'info',
+      message: localizedSafetyCopy.pigmentSunscreen[resolvedLanguage],
+      ingredientSlugs: ['spf'],
+      sourceIds: [
+        SuggestionEvidenceSourceId.AadSunscreenSelection,
+        SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+      ],
+    });
+  }
   for (const signal of environmentPolicy.signals) {
     if (signal.kind === EnvironmentSignalKind.HighUv) continue;
     flags.push({
@@ -216,9 +232,9 @@ const localizedSafetyCopy: Record<string, Record<AppLanguage, string>> = {
     es: 'No hay protector solar en tu estante, asi que el SPF diurno queda como una carencia y no como un paso.',
   },
   pregnancyRetinoid: {
-    en: 'Pregnancy or medication changes need clinician guidance before retinoids.',
-    sv: 'Graviditet eller medicinbyte kraver klinisk vagledning innan retinoider.',
-    es: 'El embarazo o los cambios de medicacion requieren orientacion clinica antes de usar retinoides.',
+    en: 'Pregnancy or medication context needs clinician guidance before changing strong actives.',
+    sv: 'Graviditet eller medicinlage kraver klinisk vagledning innan starka aktiva amnen andras.',
+    es: 'El embarazo o el contexto de medicacion requiere orientacion clinica antes de cambiar activos fuertes.',
   },
   retinoidAha: {
     en: 'Retinoids and AHA exfoliants can be irritating together.',
@@ -255,7 +271,25 @@ const localizedSafetyCopy: Record<string, Record<AppLanguage, string>> = {
     sv: 'UV ar hogt idag, sa solskydd dagtid ar viktigt.',
     es: 'El UV esta alto hoy, asi que el protector solar diurno importa.',
   },
+  pigmentSunscreen: {
+    en: 'Sunscreen is central when dark marks or uneven tone are priority concerns.',
+    sv: 'Solskydd ar centralt nar morka marken eller ojamn ton prioriteras.',
+    es: 'El protector solar es central cuando las manchas o el tono desigual son prioridad.',
+  },
 };
+
+function needsPigmentProtection(context: SuggestionContextSummary): boolean {
+  return /(dark mark|hyperpigmentation|uneven tone|melasma|pigment)/i.test(
+    JSON.stringify([
+      context.skinProfile.primaryGoal ?? '',
+      context.skinProfile.activeConcerns,
+      context.goalSignals?.mainGoal ?? '',
+      context.goalSignals?.primaryGoal ?? '',
+      context.goalSignals?.selectedGoals ?? [],
+      context.goalSignals?.secondaryGoals.map((goal) => goal.concern) ?? [],
+    ]),
+  );
+}
 
 function localizedEnvironmentSignalMessage(
   kind: EnvironmentSignalKind,

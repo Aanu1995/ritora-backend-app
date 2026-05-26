@@ -59,6 +59,8 @@ import {
   hasUnjustifiedHistoryNoveltyStep,
   requiresOwnedDaytimeSpf,
 } from './suggestion-routine-repeat-policy';
+import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
+import { isStrongActiveTag } from './suggestion-product-intelligence';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
 export const SUGGESTION_AI_TIMEOUT_MS = 45_000;
@@ -278,9 +280,10 @@ export class SuggestionAiGenerator {
       }
       steps.push(resolved);
     }
+    const repairedSteps = repairRecoverableMissingSteps(inputs, steps);
     const hardSafetyFallbackReason = resolveHardSafetyFallbackReason(
       inputs,
-      steps,
+      repairedSteps,
     );
     if (hardSafetyFallbackReason) {
       this.logger.warn(
@@ -293,12 +296,19 @@ export class SuggestionAiGenerator {
         hardSafetyFallbackReason,
       );
     }
-    const explanation = sanitizeExplanation(
-      raw.explanation ?? defaultExplanation(),
+    const orderedSteps = orderGeneratedSteps(
+      inputs,
+      repairedSteps,
+      context.lockedSteps.length > 0,
+    );
+    const explanation = normalizeExplanationForSelectedSteps(
+      inputs,
+      orderedSteps,
+      sanitizeExplanation(raw.explanation ?? defaultExplanation()),
     );
     const copyFallbackReason = resolveCopyFallbackReason(
       inputs,
-      steps,
+      orderedSteps,
       explanation,
     );
     if (copyFallbackReason) {
@@ -314,22 +324,31 @@ export class SuggestionAiGenerator {
     }
 
     const hasReactionSignal = hasReactionSignalInInputs(inputs);
+    const gapRecommendations = mergeRequiredDeterministicGapRecommendations(
+      inputs,
+      orderedSteps,
+      filterContextualGapRecommendations(
+        inputs,
+        orderedSteps,
+        sanitizeGapRecommendations(raw.gapRecommendations ?? []),
+      ),
+    );
     return {
-      mode: computeMode(steps, context.lockedSteps.length > 0),
+      mode: computeMode(orderedSteps, context.lockedSteps.length > 0),
       hasReactionSignal,
       simplifiedForReaction:
         Boolean(raw.simplifiedForReaction) && hasReactionSignal,
       explanation,
-      gapRecommendations: filterContextualGapRecommendations(
-        inputs,
-        steps,
-        sanitizeGapRecommendations(raw.gapRecommendations ?? []),
-      ),
+      gapRecommendations,
       safetyFlags: [
-        ...sanitizeSafetyFlags(raw.safetyFlags ?? []),
-        ...buildDeterministicSafetyFlags(inputs, steps),
+        ...filterContextualSafetyFlags(
+          inputs,
+          orderedSteps,
+          sanitizeSafetyFlags(raw.safetyFlags ?? []),
+        ),
+        ...buildDeterministicSafetyFlags(inputs, orderedSteps),
       ],
-      steps: steps.sort((a, b) => a.stepOrder - b.stepOrder),
+      steps: orderedSteps,
       metadata: {
         ...metadata,
         promptVersion: SUGGESTION_PROMPT_VERSION,
@@ -450,6 +469,374 @@ function orderBaselineSteps(
     .map((step, index) => ({ ...step, stepOrder: index }));
 }
 
+function repairRecoverableMissingSteps(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  return repairMissingOnDemandMoisturizer(
+    inputs,
+    repairMissingOwnedDaytimeSpf(inputs, steps),
+  );
+}
+
+function repairMissingOwnedDaytimeSpf(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  if (!requiresOwnedDaytimeSpf(inputs)) return steps;
+  const hasSunscreenStep = selectedProductScores(inputs, steps).some(
+    (score) => score.category === ProductCategory.SunProtection,
+  );
+  if (hasSunscreenStep) return steps;
+
+  const existingProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  const sunscreenStep = buildDeterministicAiSteps(inputs).find(
+    (step) =>
+      step.stepLabel === ProductCategory.SunProtection &&
+      step.inventoryProductId &&
+      !existingProductIds.has(step.inventoryProductId),
+  );
+  return sunscreenStep ? orderBaselineSteps([...steps, sunscreenStep]) : steps;
+}
+
+function repairMissingOnDemandMoisturizer(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  if (
+    inputs.requestSource !== SuggestionRequestSource.OnDemand ||
+    ![
+      'post_workout',
+      'post_sun',
+      'post_swim',
+      'post_makeup_or_shower',
+    ].includes(inputs.requestContext?.intent ?? '')
+  ) {
+    return steps;
+  }
+  const selectedScores = selectedProductScores(inputs, steps);
+  if (
+    selectedScores.some(
+      (score) => score.category === ProductCategory.Moisturizer,
+    )
+  ) {
+    return steps;
+  }
+  const existingProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  const moisturizerStep = buildDeterministicAiSteps(inputs).find(
+    (step) =>
+      step.stepLabel === ProductCategory.Moisturizer &&
+      step.inventoryProductId &&
+      !existingProductIds.has(step.inventoryProductId),
+  );
+  return moisturizerStep
+    ? orderBaselineSteps([...steps, moisturizerStep])
+    : steps;
+}
+
+function orderGeneratedSteps(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+  hasLockedInput: boolean,
+): SuggestionGenerationStepOutput[] {
+  if (hasLockedInput || inputs.routineSteps.length > 0) {
+    return [...steps].sort((left, right) => left.stepOrder - right.stepOrder);
+  }
+  return orderBaselineSteps(steps);
+}
+
+function normalizeExplanationForSelectedSteps(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+  explanation: SuggestionExplanationJson,
+): SuggestionExplanationJson {
+  const selectedProductLabels = new Set(
+    steps.flatMap((step) =>
+      [
+        step.inventoryProductId,
+        step.productName,
+        step.productBrand && step.productName
+          ? `${step.productBrand} ${step.productName}`
+          : null,
+      ]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => normalizeProductCopy(value)),
+    ),
+  );
+  const perStepReasons = steps.map((step) => ({
+    stepOrder: step.stepOrder,
+    reason: step.explanation ?? 'Good fit for this slot.',
+  }));
+  const body = [
+    ...explanation.body.filter(
+      (line) =>
+        !isConditionalSelectedSpfText(steps, line) &&
+        !isOffSlotSunscreenCopy(inputs, line),
+    ),
+    ...deterministicExplanationBodyLines(inputs, explanation.body),
+  ];
+  const skipped = mergeSkippedExplanationItems(
+    explanation.skipped.filter((skipped) => {
+      const normalizedName = normalizeProductCopy(skipped.name);
+      return ![...selectedProductLabels].some(
+        (selected) =>
+          selected.length > 0 &&
+          (normalizedName.includes(selected) ||
+            selected.includes(normalizedName)),
+      );
+    }),
+    deterministicSkippedExplanationItems(inputs, selectedProductLabels),
+  );
+
+  return {
+    ...explanation,
+    body,
+    perStepReasons,
+    skipped,
+  };
+}
+
+function normalizeProductCopy(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function deterministicExplanationBodyLines(
+  inputs: SuggestionGenerationInputs,
+  existingBody: string[],
+): string[] {
+  const lines: string[] = [];
+  const bodyText = existingBody.join(' ');
+  const strongActiveLine = strongActiveSpacingBodyLine(inputs);
+  if (strongActiveLine && needsStrongActiveSpacingLine(inputs, bodyText)) {
+    lines.push(strongActiveLine);
+  }
+  if (
+    hasPregnancyOrMedicationCaution(inputs) &&
+    !hasMedicationProfessionalGuidance(bodyText)
+  ) {
+    lines.push(medicationProfessionalGuidanceLine(inputs));
+  }
+  return lines;
+}
+
+function needsStrongActiveSpacingLine(
+  inputs: SuggestionGenerationInputs,
+  bodyText: string,
+): boolean {
+  if (
+    !/retinoid|strong active|exfoliat|\baha\b|\bbha\b|glycolic|salicylic/i.test(
+      bodyText,
+    )
+  ) {
+    return true;
+  }
+  return (
+    Boolean(latestStrongActiveApplication(inputs)) &&
+    !/\b(yesterday|recent|used|last night|\d{4}-\d{2}-\d{2})\b/i.test(bodyText)
+  );
+}
+
+function strongActiveSpacingBodyLine(
+  inputs: SuggestionGenerationInputs,
+): string | null {
+  if (
+    !inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /space_strong_actives|avoid_new_strong_actives/i.test(constraint),
+    )
+  ) {
+    return null;
+  }
+  const latestStrongActive = latestStrongActiveApplication(inputs);
+  const activeLabel = skippedStrongActiveLabel(inputs);
+  const slotLabel =
+    inputs.daypart === SuggestionDaypart.Evening ? 'tonight' : 'today';
+  if (latestStrongActive) {
+    const recency = recencyCopy(
+      inputs.targetDate,
+      latestStrongActive.lastAppliedDate,
+    );
+    return `${latestStrongActive.name} was used ${recency}, so ${activeLabel} stay spaced ${slotLabel}.`;
+  }
+  if (inputs.contextSummary.skippedCandidates.length === 0) return null;
+  return `${activeLabel} stay spaced ${slotLabel} to avoid stacking strong actives.`;
+}
+
+function skippedStrongActiveLabel(inputs: SuggestionGenerationInputs): string {
+  const productScoreById = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const tags = new Set(
+    inputs.contextSummary.skippedCandidates.flatMap(
+      (candidate) =>
+        productScoreById.get(candidate.productId)?.activeTags ?? [],
+    ),
+  );
+  const hasRetinoid = [...tags].some((tag) =>
+    /retinoid|retinol|adapalene|tretinoin/i.test(tag),
+  );
+  const hasExfoliant = [...tags].some((tag) =>
+    /aha|bha|glycolic|lactic|mandelic|salicylic/i.test(tag),
+  );
+  if (hasRetinoid && hasExfoliant) return 'retinoid and exfoliating steps';
+  if (hasRetinoid) return 'retinoid steps';
+  if (hasExfoliant) return 'exfoliating active steps';
+  return 'strong active steps';
+}
+
+function medicationProfessionalGuidanceLine(
+  inputs: SuggestionGenerationInputs,
+): string {
+  const professional = /yes|dermatologist|dermatology/i.test(
+    inputs.skinProfile?.under_dermatologist_care ?? '',
+  )
+    ? 'your dermatologist'
+    : 'your responsible professional';
+  return `Medication context: keep retinoid or acne actives paused unless ${professional} clears them.`;
+}
+
+function hasMedicationProfessionalGuidance(value: string): boolean {
+  return (
+    /\b(medication|medicin|medicine|medicacion|pregnan|gravid|embarazo|breastfeed)\b/i.test(
+      value,
+    ) &&
+    /\b(professional|dermatologist|clinician|doctor|specialist|clears|guidance)\b/i.test(
+      value,
+    )
+  );
+}
+
+function latestStrongActiveApplication(inputs: SuggestionGenerationInputs): {
+  name: string;
+  lastAppliedDate: string;
+} | null {
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const strongApplications =
+    inputs.contextSummary.appliedProductHistory?.products
+      .filter(
+        (product) =>
+          product.productId &&
+          product.lastAppliedDate &&
+          scoreByProductId
+            .get(product.productId)
+            ?.activeTags.some(isStrongActiveTag),
+      )
+      .sort((left, right) =>
+        (right.lastAppliedDate ?? '').localeCompare(left.lastAppliedDate ?? ''),
+      ) ?? [];
+  const latest = strongApplications[0];
+  if (!latest?.productId || !latest.lastAppliedDate) return null;
+  const score = scoreByProductId.get(latest.productId);
+  return {
+    name:
+      [latest.brand, latest.name].filter(Boolean).join(' ') ||
+      score?.name ||
+      latest.productId,
+    lastAppliedDate: latest.lastAppliedDate,
+  };
+}
+
+function recencyCopy(targetDate: string, appliedDate: string): string {
+  const days = daysBetweenDates(appliedDate, targetDate);
+  if (days === 1) return 'yesterday';
+  if (days > 1 && days <= 7) return `${days} days ago`;
+  return 'recently';
+}
+
+function daysBetweenDates(startDate: string, endDate: string): number {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 86_400_000));
+}
+
+function deterministicSkippedExplanationItems(
+  inputs: SuggestionGenerationInputs,
+  selectedProductLabels: Set<string>,
+): SuggestionExplanationJson['skipped'] {
+  const productScoreById = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const shelfProductById = new Map(
+    inputs.shelfActiveProducts.map((product) => [product.id, product]),
+  );
+  return inputs.contextSummary.skippedCandidates.flatMap((candidate) => {
+    const score = productScoreById.get(candidate.productId);
+    const shelfProduct = shelfProductById.get(candidate.productId);
+    const name = score
+      ? [shelfProduct?.brand ?? score.brand, shelfProduct?.name ?? score.name]
+          .filter(Boolean)
+          .join(' ')
+      : candidate.productId;
+    const normalizedName = normalizeProductCopy(name);
+    if (
+      [...selectedProductLabels].some(
+        (selected) =>
+          selected.length > 0 &&
+          (normalizedName.includes(selected) ||
+            selected.includes(normalizedName)),
+      )
+    ) {
+      return [];
+    }
+    return [
+      {
+        name,
+        reason: skippedStrongActiveReason(inputs),
+      },
+    ];
+  });
+}
+
+function skippedStrongActiveReason(inputs: SuggestionGenerationInputs): string {
+  if (hasPregnancyOrMedicationCaution(inputs)) {
+    return 'Paused for medication or professional-guidance safety.';
+  }
+  if (latestStrongActiveApplication(inputs)) {
+    return 'Paused to space strong actives after recent use.';
+  }
+  return 'Paused to avoid stacking strong actives tonight.';
+}
+
+function mergeSkippedExplanationItems(
+  existing: SuggestionExplanationJson['skipped'],
+  additions: SuggestionExplanationJson['skipped'],
+): SuggestionExplanationJson['skipped'] {
+  const names = new Set(
+    existing.map((item) => normalizeProductCopy(item.name)),
+  );
+  return [
+    ...existing,
+    ...additions.filter((item) => {
+      const key = normalizeProductCopy(item.name);
+      if (names.has(key)) return false;
+      names.add(key);
+      return true;
+    }),
+  ];
+}
+
 function hasReactionSignalInInputs(
   inputs: SuggestionGenerationInputs,
 ): boolean {
@@ -462,9 +849,7 @@ function hasReactionSignalInInputs(
 
 function hasNoUsableShelfOptions(inputs: SuggestionGenerationInputs): boolean {
   return (
-    inputs.routineSteps.length === 0 &&
-    (inputs.shelfActiveProducts.length === 0 ||
-      inputs.contextSummary.productScores.length === 0)
+    inputs.routineSteps.length === 0 && inputs.shelfActiveProducts.length === 0
   );
 }
 
@@ -577,7 +962,7 @@ function selectedProductScores(
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionContextSummary['productScores'] {
   const scoreByProductId = new Map(
-    inputs.contextSummary.productScores.map((score) => [
+    resolveSuggestionProductScores(inputs).map((score) => [
       score.productId,
       score,
     ]),
@@ -685,7 +1070,7 @@ function isConditionalSpfStep(
   step: SuggestionGenerationStepOutput,
 ): boolean {
   const score = step.inventoryProductId
-    ? inputs.contextSummary.productScores.find(
+    ? resolveSuggestionProductScores(inputs).find(
         (product) => product.productId === step.inventoryProductId,
       )
     : null;
@@ -698,7 +1083,7 @@ function isConditionalSpfStep(
 function requiresBarrierMoisturizer(
   inputs: SuggestionGenerationInputs,
 ): boolean {
-  const hasMoisturizer = inputs.contextSummary.productScores.some(
+  const hasMoisturizer = resolveSuggestionProductScores(inputs).some(
     (score) => score.category === ProductCategory.Moisturizer,
   );
   if (!hasMoisturizer) return false;
@@ -742,14 +1127,64 @@ function filterContextualGapRecommendations(
 ): SuggestionGapRecommendationJson[] {
   const selectedScores = selectedProductScores(inputs, steps);
   const selectedPhotosensitizingActive = selectedScores.some(hasStrongActive);
+  const selectedSunscreen = selectedScores.some(
+    (score) => score.category === ProductCategory.SunProtection,
+  );
+  const selectedMoisturizer = selectedScores.some(
+    (score) => score.category === ProductCategory.Moisturizer,
+  );
   return gaps.filter((gap) => {
     if (isOwnedProductGap(inputs, gap)) return false;
+    if (selectedSunscreen && isSunscreenGap(gap)) return false;
+    if (selectedMoisturizer && isMoisturizerGap(gap)) return false;
     if (!isSunscreenGap(gap)) return true;
     if (inputs.daypart !== SuggestionDaypart.Evening) return true;
     if (selectedPhotosensitizingActive) return true;
     if (needsPigmentOrUvProtection(inputs)) return true;
     return false;
   });
+}
+
+function mergeRequiredDeterministicGapRecommendations(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+  gaps: SuggestionGapRecommendationJson[],
+): SuggestionGapRecommendationJson[] {
+  const deterministicGaps = filterContextualGapRecommendations(
+    inputs,
+    steps,
+    buildDeterministicGapRecommendations(inputs),
+  );
+  const merged = [...gaps];
+  for (const deterministicGap of deterministicGaps) {
+    if (merged.some((gap) => equivalentGap(gap, deterministicGap))) continue;
+    merged.push(deterministicGap);
+  }
+  return merged;
+}
+
+function equivalentGap(
+  left: SuggestionGapRecommendationJson,
+  right: SuggestionGapRecommendationJson,
+): boolean {
+  if (isSunscreenGap(left) && isSunscreenGap(right)) return true;
+  const leftText = normalizeProductCopy(
+    `${left.ingredientOrCategory} ${left.reason} ${left.goalAlignment ?? ''}`,
+  );
+  const rightCategory = normalizeProductCopy(right.ingredientOrCategory);
+  return leftText.includes(rightCategory);
+}
+
+function filterContextualSafetyFlags(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+  flags: SuggestionSafetyFlagJson[],
+): SuggestionSafetyFlagJson[] {
+  return flags.filter(
+    (flag) =>
+      !isConditionalSelectedSpfText(steps, flag.message) &&
+      !isOffSlotSunscreenCopy(inputs, flag.message),
+  );
 }
 
 function isOwnedProductGap(
@@ -759,7 +1194,7 @@ function isOwnedProductGap(
   const text = `${gap.ingredientOrCategory} ${gap.reason} ${
     gap.goalAlignment ?? ''
   }`.toLowerCase();
-  return inputs.contextSummary.productScores.some((score) => {
+  return resolveSuggestionProductScores(inputs).some((score) => {
     const productName = score.name.toLowerCase();
     if (productName && text.includes(productName)) return true;
     if (text.includes(score.productId.toLowerCase())) return true;
@@ -777,6 +1212,37 @@ function isSunscreenGap(gap: SuggestionGapRecommendationJson): boolean {
   return /spf|sunscreen|sun protection/i.test(
     `${gap.ingredientOrCategory} ${gap.reason} ${gap.goalAlignment ?? ''}`,
   );
+}
+
+function isMoisturizerGap(gap: SuggestionGapRecommendationJson): boolean {
+  return /moisturizer|moisturiser|barrier|cream|hydrating/i.test(
+    `${gap.ingredientOrCategory} ${gap.reason} ${gap.goalAlignment ?? ''}`,
+  );
+}
+
+function isConditionalSelectedSpfText(
+  steps: SuggestionGenerationStepOutput[],
+  value: string,
+): boolean {
+  const hasSelectedSunscreen = steps.some(
+    (step) => step.stepLabel === ProductCategory.SunProtection,
+  );
+  if (!hasSelectedSunscreen) return false;
+  return (
+    /\b(spf|sunscreen|sun protection)\b/i.test(value) &&
+    /\b(if|when|outside|sunlight|heading back|going back|good add|useful if)\b/i.test(
+      value,
+    )
+  );
+}
+
+function isOffSlotSunscreenCopy(
+  inputs: SuggestionGenerationInputs,
+  value: string,
+): boolean {
+  if (inputs.daypart !== SuggestionDaypart.Evening) return false;
+  if (requiresOwnedDaytimeSpf(inputs)) return false;
+  return /\b(spf|sunscreen|sun protection)\b/i.test(value);
 }
 
 function needsPigmentOrUvProtection(
