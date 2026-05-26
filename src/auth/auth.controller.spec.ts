@@ -4,12 +4,14 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
 import { AccountDeletionStatus } from './dto/account-deletion-response.dto';
+import { GoogleIdTokenVerifierService } from './oauth/google-id-token-verifier.service';
 
 const mockAuthService = () => ({
   register: jest.fn(),
   login: jest.fn(),
   loginWithGoogle: jest.fn(),
   loginWithApple: jest.fn(),
+  recordOAuthFailureForMonitoring: jest.fn(),
   refreshTokens: jest.fn(),
   verifyEmail: jest.fn(),
   resendVerification: jest.fn(),
@@ -61,10 +63,12 @@ const asResponse = (response: MockResponse): Response =>
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: ReturnType<typeof mockAuthService>;
+  let googleIdTokenVerifier: { verify: jest.Mock };
   const cookieName = 'custom_refresh';
 
   beforeEach(async () => {
     authService = mockAuthService();
+    googleIdTokenVerifier = { verify: jest.fn() };
     const configValues: Record<string, unknown> = {
       CORS_ORIGINS: 'http://localhost:3000',
       WEB_APP_URL: 'http://localhost:3000',
@@ -78,6 +82,10 @@ describe('AuthController', () => {
       controllers: [AuthController],
       providers: [
         { provide: AuthService, useValue: authService },
+        {
+          provide: GoogleIdTokenVerifierService,
+          useValue: googleIdTokenVerifier,
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -207,6 +215,88 @@ describe('AuthController', () => {
     expect(res.redirect).toHaveBeenCalledWith(
       'http://localhost:3000/post-login',
     );
+  });
+
+  it('mobile google sign-in verifies the id token and returns a session', async () => {
+    const res = mockRes();
+    const authResponse = {
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+    };
+    const profile = {
+      provider: 'google',
+      providerSubject: 'google-subject',
+      email: 'test@gmail.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: true,
+    };
+    googleIdTokenVerifier.verify.mockResolvedValue(profile);
+    authService.loginWithGoogle.mockResolvedValue(authResponse);
+
+    const result = await controller.loginWithGoogleMobile(
+      {
+        idToken: 'google-id-token',
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      },
+      asResponse(res),
+      asRequest(mockReq()),
+    );
+
+    expect(googleIdTokenVerifier.verify).toHaveBeenCalledWith(
+      'google-id-token',
+    );
+    expect(authService.loginWithGoogle).toHaveBeenCalledWith(
+      profile,
+      {
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      },
+      res,
+      '127.0.0.1',
+      'TestAgent',
+    );
+    expect(res.cookie).toHaveBeenCalledWith(
+      'NEXT_LOCALE',
+      'sv',
+      expect.objectContaining({
+        httpOnly: false,
+        path: '/',
+      }),
+    );
+    expect(result).toEqual(authResponse);
+  });
+
+  it('mobile google sign-in records invalid token failures for monitoring', async () => {
+    const res = mockRes();
+    const error = new Error('Invalid Google sign-in token');
+    googleIdTokenVerifier.verify.mockRejectedValue(error);
+
+    await expect(
+      controller.loginWithGoogleMobile(
+        {
+          idToken: 'invalid-google-id-token',
+          preferredLanguage: 'en',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        },
+        asResponse(res),
+        asRequest(mockReq()),
+      ),
+    ).rejects.toThrow(error);
+
+    expect(authService.recordOAuthFailureForMonitoring).toHaveBeenCalledWith(
+      'google',
+      {
+        ip: '127.0.0.1',
+        reason: 'invalid_id_token',
+      },
+    );
+    expect(authService.loginWithGoogle).not.toHaveBeenCalled();
   });
 
   it('apple callback creates a session and redirects to post-login', async () => {

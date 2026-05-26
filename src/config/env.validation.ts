@@ -48,6 +48,19 @@ function validateCorsOrigins(value: string, helpers: CustomHelpers<string>) {
   return value;
 }
 
+function validateCommaSeparatedValues(
+  value: string,
+  helpers: CustomHelpers<string>,
+) {
+  const entries = value.split(',').map((entry) => entry.trim());
+
+  if (entries.length === 0 || entries.some((entry) => !entry)) {
+    return helpers.error('any.invalid');
+  }
+
+  return value.trim();
+}
+
 function validateCookieDomain(value: string, helpers: CustomHelpers<string>) {
   const trimmed = value.trim();
 
@@ -298,6 +311,11 @@ export const envValidationSchema = Joi.object({
       .uri({ scheme: ['http', 'https'] })
       .required(),
   }),
+  GOOGLE_ID_TOKEN_AUDIENCES: Joi.string()
+    .trim()
+    .min(1)
+    .required()
+    .custom(validateCommaSeparatedValues, 'comma-separated value validation'),
   APPLE_CLIENT_ID: Joi.string().trim().min(1).required(),
   APPLE_TEAM_ID: Joi.string().trim().min(1).required(),
   APPLE_KEY_ID: Joi.string().trim().min(1).required(),

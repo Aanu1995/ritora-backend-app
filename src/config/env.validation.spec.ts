@@ -55,6 +55,7 @@ function developmentEnv(
     GOOGLE_CLIENT_ID: 'dev-google-client-id',
     GOOGLE_CLIENT_SECRET: 'dev-google-client-secret',
     GOOGLE_CALLBACK_URL: 'http://localhost:3001/api/v1/auth/google/callback',
+    GOOGLE_ID_TOKEN_AUDIENCES: 'dev-google-web-client-id',
     APPLE_CLIENT_ID: 'com.ritora.dev',
     APPLE_TEAM_ID: 'TEAM123456',
     APPLE_KEY_ID: 'KEY1234567',
@@ -153,6 +154,7 @@ function productionEnv(
     GOOGLE_CLIENT_ID: 'google-client-id',
     GOOGLE_CLIENT_SECRET: 'google-client-secret',
     GOOGLE_CALLBACK_URL: 'https://api.ritora.com/api/v1/auth/google/callback',
+    GOOGLE_ID_TOKEN_AUDIENCES: 'google-client-id,ios-google-client-id',
     APPLE_CLIENT_ID: 'com.ritora.web',
     APPLE_TEAM_ID: 'TEAM123456',
     APPLE_KEY_ID: 'KEY1234567',
@@ -415,10 +417,17 @@ describe('envValidationSchema', () => {
 
   it('requires OAuth strategy values outside production because Passport needs them at boot', () => {
     const googleResult = validateEnv(developmentEnv({ GOOGLE_CLIENT_ID: '' }));
+    const googleAudienceResult = validateEnv(
+      developmentEnv({ GOOGLE_ID_TOKEN_AUDIENCES: '' }),
+    );
     const appleResult = validateEnv(developmentEnv({ APPLE_CLIENT_ID: '' }));
 
     expect(googleResult.error).toBeDefined();
     expect(googleResult.error?.message).toContain('GOOGLE_CLIENT_ID');
+    expect(googleAudienceResult.error).toBeDefined();
+    expect(googleAudienceResult.error?.message).toContain(
+      'GOOGLE_ID_TOKEN_AUDIENCES',
+    );
     expect(appleResult.error).toBeDefined();
     expect(appleResult.error?.message).toContain('APPLE_CLIENT_ID');
   });

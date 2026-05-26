@@ -28,6 +28,7 @@ import {
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { ConfirmPasswordDto } from './dto/confirm-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { GoogleMobileAuthDto } from './dto/google-mobile-auth.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
@@ -39,6 +40,7 @@ import { AppleOAuthGuard } from './guards/apple-oauth.guard';
 import { GoogleOAuthCallbackGuard } from './guards/google-oauth-callback.guard';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
 import { OAuthIdentityProfile, OAuthProvider } from './oauth/oauth-profile';
+import { GoogleIdTokenVerifierService } from './oauth/google-id-token-verifier.service';
 import {
   APPLE_OAUTH_CONTEXT_COOKIE,
   APPLE_OAUTH_STATE_COOKIE,
@@ -85,6 +87,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly googleIdTokenVerifier: GoogleIdTokenVerifierService,
   ) {
     this.cookieRefreshName = this.configService.getOrThrow(
       'COOKIE_REFRESH_NAME',
@@ -178,6 +181,49 @@ export class AuthController {
     this.clearGoogleOAuthCookies(res);
 
     res.redirect(this.buildFrontendPathUrl('post-login'));
+  }
+
+  @Post('google/mobile')
+  @Public()
+  @UseGuards(OriginCheckGuard)
+  @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(5))
+  @ApiOkResponse({ type: AuthResponseDto })
+  async loginWithGoogleMobile(
+    @Body() dto: GoogleMobileAuthDto,
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
+  ): Promise<AuthResponseDto> {
+    let profile: OAuthIdentityProfile;
+    try {
+      profile = await this.googleIdTokenVerifier.verify(dto.idToken);
+    } catch (error) {
+      await this.authService.recordOAuthFailureForMonitoring(
+        OAuthProvider.Google,
+        {
+          ip: req.ip,
+          reason: 'invalid_id_token',
+        },
+      );
+      throw error;
+    }
+
+    const authResponse = await this.authService.loginWithGoogle(
+      profile,
+      {
+        preferredLanguage: dto.preferredLanguage,
+        termsAccepted: dto.termsAccepted,
+        privacyPolicyAccepted: dto.privacyPolicyAccepted,
+      },
+      res,
+      req.ip,
+      getHeaderValue(req.headers, 'user-agent'),
+    );
+
+    const language = normalizeLanguage(authResponse.user.preferredLanguage);
+    setLocaleCookie(res, this.configService, language);
+
+    return authResponse;
   }
 
   @Get('apple')

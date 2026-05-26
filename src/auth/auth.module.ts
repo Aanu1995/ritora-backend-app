@@ -24,6 +24,11 @@ import { AppleOAuthCallbackGuard } from './guards/apple-oauth-callback.guard';
 import { AppleOAuthGuard } from './guards/apple-oauth.guard';
 import { GoogleOAuthCallbackGuard } from './guards/google-oauth-callback.guard';
 import { GoogleOAuthGuard } from './guards/google-oauth.guard';
+import {
+  createGoogleIdTokenClient,
+  GOOGLE_ID_TOKEN_CLIENT,
+  GoogleIdTokenVerifierService,
+} from './oauth/google-id-token-verifier.service';
 import { AppleStrategy } from './strategies/apple.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -65,6 +70,11 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     AppleOAuthCallbackGuard,
     GoogleOAuthGuard,
     GoogleOAuthCallbackGuard,
+    GoogleIdTokenVerifierService,
+    {
+      provide: GOOGLE_ID_TOKEN_CLIENT,
+      useFactory: createGoogleIdTokenClient,
+    },
     AppleStrategy,
     GoogleStrategy,
     JwtStrategy,

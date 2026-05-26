@@ -92,6 +92,7 @@
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "dayjs": "^1.11.20",
+    "google-auth-library": "^10.6.2",
     "handlebars": "^4.7.9",
     "he": "^1.2.0",
     "helmet": "^8.1.0",
