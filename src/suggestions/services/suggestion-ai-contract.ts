@@ -135,11 +135,27 @@ export function buildPrompt(inputs: SuggestionGenerationInputs): string {
       const angleCount = currentJournalPhotoAngleCount(entry);
       const angleLabels = currentJournalPhotoAngleLabels(entry);
       const analysisImages = entry.analysis_input_image_count ?? angleCount;
+      const interpretation = entry.analysis_interpretation ?? null;
+      const readingQuality = interpretation?.reading_quality ?? null;
+      const safetyFlags = entry.analysis_observations?.safety_flags ?? null;
       return `- ${toDateOnlyString(entry.entry_date)}: status=${
         entry.analysis_status
       }, currentPhotoAngles=${angleCount}, analysisImages=${analysisImages}${
         angleLabels.length > 1 ? `, angles=${angleLabels.join('+')}` : ''
-      }${hasUsableJournalReactionSignal(entry) ? ', reactionSignal=true' : ''}`;
+      }${hasUsableJournalReactionSignal(entry) ? ', reactionSignal=true' : ''}${
+        interpretation
+          ? `, interpretation=${interpretation.code}/${interpretation.severity}`
+          : ''
+      }${
+        readingQuality
+          ? `, readingQuality=visual:${readingQuality.visual_label},trend:${readingQuality.trend_label}`
+          : ''
+      }${safetyFlags?.urgent_review_recommended ? ', urgentReview=true' : ''}${
+        safetyFlags?.doctor_follow_up_recommended ||
+        entry.analysis_observations?.should_flag_for_doctor
+          ? ', doctorFollowUp=true'
+          : ''
+      }`;
     })
     .join('\n');
   const recentApplications = inputs.recentApplications

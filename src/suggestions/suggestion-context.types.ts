@@ -153,6 +153,9 @@ export interface SuggestionJournalSignals {
     count: number;
     severities: string[];
     locations: string[];
+    averageConfidence: number | null;
+    maxConfidence: number | null;
+    changeDirections: string[];
   }[];
   photoCoverage: {
     photoEntries: number;
@@ -161,6 +164,54 @@ export interface SuggestionJournalSignals {
     needsRetakeCount: number;
   };
   trendSignals: string[];
+  analysisQuality: {
+    visualLabelCounts: Record<string, number>;
+    trendLabelCounts: Record<string, number>;
+    lightingQualityCounts: Record<string, number>;
+    framingQualityCounts: Record<string, number>;
+    issueCounts: Record<string, number>;
+    trendExcludedReasons: Record<string, number>;
+    averageQualityScore: number | null;
+    usedForAnalysisImages: number;
+  };
+  interpretationSignals: {
+    codes: {
+      code: string;
+      severity: string;
+      count: number;
+      latestEntryDate: string | null;
+      sourceIds: string[];
+    }[];
+    sourceIds: string[];
+    guidanceKeys: string[];
+    caveatKeys: string[];
+  };
+  concernGuidance: {
+    concern: string;
+    severity: string;
+    count: number;
+    locations: string[];
+    confidenceLabels: string[];
+    actionKeys: string[];
+    avoidKeys: string[];
+    factorKeys: string[];
+    escalationKeys: string[];
+    sourceIds: string[];
+  }[];
+  visualChanges: {
+    concern: string;
+    directions: string[];
+    count: number;
+    averageConfidence: number | null;
+    latestDirection: string | null;
+  }[];
+  safetySignals: {
+    urgentReviewRecommended: boolean;
+    doctorFollowUpRecommended: boolean;
+    doctorFlagReasons: string[];
+    safetyReasons: string[];
+    flaggedEntryCount: number;
+  };
 }
 
 export interface SuggestionEnvironmentSignals {

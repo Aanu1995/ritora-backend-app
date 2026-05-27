@@ -427,6 +427,119 @@ describe('suggestion AI contract', () => {
     expect(prompt).toContain('reactionSignal=true');
   });
 
+  it('includes latest photo-analysis interpretation and quality signals in prompt context', () => {
+    const inputs = generationInputs();
+    const journalSignals = inputs.contextSummary.journalSignals;
+    if (!journalSignals) throw new Error('Expected journal signals fixture.');
+
+    const prompt = buildPrompt({
+      ...inputs,
+      recentJournalEntries: [
+        {
+          id: 'journal-1',
+          entry_date: '2026-05-03',
+          photo_object_key: 'skin-journal/user-1/journal-1/front.webp',
+          analysis_status: 'completed',
+          analysis_interpretation: {
+            code: 'barrier_support',
+            severity: 'warning',
+            reading_quality: {
+              visual_label: 'useful',
+              trend_label: 'limited',
+            },
+          },
+          analysis_observations: {
+            safety_flags: {
+              urgent_review_recommended: false,
+              doctor_follow_up_recommended: true,
+              reasons: ['eye_area_involvement'],
+            },
+            should_flag_for_doctor: true,
+          },
+        } as unknown as SuggestionGenerationInputs['recentJournalEntries'][number],
+      ],
+      contextSummary: {
+        ...inputs.contextSummary,
+        journalSignals: {
+          ...journalSignals,
+          analysisQuality: {
+            visualLabelCounts: { useful: 2 },
+            trendLabelCounts: { limited: 1 },
+            lightingQualityCounts: { good: 5, fair: 1 },
+            framingQualityCounts: { good: 6 },
+            issueCounts: { shadow: 1 },
+            trendExcludedReasons: { poor_lighting: 1 },
+            averageQualityScore: 0.82,
+            usedForAnalysisImages: 5,
+          },
+          interpretationSignals: {
+            codes: [
+              {
+                code: 'barrier_support',
+                severity: 'warning',
+                count: 2,
+                latestEntryDate: '2026-05-03',
+                sourceIds: ['aad_dry_skin_relief'],
+              },
+            ],
+            sourceIds: ['aad_dry_skin_relief'],
+            guidanceKeys: [
+              'journal.analysis.interpretation.barrierSupport.guidance',
+            ],
+            caveatKeys: [
+              'journal.analysis.interpretation.caveats.notDiagnosis',
+            ],
+          },
+          concernGuidance: [
+            {
+              concern: 'redness_inflammation',
+              severity: 'moderate',
+              count: 2,
+              locations: ['cheeks'],
+              confidenceLabels: ['likely_visible'],
+              actionKeys: ['journal.analysis.guidance.actions.barrier_support'],
+              avoidKeys: ['journal.analysis.guidance.avoid.strong_actives'],
+              factorKeys: ['journal.analysis.guidance.factors.recent_retinoid'],
+              escalationKeys: [
+                'journal.analysis.guidance.escalation.dermatologist',
+              ],
+              sourceIds: ['aad_dry_skin_relief'],
+            },
+          ],
+          visualChanges: [
+            {
+              concern: 'redness_inflammation',
+              directions: ['worsened'],
+              count: 1,
+              averageConfidence: 0.73,
+              latestDirection: 'worsened',
+            },
+          ],
+          safetySignals: {
+            urgentReviewRecommended: false,
+            doctorFollowUpRecommended: true,
+            doctorFlagReasons: ['Persistent irritation after retinoid use.'],
+            safetyReasons: ['eye_area_involvement'],
+            flaggedEntryCount: 1,
+          },
+        } as unknown as SuggestionContextSummary['journalSignals'],
+      },
+    });
+
+    expect(prompt).toContain('interpretation=barrier_support/warning');
+    expect(prompt).toContain('readingQuality=visual:useful,trend:limited');
+    expect(prompt).toContain('"analysisQuality"');
+    expect(prompt).toContain('"interpretationSignals"');
+    expect(prompt).toContain('"concernGuidance"');
+    expect(prompt).toContain('"visualChanges"');
+    expect(prompt).toContain('"safetySignals"');
+    expect(prompt).toContain('aad_dry_skin_relief');
+    expect(prompt).toContain(
+      'journal.analysis.guidance.actions.barrier_support',
+    );
+    expect(prompt).toContain('eye_area_involvement');
+  });
+
   it('treats on-demand free text as context instead of instructions', () => {
     const prompt = buildPrompt({
       ...generationInputs(),
@@ -771,6 +884,9 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
           count: 3,
           severities: ['mild'],
           locations: ['cheeks'],
+          averageConfidence: null,
+          maxConfidence: null,
+          changeDirections: [],
         },
       ],
       photoCoverage: {
@@ -780,6 +896,31 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
         needsRetakeCount: 0,
       },
       trendSignals: ['sun_exposure_recent', 'barrier_discomfort_ratings'],
+      analysisQuality: {
+        visualLabelCounts: {},
+        trendLabelCounts: {},
+        lightingQualityCounts: {},
+        framingQualityCounts: {},
+        issueCounts: {},
+        trendExcludedReasons: {},
+        averageQualityScore: null,
+        usedForAnalysisImages: 0,
+      },
+      interpretationSignals: {
+        codes: [],
+        sourceIds: [],
+        guidanceKeys: [],
+        caveatKeys: [],
+      },
+      concernGuidance: [],
+      visualChanges: [],
+      safetySignals: {
+        urgentReviewRecommended: false,
+        doctorFollowUpRecommended: false,
+        doctorFlagReasons: [],
+        safetyReasons: [],
+        flaggedEntryCount: 0,
+      },
     },
     routineBreak: {
       recentlyResumed: false,

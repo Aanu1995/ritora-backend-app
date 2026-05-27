@@ -12,6 +12,7 @@ import {
   trimForPrompt,
   unique,
 } from './suggestion-context-common';
+import { JournalPhotoAnalysisSignalCollector } from './suggestion-photo-analysis-signals';
 
 export function buildJournalSignals(
   entries: SkinJournalEntry[],
@@ -23,15 +24,13 @@ export function buildJournalSignals(
   const sunExposureCounts: Record<string, number> = {};
   const cycleMarkers: string[] = [];
   const recentChangeKinds: string[] = [];
-  const detectedConcernMap = new Map<
-    string,
-    { count: number; severities: Set<string>; locations: Set<string> }
-  >();
+  const photoAnalysis = new JournalPhotoAnalysisSignalCollector();
   let sweatExerciseDays = 0;
-  let needsRetakeCount = 0;
   const complaintNotes: string[] = [];
 
   for (const entry of sortedEntries) {
+    const entryDate = toDateOnlyString(entry.entry_date);
+
     if (entry.stress_today) increment(stressCounts, entry.stress_today);
     if (entry.sleep_band) increment(sleepCounts, entry.sleep_band);
     if (entry.overall_feel) increment(overallFeelCounts, entry.overall_feel);
@@ -44,37 +43,10 @@ export function buildJournalSignals(
     if (entry.complaint_note && complaintNotes.length < 5) {
       complaintNotes.push(trimForPrompt(entry.complaint_note, 120));
     }
-    if (
-      entry.needs_retake ||
-      entry.analysis_observations?.image_quality?.needs_retake ||
-      (entry.analysis_observations?.per_angle_quality ?? []).some(
-        (quality) => quality.needs_retake,
-      )
-    ) {
-      needsRetakeCount += 1;
-    }
-    for (const concern of entry.analysis_observations?.detected_concerns ??
-      []) {
-      const aggregate =
-        detectedConcernMap.get(concern.concern) ??
-        ({
-          count: 0,
-          severities: new Set<string>(),
-          locations: new Set<string>(),
-        } satisfies {
-          count: number;
-          severities: Set<string>;
-          locations: Set<string>;
-        });
-      aggregate.count += 1;
-      aggregate.severities.add(concern.severity);
-      for (const location of concern.locations ?? []) {
-        aggregate.locations.add(location);
-      }
-      detectedConcernMap.set(concern.concern, aggregate);
-    }
+    photoAnalysis.collect(entry, entryDate);
   }
 
+  const photoSummary = photoAnalysis.build();
   const photoInputImages = sortedEntries.reduce(
     (sum, entry) => sum + currentJournalPhotoAngleCount(entry),
     0,
@@ -84,7 +56,8 @@ export function buildJournalSignals(
     stressCounts,
     sunExposureCounts,
     sweatExerciseDays,
-    needsRetakeCount,
+    photoSummary.needsRetakeCount,
+    photoSummary.trendSignals,
   );
 
   return {
@@ -102,14 +75,7 @@ export function buildJournalSignals(
       recentChangeKinds: unique(recentChangeKinds),
       complaintNotes,
     },
-    detectedConcerns: Array.from(detectedConcernMap.entries())
-      .map(([concern, aggregate]) => ({
-        concern,
-        count: aggregate.count,
-        severities: Array.from(aggregate.severities),
-        locations: Array.from(aggregate.locations),
-      }))
-      .sort((a, b) => b.count - a.count || a.concern.localeCompare(b.concern)),
+    detectedConcerns: photoSummary.detectedConcerns,
     photoCoverage: {
       photoEntries: sortedEntries.filter(
         (entry) =>
@@ -119,9 +85,14 @@ export function buildJournalSignals(
       photoInputImages,
       multiAnglePhotoEntries: sortedEntries.filter(hasMultiAngleJournalPhoto)
         .length,
-      needsRetakeCount,
+      needsRetakeCount: photoSummary.needsRetakeCount,
     },
     trendSignals,
+    analysisQuality: photoSummary.analysisQuality,
+    interpretationSignals: photoSummary.interpretationSignals,
+    concernGuidance: photoSummary.concernGuidance,
+    visualChanges: photoSummary.visualChanges,
+    safetySignals: photoSummary.safetySignals,
   };
 }
 
@@ -183,6 +154,7 @@ function buildJournalTrendSignals(
   sunExposureCounts: Record<string, number>,
   sweatExerciseDays: number,
   needsRetakeCount: number,
+  photoTrendSignals: string[],
 ): string[] {
   const signals: string[] = [];
   if (entries.some(hasUsableJournalReactionSignal)) {
@@ -217,6 +189,7 @@ function buildJournalTrendSignals(
   ) {
     signals.push('new_product_recently_started');
   }
+  signals.push(...photoTrendSignals);
   return unique(signals);
 }
 

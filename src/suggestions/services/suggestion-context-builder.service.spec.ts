@@ -130,10 +130,69 @@ describe('SuggestionContextBuilder', () => {
         trendSignals: expect.arrayContaining([
           'reaction_signal_present',
           'barrier_compromised',
+          'photo_interpretation_barrier_support',
+          'photo_trend_limited',
+          'photo_concern_worsened',
+          'doctor_follow_up_recommended',
           'sun_exposure_recent',
           'sweat_exercise_recent',
           'new_product_recently_started',
         ]),
+        analysisQuality: expect.objectContaining({
+          visualLabelCounts: { useful: 1 },
+          trendLabelCounts: { limited: 1 },
+          lightingQualityCounts: { good: 3, fair: 1 },
+          framingQualityCounts: { good: 4 },
+          issueCounts: { shadow: 1 },
+          trendExcludedReasons: { poor_lighting: 1 },
+          averageQualityScore: 0.81,
+          usedForAnalysisImages: 3,
+        }),
+        interpretationSignals: expect.objectContaining({
+          codes: [
+            expect.objectContaining({
+              code: 'barrier_support',
+              severity: 'warning',
+              count: 1,
+              latestEntryDate: '2026-04-29',
+              sourceIds: ['aad_dry_skin_relief'],
+            }),
+          ],
+          sourceIds: ['aad_dry_skin_relief'],
+          guidanceKeys: [
+            'journal.analysis.interpretation.barrierSupport.guidance',
+          ],
+          caveatKeys: ['journal.analysis.interpretation.caveats.notDiagnosis'],
+        }),
+        concernGuidance: [
+          expect.objectContaining({
+            concern: 'redness_inflammation',
+            severity: 'moderate',
+            confidenceLabels: ['likely_visible'],
+            actionKeys: ['journal.analysis.guidance.actions.barrier_support'],
+            avoidKeys: ['journal.analysis.guidance.avoid.strong_actives'],
+            factorKeys: ['journal.analysis.guidance.factors.recent_retinoid'],
+            escalationKeys: [
+              'journal.analysis.guidance.escalation.dermatologist',
+            ],
+            sourceIds: ['aad_dry_skin_relief'],
+          }),
+        ],
+        visualChanges: [
+          expect.objectContaining({
+            concern: 'redness_inflammation',
+            directions: ['worsened'],
+            averageConfidence: 0.73,
+            latestDirection: 'worsened',
+          }),
+        ],
+        safetySignals: expect.objectContaining({
+          urgentReviewRecommended: false,
+          doctorFollowUpRecommended: true,
+          doctorFlagReasons: ['Persistent irritation after retinoid use.'],
+          safetyReasons: ['eye_area_involvement'],
+          flaggedEntryCount: 1,
+        }),
       }),
     );
     expect(summary.appliedProductHistory).toEqual(
@@ -357,12 +416,28 @@ describe('SuggestionContextBuilder', () => {
         } as unknown as SkinJournalEntry,
       ],
     };
+    const changedPhotoInterpretationInput = {
+      ...baseInput,
+      recentJournalEntries: [
+        {
+          ...reactionJournalEntry(),
+          analysis_interpretation: {
+            ...reactionJournalEntry().analysis_interpretation,
+            code: 'urgent_review',
+            severity: 'critical',
+          },
+        } as unknown as SkinJournalEntry,
+      ],
+    };
 
     expect(buildSuggestionContextCacheKey(baseInput)).toBe(
       buildSuggestionContextCacheKey(changedPrivateTextInput),
     );
     expect(buildSuggestionContextCacheKey(baseInput)).not.toBe(
       buildSuggestionContextCacheKey(changedVersionInput),
+    );
+    expect(buildSuggestionContextCacheKey(baseInput)).not.toBe(
+      buildSuggestionContextCacheKey(changedPhotoInterpretationInput),
     );
   });
 
@@ -655,11 +730,38 @@ function reactionJournalEntry(): SkinJournalEntry {
         framing_quality: 'good',
         blur_detected: false,
         issues: [],
+        quality_score: 0.88,
+        needs_retake: false,
+        excluded_from_trends_reason: 'poor_lighting',
       },
       per_angle_quality: [
-        { angle: 'head_on' },
-        { angle: 'left_profile' },
-        { angle: 'right_profile' },
+        {
+          angle: 'head_on',
+          lighting_quality: 'good',
+          framing_quality: 'good',
+          blur_detected: false,
+          issues: [],
+          quality_score: 0.92,
+          used_for_analysis: true,
+        },
+        {
+          angle: 'left_profile',
+          lighting_quality: 'fair',
+          framing_quality: 'good',
+          blur_detected: false,
+          issues: ['shadow'],
+          quality_score: 0.72,
+          used_for_analysis: true,
+        },
+        {
+          angle: 'right_profile',
+          lighting_quality: 'good',
+          framing_quality: 'good',
+          blur_detected: false,
+          issues: [],
+          quality_score: 0.72,
+          used_for_analysis: true,
+        },
       ],
       reaction_signals: {
         reaction_detected: true,
@@ -676,6 +778,73 @@ function reactionJournalEntry(): SkinJournalEntry {
           concern: 'redness_inflammation',
           severity: 'moderate',
           locations: ['cheeks'],
+          confidence: 0.84,
+          change_from_previous: 'worsened',
+          change_confidence: 0.73,
+        },
+      ],
+      safety_flags: {
+        urgent_review_recommended: false,
+        doctor_follow_up_recommended: true,
+        reasons: ['eye_area_involvement'],
+      },
+      should_flag_for_doctor: true,
+      doctor_flag_reason: 'Persistent irritation after retinoid use.',
+    },
+    analysis_interpretation: {
+      version: '1.1',
+      code: 'barrier_support',
+      severity: 'warning',
+      summary_key: 'journal.analysis.interpretation.barrierSupport.summary',
+      summary_values: { severity: 'moderate' },
+      guidance_keys: [
+        'journal.analysis.interpretation.barrierSupport.guidance',
+      ],
+      caveat_keys: ['journal.analysis.interpretation.caveats.notDiagnosis'],
+      source_ids: ['aad_dry_skin_relief'],
+      sources: [
+        {
+          id: 'aad_dry_skin_relief',
+          title_key: 'journal.analysis.sources.aad_dry_skin_relief.title',
+          organization: 'American Academy of Dermatology',
+          summary_key: 'journal.analysis.sources.aad_dry_skin_relief.summary',
+          url: 'https://example.test/dry-skin',
+          evidence_grade: 'moderate',
+          last_verified: '2026-05-01',
+        },
+      ],
+      generated_at: '2026-04-29T05:31:00.000Z',
+      reading_quality: {
+        visual_label: 'useful',
+        trend_label: 'limited',
+        reason_keys: [{ key: 'journal.analysis.reading.reasons.trendLimited' }],
+      },
+      concern_guidance: [
+        {
+          concern: 'redness_inflammation',
+          severity: 'moderate',
+          locations: ['cheeks'],
+          confidence_label: 'likely_visible',
+          title_key: 'journal.analysis.guidance.redness.title',
+          summary: {
+            key: 'journal.analysis.guidance.redness.summary',
+            values: { severity: 'moderate' },
+          },
+          possible_factor_keys: [
+            { key: 'journal.analysis.guidance.factors.recent_retinoid' },
+          ],
+          action_keys: [
+            { key: 'journal.analysis.guidance.actions.barrier_support' },
+          ],
+          avoid_keys: [
+            { key: 'journal.analysis.guidance.avoid.strong_actives' },
+          ],
+          track_key: { key: 'journal.analysis.guidance.track.redness' },
+          escalation_key: {
+            key: 'journal.analysis.guidance.escalation.dermatologist',
+          },
+          source_ids: ['aad_dry_skin_relief'],
+          sources: [],
         },
       ],
     },

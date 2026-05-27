@@ -68,19 +68,98 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
         entry.analysis_concern_keys ?? [],
         entry.analysis_observations?.reaction_signals ?? null,
         entry.analysis_observations?.barrier_signs ?? null,
-        entry.analysis_observations?.image_quality?.needs_retake ?? null,
+        entry.analysis_observations
+          ? [
+              entry.analysis_observations.schema_version,
+              entry.analysis_observations.model_version,
+              entry.analysis_observations.overall_change_from_previous ?? null,
+              entry.analysis_observations.image_quality
+                ? [
+                    entry.analysis_observations.image_quality.face_detected,
+                    entry.analysis_observations.image_quality.lighting_quality,
+                    entry.analysis_observations.image_quality.framing_quality,
+                    entry.analysis_observations.image_quality.blur_detected,
+                    entry.analysis_observations.image_quality.needs_retake ??
+                      null,
+                    entry.analysis_observations.image_quality.quality_score ??
+                      null,
+                    entry.analysis_observations.image_quality
+                      .excluded_from_trends_reason ?? null,
+                    entry.analysis_observations.image_quality.issues ?? [],
+                  ]
+                : null,
+              entry.analysis_observations.safety_flags
+                ? [
+                    entry.analysis_observations.safety_flags
+                      .urgent_review_recommended,
+                    entry.analysis_observations.safety_flags
+                      .doctor_follow_up_recommended,
+                    entry.analysis_observations.safety_flags.reasons ?? [],
+                  ]
+                : null,
+              entry.analysis_observations.should_flag_for_doctor,
+            ]
+          : null,
         entry.analysis_observations?.detected_concerns?.map((concern) => [
           concern.concern,
           concern.severity,
           concern.locations,
+          concern.confidence,
           concern.change_from_previous ?? null,
+          concern.change_confidence ?? null,
         ]) ?? [],
         entry.analysis_observations?.per_angle_quality?.map((quality) => [
           quality.angle,
+          quality.face_detected,
+          quality.lighting_quality,
+          quality.framing_quality,
+          quality.blur_detected,
+          quality.issues ?? [],
           quality.used_for_analysis,
           quality.needs_retake,
           quality.quality_score ?? null,
         ]) ?? [],
+        entry.analysis_interpretation
+          ? [
+              entry.analysis_interpretation.version,
+              entry.analysis_interpretation.code,
+              entry.analysis_interpretation.severity,
+              entry.analysis_interpretation.summary_key,
+              Object.entries(
+                entry.analysis_interpretation.summary_values ?? {},
+              ).sort(([firstKey], [secondKey]) =>
+                firstKey.localeCompare(secondKey),
+              ),
+              entry.analysis_interpretation.guidance_keys ?? [],
+              entry.analysis_interpretation.caveat_keys ?? [],
+              entry.analysis_interpretation.source_ids ?? [],
+              entry.analysis_interpretation.reading_quality
+                ? [
+                    entry.analysis_interpretation.reading_quality.visual_label,
+                    entry.analysis_interpretation.reading_quality.trend_label,
+                    (
+                      entry.analysis_interpretation.reading_quality
+                        .reason_keys ?? []
+                    ).map((ref) => ref.key),
+                  ]
+                : null,
+              (entry.analysis_interpretation.concern_guidance ?? []).map(
+                (guidance) => [
+                  guidance.concern,
+                  guidance.severity,
+                  guidance.locations,
+                  guidance.confidence_label,
+                  guidance.summary.key,
+                  guidance.possible_factor_keys.map((ref) => ref.key),
+                  guidance.action_keys.map((ref) => ref.key),
+                  guidance.avoid_keys.map((ref) => ref.key),
+                  guidance.track_key.key,
+                  guidance.escalation_key?.key ?? null,
+                  guidance.source_ids ?? [],
+                ],
+              ),
+            ]
+          : null,
       ]),
     logs: inputs.recentApplications
       .slice()

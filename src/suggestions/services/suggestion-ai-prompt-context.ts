@@ -111,6 +111,9 @@ export function formatJournalSignalsForPrompt(
       count: concern.count,
       severities: concern.severities,
       locations: concern.locations,
+      averageConfidence: concern.averageConfidence,
+      maxConfidence: concern.maxConfidence,
+      changeDirections: concern.changeDirections,
     })),
     photoCoverage: {
       photoEntries: signals.photoCoverage.photoEntries,
@@ -119,6 +122,70 @@ export function formatJournalSignalsForPrompt(
       needsRetakeCount: signals.photoCoverage.needsRetakeCount,
     },
     trendSignals: signals.trendSignals.slice(0, 20),
+    analysisQuality: signals.analysisQuality
+      ? {
+          visualLabelCounts: signals.analysisQuality.visualLabelCounts,
+          trendLabelCounts: signals.analysisQuality.trendLabelCounts,
+          lightingQualityCounts: signals.analysisQuality.lightingQualityCounts,
+          framingQualityCounts: signals.analysisQuality.framingQualityCounts,
+          issueCounts: signals.analysisQuality.issueCounts,
+          trendExcludedReasons: signals.analysisQuality.trendExcludedReasons,
+          averageQualityScore: signals.analysisQuality.averageQualityScore,
+          usedForAnalysisImages: signals.analysisQuality.usedForAnalysisImages,
+        }
+      : null,
+    interpretationSignals: signals.interpretationSignals
+      ? {
+          codes: signals.interpretationSignals.codes
+            .slice(0, 12)
+            .map((code) => ({
+              code: code.code,
+              severity: code.severity,
+              count: code.count,
+              latestEntryDate: code.latestEntryDate,
+              sourceIds: code.sourceIds.slice(0, 12),
+            })),
+          sourceIds: signals.interpretationSignals.sourceIds.slice(0, 20),
+          guidanceKeys: signals.interpretationSignals.guidanceKeys.slice(0, 20),
+          caveatKeys: signals.interpretationSignals.caveatKeys.slice(0, 20),
+        }
+      : null,
+    concernGuidance: signals.concernGuidance
+      ? signals.concernGuidance.slice(0, 12).map((guidance) => ({
+          concern: guidance.concern,
+          severity: guidance.severity,
+          count: guidance.count,
+          locations: guidance.locations.slice(0, 12),
+          confidenceLabels: guidance.confidenceLabels.slice(0, 12),
+          actionKeys: guidance.actionKeys.slice(0, 12),
+          avoidKeys: guidance.avoidKeys.slice(0, 12),
+          factorKeys: guidance.factorKeys.slice(0, 12),
+          escalationKeys: guidance.escalationKeys.slice(0, 12),
+          sourceIds: guidance.sourceIds.slice(0, 12),
+        }))
+      : [],
+    visualChanges: signals.visualChanges
+      ? signals.visualChanges.slice(0, 12).map((change) => ({
+          concern: change.concern,
+          directions: change.directions,
+          count: change.count,
+          averageConfidence: change.averageConfidence,
+          latestDirection: change.latestDirection,
+        }))
+      : [],
+    safetySignals: signals.safetySignals
+      ? {
+          urgentReviewRecommended:
+            signals.safetySignals.urgentReviewRecommended,
+          doctorFollowUpRecommended:
+            signals.safetySignals.doctorFollowUpRecommended,
+          doctorFlagReasons: signals.safetySignals.doctorFlagReasons
+            .slice(0, 5)
+            .map((reason) => trimPromptText(reason, 120)),
+          safetyReasons: signals.safetySignals.safetyReasons.slice(0, 12),
+          flaggedEntryCount: signals.safetySignals.flaggedEntryCount,
+        }
+      : null,
   };
 }
 
