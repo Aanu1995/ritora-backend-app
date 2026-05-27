@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { NestFactory } from '@nestjs/core';
+import { evaluationEnvFilePaths, loadEnvFiles } from '../config/env-files';
 import { SkinJournalAnalysisService } from '../skin-journal/services/skin-journal-analysis.service';
 import { detectLocalFaceLikeRegion } from '../skin-journal/services/skin-journal-analysis-local-face-gate';
 import { parseAnalysisPhotoPreflightIssues } from '../skin-journal/services/skin-journal-analysis-preflight';
@@ -24,12 +25,14 @@ import {
 } from '../skin-journal/skin-journal.constants';
 
 interface EvaluationCliOptions {
+  envFile: string | null;
   fixturesDir: string;
   out: string;
 }
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
+  loadEnvFiles(evaluationEnvFilePaths(options.envFile));
   const app = await NestFactory.createApplicationContext(
     SkinJournalAnalysisEvaluationModule,
     {
@@ -121,6 +124,7 @@ function parseArgs(args: string[]): EvaluationCliOptions {
     join(process.cwd(), 'src/skin-journal/analysis-evaluation/private-images');
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   return {
+    envFile: readFlag(args, '--env-file'),
     fixturesDir: resolve(fixturesDir),
     out: resolve(
       readFlag(args, '--out') ??

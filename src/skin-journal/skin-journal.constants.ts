@@ -122,6 +122,34 @@ export const INSIGHT_INTERACTION_TYPES = Object.values(
   InsightInteractionTypeValue,
 );
 
+export const AnalysisFeedbackVoteValue = {
+  Helpful: 'helpful',
+  NotHelpful: 'not_helpful',
+} as const;
+
+export type AnalysisFeedbackVote =
+  (typeof AnalysisFeedbackVoteValue)[keyof typeof AnalysisFeedbackVoteValue];
+
+export const ANALYSIS_FEEDBACK_VOTES = Object.values(AnalysisFeedbackVoteValue);
+
+export const AnalysisFeedbackReasonValue = {
+  TooGeneric: 'too_generic',
+  WrongConcern: 'wrong_concern',
+  WrongLocation: 'wrong_location',
+  MissedContext: 'missed_context',
+  NotActionable: 'not_actionable',
+  PhotoQualityConfusing: 'photo_quality_confusing',
+  SourcesNotUseful: 'sources_not_useful',
+  Other: 'other',
+} as const;
+
+export type AnalysisFeedbackReason =
+  (typeof AnalysisFeedbackReasonValue)[keyof typeof AnalysisFeedbackReasonValue];
+
+export const ANALYSIS_FEEDBACK_REASONS = Object.values(
+  AnalysisFeedbackReasonValue,
+);
+
 export type InsightWindow = 'all' | 'week' | 'month';
 
 export type InsightSourceType = 'deterministic' | 'ai_polished' | 'ai_sourced';
@@ -456,6 +484,39 @@ export interface AnalysisEntryContext {
   is_pre_routine?: boolean | null;
 }
 
+export interface AnalysisRoutineProductContext {
+  product_id: string | null;
+  brand: string | null;
+  name: string | null;
+  category: string | null;
+  step_label: string | null;
+  is_specialist_locked?: boolean;
+}
+
+export interface AnalysisRecentApplicationContext {
+  target_date: string;
+  daypart: string | null;
+  applied_at: string | null;
+  items: Array<{
+    status: string;
+    product_id: string | null;
+    brand: string | null;
+    name: string | null;
+    category: string | null;
+    step_label: string | null;
+  }>;
+}
+
+export interface AnalysisCheckInContext extends AnalysisEntryContext {
+  detected_concerns?: AnalysisConcern[];
+}
+
+export interface AnalysisRoutineContext {
+  routine_products: AnalysisRoutineProductContext[];
+  recent_applications: AnalysisRecentApplicationContext[];
+  recent_check_ins: AnalysisCheckInContext[];
+}
+
 export interface AnalysisRunMetadata {
   prompt_version: string;
   duration_ms: number;
@@ -553,8 +614,42 @@ export interface PhotoAnalysisSourceCitation {
   last_verified: string;
 }
 
+export type PhotoAnalysisReadingLabel = 'useful' | 'limited' | 'needs_retake';
+
+export type PhotoAnalysisConcernReadLabel =
+  | 'likely_visible'
+  | 'possible'
+  | 'limited';
+
+export interface PhotoAnalysisTextRef {
+  key: string;
+  values?: Record<string, string | number>;
+}
+
+export interface PhotoAnalysisReadingQuality {
+  visual_label: PhotoAnalysisReadingLabel;
+  trend_label: PhotoAnalysisReadingLabel;
+  reason_keys: PhotoAnalysisTextRef[];
+}
+
+export interface PhotoAnalysisConcernGuidance {
+  concern: AnalysisConcern;
+  severity: 'mild' | 'moderate' | 'severe';
+  locations: string[];
+  confidence_label: PhotoAnalysisConcernReadLabel;
+  title_key: string;
+  summary: PhotoAnalysisTextRef;
+  possible_factor_keys: PhotoAnalysisTextRef[];
+  action_keys: PhotoAnalysisTextRef[];
+  avoid_keys: PhotoAnalysisTextRef[];
+  track_key: PhotoAnalysisTextRef;
+  escalation_key?: PhotoAnalysisTextRef | null;
+  source_ids: string[];
+  sources: PhotoAnalysisSourceCitation[];
+}
+
 export interface PhotoAnalysisInterpretation {
-  version: '1.0';
+  version: '1.0' | '1.1';
   code: PhotoAnalysisInterpretationCode;
   severity: EventSeverity;
   summary_key: string;
@@ -564,6 +659,8 @@ export interface PhotoAnalysisInterpretation {
   source_ids: string[];
   sources: PhotoAnalysisSourceCitation[];
   generated_at: string;
+  reading_quality?: PhotoAnalysisReadingQuality;
+  concern_guidance?: PhotoAnalysisConcernGuidance[];
 }
 
 export interface WrappedManifestEntry {

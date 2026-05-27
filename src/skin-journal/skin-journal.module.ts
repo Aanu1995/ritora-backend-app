@@ -5,6 +5,7 @@ import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entit
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalInsightInteraction } from './entities/skin-journal-insight-interaction.entity';
+import { SkinJournalAnalysisFeedback } from './entities/skin-journal-analysis-feedback.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
 import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
 import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
@@ -18,6 +19,7 @@ import { AccountMonitoringEvent } from '../users/entities/account-monitoring-eve
 import { User } from '../users/entities/user.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { RoutineStep } from '../schedule/entities/routine-step.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
@@ -47,6 +49,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       SkinJournalEvent,
       SkinJournalInsight,
       SkinJournalInsightInteraction,
+      SkinJournalAnalysisFeedback,
       SkinJournalInsightGenerationRun,
       SkinJournalInsightJob,
       SkinJournalInsightState,
@@ -60,6 +63,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       User,
       SkinProfile,
       ApplicationLog,
+      RoutineStep,
     ]),
   ],
   controllers: [SkinJournalController],

@@ -45,48 +45,52 @@ describe('Suggestions context history database performance (e2e)', () => {
     await closeTestApp(app);
   }, PERFORMANCE_E2E_TIMEOUT_MS);
 
-  it('uses intended indexes for large 30-day Today suggestion context reads', async () => {
-    const userId = await loadCurrentUserId(dataSource);
-    const targetDate = '2026-05-25';
-    await cleanupPerformanceRows(dataSource);
-    await seedPerformanceRows(dataSource, userId, targetDate);
+  it(
+    'uses intended indexes for large 30-day Today suggestion context reads',
+    async () => {
+      const userId = await loadCurrentUserId(dataSource);
+      const targetDate = '2026-05-25';
+      await cleanupPerformanceRows(dataSource);
+      await seedPerformanceRows(dataSource, userId, targetDate);
 
-    try {
-      await analyzeContextTables(dataSource);
+      try {
+        await analyzeContextTables(dataSource);
 
-      await expectIndexedPlan({
-        dataSource,
-        expectedIndexNames: [
-          'IDX_skin_journal_entries_user_date_desc',
-          'IDX_skin_journal_entries_user_reaction_date',
-        ],
-        parameters: [userId, targetDate],
-        sql: `
+        await expectIndexedPlan({
+          dataSource,
+          expectedIndexNames: [
+            'IDX_skin_journal_entries_user_date_desc',
+            'IDX_skin_journal_entries_user_reaction_date',
+          ],
+          parameters: [userId, targetDate],
+          sql: `
           SELECT id
           FROM skin_journal_entries
           WHERE user_id = $1
             AND entry_date BETWEEN ($2::date - INTERVAL '29 days') AND $2::date
           ORDER BY entry_date DESC, updated_at DESC
         `,
-      });
-      await expectIndexedPlan({
-        dataSource,
-        expectedIndexNames: ['IDX_application_logs_user_target_date'],
-        parameters: [userId, targetDate],
-        sql: `
+        });
+        await expectIndexedPlan({
+          dataSource,
+          expectedIndexNames: ['IDX_application_logs_user_target_date'],
+          parameters: [userId, targetDate],
+          sql: `
           SELECT id
           FROM application_logs
           WHERE user_id = $1
             AND target_date BETWEEN ($2::date - INTERVAL '29 days') AND $2::date
           ORDER BY target_date DESC, created_at DESC
         `,
-      });
-      await expectIndexedPlan({
-        dataSource,
-        disableSort: true,
-        expectedIndexNames: ['idx_suggestion_instances_context_history_ready'],
-        parameters: [userId, targetDate],
-        sql: `
+        });
+        await expectIndexedPlan({
+          dataSource,
+          disableSort: true,
+          expectedIndexNames: [
+            'idx_suggestion_instances_context_history_ready',
+          ],
+          parameters: [userId, targetDate],
+          sql: `
           SELECT id
           FROM suggestion_instances
           WHERE user_id = $1
@@ -94,16 +98,16 @@ describe('Suggestions context history database performance (e2e)', () => {
             AND target_date BETWEEN ($2::date - INTERVAL '29 days') AND $2::date
           ORDER BY target_date DESC, target_time DESC, created_at DESC
         `,
-      });
-      await expectIndexedPlan({
-        dataSource,
-        expectedIndexNames: ['idx_routine_breaks_context_history'],
-        parameters: [
-          userId,
-          '2026-04-26T00:00:00.000Z',
-          '2026-05-26T00:00:00.000Z',
-        ],
-        sql: `
+        });
+        await expectIndexedPlan({
+          dataSource,
+          expectedIndexNames: ['idx_routine_breaks_context_history'],
+          parameters: [
+            userId,
+            '2026-04-26T00:00:00.000Z',
+            '2026-05-26T00:00:00.000Z',
+          ],
+          sql: `
           SELECT id
           FROM routine_breaks
           WHERE (
@@ -127,11 +131,13 @@ describe('Suggestions context history database performance (e2e)', () => {
             )
           ORDER BY starts_at DESC
         `,
-      });
-    } finally {
-      await cleanupPerformanceRows(dataSource);
-    }
-  }, PERFORMANCE_E2E_TIMEOUT_MS);
+        });
+      } finally {
+        await cleanupPerformanceRows(dataSource);
+      }
+    },
+    PERFORMANCE_E2E_TIMEOUT_MS,
+  );
 });
 
 async function expectIndexedPlan(input: {

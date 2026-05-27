@@ -55,6 +55,7 @@ import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entit
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalInsightInteraction } from './entities/skin-journal-insight-interaction.entity';
+import { SkinJournalAnalysisFeedback } from './entities/skin-journal-analysis-feedback.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
 import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
 import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
@@ -78,6 +79,10 @@ import {
 import { SkinJournalInsightQueueService } from './services/skin-journal-insight-queue.service';
 import { SkinJournalMediaRetentionService } from './services/skin-journal-media-retention.service';
 import { UpsertEntryDto } from './dto/upsert-entry.dto';
+import {
+  AnalysisFeedbackResponseDto,
+  RecordAnalysisFeedbackDto,
+} from './dto/analysis-feedback.dto';
 import {
   CreateJournalExportDto,
   JournalExportResponseDto,
@@ -144,7 +149,10 @@ import {
   AnalysisStatusValue,
   AnalysisFailureCode,
   AnalysisFailureCodeValue,
+  ANALYSIS_FEEDBACK_REASONS,
+  AnalysisFeedbackVoteValue,
   AnalysisEntryContext,
+  AnalysisRoutineContext,
   AnalysisSkinContext,
   CompareDeltaBullet,
   CompareDeltaSeverity,
@@ -189,6 +197,7 @@ import type { InsightBlock, InsightCandidate } from './insights/insight-types';
 import type { InsightAction } from './insights/insight-types';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { RoutineStep } from '../schedule/entities/routine-step.entity';
 import type { RoutineApplicationEvidence } from './skin-journal-insight-detectors';
 import {
   AccountMonitoringEvent,
@@ -386,8 +395,12 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly insights: Repository<SkinJournalInsight>,
     @InjectRepository(SkinJournalInsightInteraction)
     private readonly insightInteractions: Repository<SkinJournalInsightInteraction>,
+    @InjectRepository(SkinJournalAnalysisFeedback)
+    private readonly analysisFeedback: Repository<SkinJournalAnalysisFeedback>,
     @InjectRepository(ApplicationLog)
     private readonly applicationLogs: Repository<ApplicationLog>,
+    @InjectRepository(RoutineStep)
+    private readonly routineSteps: Repository<RoutineStep>,
     @InjectRepository(SkinJournalInsightGenerationRun)
     private readonly insightRuns: Repository<SkinJournalInsightGenerationRun>,
     @InjectRepository(SkinJournalInsightState)
@@ -541,6 +554,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   private buildEntryResponse(
     entry: SkinJournalEntry,
     rows: SkinJournalEntryPhoto[] = [],
+    feedback: SkinJournalAnalysisFeedback | null = null,
   ): JournalEntryResponseDto {
     const photos = this.normalizePhotoRowsForEntry(entry, rows);
     const front = this.frontPhotoRow(photos);
@@ -556,6 +570,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       this.entryWithFrontPhotoCompatibility(entry, front),
       this.photoStorage.getSignedUrl(front?.photo_object_key ?? null),
       signedPhotos,
+      feedback,
     );
   }
 
@@ -612,13 +627,40 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     entries: SkinJournalEntry[],
   ): Promise<JournalEntryResponseDto[]> {
+    const entryIds = entries.map((entry) => entry.id);
     const rowsByEntry = await this.loadEntryPhotoRowsByEntryId(
       userId,
-      entries.map((entry) => entry.id),
+      entryIds,
+    );
+    const feedbackByEntry = this.loadAnalysisFeedbackByEntryId(
+      userId,
+      entryIds,
     );
     return entries.map((entry) =>
-      this.buildEntryResponse(entry, rowsByEntry.get(entry.id) ?? []),
+      this.buildEntryResponse(
+        entry,
+        rowsByEntry.get(entry.id) ?? [],
+        feedbackByEntry.get(entry.id) ?? null,
+      ),
     );
+  }
+
+  private loadAnalysisFeedbackByEntryId(
+    userId: string,
+    entryIds: string[],
+  ): Map<string, SkinJournalAnalysisFeedback> {
+    void userId;
+    void entryIds;
+    return new Map();
+  }
+
+  private loadAnalysisFeedbackForEntry(
+    userId: string,
+    entryId: string,
+  ): SkinJournalAnalysisFeedback | null {
+    void userId;
+    void entryId;
+    return null;
   }
 
   private storedPhotoToRow(
@@ -661,6 +703,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     entry.analysis_status = AnalysisStatusValue.Pending;
     entry.analysis_observations = null;
     entry.analysis_interpretation = null;
+    entry.analysis_feedback_submitted = false;
+    entry.analysis_feedback_submitted_at = null;
+    entry.analysis_feedback_interpretation_version = null;
     entry.analysis_concern_keys = [];
     entry.has_reaction_signal = false;
     entry.needs_retake = false;
@@ -920,7 +965,11 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     }
     this.scheduleSmartPicksPreparation(params.userId);
 
-    return this.buildEntryResponse(saved, savedPhotoRows);
+    return this.buildEntryResponse(
+      saved,
+      savedPhotoRows,
+      this.loadAnalysisFeedbackForEntry(params.userId, saved.id),
+    );
   }
 
   private async saveEntryAndPhotoSet(params: {
@@ -1120,6 +1169,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     entry.analysis_error = null;
     entry.analysis_error_code = null;
     entry.analysis_interpretation = null;
+    entry.analysis_feedback_submitted = false;
+    entry.analysis_feedback_submitted_at = null;
+    entry.analysis_feedback_interpretation_version = null;
     entry.analysis_retry_count = (entry.analysis_retry_count ?? 0) + 1;
     await this.entries.save(entry);
     await this.analysisQueue.cancelActiveJobsForEntry(
@@ -1135,7 +1187,108 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     return this.buildEntryResponse(
       refreshed,
       await this.loadEntryPhotoRows(userId, refreshed.id),
+      this.loadAnalysisFeedbackForEntry(userId, refreshed.id),
     );
+  }
+
+  async reinterpretAnalysis(
+    userId: string,
+    entryId: string,
+  ): Promise<JournalEntryResponseDto> {
+    const entry = await this.findOwnedEntry(userId, entryId);
+    if (!entry.analysis_observations) {
+      throw new BadRequestException(
+        'Entry has no analysis observations to reinterpret',
+      );
+    }
+    const skinProfile = await this.skinProfiles.findOne({
+      where: { user_id: userId },
+    });
+    const skinContext = this.buildAnalysisSkinContext(skinProfile);
+    const routineContext = await this.buildAnalysisRoutineContext(
+      userId,
+      entry,
+      entry.analysis_observations,
+    );
+    const interpretation = this.photoInterpretation.interpret(
+      entry.analysis_observations,
+      new Date(),
+      {
+        skinContext,
+        recentChange: entry.recent_change,
+        routineContext,
+      },
+    );
+    entry.analysis_interpretation = interpretation;
+    entry.analysis_feedback_submitted = false;
+    entry.analysis_feedback_submitted_at = null;
+    entry.analysis_feedback_interpretation_version = null;
+    entry.analysis_summary = interpretation.summary_key;
+    entry.analysis_concern_keys = this.analysisConcernKeys(
+      entry.analysis_observations,
+    );
+    const saved = await this.entries.save(entry);
+    return this.buildEntryResponse(
+      saved,
+      await this.loadEntryPhotoRows(userId, saved.id),
+      this.loadAnalysisFeedbackForEntry(userId, saved.id),
+    );
+  }
+
+  async recordAnalysisFeedback(
+    userId: string,
+    entryId: string,
+    body: RecordAnalysisFeedbackDto,
+  ): Promise<AnalysisFeedbackResponseDto> {
+    if (
+      body.vote !== AnalysisFeedbackVoteValue.Helpful &&
+      body.vote !== AnalysisFeedbackVoteValue.NotHelpful
+    ) {
+      throw new BadRequestException('Invalid analysis feedback vote');
+    }
+    const reason =
+      typeof body.reason === 'string' &&
+      ANALYSIS_FEEDBACK_REASONS.includes(body.reason)
+        ? body.reason
+        : null;
+    if (body.vote === AnalysisFeedbackVoteValue.NotHelpful && !reason) {
+      throw new BadRequestException(
+        'Not helpful analysis feedback requires a reason',
+      );
+    }
+    const entry = await this.findOwnedEntry(userId, entryId);
+    if (!entry.analysis_observations || !entry.analysis_interpretation) {
+      throw new BadRequestException(
+        'Entry has no analysis interpretation to rate',
+      );
+    }
+    const interpretation = entry.analysis_interpretation;
+    const observations = entry.analysis_observations;
+    const saved = await this.entries.manager.transaction(async (manager) => {
+      const feedbackRepository = manager.getRepository(
+        SkinJournalAnalysisFeedback,
+      );
+      const entryRepository = manager.getRepository(SkinJournalEntry);
+      const feedback = feedbackRepository.create({});
+      feedback.vote = body.vote;
+      feedback.reason =
+        body.vote === AnalysisFeedbackVoteValue.NotHelpful ? reason : null;
+      feedback.note =
+        body.vote === AnalysisFeedbackVoteValue.NotHelpful
+          ? sanitizeContextText(body.note)
+          : null;
+      feedback.interpretation_version = interpretation.version;
+      feedback.reading_label =
+        interpretation.reading_quality?.visual_label ?? null;
+      feedback.concern_keys = this.analysisConcernKeys(observations);
+      const savedFeedback = await feedbackRepository.save(feedback);
+      entry.analysis_feedback_submitted = true;
+      entry.analysis_feedback_submitted_at = nowDate();
+      entry.analysis_feedback_interpretation_version = interpretation.version;
+      await entryRepository.save(entry);
+      return savedFeedback;
+    });
+    return AnalysisFeedbackResponseDto.fromEntity(saved);
   }
 
   async getToday(
@@ -1156,6 +1309,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         ? this.buildEntryResponse(
             entry,
             await this.loadEntryPhotoRows(userId, entry.id),
+            this.loadAnalysisFeedbackForEntry(userId, entry.id),
           )
         : null,
     };
@@ -1185,6 +1339,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       entryDto = this.buildEntryResponse(
         entry,
         await this.loadEntryPhotoRows(userId, entry.id),
+        this.loadAnalysisFeedbackForEntry(userId, entry.id),
       );
       events = await this.events.find({
         where: { user_id: userId, entry_id: entry.id },
@@ -1471,13 +1626,26 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       );
     }
     await this.recordDataAccess(userId, UserDataAccessPurpose.SkinJournalRead);
-    const rowsByEntry = await this.loadEntryPhotoRowsByEntryId(userId, [
-      from.id,
-      to.id,
-    ]);
+    const entryIds = [from.id, to.id];
+    const rowsByEntry = await this.loadEntryPhotoRowsByEntryId(
+      userId,
+      entryIds,
+    );
+    const feedbackByEntry = this.loadAnalysisFeedbackByEntryId(
+      userId,
+      entryIds,
+    );
     return {
-      from: this.buildEntryResponse(from, rowsByEntry.get(from.id) ?? []),
-      to: this.buildEntryResponse(to, rowsByEntry.get(to.id) ?? []),
+      from: this.buildEntryResponse(
+        from,
+        rowsByEntry.get(from.id) ?? [],
+        feedbackByEntry.get(from.id) ?? null,
+      ),
+      to: this.buildEntryResponse(
+        to,
+        rowsByEntry.get(to.id) ?? [],
+        feedbackByEntry.get(to.id) ?? null,
+      ),
       delta: this.computeDelta(from, to),
     };
   }
@@ -1663,16 +1831,25 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      const routineContext = await this.buildAnalysisRoutineContext(
+        userId,
+        current,
+        obs,
+      );
       const interpretation = this.photoInterpretation.interpret(
         obs,
         new Date(),
         {
           skinContext,
           recentChange: current.recent_change,
+          routineContext,
         },
       );
       current.analysis_observations = obs;
       current.analysis_interpretation = interpretation;
+      current.analysis_feedback_submitted = false;
+      current.analysis_feedback_submitted_at = null;
+      current.analysis_feedback_interpretation_version = null;
       current.analysis_concern_keys = this.analysisConcernKeys(obs);
       current.has_reaction_signal = obs.reaction_signals.reaction_detected;
       current.needs_retake =
@@ -3600,6 +3777,106 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async buildAnalysisRoutineContext(
+    userId: string,
+    currentEntry: SkinJournalEntry,
+    currentObservations: AnalysisObservations,
+  ): Promise<AnalysisRoutineContext> {
+    const sinceDate = dateOnlyDaysBefore(currentEntry.entry_date, 14);
+    const [routineSteps, recentApplications, recentEntries] = await Promise.all(
+      [
+        this.routineSteps.find({
+          where: {
+            slot: { user_id: userId, deleted_at: IsNull() },
+          } as FindOptionsWhere<RoutineStep>,
+          relations: ['slot', 'product'],
+          order: { step_order: 'ASC' },
+          take: 60,
+        }),
+        this.applicationLogs.find({
+          where: {
+            user_id: userId,
+            target_date: MoreThanOrEqual(sinceDate),
+          } as FindOptionsWhere<ApplicationLog>,
+          relations: [
+            'items',
+            'items.product',
+            'items.substituted_with_product',
+          ],
+          order: { target_date: 'DESC', created_at: 'DESC' },
+          take: 14,
+        }),
+        this.entries.find({
+          where: {
+            user_id: userId,
+            entry_date: Between(sinceDate, currentEntry.entry_date),
+          } as FindOptionsWhere<SkinJournalEntry>,
+          order: { entry_date: 'DESC' },
+          take: 8,
+        }),
+      ],
+    );
+
+    const checkIns = [currentEntry, ...recentEntries]
+      .filter(uniqueEntryById())
+      .slice(0, 8)
+      .map((entry) =>
+        this.buildAnalysisCheckInContext(
+          entry,
+          entry.id === currentEntry.id ? currentObservations : null,
+        ),
+      );
+
+    return {
+      routine_products: routineSteps
+        .filter((step) => step.slot?.deleted_at === null)
+        .map((step) => ({
+          product_id: step.inventory_product_id,
+          brand: sanitizeContextText(step.product?.brand),
+          name: sanitizeContextText(step.product?.name),
+          category: sanitizeContextText(step.product?.category),
+          step_label: sanitizeContextText(step.step_label),
+          is_specialist_locked: step.is_specialist_locked,
+        }))
+        .filter(
+          (product) =>
+            product.brand !== null ||
+            product.name !== null ||
+            product.category !== null ||
+            product.step_label !== null,
+        )
+        .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS),
+      recent_applications: recentApplications.map((application) => ({
+        target_date: application.target_date,
+        daypart: sanitizeContextText(application.daypart),
+        applied_at: application.applied_at?.toISOString() ?? null,
+        items: (application.items ?? []).slice(0, 8).map((item) => {
+          const product =
+            item.status === 'substituted'
+              ? (item.substituted_with_product ?? item.product)
+              : item.product;
+          return {
+            status: sanitizeContextText(item.status) ?? 'unknown',
+            product_id:
+              item.status === 'substituted'
+                ? (item.substituted_with_product_id ??
+                  item.inventory_product_id)
+                : item.inventory_product_id,
+            brand: sanitizeContextText(
+              product?.brand ?? item.product_brand_snapshot,
+            ),
+            name: sanitizeContextText(
+              product?.name ?? item.product_name_snapshot,
+            ),
+            category: sanitizeContextText(product?.category),
+            step_label: sanitizeContextText(item.step_label),
+          };
+        }),
+      })),
+      recent_check_ins: checkIns,
+    };
+  }
+
   private buildAnalysisEntryContext(
     entry: SkinJournalEntry,
   ): AnalysisEntryContext {
@@ -3615,6 +3892,18 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       recent_change_kind: entry.recent_change?.kind ?? null,
       complaint_note: sanitizeContextText(entry.complaint_note),
       is_pre_routine: entry.is_pre_routine,
+    };
+  }
+
+  private buildAnalysisCheckInContext(
+    entry: SkinJournalEntry,
+    currentObservations: AnalysisObservations | null,
+  ): AnalysisRoutineContext['recent_check_ins'][number] {
+    return {
+      ...this.buildAnalysisEntryContext(entry),
+      detected_concerns: currentObservations
+        ? this.analysisConcernKeys(currentObservations)
+        : entry.analysis_concern_keys,
     };
   }
 
@@ -4628,4 +4917,25 @@ function sanitizeConcernDetails(
         ? detail.priority
         : null,
   }));
+}
+
+function uniqueEntryById(): (
+  entry: SkinJournalEntry,
+  index: number,
+  entries: SkinJournalEntry[],
+) => boolean {
+  const seen = new Set<string>();
+  return (entry) => {
+    if (seen.has(entry.id)) {
+      return false;
+    }
+    seen.add(entry.id);
+    return true;
+  };
+}
+
+function dateOnlyDaysBefore(dateOnly: string, days: number): string {
+  const date = new Date(`${dateOnly}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
 }

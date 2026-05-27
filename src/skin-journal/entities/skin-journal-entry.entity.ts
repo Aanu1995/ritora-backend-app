@@ -163,6 +163,15 @@ export class SkinJournalEntry {
   })
   analysis_interpretation: PhotoAnalysisInterpretation | null;
 
+  @Column({ type: 'boolean', default: false })
+  analysis_feedback_submitted: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  analysis_feedback_submitted_at: Date | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  analysis_feedback_interpretation_version: string | null;
+
   @Column({ type: 'text', array: true, default: () => 'ARRAY[]::text[]' })
   analysis_concern_keys: AnalysisConcern[];
 

@@ -52,6 +52,7 @@ import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitori
 import { UserRestrictionCapability } from '../users/user-restrictions';
 import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
+import { SkinJournalAnalysisFeedback } from '../skin-journal/entities/skin-journal-analysis-feedback.entity';
 
 type RepositoryMock = Record<string, unknown>;
 
@@ -66,6 +67,7 @@ const restrictionUserMessageTransformer =
 
 function createAdminDataSourceMock(options: {
   accountsRepository?: Partial<RepositoryMock>;
+  analysisFeedbackRepository?: Partial<RepositoryMock>;
   auditLogsRepository?: Partial<RepositoryMock>;
   incidentsRepository?: Partial<RepositoryMock>;
   notificationsRepository?: Partial<RepositoryMock>;
@@ -90,6 +92,10 @@ function createAdminDataSourceMock(options: {
     create: jest.fn((value: Partial<AdminAuditLog>) => value as AdminAuditLog),
     save: jest.fn(async (value: AdminAuditLog) => value),
     ...options.auditLogsRepository,
+  };
+  const analysisFeedbackRepository = {
+    find: jest.fn(async () => []),
+    ...options.analysisFeedbackRepository,
   };
   const notesRepository = {
     create: jest.fn((value: Partial<AdminUserNote>) => value as AdminUserNote),
@@ -168,6 +174,9 @@ function createAdminDataSourceMock(options: {
       if (entity === AdminUserNote) return notesRepository;
       if (entity === AdminOperationalIncident) return incidentsRepository;
       if (entity === AdminNotification) return notificationsRepository;
+      if (entity === SkinJournalAnalysisFeedback) {
+        return analysisFeedbackRepository;
+      }
       throw new Error('Unexpected repository requested');
     }),
   };
@@ -175,6 +184,7 @@ function createAdminDataSourceMock(options: {
   return {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === AdminAccount) return accountsRepository;
+      if (entity === AdminAuditLog) return auditLogsRepository;
       if (entity === AdminUserNote) return notesRepository;
       if (entity === AdminOperationalIncident) return incidentsRepository;
       if (entity === AdminNotification) return notificationsRepository;
@@ -184,6 +194,9 @@ function createAdminDataSourceMock(options: {
       if (entity === AdminAccountMonitoringFlag) return monitoringRepository;
       if (entity === AdminAccountMonitoringSettings) {
         return monitoringSettingsRepository;
+      }
+      if (entity === SkinJournalAnalysisFeedback) {
+        return analysisFeedbackRepository;
       }
       throw new Error('Unexpected repository requested');
     }),
@@ -3075,5 +3088,161 @@ describe('AdminService', () => {
         },
       ),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('summarizes skin journal analysis feedback for admin review', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ helpful: '6', not_helpful: '4', total: '10' }])
+      .mockResolvedValueOnce([{ helpful: '16', not_helpful: '4', total: '20' }])
+      .mockResolvedValueOnce([
+        { count: '3', id: 'too_generic', label: 'too_generic' },
+      ])
+      .mockResolvedValueOnce([{ count: '10', id: 'useful', label: 'useful' }])
+      .mockResolvedValueOnce([{ count: '10', id: '1.1', label: '1.1' }])
+      .mockResolvedValueOnce([
+        {
+          analyses_with_feedback: '6',
+          analyses_without_feedback: '14',
+        },
+      ]);
+    const feedbackRow = {
+      concern_keys: ['acne'],
+      created_at: new Date('2026-05-27T08:00:00.000Z'),
+      generateId: jest.fn(),
+      id: 'feedback-1',
+      interpretation_version: '1.1',
+      note: 'Too generic for my routine.',
+      reading_label: 'useful',
+      reason: 'too_generic',
+      updated_at: new Date('2026-05-27T08:05:00.000Z'),
+      vote: 'not_helpful',
+    } as unknown as SkinJournalAnalysisFeedback;
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        analysisFeedbackRepository: {
+          find: jest.fn(async () => [feedbackRow]),
+        },
+        query,
+      }),
+    );
+
+    const result = await service.getSkinJournalAnalysisFeedbackReport(
+      new Date('2026-05-27T10:00:00.000Z'),
+    );
+
+    expect(result.window).toMatchObject({
+      helpful: 6,
+      helpfulRate: 60,
+      needsReview: true,
+      notHelpful: 4,
+      total: 10,
+    });
+    expect(result.allTime.helpfulRate).toBe(80);
+    expect(result.coverage).toMatchObject({
+      analysesWithFeedback: 6,
+      analysesWithoutFeedback: 14,
+      feedbackRate: 30,
+    });
+    expect(result.reasons[0]).toMatchObject({
+      count: 3,
+      id: 'too_generic',
+      rate: 75,
+    });
+    expect(result.recentFeedback[0]).toMatchObject({
+      note: 'Too generic for my routine.',
+      reason: 'too_generic',
+      vote: 'not_helpful',
+    });
+    expect(result.recentFeedback[0]).not.toHaveProperty('id');
+    expect(result.recentFeedback[0]).not.toHaveProperty('userId');
+    expect(result.recentFeedback[0]).not.toHaveProperty('entryId');
+  });
+
+  it('exports anonymous formula-safe skin journal analysis feedback as csv and audits the download', async () => {
+    const auditCreate = jest.fn(
+      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
+    );
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        auditLogsRepository: { create: auditCreate },
+        analysisFeedbackRepository: {
+          find: jest.fn(async () => [
+            {
+              concern_keys: ['acne', 'hyperpigmentation'],
+              created_at: new Date('2026-05-27T08:00:00.000Z'),
+              generateId: jest.fn(),
+              id: 'feedback-1',
+              interpretation_version: '1.1',
+              note: '=IMPORTXML("https://example.com")',
+              reading_label: 'useful',
+              reason: 'too_generic',
+              updated_at: new Date('2026-05-27T08:05:00.000Z'),
+              vote: 'not_helpful',
+            } as unknown as SkinJournalAnalysisFeedback,
+          ]),
+        },
+      }),
+    );
+
+    const csv = await service.exportSkinJournalAnalysisFeedbackCsv(
+      {
+        email: 'owner@ritora.app',
+        id: 'admin-root',
+        name: 'Root Admin',
+        role: AdminAccountRole.Root,
+        sessionId: 'admin-session',
+        status: AdminAccountStatus.Active,
+      },
+      {
+        reason: 'Export anonymous feedback for model quality review',
+        sessionId: 'admin-session',
+      },
+    );
+
+    expect(csv).toContain('vote,reason,note');
+    expect(csv).not.toContain('id,user_id,entry_id');
+    expect(csv).not.toContain('feedback-1');
+    expect(csv).not.toContain('user-1');
+    expect(csv).not.toContain('entry-1');
+    expect(csv).toContain(
+      'not_helpful,too_generic,"\'=IMPORTXML(""https://example.com"")",1.1,useful,acne; hyperpigmentation',
+    );
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AdminAuditAction.SkinJournalAnalysisFeedbackExported,
+        reason: 'Export anonymous feedback for model quality review',
+        target_user_id: null,
+      }),
+    );
+  });
+
+  it('rejects analysis feedback csv exports without an audit reason', async () => {
+    const feedbackFind = jest.fn(async () => []);
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        analysisFeedbackRepository: {
+          find: feedbackFind,
+        },
+      }),
+    );
+
+    await expect(
+      service.exportSkinJournalAnalysisFeedbackCsv(
+        {
+          email: 'owner@ritora.app',
+          id: 'admin-root',
+          name: 'Root Admin',
+          role: AdminAccountRole.Root,
+          sessionId: 'admin-session',
+          status: AdminAccountStatus.Active,
+        },
+        {
+          reason: '   ',
+          sessionId: 'admin-session',
+        },
+      ),
+    ).rejects.toThrow('Admin audit reason is required');
+    expect(feedbackFind).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,10 @@
-import { config, parse } from 'dotenv';
-import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
+import {
+  appEnvFilePaths,
+  evaluationEnvFilePaths,
+  EXTERNAL_TEST_SERVICES_ENV,
+  loadEnvFiles,
+} from '../src/config/env-files';
 
 const rootDir = resolve(__dirname, '..');
 const shellProvidedKeys = new Set(Object.keys(process.env));
@@ -17,40 +21,20 @@ const E2E_AI_MODEL_ENV_KEYS = [
   'INSIGHTS_AI_MODEL',
 ] as const;
 
-config({
-  path: resolve(rootDir, '.env'),
-  quiet: true,
-});
+const externalServicesAllowed =
+  process.env[EXTERNAL_TEST_SERVICES_ENV] === 'true';
 
-applyTestEnv(resolve(rootDir, '.env.test'), shellProvidedKeys);
-applyE2eSafeDrivers();
-applyE2eExternalAiIsolation();
+loadEnvFiles(
+  externalServicesAllowed ? evaluationEnvFilePaths() : appEnvFilePaths('test'),
+  {
+    protectedKeys: shellProvidedKeys,
+    rootDir,
+  },
+);
 
-function applyTestEnv(
-  envPath: string,
-  protectedKeys: ReadonlySet<string>,
-): void {
-  if (!existsSync(envPath)) {
-    return;
-  }
-
-  const values = parse(readFileSync(envPath));
-
-  for (const [key, value] of Object.entries(values)) {
-    if (protectedKeys.has(key)) {
-      continue;
-    }
-
-    if (
-      key === 'DATABASE_PASSWORD' &&
-      value === '' &&
-      process.env.DATABASE_PASSWORD
-    ) {
-      continue;
-    }
-
-    process.env[key] = value;
-  }
+if (!externalServicesAllowed) {
+  applyE2eSafeDrivers();
+  applyE2eExternalAiIsolation();
 }
 
 function applyE2eSafeDrivers(): void {

@@ -23,6 +23,10 @@ import {
 } from './admin-ai-cost.types';
 import { UserRestrictionCapability } from '../users/user-restrictions';
 import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
+import type {
+  AnalysisFeedbackReason,
+  AnalysisFeedbackVote,
+} from '../skin-journal/skin-journal.constants';
 
 export {
   AdminAiCostFeatureFilter,
@@ -501,6 +505,55 @@ export type AdminOperationsMonitoringResponse = {
   jobHealth: AdminOverviewResponse['jobHealth'];
   compliance: AdminOverviewResponse['compliance'];
   workItems: AdminOperationalWorkItemResponse[];
+};
+
+export type AdminSkinJournalAnalysisFeedbackSummaryResponse = {
+  total: number;
+  helpful: number;
+  notHelpful: number;
+  helpfulRate: number;
+  notHelpfulRate: number;
+  needsReview: boolean;
+};
+
+export type AdminSkinJournalAnalysisFeedbackCoverageResponse = {
+  analysesWithFeedback: number;
+  analysesWithoutFeedback: number;
+  feedbackRate: number;
+};
+
+export type AdminSkinJournalAnalysisFeedbackCountResponse = {
+  id: string | null;
+  label: string;
+  count: number;
+  rate: number;
+};
+
+export type AdminSkinJournalAnalysisFeedbackItemResponse = {
+  vote: AnalysisFeedbackVote;
+  reason: AnalysisFeedbackReason | null;
+  note: string | null;
+  interpretationVersion: string | null;
+  readingLabel: string | null;
+  concernKeys: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminSkinJournalAnalysisFeedbackReportResponse = {
+  generatedAt: string;
+  windowDays: number;
+  reviewThreshold: {
+    minResponses: number;
+    helpfulRate: number;
+  };
+  window: AdminSkinJournalAnalysisFeedbackSummaryResponse;
+  allTime: AdminSkinJournalAnalysisFeedbackSummaryResponse;
+  coverage: AdminSkinJournalAnalysisFeedbackCoverageResponse;
+  reasons: AdminSkinJournalAnalysisFeedbackCountResponse[];
+  readingLabels: AdminSkinJournalAnalysisFeedbackCountResponse[];
+  interpretationVersions: AdminSkinJournalAnalysisFeedbackCountResponse[];
+  recentFeedback: AdminSkinJournalAnalysisFeedbackItemResponse[];
 };
 
 export type AdminOperationalIncidentActorResponse = {

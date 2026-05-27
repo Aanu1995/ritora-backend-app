@@ -37,6 +37,7 @@ import { DayDetailResponseDto } from './dto/day-detail-response.dto';
 import { JournalEventResponseDto } from './dto/event-response.dto';
 import { JournalInsightsResponseDto } from './dto/insight-response.dto';
 import { RecordInsightActionDto } from './dto/insight-interaction.dto';
+import { RecordAnalysisFeedbackDto } from './dto/analysis-feedback.dto';
 import { JournalStatsResponseDto } from './dto/stats-response.dto';
 import { WrappedResponseDto } from './dto/wrapped-response.dto';
 import { PhotoDatesResponseDto } from './dto/photo-dates-response.dto';
@@ -261,6 +262,23 @@ export class SkinJournalController {
     @Param('id') id: string,
   ) {
     return this.service.retryAnalysis(userId, id);
+  }
+
+  @Post('entries/:id/analyze/reinterpret')
+  async reinterpretAnalysis(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.service.reinterpretAnalysis(userId, id);
+  }
+
+  @Post('entries/:id/analysis-feedback')
+  async recordAnalysisFeedback(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() body: RecordAnalysisFeedbackDto,
+  ) {
+    return this.service.recordAnalysisFeedback(userId, id, body);
   }
 
   @Get('compare')

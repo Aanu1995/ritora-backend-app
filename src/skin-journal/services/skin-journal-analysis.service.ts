@@ -914,6 +914,8 @@ function buildSystemPrompt(): string {
       'moderate = clear visible signal, clustered or multi-zone involvement, or meaningful change from previous summary.',
       'severe = intense, widespread, swelling-like, hive-like, peeling/cracking-like, or safety-relevant visible signal.',
       'Confidence rubric: use 0.0-0.39 for uncertain/poor quality, 0.4-0.59 for possible, 0.6-0.79 for likely visible, and 0.8-1.0 only for clear high-quality evidence.',
+      'Do not default to the same middle confidence value across concerns. Calibrate each confidence from image quality, angle coverage, visibility, and whether lighting could explain the finding.',
+      'If a concern is only weakly visible, either omit it or mark it below 0.55 instead of making it look equally likely as clearer findings.',
     ].join(' '),
     [
       'Locations and indicators:',

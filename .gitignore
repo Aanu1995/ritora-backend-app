@@ -6,6 +6,8 @@ dist/
 
 # Environment
 .env
+.env.local
+.env.*.local
 
 # IDE
 .idea/
@@ -32,4 +34,3 @@ openapi.json
 coverage/
 
 .claude
-

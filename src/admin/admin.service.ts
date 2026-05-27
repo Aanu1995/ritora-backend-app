@@ -36,10 +36,12 @@ import { platformGlobalRestrictionInternalNoteTransformer } from '../platform-co
 import { canonicalizeEmailForIdentity } from '../users/users.service.utils';
 import {
   AnalysisJobStatusValue,
+  AnalysisFeedbackVoteValue,
   AnalysisStatusValue,
   ExportStatusValue,
   InsightGenerationStatusValue,
 } from '../skin-journal/skin-journal.constants';
+import { SkinJournalAnalysisFeedback } from '../skin-journal/entities/skin-journal-analysis-feedback.entity';
 import { SmartPicksGenerationJobStatus } from '../smart-picks/smart-picks.types';
 import {
   SuggestionGenerationJobStatus,
@@ -82,6 +84,11 @@ import {
   type AdminOverviewResponse,
   type AdminPlatformGlobalRestrictionListResponse,
   type AdminPlatformGlobalRestrictionResponse,
+  type AdminSkinJournalAnalysisFeedbackCountResponse,
+  type AdminSkinJournalAnalysisFeedbackCoverageResponse,
+  type AdminSkinJournalAnalysisFeedbackItemResponse,
+  type AdminSkinJournalAnalysisFeedbackReportResponse,
+  type AdminSkinJournalAnalysisFeedbackSummaryResponse,
   AdminUserAccountStatus,
   type AdminUserDetailResponse,
   type AdminUserListQuery,
@@ -277,6 +284,11 @@ const ADMIN_OPERATIONAL_INCIDENTS_MAX_LIMIT = 50;
 const ADMIN_OPERATIONAL_INCIDENT_TITLE_MAX_LENGTH = 160;
 const ADMIN_OPERATIONAL_INCIDENT_DESCRIPTION_MAX_LENGTH = 1000;
 const ADMIN_OPERATIONS_WORK_ITEM_LIMIT = 20;
+const ADMIN_ANALYSIS_FEEDBACK_WINDOW_DAYS = 30;
+const ADMIN_ANALYSIS_FEEDBACK_REVIEW_MIN_RESPONSES = 10;
+const ADMIN_ANALYSIS_FEEDBACK_REVIEW_HELPFUL_RATE = 70;
+const ADMIN_ANALYSIS_FEEDBACK_RECENT_LIMIT = 25;
+const ADMIN_ANALYSIS_FEEDBACK_EXPORT_LIMIT = 5000;
 const ADMIN_ACCOUNT_MONITORING_DEFAULT_LIMIT = 10;
 const ADMIN_ACCOUNT_MONITORING_MAX_LIMIT = 50;
 const ADMIN_ACCOUNT_MONITORING_SUMMARY_MAX_LENGTH = 160;
@@ -552,6 +564,34 @@ function toNumber(value: unknown): number {
   }
 
   return 0;
+}
+
+function toRate(part: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+  return Math.round((part / total) * 1000) / 10;
+}
+
+function csvValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  const rawText =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' ||
+          typeof value === 'boolean' ||
+          typeof value === 'bigint'
+        ? value.toString()
+        : value instanceof Date
+          ? value.toISOString()
+          : (JSON.stringify(value) ?? '');
+  const text = /^[\s]*[=+\-@]/.test(rawText) ? `'${rawText}` : rawText;
+  if (!/[",\n\r]/.test(text)) {
+    return text;
+  }
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -3066,6 +3106,188 @@ export class AdminService {
     };
   }
 
+  async getSkinJournalAnalysisFeedbackReport(
+    now = new Date(),
+  ): Promise<AdminSkinJournalAnalysisFeedbackReportResponse> {
+    const since = new Date(
+      now.getTime() - ADMIN_ANALYSIS_FEEDBACK_WINDOW_DAYS * DAY_MS,
+    );
+    const feedbackRepository = this.dataSource.getRepository(
+      SkinJournalAnalysisFeedback,
+    );
+    const queryRows = (
+      sql: string,
+      parameters?: unknown[],
+    ): Promise<QueryRow[]> => this.dataSource.query(sql, parameters);
+    const [
+      windowRows,
+      allTimeRows,
+      reasonRows,
+      readingLabelRows,
+      interpretationVersionRows,
+      coverageRows,
+      recentFeedback,
+    ] = await Promise.all([
+      queryRows(
+        `
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE vote = $2)::int AS helpful,
+            COUNT(*) FILTER (WHERE vote = $3)::int AS not_helpful
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1
+        `,
+        [
+          since,
+          AnalysisFeedbackVoteValue.Helpful,
+          AnalysisFeedbackVoteValue.NotHelpful,
+        ],
+      ),
+      queryRows(
+        `
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE vote = $1)::int AS helpful,
+            COUNT(*) FILTER (WHERE vote = $2)::int AS not_helpful
+          FROM skin_journal_analysis_feedback
+        `,
+        [
+          AnalysisFeedbackVoteValue.Helpful,
+          AnalysisFeedbackVoteValue.NotHelpful,
+        ],
+      ),
+      queryRows(
+        `
+          SELECT reason AS id, COALESCE(reason, 'No reason') AS label, COUNT(*)::int AS count
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1 AND vote = $2
+          GROUP BY reason
+          ORDER BY count DESC, label ASC
+        `,
+        [since, AnalysisFeedbackVoteValue.NotHelpful],
+      ),
+      queryRows(
+        `
+          SELECT
+            reading_label AS id,
+            COALESCE(reading_label, 'unknown') AS label,
+            COUNT(*)::int AS count
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1
+          GROUP BY reading_label
+          ORDER BY count DESC, label ASC
+        `,
+        [since],
+      ),
+      queryRows(
+        `
+          SELECT
+            interpretation_version AS id,
+            COALESCE(interpretation_version, 'unknown') AS label,
+            COUNT(*)::int AS count
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1
+          GROUP BY interpretation_version
+          ORDER BY count DESC, label ASC
+        `,
+        [since],
+      ),
+      queryRows(
+        `
+          SELECT
+            COUNT(*) FILTER (WHERE analysis_feedback_submitted = true)::int AS analyses_with_feedback,
+            COUNT(*) FILTER (WHERE analysis_feedback_submitted = false)::int AS analyses_without_feedback
+          FROM skin_journal_entries
+          WHERE analysis_interpretation IS NOT NULL
+            AND analysis_completed_at >= $1
+        `,
+        [since],
+      ),
+      feedbackRepository.find({
+        order: { created_at: 'DESC' },
+        take: ADMIN_ANALYSIS_FEEDBACK_RECENT_LIMIT,
+      }),
+    ]);
+    const windowSummary = this.toAnalysisFeedbackSummary(windowRows[0]);
+    const allTimeSummary = this.toAnalysisFeedbackSummary(allTimeRows[0]);
+
+    return {
+      allTime: allTimeSummary,
+      coverage: this.toAnalysisFeedbackCoverage(coverageRows[0]),
+      generatedAt: now.toISOString(),
+      interpretationVersions: this.toAnalysisFeedbackCounts(
+        interpretationVersionRows,
+        windowSummary.total,
+      ),
+      readingLabels: this.toAnalysisFeedbackCounts(
+        readingLabelRows,
+        windowSummary.total,
+      ),
+      reasons: this.toAnalysisFeedbackCounts(
+        reasonRows,
+        windowSummary.notHelpful,
+      ),
+      recentFeedback: recentFeedback.map((feedback) =>
+        this.toSkinJournalAnalysisFeedbackResponse(feedback),
+      ),
+      reviewThreshold: {
+        helpfulRate: ADMIN_ANALYSIS_FEEDBACK_REVIEW_HELPFUL_RATE,
+        minResponses: ADMIN_ANALYSIS_FEEDBACK_REVIEW_MIN_RESPONSES,
+      },
+      window: windowSummary,
+      windowDays: ADMIN_ANALYSIS_FEEDBACK_WINDOW_DAYS,
+    };
+  }
+
+  async exportSkinJournalAnalysisFeedbackCsv(
+    actor: AdminAuthenticatedUser,
+    context: AdminUserAuditContext,
+  ): Promise<string> {
+    const reason = this.normalizeAuditReason(context.reason);
+    const feedbackRepository = this.dataSource.getRepository(
+      SkinJournalAnalysisFeedback,
+    );
+    const auditLogsRepository = this.dataSource.getRepository(AdminAuditLog);
+    const feedback = await feedbackRepository.find({
+      order: { created_at: 'DESC' },
+      take: ADMIN_ANALYSIS_FEEDBACK_EXPORT_LIMIT,
+    });
+    const headers = [
+      'vote',
+      'reason',
+      'note',
+      'interpretation_version',
+      'reading_label',
+      'concern_keys',
+      'created_at',
+      'updated_at',
+    ];
+    const rows = feedback.map((row) => [
+      row.vote,
+      row.reason,
+      row.note,
+      row.interpretation_version,
+      row.reading_label,
+      row.concern_keys.join('; '),
+      toIsoString(row.created_at),
+      toIsoString(row.updated_at),
+    ]);
+    await this.writeUserAuditLog(auditLogsRepository, {
+      action: AdminAuditAction.SkinJournalAnalysisFeedbackExported,
+      actor,
+      context: { ...context, reason },
+      metadata: {
+        exportedRows: feedback.length,
+        maxRows: ADMIN_ANALYSIS_FEEDBACK_EXPORT_LIMIT,
+      },
+      targetUserId: null,
+    });
+
+    return [headers, ...rows]
+      .map((row) => row.map(csvValue).join(','))
+      .join('\n');
+  }
+
   async listOperationalIncidents(
     query: AdminOperationalIncidentListQuery = {},
   ): Promise<AdminOperationalIncidentListResponse> {
@@ -4666,6 +4888,71 @@ export class AdminService {
       updatedAt: toNullableIso(row.updated_at),
       userEmail: toNullableString(row.user_email),
       userId: toNullableString(row.user_id),
+    };
+  }
+
+  private toAnalysisFeedbackSummary(
+    row: QueryRow | undefined,
+  ): AdminSkinJournalAnalysisFeedbackSummaryResponse {
+    const total = toNumber(row?.total);
+    const helpful = toNumber(row?.helpful);
+    const notHelpful = toNumber(row?.not_helpful);
+    const helpfulRate = toRate(helpful, total);
+
+    return {
+      helpful,
+      helpfulRate,
+      needsReview:
+        total >= ADMIN_ANALYSIS_FEEDBACK_REVIEW_MIN_RESPONSES &&
+        helpfulRate < ADMIN_ANALYSIS_FEEDBACK_REVIEW_HELPFUL_RATE,
+      notHelpful,
+      notHelpfulRate: toRate(notHelpful, total),
+      total,
+    };
+  }
+
+  private toAnalysisFeedbackCoverage(
+    row: QueryRow | undefined,
+  ): AdminSkinJournalAnalysisFeedbackCoverageResponse {
+    const analysesWithFeedback = toNumber(row?.analyses_with_feedback);
+    const analysesWithoutFeedback = toNumber(row?.analyses_without_feedback);
+    const total = analysesWithFeedback + analysesWithoutFeedback;
+
+    return {
+      analysesWithFeedback,
+      analysesWithoutFeedback,
+      feedbackRate: toRate(analysesWithFeedback, total),
+    };
+  }
+
+  private toAnalysisFeedbackCounts(
+    rows: QueryRow[],
+    total: number,
+  ): AdminSkinJournalAnalysisFeedbackCountResponse[] {
+    return rows.map((row) => {
+      const count = toNumber(row.count);
+
+      return {
+        count,
+        id: toNullableString(row.id),
+        label: toStringValue(row.label),
+        rate: toRate(count, total),
+      };
+    });
+  }
+
+  private toSkinJournalAnalysisFeedbackResponse(
+    feedback: SkinJournalAnalysisFeedback,
+  ): AdminSkinJournalAnalysisFeedbackItemResponse {
+    return {
+      concernKeys: feedback.concern_keys,
+      createdAt: toIsoString(feedback.created_at),
+      interpretationVersion: feedback.interpretation_version,
+      note: feedback.note,
+      readingLabel: feedback.reading_label,
+      reason: feedback.reason,
+      updatedAt: toIsoString(feedback.updated_at),
+      vote: feedback.vote,
     };
   }
 
