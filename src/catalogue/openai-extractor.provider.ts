@@ -50,8 +50,29 @@ const REQUEST_TIMEOUT_MS = 15000;
 const PHOTO_REQUEST_TIMEOUT_MS = 45000;
 const WEB_SEARCH_REQUEST_TIMEOUT_MS = 20000;
 const OFFICIAL_DISCOVERY_REQUEST_TIMEOUT_MS = 15000;
+export const OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS = 6_000;
+export const OPENAI_PRODUCT_DISCOVERY_MAX_OUTPUT_TOKENS = 4_000;
+export const OPENAI_OFFICIAL_DISCOVERY_MAX_OUTPUT_TOKENS = 2_000;
+export const OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 const DEFAULT_MODEL = 'gpt-5.2';
 const OFFICIAL_DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000;
+
+type OpenAiRawResponseResult =
+  | {
+      ok: true;
+      outputText: string | null;
+      payload: OpenAiResponsePayload;
+    }
+  | {
+      ok: false;
+      reason: string;
+      retryable: boolean;
+      timedOut: boolean;
+    };
+
+function isRetryableOpenAiStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
 
 @Injectable()
 export class OpenAiExtractorProvider {
@@ -118,7 +139,7 @@ export class OpenAiExtractorProvider {
           timeoutMs: PHOTO_REQUEST_TIMEOUT_MS,
           failureLabel: 'OpenAI photo extraction',
           model: this.getModel(),
-          maxOutputTokens: 1400,
+          maxOutputTokens: OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
           responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
         },
       ),
@@ -145,7 +166,7 @@ export class OpenAiExtractorProvider {
         failureLabel: 'Optional OpenAI product discovery enrichment',
         optionalFallbackMessage: 'continuing with photo extraction result',
         model,
-        maxOutputTokens: 900,
+        maxOutputTokens: OPENAI_PRODUCT_DISCOVERY_MAX_OUTPUT_TOKENS,
         responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
       }),
     );
@@ -190,26 +211,52 @@ export class OpenAiExtractorProvider {
       responseFormat: OpenAiTextFormat;
     },
   ): Promise<ExtractionResult | null> {
-    const response = await this.requestOutputText(input, options);
-    if (!response) {
-      return null;
+    for (
+      let attempt = 1;
+      attempt <= OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS;
+      attempt += 1
+    ) {
+      const response = await this.requestOutputTextOnce(input, options);
+      if (!response.ok) {
+        if (
+          attempt < OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS &&
+          response.retryable
+        ) {
+          continue;
+        }
+        this.logRequestFailure(options, response);
+        return null;
+      }
+
+      if (!response.outputText) {
+        if (attempt < OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS) {
+          continue;
+        }
+        this.logger.warn(formatOpenAiFailure(options, 'empty output'));
+        return null;
+      }
+
+      try {
+        const parsed = JSON.parse(
+          extractJsonObject(response.outputText),
+        ) as ExtractedGroundedData;
+
+        return toExtractionResult(parsed, response.payload);
+      } catch (error) {
+        if (attempt < OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS) {
+          continue;
+        }
+        this.logger.warn(
+          formatOpenAiFailure(
+            options,
+            error instanceof Error ? error.message : 'Invalid JSON output',
+          ),
+        );
+        return null;
+      }
     }
 
-    try {
-      const parsed = JSON.parse(
-        extractJsonObject(response.outputText),
-      ) as ExtractedGroundedData;
-
-      return toExtractionResult(parsed, response.payload);
-    } catch (error) {
-      this.logger.warn(
-        formatOpenAiFailure(
-          options,
-          error instanceof Error ? error.message : 'Invalid JSON output',
-        ),
-      );
-      return null;
-    }
+    return null;
   }
 
   private async requestOutputText(
@@ -224,9 +271,55 @@ export class OpenAiExtractorProvider {
       responseFormat: OpenAiTextFormat;
     },
   ): Promise<{ outputText: string; payload: OpenAiResponsePayload } | null> {
+    for (
+      let attempt = 1;
+      attempt <= OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS;
+      attempt += 1
+    ) {
+      const response = await this.requestOutputTextOnce(input, options);
+      if (!response.ok) {
+        if (
+          attempt < OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS &&
+          response.retryable
+        ) {
+          continue;
+        }
+        this.logRequestFailure(options, response);
+        return null;
+      }
+
+      if (response.outputText) {
+        return { outputText: response.outputText, payload: response.payload };
+      }
+
+      if (attempt === OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS) {
+        this.logger.warn(formatOpenAiFailure(options, 'empty output'));
+      }
+    }
+
+    return null;
+  }
+
+  private async requestOutputTextOnce(
+    input: unknown,
+    options: {
+      useWebSearch: boolean;
+      timeoutMs: number;
+      failureLabel: string;
+      optionalFallbackMessage?: string;
+      model?: string;
+      maxOutputTokens?: number;
+      responseFormat: OpenAiTextFormat;
+    },
+  ): Promise<OpenAiRawResponseResult> {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
     if (!apiKey) {
-      return null;
+      return {
+        ok: false,
+        reason: 'missing OpenAI API key',
+        retryable: false,
+        timedOut: false,
+      };
     }
 
     try {
@@ -243,7 +336,9 @@ export class OpenAiExtractorProvider {
             ? { tools: [{ type: 'web_search' }], tool_choice: 'auto' }
             : {}),
           input,
-          max_output_tokens: options.maxOutputTokens ?? 1200,
+          max_output_tokens:
+            options.maxOutputTokens ??
+            OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
           ...openAiRepeatabilityRequestOptions(
             options.model ?? this.getModel(),
           ),
@@ -256,28 +351,42 @@ export class OpenAiExtractorProvider {
       });
 
       if (!response.ok) {
-        this.logger.warn(
-          formatOpenAiFailure(options, `status ${response.status}`),
-        );
-        return null;
+        return {
+          ok: false,
+          reason: `status ${response.status}`,
+          retryable: isRetryableOpenAiStatus(response.status),
+          timedOut: false,
+        };
       }
 
       const payload = (await response.json()) as OpenAiResponsePayload;
       const outputText = extractOutputText(payload);
-      return outputText ? { outputText, payload } : null;
+      return { ok: true, outputText, payload };
     } catch (error) {
-      if (isOpenAiTimeoutError(error)) {
-        this.logger.warn(formatOpenAiTimeout(options));
-      } else {
-        this.logger.warn(
-          formatOpenAiFailure(
-            options,
-            error instanceof Error ? error.message : 'Unknown error',
-          ),
-        );
-      }
-      return null;
+      const timedOut = isOpenAiTimeoutError(error);
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : 'Unknown error',
+        retryable: !timedOut,
+        timedOut,
+      };
     }
+  }
+
+  private logRequestFailure(
+    options: {
+      timeoutMs: number;
+      failureLabel: string;
+      optionalFallbackMessage?: string;
+    },
+    failure: Extract<OpenAiRawResponseResult, { ok: false }>,
+  ): void {
+    if (failure.timedOut) {
+      this.logger.warn(formatOpenAiTimeout(options));
+      return;
+    }
+
+    this.logger.warn(formatOpenAiFailure(options, failure.reason));
   }
 
   private getModel(): string {
@@ -339,7 +448,7 @@ export class OpenAiExtractorProvider {
         failureLabel: 'Optional OpenAI official product URL discovery',
         optionalFallbackMessage: 'continuing without official URL candidates',
         model: this.getModel(),
-        maxOutputTokens: 1200,
+        maxOutputTokens: OPENAI_OFFICIAL_DISCOVERY_MAX_OUTPUT_TOKENS,
         responseFormat: OPENAI_OFFICIAL_DISCOVERY_FORMAT,
       },
     );

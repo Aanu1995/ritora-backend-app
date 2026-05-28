@@ -1,0 +1,369 @@
+{
+  "reportType": "catalogue_photo_extraction_live_ai_evaluation",
+  "generatedAt": "2026-05-28T22:21:47.276Z",
+  "model": "gpt-5.4-mini",
+  "timeoutMs": {
+    "photoExtraction": 45000
+  },
+  "maxOutputTokens": {
+    "photoExtraction": 6000
+  },
+  "structuredOutputAttempts": 2,
+  "totalCases": 3,
+  "passedCases": 3,
+  "failedCases": 0,
+  "gate": {
+    "passed": true,
+    "blockers": []
+  },
+  "cases": [
+    {
+      "caseId": "cleanser_complete_label",
+      "title": "Cleanser label extracts core identity, size, ingredients, and use",
+      "status": "passed",
+      "hardChecksPassed": 9,
+      "hardChecksTotal": 9,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "RITORA LAB",
+        "name": "Calm Barrier Cleanser Gentle Cream Cleanser",
+        "category": "cleanser",
+        "sizeMl": 150,
+        "ingredients": [
+          "Aqua",
+          "Glycerin",
+          "Cocamidopropyl Betaine",
+          "Sodium Lauroyl Sarcosinate",
+          "Panthenol",
+          "Ceramide NP",
+          "Sodium Chloride",
+          "Citric Acid",
+          "Phenoxyethanol"
+        ],
+        "steps": [
+          "Massage onto wet skin with fingertips",
+          "Rinse thoroughly"
+        ],
+        "cautions": [
+          "For external use only",
+          "Avoid direct contact with eyes"
+        ],
+        "applicationMethod": "fingertips",
+        "quantity": null
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "ritora",
+          "actual": "RITORA LAB"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "calm",
+            "barrier",
+            "cleanser"
+          ],
+          "actual": "Calm Barrier Cleanser Gentle Cream Cleanser"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "cleanser",
+          "actual": "cleanser"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Aqua",
+            "Glycerin",
+            "Ceramide NP"
+          ],
+          "actual": [
+            "Aqua",
+            "Glycerin",
+            "Cocamidopropyl Betaine",
+            "Sodium Lauroyl Sarcosinate",
+            "Panthenol",
+            "Ceramide NP",
+            "Sodium Chloride",
+            "Citric Acid",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 150,
+          "actual": 150
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "massage",
+            "wet skin",
+            "rinse"
+          ],
+          "actual": [
+            "Massage onto wet skin with fingertips",
+            "Rinse thoroughly"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "external use",
+            "eyes"
+          ],
+          "actual": [
+            "For external use only",
+            "Avoid direct contact with eyes"
+          ]
+        },
+        {
+          "code": "application_method_matches_label",
+          "passed": true,
+          "expected": "fingertips",
+          "actual": "fingertips"
+        }
+      ]
+    },
+    {
+      "caseId": "spf_front_label",
+      "title": "SPF label is categorized as sun protection, not moisturizer",
+      "status": "passed",
+      "hardChecksPassed": 8,
+      "hardChecksTotal": 8,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "NORDIC SKIN",
+        "name": "Daily Shield SPF 50",
+        "category": "sun-protection",
+        "sizeMl": 50,
+        "ingredients": [
+          "Aqua",
+          "Diethylamino Hydroxybenzoyl Hexyl Benzoate",
+          "Ethylhexyl Triazone",
+          "Glycerin",
+          "Niacinamide",
+          "Tocopherol",
+          "Phenoxyethanol"
+        ],
+        "steps": [
+          "Apply every morning as last skincare step",
+          "Reapply every two hours during sun exposure"
+        ],
+        "cautions": [
+          "Avoid contact with eyes",
+          "Reduce sun exposure while using sunscreen"
+        ],
+        "applicationMethod": null,
+        "quantity": "generous"
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "nordic",
+          "actual": "NORDIC SKIN"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "daily",
+            "shield",
+            "spf 50"
+          ],
+          "actual": "Daily Shield SPF 50"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "sun-protection",
+          "actual": "sun-protection"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Ethylhexyl Triazone",
+            "Niacinamide"
+          ],
+          "actual": [
+            "Aqua",
+            "Diethylamino Hydroxybenzoyl Hexyl Benzoate",
+            "Ethylhexyl Triazone",
+            "Glycerin",
+            "Niacinamide",
+            "Tocopherol",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 50,
+          "actual": 50
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "morning",
+            "reapply"
+          ],
+          "actual": [
+            "Apply every morning as last skincare step",
+            "Reapply every two hours during sun exposure"
+          ]
+        },
+        {
+          "code": "quantity_matches_label",
+          "passed": true,
+          "expected": "generous",
+          "actual": "generous"
+        }
+      ]
+    },
+    {
+      "caseId": "retinal_serum_usage",
+      "title": "Retinal serum keeps active product identity and caution context",
+      "status": "passed",
+      "hardChecksPassed": 9,
+      "hardChecksTotal": 9,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "AURORA DERM",
+        "name": "Retinal Night Renewal Serum 0.05% Retinal + Peptides",
+        "category": "serum",
+        "sizeMl": 30,
+        "ingredients": [
+          "Aqua",
+          "Propanediol",
+          "Glycerin",
+          "Retinal",
+          "Palmitoyl Tripeptide-5",
+          "Squalane",
+          "Lecithin",
+          "Xanthan Gum",
+          "Phenoxyethanol"
+        ],
+        "steps": [
+          "Apply two to three drops at night after cleansing",
+          "Follow with moisturizer"
+        ],
+        "cautions": [
+          "Patch test first",
+          "Use sunscreen during the day",
+          "Do not use on irritated skin"
+        ],
+        "applicationMethod": null,
+        "quantity": "two-to-three-drops"
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "aurora",
+          "actual": "AURORA DERM"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "retinal",
+            "night",
+            "serum"
+          ],
+          "actual": "Retinal Night Renewal Serum 0.05% Retinal + Peptides"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "serum",
+          "actual": "serum"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Retinal",
+            "Squalane"
+          ],
+          "actual": [
+            "Aqua",
+            "Propanediol",
+            "Glycerin",
+            "Retinal",
+            "Palmitoyl Tripeptide-5",
+            "Squalane",
+            "Lecithin",
+            "Xanthan Gum",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 30,
+          "actual": 30
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "night",
+            "moisturizer"
+          ],
+          "actual": [
+            "Apply two to three drops at night after cleansing",
+            "Follow with moisturizer"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "patch test",
+            "sunscreen"
+          ],
+          "actual": [
+            "Patch test first",
+            "Use sunscreen during the day",
+            "Do not use on irritated skin"
+          ]
+        },
+        {
+          "code": "quantity_matches_label",
+          "passed": true,
+          "expected": "two-to-three-drops",
+          "actual": "two-to-three-drops"
+        }
+      ]
+    }
+  ]
+}

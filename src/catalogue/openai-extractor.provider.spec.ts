@@ -6,7 +6,13 @@ import {
   LookupConfidence,
   ProductCategory,
 } from '../shelf/shelf.types';
-import { OpenAiExtractorProvider } from './openai-extractor.provider';
+import {
+  OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS,
+  OPENAI_OFFICIAL_DISCOVERY_MAX_OUTPUT_TOKENS,
+  OPENAI_PRODUCT_DISCOVERY_MAX_OUTPUT_TOKENS,
+  OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
+  OpenAiExtractorProvider,
+} from './openai-extractor.provider';
 
 function buildConfig(
   values: Record<string, number | string | undefined>,
@@ -118,6 +124,9 @@ describe('OpenAiExtractorProvider', () => {
     const body = lastRequestBody();
     expect(body.model).toBe('catalogue-model');
     expect(body.store).toBe(false);
+    expect(body.max_output_tokens).toBe(
+      OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
+    );
     expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
     expect(body.temperature).toBe(0);
     expect(body.text).toMatchObject({
@@ -161,6 +170,41 @@ describe('OpenAiExtractorProvider', () => {
         strict: true,
       },
     });
+    expect(lastRequestBody().max_output_tokens).toBe(
+      OPENAI_OFFICIAL_DISCOVERY_MAX_OUTPUT_TOKENS,
+    );
+  });
+
+  it('retries malformed structured extraction output before falling back', async () => {
+    const provider = buildProvider();
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: '{"identity":{"brand":"Q+A","name":"Broken"',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify(buildProductOutput('Recovered Toner')),
+        }),
+      });
+
+    const result = await provider.extract({
+      identity: {},
+      guidance: {},
+      manufacturer: {},
+      evidence: [],
+      rawSource: {},
+      textExcerpt: null,
+    });
+
+    expect(result?.data.identity?.name).toBe('Recovered Toner');
+    expect(global.fetch).toHaveBeenCalledTimes(
+      OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS,
+    );
   });
 
   it('caches identical processed photo extraction requests', async () => {
@@ -191,12 +235,16 @@ describe('OpenAiExtractorProvider', () => {
     expect(first?.data.identity?.name).toBe('Cached Toner');
     expect(second?.data.identity?.name).toBe('Cached Toner');
     expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(lastRequestBody().max_output_tokens).toBe(
+      OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
+    );
   });
 
   it('does not cache failed photo extraction requests', async () => {
     const provider = buildProvider();
     global.fetch = jest
       .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500 })
       .mockResolvedValueOnce({ ok: false, status: 500 })
       .mockResolvedValueOnce({
         ok: true,
@@ -214,7 +262,9 @@ describe('OpenAiExtractorProvider', () => {
 
     expect(first).toBeNull();
     expect(second?.data.identity?.name).toBe('Glycolic Acid Daily Toner');
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(global.fetch).toHaveBeenCalledTimes(
+      OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS + 1,
+    );
   });
 
   it('caches identical web discovery completion requests', async () => {
@@ -239,6 +289,9 @@ describe('OpenAiExtractorProvider', () => {
 
     const body = lastRequestBody();
     expect(body.model).toBe('catalogue-model');
+    expect(body.max_output_tokens).toBe(
+      OPENAI_PRODUCT_DISCOVERY_MAX_OUTPUT_TOKENS,
+    );
     expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
     expect(timeoutSpy).toHaveBeenCalledWith(20000);
   });
