@@ -285,6 +285,96 @@ describe("Today's Suggestion evaluation reporting", () => {
     expect(report.cases[0].status).toBe('failed');
   });
 
+  it('includes applied product history in judge case summaries', async () => {
+    const report = await evaluateTodaysSuggestionGoldenCases({
+      generator: {
+        generate: jest.fn().mockResolvedValue(
+          baseOutput({
+            steps: [
+              step({
+                order: 0,
+                productId: 'cleanser-1',
+                productName: 'Soft Cream Cleanser',
+                label: ProductCategory.Cleanser,
+              }),
+              step({
+                order: 1,
+                productId: 'spf-1',
+                productName: 'Daily SPF 50',
+                label: ProductCategory.SunProtection,
+              }),
+            ],
+          }),
+        ),
+      },
+      judge: passingJudge,
+      model: 'gpt-4.1-mini',
+      generatedAt: '2026-05-18T08:00:00.000Z',
+      cases: [goldenCase('acne_pigment_priority_conflict')],
+    });
+    const summary = report.cases[0].sanitizedCaseSummary as {
+      contextSignals: {
+        appliedProductHistory: {
+          products: Array<{
+            productId: string;
+            lastAppliedDate: string | null;
+          }>;
+        };
+      };
+    };
+
+    expect(summary.contextSignals.appliedProductHistory.products).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'bha-1',
+          lastAppliedDate: '2026-05-17',
+        }),
+      ]),
+    );
+  });
+
+  it('includes medication safety context in judge case summaries', async () => {
+    const report = await evaluateTodaysSuggestionGoldenCases({
+      generator: {
+        generate: jest.fn().mockResolvedValue(
+          baseOutput({
+            steps: [
+              step({
+                order: 0,
+                productId: 'cleanser-1',
+                productName: 'Soft Cream Cleanser',
+                label: ProductCategory.Cleanser,
+              }),
+              step({
+                order: 1,
+                productId: 'moisturizer-1',
+                productName: 'Barrier Cream',
+                label: ProductCategory.Moisturizer,
+              }),
+            ],
+          }),
+        ),
+      },
+      judge: passingJudge,
+      model: 'gpt-4.1-mini',
+      generatedAt: '2026-05-18T08:00:00.000Z',
+      cases: [goldenCase('medication_active_caution')],
+    });
+    const summary = report.cases[0].sanitizedCaseSummary as {
+      skinProfile: {
+        safetyContext: {
+          medications: string[];
+          photosensitizingOther: boolean;
+        };
+      };
+    };
+
+    expect(summary.skinProfile.safetyContext.medications).toEqual([
+      'oral acne medication',
+    ]);
+    expect(summary.skinProfile.safetyContext.photosensitizingOther).toBe(true);
+  });
+
   it('records repeatability variation without failing when repeated outputs stay valid', async () => {
     const first = darkMarksOutput({ includeSpfGap: true });
     const second = darkMarksOutput({ includeSpfGap: true });

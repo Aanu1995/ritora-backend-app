@@ -108,7 +108,7 @@ export function buildPolicySafetyFlags(
   ) {
     flags.push({
       severity: 'warning',
-      message: localizedSafetyCopy.pregnancyRetinoid[resolvedLanguage],
+      message: activeCautionMessage(context, resolvedLanguage),
       ingredientSlugs: ['retinoid'],
       sourceIds: [SuggestionEvidenceSourceId.DermNetTopicalRetinoids],
     });
@@ -236,6 +236,11 @@ const localizedSafetyCopy: Record<string, Record<AppLanguage, string>> = {
     sv: 'Graviditet eller medicinlage kraver klinisk vagledning innan starka aktiva amnen andras.',
     es: 'El embarazo o el contexto de medicacion requiere orientacion clinica antes de cambiar activos fuertes.',
   },
+  medicationRetinoid: {
+    en: 'Medication context needs clinician guidance before changing strong actives.',
+    sv: 'Medicinlage kraver klinisk vagledning innan starka aktiva amnen andras.',
+    es: 'El contexto de medicacion requiere orientacion clinica antes de cambiar activos fuertes.',
+  },
   retinoidAha: {
     en: 'Retinoids and AHA exfoliants can be irritating together.',
     sv: 'Retinoider och AHA-exfolianter kan irritera tillsammans.',
@@ -360,6 +365,32 @@ function hasPregnancyOrMedicationCaution(
       context.safetyConstraints,
     ]),
   );
+}
+
+function hasPregnancyCaution(
+  context: Partial<
+    Pick<SuggestionContextSummary, 'profileSignals' | 'skinProfile'>
+  >,
+): boolean {
+  const safety = context.profileSignals?.safety;
+  return /(pregnan|breastfeed|trying|conceiv)/i.test(
+    JSON.stringify([
+      context.skinProfile?.pregnancyStatus ?? '',
+      safety?.pregnancyStatus ?? '',
+      safety?.conditions ?? [],
+    ]),
+  );
+}
+
+function activeCautionMessage(
+  context: Partial<
+    Pick<SuggestionContextSummary, 'profileSignals' | 'skinProfile'>
+  >,
+  language: AppLanguage,
+): string {
+  return hasPregnancyCaution(context)
+    ? localizedSafetyCopy.pregnancyRetinoid[language]
+    : localizedSafetyCopy.medicationRetinoid[language];
 }
 
 export function skippedReasonsFromPolicy(

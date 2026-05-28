@@ -238,7 +238,7 @@ export function buildDeterministicSafetyFlags(
   ) {
     flags.push({
       severity: 'info',
-      message: localizedPregnancySafetyMessage(language),
+      message: localizedMedicalSafetyMessage(inputs, language),
       ingredientSlugs: [],
       sourceIds: [SuggestionEvidenceSourceId.DermNetTopicalRetinoids],
     });
@@ -262,6 +262,15 @@ function hasPregnancyOrMedicationCaution(
   );
 }
 
+function hasPregnancyCaution(inputs: SuggestionGenerationInputs): boolean {
+  return /(pregnan|breastfeed|trying|conceiv)/i.test(
+    JSON.stringify([
+      inputs.skinProfile?.pregnancy_status ?? '',
+      inputs.skinProfile?.safety_context?.conditions ?? [],
+    ]),
+  );
+}
+
 function hasMedicalCautionText(value: string): boolean {
   return /\b(medication|medicacion|medicin|medicine|pregnan|embarazo|gravid|breastfeed|clinician|clinica|klinisk|specialist|doctor|prescrib)\b/i.test(
     value,
@@ -276,11 +285,21 @@ function localizedSpecialistLocked(language: AppLanguage): string {
   }[language];
 }
 
-function localizedPregnancySafetyMessage(language: AppLanguage): string {
+function localizedMedicalSafetyMessage(
+  inputs: SuggestionGenerationInputs,
+  language: AppLanguage,
+): string {
+  if (hasPregnancyCaution(inputs)) {
+    return {
+      en: 'Check active ingredients with your specialist during pregnancy or medication changes.',
+      sv: 'Stam av aktiva ingredienser med din specialist vid graviditet eller medicinbyte.',
+      es: 'Consulta los activos con tu especialista durante el embarazo o cambios de medicacion.',
+    }[language];
+  }
   return {
-    en: 'Check active ingredients with your specialist during pregnancy or medication changes.',
-    sv: 'Stam av aktiva ingredienser med din specialist vid graviditet eller medicinbyte.',
-    es: 'Consulta los activos con tu especialista durante el embarazo o cambios de medicacion.',
+    en: 'Check active ingredients with your specialist during medication changes.',
+    sv: 'Stam av aktiva ingredienser med din specialist vid medicinbyte.',
+    es: 'Consulta los activos con tu especialista durante cambios de medicacion.',
   }[language];
 }
 

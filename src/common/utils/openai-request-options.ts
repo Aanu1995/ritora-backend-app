@@ -1,4 +1,4 @@
-export const OPENAI_REASONING_EFFORT = 'xhigh' as const;
+export const OPENAI_REASONING_EFFORT = 'high' as const;
 
 export type OpenAiRepeatabilityRequestOptions = {
   reasoning: {

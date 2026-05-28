@@ -86,6 +86,8 @@ const MEDICAL_CLAIM_PATTERN =
   /\b(diagnose|diagnosed|diagnosis|cure|cures|cured|curing|prescribe|prescribes|prescribed|prescription|treat|treats|treated|treating)\b/i;
 
 const DEFAULT_CASES = TODAYS_SUGGESTION_GOLDEN_CASES;
+const SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS = 12000;
+const SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 2;
 
 export type TodaysSuggestionEvaluationStatus = 'passed' | 'failed';
 
@@ -306,14 +308,53 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
       throw new Error('OpenAI evaluation judge configuration is missing.');
     }
 
+    const outputText = await this.requestStructuredJudgement({
+      apiKey,
+      model,
+      input,
+    });
+    if (!outputText) {
+      throw new Error('OpenAI evaluation judge returned no structured output.');
+    }
+    return normalizeRubric(JSON.parse(outputText));
+  }
+
+  private async requestStructuredJudgement(input: {
+    apiKey: string;
+    model: string;
+    input: {
+      evaluationCase: TodaysSuggestionEvaluationCase;
+      output: SuggestionGenerationOutput;
+    };
+  }): Promise<string | null> {
+    let outputText: string | null = null;
+    for (
+      let attempt = 1;
+      attempt <= SUGGESTION_EVALUATION_JUDGE_ATTEMPTS;
+      attempt += 1
+    ) {
+      outputText = extractOutputText(await this.requestOpenAiJudgement(input));
+      if (outputText) break;
+    }
+    return outputText;
+  }
+
+  private async requestOpenAiJudgement(input: {
+    apiKey: string;
+    model: string;
+    input: {
+      evaluationCase: TodaysSuggestionEvaluationCase;
+      output: SuggestionGenerationOutput;
+    };
+  }): Promise<OpenAiResponsePayload> {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${input.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model,
+        model: input.model,
         store: false,
         input: [
           {
@@ -340,10 +381,10 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
                 type: 'input_text',
                 text: JSON.stringify(
                   sanitizeForReport({
-                    case: buildCaseSummary(input.evaluationCase),
+                    case: buildCaseSummary(input.input.evaluationCase),
                     output: buildOutputSummary(
-                      input.output,
-                      input.evaluationCase,
+                      input.input.output,
+                      input.input.evaluationCase,
                     ),
                     rubric: {
                       answersQuestion:
@@ -365,8 +406,11 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
             ],
           },
         ],
-        max_output_tokens: Math.min(SUGGESTION_AI_MAX_OUTPUT_TOKENS, 900),
-        ...openAiRepeatabilityRequestOptions(model),
+        max_output_tokens: Math.min(
+          SUGGESTION_AI_MAX_OUTPUT_TOKENS,
+          SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS,
+        ),
+        ...openAiRepeatabilityRequestOptions(input.model),
         text: {
           verbosity: 'low',
           format: JUDGE_RESPONSE_FORMAT,
@@ -379,12 +423,7 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
       throw new Error(`OpenAI evaluation judge failed (${response.status}).`);
     }
 
-    const payload = (await response.json()) as OpenAiResponsePayload;
-    const outputText = extractOutputText(payload);
-    if (!outputText) {
-      throw new Error('OpenAI evaluation judge returned no structured output.');
-    }
-    return normalizeRubric(JSON.parse(outputText));
+    return (await response.json()) as OpenAiResponsePayload;
   }
 }
 
@@ -1307,10 +1346,72 @@ function buildCaseSummary(
         evaluationCase.inputs.skinProfile?.pregnancy_status ?? null,
       dermatologistCare:
         evaluationCase.inputs.skinProfile?.under_dermatologist_care ?? null,
+      safetyContext: {
+        conditions:
+          evaluationCase.inputs.contextSummary.profileSignals?.safety
+            .conditions ??
+          evaluationCase.inputs.skinProfile?.safety_context?.conditions ??
+          [],
+        medications:
+          evaluationCase.inputs.contextSummary.profileSignals?.safety
+            .medications ??
+          evaluationCase.inputs.skinProfile?.safety_context?.medications ??
+          [],
+        photosensitizingOther:
+          evaluationCase.inputs.contextSummary.profileSignals?.safety
+            .photosensitizingOther ??
+          evaluationCase.inputs.skinProfile?.safety_context
+            ?.photosensitizing_other ??
+          false,
+      },
     },
     contextSignals: {
       reaction: evaluationCase.inputs.contextSummary.reaction,
       routineBreak: evaluationCase.inputs.contextSummary.routineBreak,
+      applicationPatterns:
+        evaluationCase.inputs.contextSummary.applicationPatterns,
+      appliedProductHistory: evaluationCase.inputs.contextSummary
+        .appliedProductHistory
+        ? {
+            windowStartDate:
+              evaluationCase.inputs.contextSummary.appliedProductHistory
+                .windowStartDate,
+            windowEndDate:
+              evaluationCase.inputs.contextSummary.appliedProductHistory
+                .windowEndDate,
+            recordsConsidered:
+              evaluationCase.inputs.contextSummary.appliedProductHistory
+                .recordsConsidered,
+            products:
+              evaluationCase.inputs.contextSummary.appliedProductHistory.products.map(
+                (product) => ({
+                  productId: product.productId,
+                  brand: product.brand,
+                  name: product.name,
+                  category: product.category,
+                  dayparts: product.dayparts,
+                  statuses: product.statuses,
+                  useCount: product.useCount,
+                  lastAppliedDate: product.lastAppliedDate,
+                  isOffShelf: product.isOffShelf,
+                  isSubstitution: product.isSubstitution,
+                }),
+              ),
+          }
+        : null,
+      routineMemory: evaluationCase.inputs.contextSummary.routineMemory
+        ? {
+            sameDaypartSuggestionCount:
+              evaluationCase.inputs.contextSummary.routineMemory
+                .sameDaypartSuggestionCount,
+            recentlySuggestedProductIds:
+              evaluationCase.inputs.contextSummary.routineMemory
+                .recentlySuggestedProductIds,
+            exactRepeatCountByFingerprint:
+              evaluationCase.inputs.contextSummary.routineMemory
+                .exactRepeatCountByFingerprint,
+          }
+        : null,
       environment: evaluationCase.inputs.contextSummary.environment
         ? {
             uvRisk: evaluationCase.inputs.contextSummary.environment.uvRisk,

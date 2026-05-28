@@ -312,12 +312,7 @@ function scorePreferredTime(
     reasons.push('product can be used any time');
     return 6;
   }
-  if (
-    (preferredTime === PreferredTimeOfDay.Morning &&
-      isDaytimeSuggestion(daypart)) ||
-    (preferredTime === PreferredTimeOfDay.Evening &&
-      daypart === SuggestionDaypart.Evening)
-  ) {
+  if (isPreferredTimeCompatibleWithDaypart(preferredTime, daypart)) {
     reasons.push('matches preferred time of day');
     return 12;
   }
@@ -329,6 +324,19 @@ function isDaytimeSuggestion(daypart: SuggestionDaypart): boolean {
   return (
     daypart === SuggestionDaypart.Morning || daypart === SuggestionDaypart.Noon
   );
+}
+
+export function isPreferredTimeCompatibleWithDaypart(
+  preferredTime: PreferredTimeOfDay | null | undefined,
+  daypart: SuggestionDaypart,
+): boolean {
+  if (!preferredTime || preferredTime === PreferredTimeOfDay.Either) {
+    return true;
+  }
+  if (preferredTime === PreferredTimeOfDay.Morning) {
+    return isDaytimeSuggestion(daypart);
+  }
+  return daypart === SuggestionDaypart.Evening;
 }
 
 function isRepeatProtectedProduct(

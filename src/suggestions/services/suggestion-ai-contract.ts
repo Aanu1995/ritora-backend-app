@@ -58,9 +58,11 @@ export const SYSTEM_PROMPT = [
   '14. In pregnancy, medication, or clinician-care caution contexts, include a short caution in explanation.body or safetyFlags even when the chosen steps avoid retinoids.',
   '15. Do not write "only" in headline or body unless the output has exactly one application step.',
   '16. Respect the goal hierarchy: safety first, primary goal second, then secondary concerns and user preferences.',
-  '17. Output is strictly valid JSON conforming to the provided schema.',
-  '18. Write every user-facing string in the requested response language. Keep product names, brand names, ingredient slugs, enum values, IDs, sourceIds, and JSON keys unchanged.',
-  '19. Write like a calm skincare app, not a report. Keep copy short and human: headlines under 8 words, step reasons under 18 words, safety and gap reasons under 22 words. Do not mention prompts, schemas, tokens, fallback internals, or legal wording.',
+  '17. Respect product preferredTime from the shelf: preferredTime=morning may be used only in morning/noon slots, preferredTime=evening only in evening slots, and preferredTime=either in any slot. If a product does not match this slot, omit it from application steps unless it is specialist-locked.',
+  '18. Keep gap recommendations limited to missing essentials needed for today, such as daytime SPF or barrier moisturizer. Do not add optional treatment, acne, pigment, serum, exfoliant, or upgrade shopping gaps when the owned steps answer the immediate request.',
+  '19. Output is strictly valid JSON conforming to the provided schema.',
+  '20. Write every user-facing string in the requested response language. Keep product names, brand names, ingredient slugs, enum values, IDs, sourceIds, and JSON keys unchanged.',
+  '21. Write like a calm skincare app, not a report. Keep copy short and human: headlines under 8 words, step reasons under 18 words, safety and gap reasons under 22 words. Do not mention prompts, schemas, tokens, fallback internals, or legal wording.',
 ].join(' ');
 
 const RESPONSE_LANGUAGE_LABELS: Record<AppLanguage, string> = {

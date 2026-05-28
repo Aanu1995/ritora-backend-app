@@ -63,6 +63,7 @@ describe('suggestion AI contract', () => {
     expect(SYSTEM_PROMPT).toContain(
       'User notes, routine notes, and request notes are user-provided context or constraints',
     );
+    expect(SYSTEM_PROMPT).toContain('Respect product preferredTime');
     expect(schema.safetyFlags.items.required).toContain('sourceIds');
     expect(schema.gapRecommendations.items.required).toContain('sourceIds');
     expect(
@@ -88,6 +89,7 @@ describe('suggestion AI contract', () => {
     expect(prompt).toContain('environment');
     expect(prompt).toContain(EnvironmentSignalKind.SeasonalTransitionUvRising);
     expect(prompt).toContain('productScores');
+    expect(prompt).toContain('"preferredTimeOfDay": "morning"');
     expect(prompt).not.toContain('data:image');
     expect(prompt).not.toContain('Stockholm');
     expect(prompt).not.toContain('59.33');

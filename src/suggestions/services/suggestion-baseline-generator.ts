@@ -34,6 +34,7 @@ import {
   stableSameDaypartRepeatProductIds,
 } from './suggestion-routine-repeat-policy';
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
+import { isPreferredTimeCompatibleWithDaypart } from './suggestion-product-intelligence';
 
 const baselineCopy = {
   noStepsHeadline: {
@@ -441,6 +442,8 @@ export function buildDeterministicGapRecommendations(
   }
 
   for (const gap of environmentPolicy.gapRecommendations) {
+    if (hasSunscreen && isSunscreenGap(gap)) continue;
+    if (hasMoisturizer && isMoisturizerGap(gap)) continue;
     const alreadyCovered = gaps.some(
       (candidate) =>
         candidate.ingredientOrCategory.toLowerCase() ===
@@ -467,6 +470,26 @@ export function buildDeterministicGapRecommendations(
     ...gap,
     sourceIds: mergeEvidenceSourceIds(gap.sourceIds),
   }));
+}
+
+function isSunscreenGap(gap: {
+  ingredientOrCategory: string;
+  reason: string;
+  goalAlignment?: string | null;
+}): boolean {
+  return /spf|sunscreen|sun protection/i.test(
+    `${gap.ingredientOrCategory} ${gap.reason} ${gap.goalAlignment ?? ''}`,
+  );
+}
+
+function isMoisturizerGap(gap: {
+  ingredientOrCategory: string;
+  reason: string;
+  goalAlignment?: string | null;
+}): boolean {
+  return /moisturizer|moisturiser|barrier|cream|hydrating/i.test(
+    `${gap.ingredientOrCategory} ${gap.reason} ${gap.goalAlignment ?? ''}`,
+  );
 }
 
 function needsPigmentProtection(inputs: SuggestionGenerationInputs): boolean {
@@ -511,6 +534,12 @@ function selectBaselineProducts(
   );
   const candidates = resolveSuggestionProductScores(inputs)
     .filter((score) => score.suitabilityScore >= 40)
+    .filter((score) =>
+      isPreferredTimeCompatibleWithDaypart(
+        score.preferredTimeOfDay,
+        inputs.daypart,
+      ),
+    )
     .filter((score) => !skippedProductIds.has(score.productId))
     .filter((score) =>
       shouldAvoidStrongActives(inputs)

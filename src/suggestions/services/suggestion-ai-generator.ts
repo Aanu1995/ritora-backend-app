@@ -60,11 +60,15 @@ import {
   requiresOwnedDaytimeSpf,
 } from './suggestion-routine-repeat-policy';
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
-import { isStrongActiveTag } from './suggestion-product-intelligence';
+import {
+  isPreferredTimeCompatibleWithDaypart,
+  isStrongActiveTag,
+} from './suggestion-product-intelligence';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
-export const SUGGESTION_AI_TIMEOUT_MS = 45_000;
-export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 1500;
+export const SUGGESTION_AI_TIMEOUT_MS = 180_000;
+export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 24000;
+const SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 
 export interface SuggestionGenerationInputs {
   language?: AppLanguage;
@@ -183,41 +187,12 @@ export class SuggestionAiGenerator {
     }
 
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          store: false,
-          input: [
-            {
-              role: 'system',
-              content: [{ type: 'input_text', text: SYSTEM_PROMPT }],
-            },
-            {
-              role: 'user',
-              content: [{ type: 'input_text', text: buildPrompt(inputs) }],
-            },
-          ],
-          max_output_tokens: SUGGESTION_AI_MAX_OUTPUT_TOKENS,
-          ...openAiRepeatabilityRequestOptions(model),
-          text: {
-            verbosity: 'low',
-            format: RESPONSE_FORMAT,
-          },
-        }),
-        signal: AbortSignal.timeout(SUGGESTION_AI_TIMEOUT_MS),
+      const prompt = buildPrompt(inputs);
+      const { outputText, payload } = await this.requestStructuredOutput({
+        apiKey,
+        model,
+        prompt,
       });
-
-      if (!response.ok) {
-        throw new Error(`OpenAI suggestion call failed (${response.status}).`);
-      }
-
-      const payload = (await response.json()) as OpenAiResponsePayload;
-      const outputText = extractOutputText(payload);
       if (!outputText) {
         throw new Error('OpenAI returned no usable structured output.');
       }
@@ -354,6 +329,75 @@ export class SuggestionAiGenerator {
         promptVersion: SUGGESTION_PROMPT_VERSION,
       },
     };
+  }
+
+  private async requestStructuredOutput(input: {
+    apiKey: string;
+    model: string;
+    prompt: string;
+  }): Promise<{
+    outputText: string | null;
+    payload: OpenAiResponsePayload;
+  }> {
+    let lastPayload: OpenAiResponsePayload | null = null;
+    for (
+      let attempt = 1;
+      attempt <= SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS;
+      attempt += 1
+    ) {
+      const payload = await this.requestOpenAiResponse(input);
+      const outputText = extractOutputText(payload);
+      if (outputText) {
+        return { outputText, payload };
+      }
+      lastPayload = payload;
+    }
+
+    return {
+      outputText: null,
+      payload: lastPayload ?? {},
+    };
+  }
+
+  private async requestOpenAiResponse(input: {
+    apiKey: string;
+    model: string;
+    prompt: string;
+  }): Promise<OpenAiResponsePayload> {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        store: false,
+        input: [
+          {
+            role: 'system',
+            content: [{ type: 'input_text', text: SYSTEM_PROMPT }],
+          },
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: input.prompt }],
+          },
+        ],
+        max_output_tokens: SUGGESTION_AI_MAX_OUTPUT_TOKENS,
+        ...openAiRepeatabilityRequestOptions(input.model),
+        text: {
+          verbosity: 'low',
+          format: RESPONSE_FORMAT,
+        },
+      }),
+      signal: AbortSignal.timeout(SUGGESTION_AI_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI suggestion call failed (${response.status}).`);
+    }
+
+    return (await response.json()) as OpenAiResponsePayload;
   }
 
   private buildBaseline(
@@ -906,6 +950,9 @@ function resolveHardSafetyFallbackReason(
   ) {
     return 'unsafe_daytime_strong_active';
   }
+  if (hasAiAddedPreferredTimeMismatch(inputs, steps)) {
+    return 'preferred_time_of_day_mismatch';
+  }
   if (
     requiresBarrierMoisturizer(inputs) &&
     !selectedScores.some(
@@ -980,6 +1027,31 @@ function selectedProductScores(
       (score): score is SuggestionContextSummary['productScores'][number] =>
         Boolean(score),
     );
+}
+
+function hasAiAddedPreferredTimeMismatch(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): boolean {
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  return steps.some((step) => {
+    if (
+      step.provenance !== SuggestionStepProvenance.AiAdded ||
+      !step.inventoryProductId
+    ) {
+      return false;
+    }
+    const score = scoreByProductId.get(step.inventoryProductId);
+    return !isPreferredTimeCompatibleWithDaypart(
+      score?.preferredTimeOfDay,
+      inputs.daypart,
+    );
+  });
 }
 
 function isSkippedProductReturnedAsStep(
@@ -1135,6 +1207,14 @@ function filterContextualGapRecommendations(
   );
   return gaps.filter((gap) => {
     if (isOwnedProductGap(inputs, gap)) return false;
+    if (!isEssentialTodayGap(gap)) return false;
+    if (
+      hasReactionSignalInInputs(inputs) &&
+      !isSunscreenGap(gap) &&
+      !isMoisturizerGap(gap)
+    ) {
+      return false;
+    }
     if (selectedSunscreen && isSunscreenGap(gap)) return false;
     if (selectedMoisturizer && isMoisturizerGap(gap)) return false;
     if (!isSunscreenGap(gap)) return true;
@@ -1143,6 +1223,10 @@ function filterContextualGapRecommendations(
     if (needsPigmentOrUvProtection(inputs)) return true;
     return false;
   });
+}
+
+function isEssentialTodayGap(gap: SuggestionGapRecommendationJson): boolean {
+  return isSunscreenGap(gap) || isMoisturizerGap(gap);
 }
 
 function mergeRequiredDeterministicGapRecommendations(

@@ -4,6 +4,7 @@ import { SuggestionProductScore } from '../suggestion-context.types';
 import { SuggestionDaypart } from '../suggestions.constants';
 import type { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import {
+  isPreferredTimeCompatibleWithDaypart,
   isStrongActiveTag,
   scoreProductForSuggestion,
 } from './suggestion-product-intelligence';
@@ -82,10 +83,15 @@ function buildFallbackScore(
 
   return {
     ...scored,
-    suitabilityScore: Math.max(
-      scored.suitabilityScore,
-      fallbackSuitabilityFloor(scored, inputs.daypart),
-    ),
+    suitabilityScore: isPreferredTimeCompatibleWithDaypart(
+      scored.preferredTimeOfDay,
+      inputs.daypart,
+    )
+      ? Math.max(
+          scored.suitabilityScore,
+          fallbackSuitabilityFloor(scored, inputs.daypart),
+        )
+      : scored.suitabilityScore,
     suitabilityReasons: appendUniqueReason(
       scored.suitabilityReasons,
       'active shelf fallback score',

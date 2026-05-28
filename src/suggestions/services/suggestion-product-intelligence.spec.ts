@@ -20,6 +20,7 @@ import {
 } from '../../environment-intelligence/environment-intelligence.constants';
 import {
   assessProductDataQuality,
+  isPreferredTimeCompatibleWithDaypart,
   scoreProductForSuggestion,
   SuggestionProductGoalFitReason,
 } from './suggestion-product-intelligence';
@@ -94,6 +95,56 @@ describe('suggestion product intelligence', () => {
       quality: 'verified',
       warnings: [],
     });
+  });
+
+  it('treats user-selected product timing as a slot constraint', () => {
+    const eveningProduct = productWithData({
+      category: ProductCategory.Serum,
+      inciIngredients: ['Niacinamide', 'Glycerin'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Evening,
+    });
+
+    const morningScore = scoreProductForSuggestion(eveningProduct, {
+      daypart: 'morning',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'high',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+    const eveningScore = scoreProductForSuggestion(eveningProduct, {
+      daypart: 'evening',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'high',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(
+      isPreferredTimeCompatibleWithDaypart(
+        PreferredTimeOfDay.Evening,
+        'morning',
+      ),
+    ).toBe(false);
+    expect(
+      isPreferredTimeCompatibleWithDaypart(
+        PreferredTimeOfDay.Morning,
+        'noon',
+      ),
+    ).toBe(true);
+    expect(morningScore.cautionReasons).toContain(
+      'preferred time of day does not match this slot',
+    );
+    expect(eveningScore.suitabilityReasons).toContain(
+      'matches preferred time of day',
+    );
+    expect(eveningScore.suitabilityScore).toBeGreaterThan(
+      morningScore.suitabilityScore,
+    );
   });
 
   it('trusts matched ingredient intelligence even when source confirmation date is absent', () => {
