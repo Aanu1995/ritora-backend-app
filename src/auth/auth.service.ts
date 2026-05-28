@@ -767,6 +767,18 @@ export class AuthService {
     this.clearRefreshCookie(res);
   }
 
+  async logoutSession(
+    userId: string,
+    sessionId: string,
+    res: Response,
+  ): Promise<void> {
+    await this.sessionsRepository.update(
+      { id: sessionId, user_id: userId, revoked_at: IsNull() },
+      { revoked_at: nowDate() },
+    );
+    this.clearRefreshCookie(res);
+  }
+
   async logoutAll(userId: string, res: Response): Promise<void> {
     await this.revokeAllSessions(userId);
     this.clearRefreshCookie(res);

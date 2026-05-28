@@ -1228,6 +1228,21 @@ describe('AuthService', () => {
       expect(sessionsRepo.save).not.toHaveBeenCalled();
       expect(res.clearCookie).toHaveBeenCalled();
     });
+
+    it('revokes the current bearer session when no refresh cookie is available', async () => {
+      const res = mockRes();
+
+      await service.logoutSession('01USER', '01SESSION', asResponse(res));
+
+      expect(sessionsRepo.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: '01SESSION',
+          user_id: '01USER',
+        }),
+        expect.objectContaining({ revoked_at: expect.any(Date) }),
+      );
+      expect(res.clearCookie).toHaveBeenCalled();
+    });
   });
 
   describe('logoutAll', () => {

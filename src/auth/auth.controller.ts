@@ -385,6 +385,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logout(
     @CurrentUser('language') language: string | undefined,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('sessionId') sessionId: string,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
@@ -400,7 +402,7 @@ export class AuthController {
       };
     }
 
-    this.authService.clearRefreshCookie(res);
+    await this.authService.logoutSession(userId, sessionId, res);
     return {
       message: translate(
         normalizeLanguage(language),

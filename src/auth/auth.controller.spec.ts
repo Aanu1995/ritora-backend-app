@@ -20,6 +20,7 @@ const mockAuthService = () => ({
   getMe: jest.fn(),
   getSessions: jest.fn(),
   logout: jest.fn(),
+  logoutSession: jest.fn(),
   logoutAll: jest.fn(),
   clearRefreshCookie: jest.fn(),
   exportData: jest.fn(),
@@ -420,27 +421,36 @@ describe('AuthController', () => {
 
     const result = await controller.logout(
       'sv',
+      '01USER',
+      '01SESSION',
       asRequest(mockReq({ cookies: { [cookieName]: '01SESSION.secret' } })),
       asResponse(res),
     );
 
     expect(result.message).toBe('Du har loggats ut');
     expect(authService.logout).toHaveBeenCalledWith('01SESSION.secret', res);
+    expect(authService.logoutSession).not.toHaveBeenCalled();
   });
 
-  it('logout clears the refresh cookie even when no token is present', async () => {
+  it('logout revokes the bearer session when no refresh cookie is present', async () => {
     const res = mockRes();
-    authService.clearRefreshCookie.mockImplementation(() => undefined);
+    authService.logoutSession.mockResolvedValue(undefined);
 
     const result = await controller.logout(
       'sv',
+      '01USER',
+      '01SESSION',
       asRequest(mockReq()),
       asResponse(res),
     );
 
     expect(result.message).toBe('Du har loggats ut');
     expect(authService.logout).not.toHaveBeenCalled();
-    expect(authService.clearRefreshCookie).toHaveBeenCalledWith(res);
+    expect(authService.logoutSession).toHaveBeenCalledWith(
+      '01USER',
+      '01SESSION',
+      res,
+    );
   });
 
   it('refresh reads the configured refresh cookie name', async () => {
