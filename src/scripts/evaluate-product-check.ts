@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
 import { mkdir, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { ConfigService } from '@nestjs/config';
@@ -8,17 +8,24 @@ import {
 } from '../ingredients/evaluation/product-check-real-life-evaluation.runner';
 
 type EvaluationCliOptions = {
+  envFile: string | null;
   out: string;
 };
 
 async function main(): Promise<number> {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.envFile) {
+    loadEnv({ path: options.envFile, override: true });
+  } else {
+    loadEnv();
+  }
+
   if (!process.env.OPENAI_API_KEY?.trim()) {
     throw new Error(
       'OPENAI_API_KEY is required for real-life Quick Check evaluation.',
     );
   }
 
-  const options = parseArgs(process.argv.slice(2));
   const report = await evaluateProductCheckRealLifeCases({
     configService: new ConfigService(),
   });
@@ -41,6 +48,7 @@ async function main(): Promise<number> {
 function parseArgs(args: readonly string[]): EvaluationCliOptions {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   return {
+    envFile: readFlag(args, '--env-file'),
     out: resolve(
       readFlag(args, '--out') ??
         join(

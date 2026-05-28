@@ -48,6 +48,12 @@ export type ProductCheckRealLifeEvaluationReport = {
   reportType: 'product_check_real_life_evaluation';
   generatedAt: string;
   model: string;
+  runtime: {
+    aiReviewMaxOutputTokens: number;
+    aiReviewStructuredOutputAttempts: number;
+    aiReviewTimeoutMs: number;
+    reasoningEffort: string;
+  };
   totalCases: number;
   passedCases: number;
   failedCases: number;

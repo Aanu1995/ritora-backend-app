@@ -12,6 +12,7 @@ import {
   INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
   INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
   INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+  PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS,
 } from './ingredient-analysis-runtime.constants';
 import type {
   ExplanationInput,
@@ -20,6 +21,7 @@ import type {
 } from './explanation.port';
 import {
   IngredientAnalysisAiMetricOperation,
+  IngredientAnalysisAiMetricSource,
   IngredientAnalysisAiMetricStatus,
   type IngredientAnalysisAiUsage,
   normalizeIngredientAnalysisAiUsage,
@@ -132,7 +134,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
       const response = await requestOpenAiStructuredOutput({
         apiKey,
         attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
-        timeoutMs: OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS,
+        timeoutMs: explanationRequestTimeoutMs(input.tracking),
         body: {
           model,
           store: false,
@@ -362,4 +364,12 @@ export class OpenAiExplanationProvider implements ExplanationPort {
 
     return lookup;
   }
+}
+
+function explanationRequestTimeoutMs(
+  tracking?: ExplanationInput['tracking'],
+): number {
+  return tracking?.source === IngredientAnalysisAiMetricSource.QuickCheck
+    ? PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS
+    : OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS;
 }

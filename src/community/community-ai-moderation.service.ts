@@ -17,8 +17,9 @@ import {
   type CommunitySafetyFlag,
 } from './community.types';
 
-export const COMMUNITY_MODERATION_AI_TIMEOUT_MS = 20_000;
-export const COMMUNITY_MODERATION_AI_MAX_OUTPUT_TOKENS = 450;
+export const COMMUNITY_MODERATION_AI_TIMEOUT_MS = 60_000;
+export const COMMUNITY_MODERATION_AI_MAX_OUTPUT_TOKENS = 2_000;
+export const COMMUNITY_MODERATION_AI_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 
 type CommunityAiModerationInput = {
   contentType: CommunityContentType;
@@ -121,90 +122,138 @@ export class CommunityAiModerationService {
       );
     }
 
-    const startedAt = Date.now();
-    try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
+    const requestBody = {
+      model,
+      store: false,
+      max_output_tokens: COMMUNITY_MODERATION_AI_MAX_OUTPUT_TOKENS,
+      ...openAiRepeatabilityRequestOptions(model),
+      input: [
+        {
+          role: 'system',
+          content: [{ type: 'input_text', text: SYSTEM_PROMPT }],
         },
-        body: JSON.stringify({
-          model,
-          store: false,
-          max_output_tokens: COMMUNITY_MODERATION_AI_MAX_OUTPUT_TOKENS,
-          ...openAiRepeatabilityRequestOptions(model),
-          input: [
+        {
+          role: 'user',
+          content: [
             {
-              role: 'system',
-              content: [{ type: 'input_text', text: SYSTEM_PROMPT }],
-            },
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: JSON.stringify(this.buildPromptPayload(input)),
-                },
-              ],
+              type: 'input_text',
+              text: JSON.stringify(this.buildPromptPayload(input)),
             },
           ],
-          text: {
-            verbosity: 'low',
-            format: RESPONSE_FORMAT,
+        },
+      ],
+      text: {
+        verbosity: 'low',
+        format: RESPONSE_FORMAT,
+      },
+    };
+
+    const startedAt = Date.now();
+    let fallbackReason = 'provider_failure';
+
+    for (
+      let attempt = 1;
+      attempt <= COMMUNITY_MODERATION_AI_STRUCTURED_OUTPUT_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        const response = await fetch('https://api.openai.com/v1/responses', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
           },
-        }),
-        signal: AbortSignal.timeout(COMMUNITY_MODERATION_AI_TIMEOUT_MS),
-      });
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(COMMUNITY_MODERATION_AI_TIMEOUT_MS),
+        });
 
-      const durationMs = Date.now() - startedAt;
-      if (!response.ok) {
+        const responseDurationMs = Date.now() - startedAt;
+        if (!response.ok) {
+          fallbackReason = `provider_http_${response.status}`;
+          if (
+            attempt < COMMUNITY_MODERATION_AI_STRUCTURED_OUTPUT_ATTEMPTS &&
+            isRetryableProviderStatus(response.status)
+          ) {
+            continue;
+          }
+          this.logger.warn(
+            `Community moderation LLM call failed (${response.status}). Falling back to deterministic moderation.`,
+          );
+          return this.deterministicFallback(
+            input,
+            model,
+            fallbackReason,
+            responseDurationMs,
+          );
+        }
+
+        const payload = (await response.json()) as OpenAiResponsePayload;
+        const outputText = extractOutputText(payload);
+        if (!outputText) {
+          fallbackReason = 'provider_empty_output';
+          if (attempt < COMMUNITY_MODERATION_AI_STRUCTURED_OUTPUT_ATTEMPTS) {
+            continue;
+          }
+          return this.deterministicFallback(
+            input,
+            model,
+            fallbackReason,
+            responseDurationMs,
+          );
+        }
+
+        const parsed = parseModerationResponse(outputText);
+        if (!parsed) {
+          fallbackReason = 'provider_invalid_json';
+          if (attempt < COMMUNITY_MODERATION_AI_STRUCTURED_OUTPUT_ATTEMPTS) {
+            continue;
+          }
+          return this.deterministicFallback(
+            input,
+            model,
+            fallbackReason,
+            responseDurationMs,
+          );
+        }
+
+        const automation = this.sanitizeLlmDecision(parsed, input, {
+          durationMs: responseDurationMs,
+          model,
+        });
+        return {
+          status: this.statusFromAction(automation.action),
+          automation,
+        };
+      } catch (error) {
+        fallbackReason = isAbortError(error)
+          ? 'provider_timeout'
+          : 'provider_failure';
+        if (
+          attempt < COMMUNITY_MODERATION_AI_STRUCTURED_OUTPUT_ATTEMPTS &&
+          fallbackReason !== 'provider_timeout'
+        ) {
+          continue;
+        }
         this.logger.warn(
-          `Community moderation LLM call failed (${response.status}). Falling back to deterministic moderation.`,
+          `Community moderation LLM call failed: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }. Falling back to deterministic moderation.`,
         );
         return this.deterministicFallback(
           input,
           model,
-          `provider_http_${response.status}`,
-          durationMs,
+          fallbackReason,
+          Date.now() - startedAt,
         );
       }
-
-      const payload = (await response.json()) as OpenAiResponsePayload;
-      const outputText = extractOutputText(payload);
-      if (!outputText) {
-        return this.deterministicFallback(
-          input,
-          model,
-          'provider_empty_output',
-          durationMs,
-        );
-      }
-
-      const parsed = JSON.parse(
-        extractJsonObject(outputText),
-      ) as ParsedCommunityModerationResponse;
-      const automation = this.sanitizeLlmDecision(parsed, input, {
-        durationMs,
-        model,
-      });
-      return {
-        status: this.statusFromAction(automation.action),
-        automation,
-      };
-    } catch (error) {
-      this.logger.warn(
-        `Community moderation LLM call failed: ${
-          error instanceof Error ? error.message : 'unknown error'
-        }. Falling back to deterministic moderation.`,
-      );
-      return this.deterministicFallback(
-        input,
-        model,
-        'provider_failure',
-        Date.now() - startedAt,
-      );
     }
+
+    return this.deterministicFallback(
+      input,
+      model,
+      fallbackReason,
+      Date.now() - startedAt,
+    );
   }
 
   private buildPromptPayload(input: CommunityAiModerationInput) {
@@ -518,4 +567,24 @@ function cleanReason(value: string | null | undefined): string | null {
 function clampConfidence(value: number | undefined): number {
   if (typeof value !== 'number' || Number.isNaN(value)) return 0.5;
   return Math.max(0, Math.min(1, value));
+}
+
+function parseModerationResponse(
+  outputText: string,
+): ParsedCommunityModerationResponse | null {
+  try {
+    return JSON.parse(
+      extractJsonObject(outputText),
+    ) as ParsedCommunityModerationResponse;
+  } catch {
+    return null;
+  }
+}
+
+function isRetryableProviderStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError';
 }

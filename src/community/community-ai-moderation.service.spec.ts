@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import { OPENAI_REASONING_EFFORT } from '../common/utils/openai-request-options';
 import { CommunityAiModerationService } from './community-ai-moderation.service';
 import {
   CommunityContentType,
@@ -89,9 +90,58 @@ describe('CommunityAiModerationService', () => {
         method: 'POST',
       }),
     );
+    const requestBody = JSON.parse(
+      String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body),
+    ) as { max_output_tokens: number; reasoning: { effort: string } };
+    expect(requestBody.max_output_tokens).toBe(2_000);
+    expect(requestBody.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
     expect(result.status).toBe(CommunityModerationStatus.NeedsEdit);
     expect(result.automation.provider).toBe('openai');
     expect(result.automation.reason).toBe('Disclosure is unclear.');
+  });
+
+  it('retries malformed structured output before using fallback moderation', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        openAiResponse({
+          output_text: '{"action":"request_edit","confidence":0.91,"reason":"',
+        }),
+      )
+      .mockResolvedValueOnce(
+        openAiResponse({
+          output_text: JSON.stringify({
+            action: 'request_edit',
+            confidence: 0.91,
+            reason: 'Disclosure needs a matching label.',
+          }),
+        }),
+      );
+    const service = new CommunityAiModerationService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        COMMUNITY_MODERATION_AI_MODEL: 'gpt-5-mini',
+      }),
+    );
+
+    const result = await service.triage({
+      contentType: CommunityContentType.Review,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      flags: [
+        {
+          code: 'possible_undisclosed_sponsorship',
+          severity: CommunitySafetySeverity.Medium,
+          message: 'Possible sponsorship language.',
+        },
+      ],
+      text: 'Use my code for a discount.',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe(CommunityModerationStatus.NeedsEdit);
+    expect(result.automation.provider).toBe('openai');
+    expect(result.automation.fallbackReason).toBeNull();
+    expect(result.automation.reason).toBe('Disclosure needs a matching label.');
   });
 
   it('does not let the LLM publish against deterministic guardrails', async () => {

@@ -604,6 +604,71 @@ describe('CommunityService review evidence', () => {
       }),
     ).rejects.toThrow(BadRequestException);
   });
+
+  it('passes labeled review context to AI moderation', async () => {
+    const { aiModeration, repositories, service } = createService();
+    const user = userFixture();
+    const moisturizer = inventoryProductFixture({
+      id: 'product_moisturizer',
+      brand: 'Ritora Eval',
+      name: 'Barrier Cream',
+      category: ProductCategory.Moisturizer,
+    });
+    const cleanser = inventoryProductFixture({
+      id: 'product_cleanser',
+      brand: 'Ritora Eval',
+      name: 'Soft Cleanser',
+      category: ProductCategory.Cleanser,
+    });
+    repositories.users.findOne.mockResolvedValue(user);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+    repositories.inventory.count.mockResolvedValue(2);
+    repositories.inventory.find.mockResolvedValue([moisturizer, cleanser]);
+    repositories.consents.findOne.mockResolvedValue(consentFixture(user.id));
+    repositories.communitySettings.findOne.mockResolvedValue(
+      settingsFixture(1),
+    );
+
+    await service.createReview(user.id, {
+      productId: moisturizer.id,
+      productBrand: 'Ignored Brand',
+      productName: 'Ignored Name',
+      productCategory: ProductCategory.Moisturizer,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      usageDuration: '4-weeks',
+      frequency: 'daily',
+      routineSlot: CommunityReviewRoutineSlot.PM,
+      skinResponse: CommunityReviewSkinResponse.Improved,
+      overallRating: 5,
+      effectivenessRating: 4,
+      irritationRating: 1,
+      outcomes: ['barrier'],
+      repurchase: 'yes',
+      routineContext: [
+        {
+          category: ProductCategory.Cleanser,
+          productId: cleanser.id,
+        },
+      ],
+      body: 'I bought this myself and it felt comfortable in a simple routine.',
+    });
+
+    const moderationInput = (aiModeration.triage as jest.Mock).mock.calls[0][0];
+    expect(moderationInput.text).toContain(
+      'Reviewed product: Ritora Eval | Barrier Cream | moisturizer',
+    );
+    expect(moderationInput.text).toContain(
+      'Routine context: Ritora Eval | Soft Cleanser | cleanser',
+    );
+    expect(moderationInput.text).toContain(
+      'Review body: I bought this myself and it felt comfortable in a simple routine.',
+    );
+    expect(moderationInput.text).not.toContain(
+      'Ritora Eval Barrier Cream improved barrier cleanser',
+    );
+  });
 });
 
 describe('CommunityService content integrity policy', () => {

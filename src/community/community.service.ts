@@ -97,6 +97,125 @@ function normalizeTags(values: string[] | null | undefined): string[] {
   return normalizeCommunityTags(values);
 }
 
+type ReviewContextModerationSnapshot = {
+  productBrand?: string | null;
+  productName?: string | null;
+  category?: string | null;
+};
+
+function moderationLine(label: string, value: unknown): string | null {
+  const text = Array.isArray(value)
+    ? value.filter(Boolean).join(', ')
+    : typeof value === 'string'
+      ? value
+      : value == null
+        ? ''
+        : String(value);
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  return cleaned ? `${label}: ${cleaned}` : null;
+}
+
+function buildRoutineModerationText(input: {
+  title?: string | null;
+  summary?: string | null;
+  disclosureType: CommunityDisclosureType;
+  concernTags?: string[] | null;
+  goalTags?: string[] | null;
+  goalResult?: string | null;
+  timeframe?: string | null;
+  avoidTags?: string[] | null;
+  habitTags?: string[] | null;
+  didNotWorkTags?: string[] | null;
+  warningTags?: string[] | null;
+  steps: CommunityRoutineStepSnapshot[];
+}): string {
+  return [
+    moderationLine('Title', input.title),
+    moderationLine('Summary', input.summary),
+    moderationLine('Disclosure', input.disclosureType),
+    moderationLine('Concerns', input.concernTags),
+    moderationLine('Goals', input.goalTags),
+    moderationLine('Goal result', input.goalResult),
+    moderationLine('Timeframe', input.timeframe),
+    moderationLine('Avoided', input.avoidTags),
+    moderationLine('Helpful habits', input.habitTags),
+    moderationLine('Did not work', input.didNotWorkTags),
+    moderationLine('Warnings', input.warningTags),
+    moderationLine(
+      'Routine steps',
+      input.steps.map((step) =>
+        [
+          `step ${step.stepOrder}`,
+          `slot ${step.slot}`,
+          step.productBrand,
+          step.productName,
+          step.category,
+          step.frequency ? `frequency ${step.frequency}` : null,
+          step.notes ? `notes ${step.notes}` : null,
+        ]
+          .filter(Boolean)
+          .join(' | '),
+      ),
+    ),
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
+function buildReviewModerationText(input: {
+  productBrand?: string | null;
+  productName?: string | null;
+  productCategory?: string | null;
+  disclosureType: CommunityDisclosureType;
+  usageDuration?: string | null;
+  frequency?: string | null;
+  routineSlot?: string | null;
+  skinResponse?: string | null;
+  overallRating?: number | null;
+  effectivenessRating?: number | null;
+  irritationRating?: number | null;
+  outcomes?: string[] | null;
+  repurchase?: string | null;
+  routineContext: ReviewContextModerationSnapshot[];
+  body?: string | null;
+}): string {
+  return [
+    moderationLine(
+      'Reviewed product',
+      [input.productBrand, input.productName, input.productCategory]
+        .filter(Boolean)
+        .join(' | '),
+    ),
+    moderationLine('Disclosure', input.disclosureType),
+    moderationLine('Usage duration', input.usageDuration),
+    moderationLine('Frequency', input.frequency),
+    moderationLine('Routine slot', input.routineSlot),
+    moderationLine('Skin response', input.skinResponse),
+    moderationLine('Ratings', [
+      input.overallRating == null ? null : `overall ${input.overallRating}`,
+      input.effectivenessRating == null
+        ? null
+        : `effectiveness ${input.effectivenessRating}`,
+      input.irritationRating == null
+        ? null
+        : `irritation ${input.irritationRating}`,
+    ]),
+    moderationLine('Outcomes', input.outcomes),
+    moderationLine('Repurchase', input.repurchase),
+    moderationLine(
+      'Routine context',
+      input.routineContext.map((item) =>
+        [item.productBrand, item.productName, item.category]
+          .filter(Boolean)
+          .join(' | '),
+      ),
+    ),
+    moderationLine('Review body', input.body),
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
 function publicProfileName(userId: string): string {
   return `Ritora member ${userId.slice(-4).toUpperCase()}`;
 }
@@ -536,22 +655,20 @@ export class CommunityService {
         };
       },
     );
-    const scannedText = [
-      dto.title,
-      dto.summary ?? '',
-      dto.goalResult ?? '',
-      dto.timeframe,
-      ...dto.goalTags,
-      ...normalizeTags(dto.avoidTags),
-      ...normalizeTags(dto.habitTags),
-      ...normalizeTags(dto.didNotWorkTags),
-      ...normalizeTags(dto.warningTags),
-      ...dto.steps.flatMap((step) => [
-        step.productBrand ?? '',
-        step.productName ?? '',
-        step.notes ?? '',
-      ]),
-    ].join(' ');
+    const scannedText = buildRoutineModerationText({
+      title: dto.title,
+      summary: dto.summary,
+      disclosureType: dto.disclosureType,
+      concernTags: normalizeTags(dto.concernTags),
+      goalTags: normalizeTags(dto.goalTags),
+      goalResult: dto.goalResult,
+      timeframe: dto.timeframe,
+      avoidTags: normalizeTags(dto.avoidTags),
+      habitTags: normalizeTags(dto.habitTags),
+      didNotWorkTags: normalizeTags(dto.didNotWorkTags),
+      warningTags: normalizeTags(dto.warningTags),
+      steps: stepSnapshots,
+    });
     const flags = [
       ...this.safety.scanText(scannedText),
       ...this.safety.scanRoutine(stepSnapshots),
@@ -699,22 +816,20 @@ export class CommunityService {
             notes: step.notes,
           }))
         : await this.buildRoutineStepSnapshots(userId, dto.steps);
-    const scannedText = [
-      routine.title,
-      routine.summary ?? '',
-      routine.goal_result ?? '',
-      routine.timeframe ?? '',
-      ...routine.goal_tags,
-      ...routine.avoid_tags,
-      ...routine.habit_tags,
-      ...routine.did_not_work_tags,
-      ...routine.warning_tags,
-      ...stepSnapshots.flatMap((step) => [
-        step.productBrand ?? '',
-        step.productName ?? '',
-        step.notes ?? '',
-      ]),
-    ].join(' ');
+    const scannedText = buildRoutineModerationText({
+      title: routine.title,
+      summary: routine.summary,
+      disclosureType: routine.disclosure_type,
+      concernTags: routine.concern_tags,
+      goalTags: routine.goal_tags,
+      goalResult: routine.goal_result,
+      timeframe: routine.timeframe,
+      avoidTags: routine.avoid_tags,
+      habitTags: routine.habit_tags,
+      didNotWorkTags: routine.did_not_work_tags,
+      warningTags: routine.warning_tags,
+      steps: stepSnapshots,
+    });
     const flags = [
       ...this.safety.scanText(scannedText),
       ...this.safety.scanRoutine(stepSnapshots),
@@ -839,21 +954,36 @@ export class CommunityService {
       throw new BadRequestException('Reviewed product must be on your shelf');
     }
     const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
-    const contextText = dto.routineContext
-      .map((item) =>
-        [item.productBrand, item.productName, item.category]
-          .filter(Boolean)
-          .join(' '),
-      )
-      .join(' ');
-    const scannedText = [
-      dto.productBrand,
-      dto.productName,
-      dto.skinResponse,
-      dto.outcomes.join(' '),
-      contextText,
-      dto.body ?? '',
-    ].join(' ');
+    const contextSnapshots = dto.routineContext.map((item) => {
+      const product = item.productId ? products.get(item.productId) : null;
+      if (item.productId && !product) {
+        throw new BadRequestException(
+          'Routine context products must be on your shelf',
+        );
+      }
+      return {
+        productBrand: product?.brand ?? cleanText(item.productBrand, 255),
+        productName: product?.name ?? cleanText(item.productName, 255),
+        category: product?.category ?? item.category,
+      };
+    });
+    const scannedText = buildReviewModerationText({
+      productBrand: reviewedProduct?.brand ?? cleanText(dto.productBrand, 255),
+      productName: reviewedProduct?.name ?? cleanText(dto.productName, 255),
+      productCategory: reviewedProduct?.category ?? dto.productCategory,
+      disclosureType: dto.disclosureType,
+      usageDuration: cleanText(dto.usageDuration, 30),
+      frequency: cleanText(dto.frequency, 50),
+      routineSlot: dto.routineSlot,
+      skinResponse: dto.skinResponse,
+      overallRating: dto.overallRating,
+      effectivenessRating: dto.effectivenessRating,
+      irritationRating: dto.irritationRating,
+      outcomes: normalizeTags(dto.outcomes),
+      repurchase: cleanText(dto.repurchase, 30),
+      routineContext: contextSnapshots,
+      body: cleanText(dto.body, 1200),
+    });
     const flags = this.safety.scanText(scannedText);
     this.safety.resolveStatus({
       disclosureType: dto.disclosureType,
@@ -901,21 +1031,15 @@ export class CommunityService {
         }),
       );
       await manager.getRepository(CommunityReviewContextProduct).save(
-        dto.routineContext.map((item) => {
-          const product = item.productId ? products.get(item.productId) : null;
-          if (item.productId && !product) {
-            throw new BadRequestException(
-              'Routine context products must be on your shelf',
-            );
-          }
-          return manager.getRepository(CommunityReviewContextProduct).create({
+        dto.routineContext.map((item, index) =>
+          manager.getRepository(CommunityReviewContextProduct).create({
             review_id: review.id,
-            product_id: product?.id ?? null,
-            product_brand: product?.brand ?? cleanText(item.productBrand, 255),
-            product_name: product?.name ?? cleanText(item.productName, 255),
-            category: product?.category ?? item.category,
-          });
-        }),
+            product_id: item.productId ?? null,
+            product_brand: contextSnapshots[index]?.productBrand ?? null,
+            product_name: contextSnapshots[index]?.productName ?? null,
+            category: contextSnapshots[index]?.category ?? item.category,
+          }),
+        ),
       );
       await this.recordDecision(manager, {
         contentType: CommunityContentType.Review,
@@ -1046,32 +1170,39 @@ export class CommunityService {
         : (cleanText(dto.repurchase, 30) ?? review.repurchase);
     review.body =
       dto.body === undefined ? review.body : cleanText(dto.body, 1200);
-    const contextForScan = dto.routineContext
+    const contextSnapshots = dto.routineContext
       ? dto.routineContext.map((item) => {
           const product = item.productId ? products.get(item.productId) : null;
-          return [
-            product?.brand ?? item.productBrand,
-            product?.name ?? item.productName,
-            product?.category ?? item.category,
-          ]
-            .filter(Boolean)
-            .join(' ');
+          return {
+            productBrand: product?.brand ?? cleanText(item.productBrand, 255),
+            productName: product?.name ?? cleanText(item.productName, 255),
+            category: product?.category ?? item.category,
+          };
         })
-      : await this.reviewContext.find({ where: { review_id: reviewId } });
-    const scannedText = [
-      review.product_brand,
-      review.product_name,
-      review.skin_response ?? '',
-      review.outcomes.join(' '),
-      ...contextForScan.map((item) =>
-        typeof item === 'string'
-          ? item
-          : [item.product_brand, item.product_name, item.category]
-              .filter(Boolean)
-              .join(' '),
-      ),
-      review.body ?? '',
-    ].join(' ');
+      : (await this.reviewContext.find({ where: { review_id: reviewId } })).map(
+          (item) => ({
+            productBrand: item.product_brand,
+            productName: item.product_name,
+            category: item.category,
+          }),
+        );
+    const scannedText = buildReviewModerationText({
+      productBrand: review.product_brand,
+      productName: review.product_name,
+      productCategory: review.product_category,
+      disclosureType: review.disclosure_type,
+      usageDuration: review.usage_duration,
+      frequency: review.frequency,
+      routineSlot: review.routine_slot,
+      skinResponse: review.skin_response,
+      overallRating: review.overall_rating,
+      effectivenessRating: review.effectiveness_rating,
+      irritationRating: review.irritation_rating,
+      outcomes: review.outcomes,
+      repurchase: review.repurchase,
+      routineContext: contextSnapshots,
+      body: review.body,
+    });
     const flags = this.safety.scanText(scannedText);
     const from = review.moderation_status;
     this.safety.resolveStatus({
@@ -1098,19 +1229,15 @@ export class CommunityService {
           .getRepository(CommunityReviewContextProduct)
           .delete({ review_id: review.id });
         await manager.getRepository(CommunityReviewContextProduct).save(
-          dto.routineContext.map((item) => {
-            const product = item.productId
-              ? products.get(item.productId)
-              : null;
-            return manager.getRepository(CommunityReviewContextProduct).create({
+          dto.routineContext.map((item, index) =>
+            manager.getRepository(CommunityReviewContextProduct).create({
               review_id: review.id,
-              product_id: product?.id ?? null,
-              product_brand:
-                product?.brand ?? cleanText(item.productBrand, 255),
-              product_name: product?.name ?? cleanText(item.productName, 255),
-              category: product?.category ?? item.category,
-            });
-          }),
+              product_id: item.productId ?? null,
+              product_brand: contextSnapshots[index]?.productBrand ?? null,
+              product_name: contextSnapshots[index]?.productName ?? null,
+              category: contextSnapshots[index]?.category ?? item.category,
+            }),
+          ),
         );
       }
       await this.recordDecision(manager, {

@@ -8,6 +8,7 @@ import {
 import {
   OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
   OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
+  OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS,
   OpenAiProductCheckReviewProvider,
 } from './openai-product-check-review.provider';
 import type { ProductCheckAiReviewInput } from './product-check-ai-review.port';
@@ -87,8 +88,9 @@ describe('OpenAiProductCheckReviewProvider', () => {
   });
 
   it('keeps the OpenAI timeout long enough for launch Quick Check requests', () => {
-    expect(OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS).toBe(180_000);
+    expect(OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS).toBe(60_000);
     expect(OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS).toBe(24_000);
+    expect(OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS).toBe(2);
   });
 
   it('persists privacy-safe Quick Check AI cost metrics with user attribution and without product details', async () => {

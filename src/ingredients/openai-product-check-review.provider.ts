@@ -14,9 +14,9 @@ import {
 import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
 import { estimateCost } from '../suggestions/services/suggestion-ai-contract';
 import {
-  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
-  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
-  INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+  PRODUCT_CHECK_AI_MAX_OUTPUT_TOKENS,
+  PRODUCT_CHECK_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+  PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS,
 } from './ingredient-analysis-runtime.constants';
 import { AnalysisStatus } from './ingredients.types';
 import { requestOpenAiStructuredOutput } from './openai-structured-output-request';
@@ -38,9 +38,11 @@ import type { ProductCheckAiReview } from './product-check.types';
 import { ProductCheckAiReviewStatus } from './product-check.types';
 
 export const OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS =
-  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS;
+  PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS;
 export const OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS =
-  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS;
+  PRODUCT_CHECK_AI_MAX_OUTPUT_TOKENS;
+export const OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS =
+  PRODUCT_CHECK_AI_STRUCTURED_OUTPUT_ATTEMPTS;
 const DEFAULT_MODEL = 'gpt-5-mini';
 
 type ProductCheckAiReviewUsage = {
@@ -130,7 +132,7 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
     try {
       const response = await requestOpenAiStructuredOutput({
         apiKey,
-        attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+        attempts: OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS,
         timeoutMs: OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
         body: {
           model,
@@ -193,7 +195,7 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
           event: 'product_check_ai_review_failed',
           reason: 'empty_output',
           model,
-          attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+          attempts: OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS,
           durationMs,
         });
         this.recordMetricInBackground({

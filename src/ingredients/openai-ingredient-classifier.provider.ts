@@ -15,6 +15,7 @@ import {
   INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
   INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
   INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+  PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS,
 } from './ingredient-analysis-runtime.constants';
 import {
   cleanClassificationTokens,
@@ -35,6 +36,7 @@ import type {
 import { IngredientAiClassificationCacheEntry } from './entities/ingredient-ai-classification-cache-entry.entity';
 import {
   IngredientAnalysisAiMetricOperation,
+  IngredientAnalysisAiMetricSource,
   IngredientAnalysisAiMetricStatus,
   type IngredientAnalysisAiUsage,
   normalizeIngredientAnalysisAiUsage,
@@ -333,7 +335,7 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
       const response = await requestOpenAiStructuredOutput({
         apiKey: input.apiKey,
         attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
-        timeoutMs: OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS,
+        timeoutMs: ingredientClassifierRequestTimeoutMs(input.tracking),
         body: {
           model: input.model,
           store: false,
@@ -525,6 +527,14 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
       this.logger.warn(message);
     }
   }
+}
+
+function ingredientClassifierRequestTimeoutMs(
+  tracking?: IngredientClassifierInput['tracking'],
+): number {
+  return tracking?.source === IngredientAnalysisAiMetricSource.QuickCheck
+    ? PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS
+    : OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS;
 }
 
 function chunkTokens(tokens: string[], size: number): string[][] {

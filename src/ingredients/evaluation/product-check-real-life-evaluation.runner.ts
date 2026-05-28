@@ -1,8 +1,14 @@
 import { ConfigService } from '@nestjs/config';
+import { OPENAI_REASONING_EFFORT } from '../../common/utils/openai-request-options';
 import {
   ingredientAnalysisAssertions,
   productCheckAssertions,
 } from './product-check-evaluation-assertions';
+import {
+  OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
+  OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
+  OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS,
+} from '../openai-product-check-review.provider';
 import {
   buildProductCheckService,
   createEvaluationRuntime,
@@ -62,6 +68,13 @@ export async function evaluateProductCheckRealLifeCases(
     reportType: 'product_check_real_life_evaluation',
     generatedAt: (input.generatedAt ?? new Date()).toISOString(),
     model: readEvaluationModel(configService),
+    runtime: {
+      aiReviewMaxOutputTokens: OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
+      aiReviewStructuredOutputAttempts:
+        OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS,
+      aiReviewTimeoutMs: OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
+      reasoningEffort: OPENAI_REASONING_EFFORT,
+    },
     totalCases: cases.length,
     passedCases,
     failedCases: cases.length - passedCases,
