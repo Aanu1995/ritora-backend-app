@@ -82,7 +82,6 @@ export class OpenAiProductCompareReviewProvider implements ProductCompareAiRevie
         body: JSON.stringify({
           model,
           store: false,
-          reasoning: { effort: 'low' },
           max_output_tokens: 700,
           ...openAiRepeatabilityRequestOptions(model),
           input: [

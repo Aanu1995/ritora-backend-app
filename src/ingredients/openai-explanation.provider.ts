@@ -133,7 +133,6 @@ export class OpenAiExplanationProvider implements ExplanationPort {
         body: JSON.stringify({
           model,
           store: false,
-          reasoning: { effort: 'low' },
           text: {
             verbosity: 'low',
             format: EXPLANATION_RESPONSE_FORMAT,

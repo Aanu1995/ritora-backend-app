@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { OPENAI_REASONING_EFFORT } from '../common/utils/openai-request-options';
 import {
   CatalogueSource,
   DataProvenance,
@@ -23,7 +24,6 @@ function buildProvider(
       OPENAI_API_KEY: 'sk-test',
       CATALOGUE_AI_MODEL: 'catalogue-model',
       OPENAI_MODEL: 'fallback-model',
-      OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
       ...overrides,
     }),
   );
@@ -118,6 +118,7 @@ describe('OpenAiExtractorProvider', () => {
     const body = lastRequestBody();
     expect(body.model).toBe('catalogue-model');
     expect(body.store).toBe(false);
+    expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
     expect(body.temperature).toBe(0);
     expect(body.text).toMatchObject({
       verbosity: 'low',
@@ -227,10 +228,8 @@ describe('OpenAiExtractorProvider', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the product model for optional web discovery with task-specific reasoning', async () => {
-    const provider = buildProvider({
-      OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: 'none',
-    });
+  it('uses the product model and shared reasoning for optional web discovery', async () => {
+    const provider = buildProvider();
     const timeoutSpy = jest
       .spyOn(AbortSignal, 'timeout')
       .mockReturnValue(new AbortController().signal);
@@ -240,7 +239,7 @@ describe('OpenAiExtractorProvider', () => {
 
     const body = lastRequestBody();
     expect(body.model).toBe('catalogue-model');
-    expect(body.reasoning).toBeUndefined();
+    expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
     expect(timeoutSpy).toHaveBeenCalledWith(20000);
   });
 

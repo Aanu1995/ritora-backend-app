@@ -59,8 +59,7 @@ Important variable groups:
 - Auth security: `BCRYPT_SALT_ROUNDS`, verification/reset expiries
 - Mail: `RESEND_API_KEY`, `MAIL_FROM`, `NOTIFICATION_MAIL_FROM`, `SUPPORT_EMAIL`, `MAIL_UNSUBSCRIBE_SECRET`
 - OpenAI: `OPENAI_API_KEY`, `OPENAI_MODEL`, feature-specific model keys such as `SUGGESTION_AI_MODEL`
-- Product extraction reasoning: `OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT` (`low` recommended)
-- Optional product web enrichment: `OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT` (`none` recommended)
+- OpenAI reasoning effort: centralized in `src/common/utils/openai-request-options.ts`
 - Ingredient product analysis queue: `INGREDIENT_ANALYSIS_QUEUE_DRIVER` (`database` or `sqs`), `INGREDIENT_ANALYSIS_SQS_QUEUE_URL`, optional `INGREDIENT_ANALYSIS_SQS_DLQ_URL`
 - Skin Journal analysis cost metadata: `SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD`, `SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD`
 - Skin Journal analysis queue: `SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER` (`database` or `sqs`), `SKIN_JOURNAL_ANALYSIS_SQS_QUEUE_URL`, optional `SKIN_JOURNAL_ANALYSIS_SQS_DLQ_URL`

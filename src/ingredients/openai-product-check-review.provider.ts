@@ -129,7 +129,6 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
         body: JSON.stringify({
           model,
           store: false,
-          reasoning: { effort: 'low' },
           max_output_tokens: 700,
           ...openAiRepeatabilityRequestOptions(model),
           input: [

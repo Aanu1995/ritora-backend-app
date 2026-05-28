@@ -450,14 +450,6 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .allow('')
     .default(''),
-  OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
-    .trim()
-    .allow('')
-    .required(),
-  OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: Joi.string()
-    .trim()
-    .allow('')
-    .required(),
   INSIGHTS_AI_MODEL: Joi.string().trim().allow('').required(),
   SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD: Joi.number()
     .min(0)

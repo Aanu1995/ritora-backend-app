@@ -4,7 +4,10 @@ import {
   CATALOGUE_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
 import { isSafeExternalHttpUrl } from '../common/utils/url-security';
 import { hashBuffer, hashStableValue } from './catalogue-cache-key.utils';
 import { TimedMemoryCache } from './catalogue-memory-cache';
@@ -30,9 +33,6 @@ import {
   formatOpenAiTimeout,
   isOpenAiTimeoutError,
   OPENAI_CACHE_MAX_ENTRIES,
-  PRIMARY_REASONING_EFFORT_ENV_KEY,
-  readReasoningEffort,
-  WEB_REASONING_EFFORT_ENV_KEY,
 } from './openai-provider-runtime';
 import { toPhotoImageContent } from './openai-photo-content.utils';
 import {
@@ -72,14 +72,12 @@ export class OpenAiExtractorProvider {
   ): Promise<ExtractionResult | null> {
     const prompt = buildOfficialPageExtractionPrompt(extraction);
     const model = this.getModel();
-    const reasoningEffort = this.getPrimaryReasoningEffort();
     const cacheKey = this.toTextRequestCacheKey(
       'openai-official-page-extraction:v1',
       prompt,
       OPENAI_PRODUCT_EXTRACTION_FORMAT,
       false,
       model,
-      reasoningEffort,
     );
 
     return this.officialPageExtractionCache.getOrCreate(cacheKey, () =>
@@ -89,7 +87,6 @@ export class OpenAiExtractorProvider {
         failureLabel: 'Optional OpenAI official page normalization',
         optionalFallbackMessage: 'continuing with page parser result',
         model,
-        reasoningEffort,
         responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
       }),
     );
@@ -121,7 +118,6 @@ export class OpenAiExtractorProvider {
           timeoutMs: PHOTO_REQUEST_TIMEOUT_MS,
           failureLabel: 'OpenAI photo extraction',
           model: this.getModel(),
-          reasoningEffort: this.getPrimaryReasoningEffort(),
           maxOutputTokens: 1400,
           responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
         },
@@ -134,14 +130,12 @@ export class OpenAiExtractorProvider {
   ): Promise<ExtractionResult | null> {
     const prompt = buildDiscoveryPrompt(draft);
     const model = this.getModel();
-    const reasoningEffort = this.getWebDiscoveryReasoningEffort();
     const cacheKey = this.toTextRequestCacheKey(
       'openai-product-discovery:v1',
       prompt,
       OPENAI_PRODUCT_EXTRACTION_FORMAT,
       true,
       model,
-      reasoningEffort,
     );
 
     return this.discoveryCompletionCache.getOrCreate(cacheKey, () =>
@@ -151,7 +145,6 @@ export class OpenAiExtractorProvider {
         failureLabel: 'Optional OpenAI product discovery enrichment',
         optionalFallbackMessage: 'continuing with photo extraction result',
         model,
-        reasoningEffort,
         maxOutputTokens: 900,
         responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
       }),
@@ -193,7 +186,6 @@ export class OpenAiExtractorProvider {
       failureLabel: string;
       optionalFallbackMessage?: string;
       model?: string;
-      reasoningEffort?: string;
       maxOutputTokens?: number;
       responseFormat: OpenAiTextFormat;
     },
@@ -228,7 +220,6 @@ export class OpenAiExtractorProvider {
       failureLabel: string;
       optionalFallbackMessage?: string;
       model?: string;
-      reasoningEffort?: string;
       maxOutputTokens?: number;
       responseFormat: OpenAiTextFormat;
     },
@@ -256,9 +247,6 @@ export class OpenAiExtractorProvider {
           ...openAiRepeatabilityRequestOptions(
             options.model ?? this.getModel(),
           ),
-          ...(options.reasoningEffort
-            ? { reasoning: { effort: options.reasoningEffort } }
-            : {}),
           text: {
             verbosity: 'low',
             format: options.responseFormat,
@@ -302,34 +290,17 @@ export class OpenAiExtractorProvider {
     );
   }
 
-  private getPrimaryReasoningEffort(): string | undefined {
-    return readReasoningEffort(
-      this.configService,
-      PRIMARY_REASONING_EFFORT_ENV_KEY,
-      'low',
-    );
-  }
-
-  private getWebDiscoveryReasoningEffort(): string | undefined {
-    return readReasoningEffort(
-      this.configService,
-      WEB_REASONING_EFFORT_ENV_KEY,
-      this.getPrimaryReasoningEffort(),
-    );
-  }
-
   private toTextRequestCacheKey(
     scope: string,
     prompt: string,
     responseFormat: OpenAiTextFormat,
     useWebSearch: boolean,
     model = this.getModel(),
-    reasoningEffort = this.getPrimaryReasoningEffort(),
   ): string {
     return hashStableValue(scope, {
       model,
       prompt,
-      reasoningEffort: reasoningEffort ?? null,
+      reasoningEffort: OPENAI_REASONING_EFFORT,
       responseFormat: responseFormat.name,
       useWebSearch,
     });
@@ -338,7 +309,7 @@ export class OpenAiExtractorProvider {
   private toPhotoRequestCacheKey(input: CataloguePhotoExtractionInput): string {
     return hashStableValue('openai-photo-extraction:v1', {
       model: this.getModel(),
-      reasoningEffort: this.getPrimaryReasoningEffort() ?? null,
+      reasoningEffort: OPENAI_REASONING_EFFORT,
       responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT.name,
       heroImageIndex: input.heroImageIndex,
       sourceImageCount: input.sourceImageCount ?? input.images.length,
@@ -368,7 +339,6 @@ export class OpenAiExtractorProvider {
         failureLabel: 'Optional OpenAI official product URL discovery',
         optionalFallbackMessage: 'continuing without official URL candidates',
         model: this.getModel(),
-        reasoningEffort: this.getWebDiscoveryReasoningEffort(),
         maxOutputTokens: 1200,
         responseFormat: OPENAI_OFFICIAL_DISCOVERY_FORMAT,
       },

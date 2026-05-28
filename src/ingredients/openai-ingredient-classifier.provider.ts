@@ -315,7 +315,6 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
         body: JSON.stringify({
           model: input.model,
           store: false,
-          reasoning: { effort: 'low' },
           max_output_tokens: 1800,
           ...openAiRepeatabilityRequestOptions(input.model),
           text: {

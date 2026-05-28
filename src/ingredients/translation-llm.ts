@@ -60,7 +60,6 @@ export async function translateWithOpenAi(
       body: JSON.stringify({
         model,
         store: false,
-        reasoning: { effort: 'low' },
         text: { verbosity: 'low' },
         max_output_tokens: maxOutputTokens,
         ...openAiRepeatabilityRequestOptions(model),

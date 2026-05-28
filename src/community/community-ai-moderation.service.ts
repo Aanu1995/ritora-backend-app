@@ -132,7 +132,6 @@ export class CommunityAiModerationService {
         body: JSON.stringify({
           model,
           store: false,
-          reasoning: { effort: 'low' },
           max_output_tokens: COMMUNITY_MODERATION_AI_MAX_OUTPUT_TOKENS,
           ...openAiRepeatabilityRequestOptions(model),
           input: [
