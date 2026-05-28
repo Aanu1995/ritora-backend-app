@@ -224,7 +224,7 @@ describe('SkinJournalAnalysisQueueService', () => {
 
     expect(send.mock.calls[0]?.[0].input).toMatchObject({
       ReceiptHandle: 'receipt-1',
-      VisibilityTimeout: 120,
+      VisibilityTimeout: 300,
     });
   });
 

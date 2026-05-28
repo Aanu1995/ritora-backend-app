@@ -7,6 +7,7 @@ import type { IngredientClassification } from './ingredient-classifier.port';
 import { IngredientCategory } from './ingredients.types';
 import {
   MAX_TOKENS_PER_INGREDIENT_CLASSIFICATION_REQUEST,
+  OPENAI_INGREDIENT_CLASSIFIER_MAX_OUTPUT_TOKENS,
   OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS,
   OpenAiIngredientClassifierProvider,
 } from './openai-ingredient-classifier.provider';
@@ -130,12 +131,29 @@ describe('OpenAiIngredientClassifierProvider', () => {
   });
 
   it('keeps the classifier timeout long enough for worker-backed product analysis', () => {
-    expect(OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS).toBe(60_000);
+    expect(OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS).toBe(180_000);
+    expect(OPENAI_INGREDIENT_CLASSIFIER_MAX_OUTPUT_TOKENS).toBe(24_000);
   });
 
   it('returns no classifications and skips network calls when the API key is missing', async () => {
     const provider = new OpenAiIngredientClassifierProvider(
       config({ OPENAI_API_KEY: '', INGREDIENT_ANALYSIS_AI_MODEL: 'model' }),
+    );
+    global.fetch = jest.fn();
+
+    const result = await provider.classify({ tokens: ['Retinol'] });
+
+    expect(result).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('skips OpenAI classification instead of hardcoding a model when model env vars are missing', async () => {
+    const provider = new OpenAiIngredientClassifierProvider(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_ANALYSIS_AI_MODEL: '',
+        OPENAI_MODEL: '',
+      }),
     );
     global.fetch = jest.fn();
 
@@ -201,12 +219,16 @@ describe('OpenAiIngredientClassifierProvider', () => {
     ]);
     const [, init] = (global.fetch as jest.Mock).mock.calls[0];
     const body = JSON.parse(String(init.body)) as {
+      max_output_tokens?: number;
       model?: string;
       store?: boolean;
       text?: { format?: { type?: string; strict?: boolean } };
     };
     expect(body.model).toBe('ingredient-analysis-model');
     expect(body.store).toBe(false);
+    expect(body.max_output_tokens).toBe(
+      OPENAI_INGREDIENT_CLASSIFIER_MAX_OUTPUT_TOKENS,
+    );
     expect(body.text?.format).toEqual(
       expect.objectContaining({
         type: 'json_schema',

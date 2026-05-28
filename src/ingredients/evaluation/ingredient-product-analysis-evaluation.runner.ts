@@ -1,4 +1,8 @@
-import { SQSClient } from '@aws-sdk/client-sqs';
+import {
+  CreateQueueCommand,
+  DeleteQueueCommand,
+  SQSClient,
+} from '@aws-sdk/client-sqs';
 import { ConfigService } from '@nestjs/config';
 import type { Repository } from 'typeorm';
 import { ulid } from 'ulid';
@@ -8,6 +12,16 @@ import {
   IngredientProductAnalysisJob,
   IngredientProductAnalysisJobStatus,
 } from '../entities/ingredient-product-analysis-job.entity';
+import {
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
+  INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+  INGREDIENT_PRODUCT_ANALYSIS_EVALUATION_SQS_WAIT_TIMEOUT_MS,
+  INGREDIENT_PRODUCT_ANALYSIS_LOCK_TIMEOUT_MINUTES,
+  INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
+  INGREDIENT_TRANSLATION_AI_MAX_BATCH_OUTPUT_TOKENS,
+  INGREDIENT_TRANSLATION_AI_REQUEST_TIMEOUT_MS,
+} from '../ingredient-analysis-runtime.constants';
 import {
   IngredientProductAnalysisSnapshot,
   IngredientProductAnalysisSnapshotStatus,
@@ -83,6 +97,16 @@ export type IngredientProductAnalysisEvaluationReport = {
     region: string | null;
     safeQueueName: boolean;
   };
+  runtime: {
+    aiRequestTimeoutMs: number;
+    aiMaxOutputTokens: number;
+    structuredOutputAttempts: number;
+    translationRequestTimeoutMs: number;
+    translationMaxBatchOutputTokens: number;
+    sqsEvaluationWaitTimeoutMs: number;
+    sqsVisibilityTimeoutSeconds: number;
+    jobLockTimeoutMinutes: number;
+  };
   databaseSafety: {
     usedRealTypeOrmConnection: false;
     mutatedApplicationDatabase: false;
@@ -153,6 +177,20 @@ export async function evaluateIngredientProductAnalysisLaunch(
       safeQueueName: isSafeIngredientAnalysisEvaluationQueueUrl(
         configService.get<string>('INGREDIENT_ANALYSIS_SQS_QUEUE_URL') ?? '',
       ),
+    },
+    runtime: {
+      aiRequestTimeoutMs: INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
+      aiMaxOutputTokens: INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
+      structuredOutputAttempts:
+        INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+      translationRequestTimeoutMs: INGREDIENT_TRANSLATION_AI_REQUEST_TIMEOUT_MS,
+      translationMaxBatchOutputTokens:
+        INGREDIENT_TRANSLATION_AI_MAX_BATCH_OUTPUT_TOKENS,
+      sqsEvaluationWaitTimeoutMs:
+        INGREDIENT_PRODUCT_ANALYSIS_EVALUATION_SQS_WAIT_TIMEOUT_MS,
+      sqsVisibilityTimeoutSeconds:
+        INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
+      jobLockTimeoutMinutes: INGREDIENT_PRODUCT_ANALYSIS_LOCK_TIMEOUT_MINUTES,
     },
     databaseSafety: {
       usedRealTypeOrmConnection: false,
@@ -236,17 +274,53 @@ async function evaluateSqsWorkerSnapshotCase(input: {
   const inventoryRepository = new EvaluationInventoryRepository([product]);
   const jobRepository = new EvaluationJobRepository();
   const snapshotRepository = new EvaluationSnapshotRepository();
+  const sqsClient = new SQSClient({ region });
+  let evaluationQueueUrl = queueUrl;
+  let temporaryQueueUrl: string | null = null;
+
+  if (!input.allowSharedSqs) {
+    try {
+      temporaryQueueUrl = await createTemporaryEvaluationQueue({
+        client: sqsClient,
+        runId,
+      });
+      evaluationQueueUrl = temporaryQueueUrl;
+      checks.push(
+        check(
+          'dedicated_evaluation_queue_created',
+          true,
+          Boolean(temporaryQueueUrl),
+          Boolean,
+        ),
+      );
+    } catch (error) {
+      checks.push(
+        check(
+          'dedicated_evaluation_queue_created',
+          true,
+          error instanceof Error ? error.message : String(error),
+          () => false,
+        ),
+      );
+      sqsClient.destroy();
+      return sqsCaseResult(checks);
+    }
+  }
+
+  const evaluationConfigService = queueConfigService(
+    input.configService,
+    evaluationQueueUrl,
+  );
   const queue = new IngredientProductAnalysisQueueService(
     jobRepository as unknown as Repository<IngredientProductAnalysisJob>,
     inventoryRepository as unknown as Repository<InventoryProduct>,
-    input.configService,
+    evaluationConfigService,
   );
   const snapshotService = new IngredientProductAnalysisSnapshotService(
     snapshotRepository as unknown as Repository<IngredientProductAnalysisSnapshot>,
     inventoryRepository as unknown as Repository<InventoryProduct>,
     input.runtime.analysisService,
   );
-  const sqsClient = new SQSClient({ region });
   let receiptHandle: string | null = null;
   let deleted = false;
 
@@ -262,7 +336,7 @@ async function evaluateSqsWorkerSnapshotCase(input: {
 
     const received = await waitForEvaluationMessage({
       client: sqsClient,
-      queueUrl,
+      queueUrl: evaluationQueueUrl,
       jobId: job.id,
     });
     receiptHandle = received.receiptHandle;
@@ -341,13 +415,83 @@ async function evaluateSqsWorkerSnapshotCase(input: {
     );
   } finally {
     if (receiptHandle && !deleted) {
-      await deleteEvaluationMessage(sqsClient, queueUrl, receiptHandle);
+      await deleteEvaluationMessage(
+        sqsClient,
+        evaluationQueueUrl,
+        receiptHandle,
+      );
+    }
+    if (temporaryQueueUrl) {
+      await deleteTemporaryEvaluationQueue(
+        sqsClient,
+        temporaryQueueUrl,
+        checks,
+      );
     }
     queue.onModuleDestroy();
     sqsClient.destroy();
   }
 
   return sqsCaseResult(checks);
+}
+
+async function createTemporaryEvaluationQueue(input: {
+  client: SQSClient;
+  runId: string;
+}): Promise<string> {
+  const response = await input.client.send(
+    new CreateQueueCommand({
+      QueueName: `ritora-eval-ingredient-analysis-${input.runId}`,
+      Attributes: {
+        MessageRetentionPeriod: '300',
+        ReceiveMessageWaitTimeSeconds: '5',
+        VisibilityTimeout:
+          INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS.toString(),
+      },
+    }),
+  );
+  if (!response.QueueUrl) {
+    throw new Error('SQS did not return a URL for the evaluation queue.');
+  }
+  return response.QueueUrl;
+}
+
+async function deleteTemporaryEvaluationQueue(
+  client: SQSClient,
+  queueUrl: string,
+  checks: EvaluationCheck[],
+): Promise<void> {
+  try {
+    await client.send(new DeleteQueueCommand({ QueueUrl: queueUrl }));
+    checks.push(check('temporary_queue_deleted', true, true, Boolean));
+  } catch (error) {
+    checks.push(
+      check(
+        'temporary_queue_deleted',
+        true,
+        error instanceof Error ? error.message : String(error),
+        () => false,
+      ),
+    );
+  }
+}
+
+function queueConfigService(
+  configService: ConfigService,
+  queueUrl: string,
+): ConfigService {
+  return {
+    get: (key: string) => {
+      if (key === 'INGREDIENT_ANALYSIS_QUEUE_DRIVER') return 'sqs';
+      if (key === 'INGREDIENT_ANALYSIS_SQS_QUEUE_URL') return queueUrl;
+      return configService.get(key);
+    },
+    getOrThrow: (key: string) => {
+      if (key === 'INGREDIENT_ANALYSIS_QUEUE_DRIVER') return 'sqs';
+      if (key === 'INGREDIENT_ANALYSIS_SQS_QUEUE_URL') return queueUrl;
+      return configService.getOrThrow(key);
+    },
+  } as ConfigService;
 }
 
 function sqsCaseResult(

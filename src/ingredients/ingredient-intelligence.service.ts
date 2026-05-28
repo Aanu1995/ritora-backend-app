@@ -9,6 +9,7 @@ import {
   applyCategorySafetyDefaults,
   categorySummary,
 } from './ingredient-safety-rules';
+import { completeKnownIngredientClassifications } from './known-ingredient-classifier';
 import type {
   IngredientDefinition,
   MatchedIngredient,
@@ -79,9 +80,10 @@ export class IngredientIntelligenceService {
     }
 
     try {
-      return await this.classifier.classify(
+      const classifications = await this.classifier.classify(
         tracking ? { tokens, tracking } : { tokens },
       );
+      return completeKnownIngredientClassifications(tokens, classifications);
     } catch (error) {
       this.logger.warn(
         JSON.stringify({
@@ -90,7 +92,7 @@ export class IngredientIntelligenceService {
           message: error instanceof Error ? error.message : 'Unknown error',
         }),
       );
-      return [];
+      return completeKnownIngredientClassifications(tokens, []);
     }
   }
 

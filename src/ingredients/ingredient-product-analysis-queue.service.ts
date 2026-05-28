@@ -16,13 +16,15 @@ import {
   IngredientProductAnalysisJob,
   IngredientProductAnalysisJobStatus,
 } from './entities/ingredient-product-analysis-job.entity';
+import {
+  INGREDIENT_PRODUCT_ANALYSIS_LOCK_TIMEOUT_MINUTES,
+  INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_HEARTBEAT_MS,
+  INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
+} from './ingredient-analysis-runtime.constants';
 import { buildProductIngredientAnalysisHash } from './ingredient-product-analysis-snapshot.service';
 
 const INGREDIENT_PRODUCT_ANALYSIS_MAX_ATTEMPTS = 3;
 const INGREDIENT_PRODUCT_ANALYSIS_SQS_WAIT_TIME_SECONDS = 10;
-const INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS = 180;
-const INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_HEARTBEAT_MS = 60_000;
-const INGREDIENT_PRODUCT_ANALYSIS_LOCK_TIMEOUT_MINUTES = 10;
 const INGREDIENT_PRODUCT_ANALYSIS_STALE_JOB_BATCH_SIZE = 25;
 const ACTIVE_JOB_STATUSES: readonly IngredientProductAnalysisJobStatus[] = [
   IngredientProductAnalysisJobStatus.Queued,

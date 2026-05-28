@@ -133,6 +133,44 @@ describe('IngredientIntelligenceService', () => {
     });
   });
 
+  it('fills common skincare actives with deterministic safety fallback when AI misses them', async () => {
+    const classifier: jest.Mocked<IngredientClassifierPort> = {
+      classify: jest.fn().mockResolvedValue([]),
+    };
+    const service = new IngredientIntelligenceService(classifier);
+
+    const result = await service.matchProduct(
+      product(['Retinol', 'Glycolic Acid', 'Zinc Oxide', 'Mystery Complex']),
+    );
+
+    expect(result.resolvedTokens).toBe(3);
+    expect(result.unresolvedTokens).toEqual(['Mystery Complex']);
+    expect(result.matchedIngredients).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rawToken: 'Retinol',
+          ingredient: expect.objectContaining({
+            category: IngredientCategory.Retinoid,
+            requiresSpf: true,
+          }),
+        }),
+        expect.objectContaining({
+          rawToken: 'Glycolic Acid',
+          ingredient: expect.objectContaining({
+            category: IngredientCategory.Aha,
+            irritationRisk: true,
+          }),
+        }),
+        expect.objectContaining({
+          rawToken: 'Zinc Oxide',
+          ingredient: expect.objectContaining({
+            category: IngredientCategory.MineralSpf,
+          }),
+        }),
+      ]),
+    );
+  });
+
   it('caps unique classification tokens per analysis request to bound AI fanout', async () => {
     const classifier: jest.Mocked<IngredientClassifierPort> = {
       classify: jest.fn(async ({ tokens }) =>

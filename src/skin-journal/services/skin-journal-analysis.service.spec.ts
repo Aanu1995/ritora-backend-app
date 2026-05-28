@@ -1,10 +1,12 @@
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
 import type { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
+import { OPENAI_REASONING_EFFORT } from '../../common/utils/openai-request-options';
 import { SkinJournalAnalysisService } from './skin-journal-analysis.service';
 import { SkinJournalPhotoStorageService } from './skin-journal-photo-storage.service';
 import {
   AnalysisFailureCodeValue,
+  SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS,
   SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
 } from '../skin-journal.constants';
 
@@ -142,6 +144,8 @@ type OpenAiRequestBody = {
   model: string;
   store: boolean;
   temperature: number;
+  max_output_tokens: number;
+  reasoning: { effort: typeof OPENAI_REASONING_EFFORT };
   input: Array<{
     role: string;
     content: Array<{
@@ -250,6 +254,7 @@ describe('SkinJournalAnalysisService', () => {
     expect(result.observations.overall_assessment).toBe(
       'Skin appears stable today.',
     );
+    expect(result.observations.model_version).toBe('skin-photo-model');
     expect(result.metadata.prompt_version).toBe(
       SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
     );
@@ -262,6 +267,10 @@ describe('SkinJournalAnalysisService', () => {
     expect(body.model).toBe('skin-photo-model');
     expect(body.store).toBe(false);
     expect(body.temperature).toBe(0);
+    expect(body.max_output_tokens).toBe(
+      SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS,
+    );
+    expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
     expect(body.text.format.strict).toBe(true);
   });
 

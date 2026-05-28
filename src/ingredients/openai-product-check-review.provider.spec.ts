@@ -6,6 +6,7 @@ import {
   AnalysisStatus,
 } from './ingredients.types';
 import {
+  OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
   OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
   OpenAiProductCheckReviewProvider,
 } from './openai-product-check-review.provider';
@@ -86,9 +87,8 @@ describe('OpenAiProductCheckReviewProvider', () => {
   });
 
   it('keeps the OpenAI timeout long enough for launch Quick Check requests', () => {
-    expect(
-      OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
-    ).toBeGreaterThanOrEqual(45_000);
+    expect(OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS).toBe(180_000);
+    expect(OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS).toBe(24_000);
   });
 
   it('persists privacy-safe Quick Check AI cost metrics with user attribution and without product details', async () => {
@@ -120,6 +120,16 @@ describe('OpenAiProductCheckReviewProvider', () => {
     const result = await provider.review(createReviewInput());
 
     expect(result.status).toBe(ProductCheckAiReviewStatus.Reviewed);
+    const [, init] = (fetchMock as jest.Mock).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const requestBody = JSON.parse(String(init?.body)) as {
+      max_output_tokens?: number;
+    };
+    expect(requestBody.max_output_tokens).toBe(
+      OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
+    );
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('product_check_ai_review_metrics'),
       [

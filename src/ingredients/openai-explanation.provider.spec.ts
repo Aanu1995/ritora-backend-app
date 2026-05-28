@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { DataSource } from 'typeorm';
 import { AnalysisSeverity } from './ingredients.types';
 import {
+  OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS,
   OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS,
   OpenAiExplanationProvider,
 } from './openai-explanation.provider';
@@ -54,9 +55,8 @@ describe('OpenAiExplanationProvider', () => {
   });
 
   it('keeps the OpenAI timeout long enough for launch Quick Check requests', () => {
-    expect(OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(
-      45_000,
-    );
+    expect(OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS).toBe(180_000);
+    expect(OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS).toBe(24_000);
   });
 
   it('returns null and skips the network when the api key is missing', async () => {
@@ -312,11 +312,13 @@ describe('OpenAiExplanationProvider', () => {
     );
     const [, init] = (global.fetch as jest.Mock).mock.calls[0];
     const body = JSON.parse(String(init.body)) as {
+      max_output_tokens?: number;
       store?: boolean;
       temperature?: number;
       text?: { format?: { type?: string; strict?: boolean } };
     };
     expect(body.store).toBe(false);
+    expect(body.max_output_tokens).toBe(OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS);
     expect(body.temperature).toBe(0);
     expect(body.text?.format).toEqual(
       expect.objectContaining({

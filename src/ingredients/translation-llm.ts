@@ -9,12 +9,14 @@ import {
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  INGREDIENT_TRANSLATION_AI_MAX_BATCH_OUTPUT_TOKENS,
+  INGREDIENT_TRANSLATION_AI_MAX_OUTPUT_TOKENS_PER_TRANSLATION,
+  INGREDIENT_TRANSLATION_AI_MIN_OUTPUT_TOKENS,
+  INGREDIENT_TRANSLATION_AI_REQUEST_TIMEOUT_MS,
+} from './ingredient-analysis-runtime.constants';
 
 const DEFAULT_MODEL = 'gpt-5-mini';
-const REQUEST_TIMEOUT_MS = 15000;
-const MAX_OUTPUT_TOKENS = 220;
-const MAX_BATCH_OUTPUT_TOKENS = 1600;
-const MAX_OUTPUT_TOKENS_PER_TRANSLATION = 120;
 
 export async function translateWithOpenAi(
   configService: ConfigService,
@@ -43,10 +45,11 @@ export async function translateWithOpenAi(
 
   const startedAt = Date.now();
   const maxOutputTokens = Math.max(
-    MAX_OUTPUT_TOKENS,
+    INGREDIENT_TRANSLATION_AI_MIN_OUTPUT_TOKENS,
     Math.min(
-      MAX_BATCH_OUTPUT_TOKENS,
-      sourceTexts.length * MAX_OUTPUT_TOKENS_PER_TRANSLATION,
+      INGREDIENT_TRANSLATION_AI_MAX_BATCH_OUTPUT_TOKENS,
+      sourceTexts.length *
+        INGREDIENT_TRANSLATION_AI_MAX_OUTPUT_TOKENS_PER_TRANSLATION,
     ),
   );
 
@@ -65,7 +68,7 @@ export async function translateWithOpenAi(
         ...openAiRepeatabilityRequestOptions(model),
         input: buildTranslationInput(sourceTexts, targetLanguage),
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(INGREDIENT_TRANSLATION_AI_REQUEST_TIMEOUT_MS),
     });
 
     const durationMs = Date.now() - startedAt;

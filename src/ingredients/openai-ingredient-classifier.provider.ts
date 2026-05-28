@@ -2,18 +2,20 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, MoreThan, type FindManyOptions } from 'typeorm';
-import {
-  extractJsonObject,
-  extractOutputText,
-  type OpenAiResponsePayload,
-} from '../catalogue/openai-extraction.utils';
+import { extractJsonObject } from '../catalogue/openai-extraction.utils';
 import { TimedMemoryCache } from '../catalogue/catalogue-memory-cache';
 import { hashStableValue } from '../catalogue/catalogue-cache-key.utils';
 import {
   INGREDIENT_ANALYSIS_AI_MODEL_ENV_KEY,
+  OPENAI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
+  INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+} from './ingredient-analysis-runtime.constants';
 import {
   cleanClassificationTokens,
   INGREDIENT_CLASSIFICATION_CONTRACT_VERSION,
@@ -38,8 +40,12 @@ import {
   normalizeIngredientAnalysisAiUsage,
   recordIngredientAnalysisAiUsageMetric,
 } from './ingredient-analysis-ai-usage-metrics';
+import { requestOpenAiStructuredOutput } from './openai-structured-output-request';
 
-export const OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS = 60_000;
+export const OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS =
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS;
+export const OPENAI_INGREDIENT_CLASSIFIER_MAX_OUTPUT_TOKENS =
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS;
 export const MAX_TOKENS_PER_INGREDIENT_CLASSIFICATION_REQUEST = 50;
 
 const DEFAULT_MODEL = 'gpt-5-mini';
@@ -86,6 +92,7 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
     shouldCacheValue: (value) => value.length > 0,
   });
   private hasWarnedMissingApiKey = false;
+  private hasWarnedMissingModel = false;
   private hasWarnedMetricWriteFailure = false;
 
   constructor(
@@ -104,6 +111,13 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
         `OPENAI_API_KEY is not set. Ingredient analysis will return insufficient data for ingredients that require AI classification.`,
       );
     }
+    const model = this.readModel();
+    if (!model) {
+      this.logger.warn(
+        `${INGREDIENT_ANALYSIS_AI_MODEL_ENV_KEY} or ${OPENAI_MODEL_ENV_KEY} is not set. Ingredient analysis will rely on deterministic known-ingredient fallback only.`,
+      );
+      this.hasWarnedMissingModel = true;
+    }
   }
 
   async classify(
@@ -115,6 +129,16 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
     }
 
     const model = this.readModel();
+    if (!model) {
+      if (!this.hasWarnedMissingModel) {
+        this.logStructured('warn', {
+          event: 'ingredient_classification_skipped',
+          reason: 'missing_model_env',
+        });
+        this.hasWarnedMissingModel = true;
+      }
+      return [];
+    }
     const cachedClassifications = await this.readCachedClassifications(
       tokens,
       model,
@@ -306,16 +330,14 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
     const startedAt = Date.now();
 
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${input.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const response = await requestOpenAiStructuredOutput({
+        apiKey: input.apiKey,
+        attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+        timeoutMs: OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS,
+        body: {
           model: input.model,
           store: false,
-          max_output_tokens: 1800,
+          max_output_tokens: OPENAI_INGREDIENT_CLASSIFIER_MAX_OUTPUT_TOKENS,
           ...openAiRepeatabilityRequestOptions(input.model),
           text: {
             verbosity: 'low',
@@ -348,10 +370,7 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
               ],
             },
           ],
-        }),
-        signal: AbortSignal.timeout(
-          OPENAI_INGREDIENT_CLASSIFIER_REQUEST_TIMEOUT_MS,
-        ),
+        },
       });
 
       const durationMs = Date.now() - startedAt;
@@ -361,6 +380,7 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
           reason: 'http_error',
           status: response.status,
           model: input.model,
+          attempt: response.attempt,
           durationMs,
         });
         await this.recordMetric({
@@ -373,14 +393,15 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
         return [];
       }
 
-      const payload = (await response.json()) as OpenAiResponsePayload;
+      const payload = response.payload;
       const usage = normalizeIngredientAnalysisAiUsage(payload.usage);
-      const outputText = extractOutputText(payload);
+      const outputText = response.outputText;
       if (!outputText) {
         this.logStructured('warn', {
           event: 'ingredient_classification_failed',
           reason: 'empty_output',
           model: input.model,
+          attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
           durationMs,
         });
         await this.recordMetric({
@@ -404,6 +425,7 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
           reason: 'invalid_output',
           message: error instanceof Error ? error.message : 'Unknown error',
           model: input.model,
+          attempt: response.attempt,
           durationMs,
         });
         await this.recordMetric({
@@ -435,6 +457,7 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
           durationMs,
           requestedTokenCount: input.tokens.length,
           classifiedTokenCount: classifications.length,
+          attempt: response.attempt,
         }),
       );
 
@@ -483,13 +506,11 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
     }
   }
 
-  private readModel(): string {
-    return (
-      readFeatureOpenAiModel(
-        this.configService,
-        INGREDIENT_ANALYSIS_AI_MODEL_ENV_KEY,
-        DEFAULT_MODEL,
-      ) ?? DEFAULT_MODEL
+  private readModel(): string | null {
+    return readFeatureOpenAiModel(
+      this.configService,
+      INGREDIENT_ANALYSIS_AI_MODEL_ENV_KEY,
+      DEFAULT_MODEL,
     );
   }
 

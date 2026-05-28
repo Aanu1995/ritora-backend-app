@@ -1,17 +1,18 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
-import {
-  extractJsonObject,
-  extractOutputText,
-  type OpenAiResponsePayload,
-} from '../catalogue/openai-extraction.utils';
+import { extractJsonObject } from '../catalogue/openai-extraction.utils';
 import {
   INGREDIENT_EXPLANATION_AI_MODEL_ENV_KEY,
   OPENAI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
+  INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+} from './ingredient-analysis-runtime.constants';
 import type {
   ExplanationInput,
   ExplanationOutput,
@@ -24,8 +25,12 @@ import {
   normalizeIngredientAnalysisAiUsage,
   recordIngredientAnalysisAiUsageMetric,
 } from './ingredient-analysis-ai-usage-metrics';
+import { requestOpenAiStructuredOutput } from './openai-structured-output-request';
 
-export const OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS = 45_000;
+export const OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS =
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS;
+export const OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS =
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS;
 const DEFAULT_MODEL = 'gpt-5-mini';
 const EXPLANATION_JSON_CONTRACT =
   'Keep JSON keys exactly as schema keys: conflicts, overlaps, id, explanation. Keep ids exactly as provided. Translate only explanation string values.';
@@ -124,20 +129,18 @@ export class OpenAiExplanationProvider implements ExplanationPort {
     const startedAt = Date.now();
 
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const response = await requestOpenAiStructuredOutput({
+        apiKey,
+        attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+        timeoutMs: OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS,
+        body: {
           model,
           store: false,
           text: {
             verbosity: 'low',
             format: EXPLANATION_RESPONSE_FORMAT,
           },
-          max_output_tokens: 700,
+          max_output_tokens: OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS,
           ...openAiRepeatabilityRequestOptions(model),
           input: [
             {
@@ -169,8 +172,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
               ],
             },
           ],
-        }),
-        signal: AbortSignal.timeout(OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS),
+        },
       });
 
       const durationMs = Date.now() - startedAt;
@@ -181,6 +183,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
           reason: 'http_error',
           status: response.status,
           model,
+          attempt: response.attempt,
           durationMs,
         });
         await this.recordMetric({
@@ -193,14 +196,15 @@ export class OpenAiExplanationProvider implements ExplanationPort {
         return null;
       }
 
-      const payload = (await response.json()) as OpenAiResponsePayload;
+      const payload = response.payload;
       const usage = normalizeIngredientAnalysisAiUsage(payload.usage);
-      const outputText = extractOutputText(payload);
+      const outputText = response.outputText;
       if (!outputText) {
         this.logStructured('warn', {
           event: 'explanation_failed',
           reason: 'empty_output',
           model,
+          attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
           durationMs,
         });
         await this.recordMetric({
@@ -228,6 +232,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
           reason: 'invalid_output',
           message: error instanceof Error ? error.message : 'Unknown error',
           model,
+          attempt: response.attempt,
           durationMs,
         });
         await this.recordMetric({

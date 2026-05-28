@@ -416,6 +416,36 @@ export const INGREDIENT_ANALYSIS_REAL_LIFE_CASES: readonly IngredientAnalysisRea
         requireExplanations: true,
       },
     },
+    {
+      id: 'retinoid_bha_conflict_is_not_missed',
+      title: 'Retinoid plus BHA conflict is detected for common acne routines',
+      products: [
+        product('retinol', 'Actives Co', 'Retinol Serum', ['Retinol']),
+        product('bha', 'Acne Lab', 'Salicylic Treatment', ['Salicylic Acid']),
+      ],
+      expected: {
+        conflictCodes: ['RETINOID_BHA'],
+        conflictSeverities: [AnalysisSeverity.High],
+        maxSafetyScore: 75,
+      },
+    },
+    {
+      id: 'mixed_sunscreen_filters_are_identified',
+      title: 'Mineral and chemical sunscreen filters are classified correctly',
+      products: [
+        product(
+          'spf',
+          'SPF Lab',
+          'Hybrid Sunscreen',
+          ['Zinc Oxide', 'Octocrylene'],
+          ProductCategory.SunProtection,
+        ),
+      ],
+      expected: {
+        conflictCodes: ['MINERAL_CHEMICAL_SPF'],
+        conflictSeverities: [AnalysisSeverity.Low],
+      },
+    },
   ];
 
 function product(
@@ -423,12 +453,13 @@ function product(
   brand: string,
   name: string,
   inciIngredients: string[],
+  category: ProductCategory = ProductCategory.Serum,
 ): ProductForAnalysis {
   return {
     id,
     brand,
     name,
-    category: ProductCategory.Serum,
+    category,
     inciIngredients,
   };
 }

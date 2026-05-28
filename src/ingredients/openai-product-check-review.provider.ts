@@ -4,7 +4,6 @@ import { DataSource } from 'typeorm';
 import { ulid } from 'ulid';
 import {
   extractJsonObject,
-  extractOutputText,
   type OpenAiResponsePayload,
 } from '../catalogue/openai-extraction.utils';
 import {
@@ -14,7 +13,13 @@ import {
 } from '../common/utils/openai-config';
 import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
 import { estimateCost } from '../suggestions/services/suggestion-ai-contract';
+import {
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
+  INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+} from './ingredient-analysis-runtime.constants';
 import { AnalysisStatus } from './ingredients.types';
+import { requestOpenAiStructuredOutput } from './openai-structured-output-request';
 import {
   buildProductCheckAiReviewPayload,
   sanitizeProductCheckAiReview,
@@ -32,7 +37,10 @@ import {
 import type { ProductCheckAiReview } from './product-check.types';
 import { ProductCheckAiReviewStatus } from './product-check.types';
 
-export const OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS = 60_000;
+export const OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS =
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS;
+export const OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS =
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS;
 const DEFAULT_MODEL = 'gpt-5-mini';
 
 type ProductCheckAiReviewUsage = {
@@ -120,16 +128,14 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
 
     const startedAt = Date.now();
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const response = await requestOpenAiStructuredOutput({
+        apiKey,
+        attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+        timeoutMs: OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
+        body: {
           model,
           store: false,
-          max_output_tokens: 700,
+          max_output_tokens: OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
           ...openAiRepeatabilityRequestOptions(model),
           input: [
             {
@@ -155,10 +161,7 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
             verbosity: 'low',
             format: PRODUCT_CHECK_REVIEW_FORMAT,
           },
-        }),
-        signal: AbortSignal.timeout(
-          OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
-        ),
+        },
       });
 
       const durationMs = Date.now() - startedAt;
@@ -168,6 +171,7 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
           reason: 'http_error',
           status: response.status,
           model,
+          attempt: response.attempt,
           durationMs,
         });
         this.recordMetricInBackground({
@@ -181,14 +185,15 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
         return unavailableProductCheckAiReview();
       }
 
-      const payload = (await response.json()) as OpenAiResponsePayload;
+      const payload = response.payload;
       const usage = normalizeUsage(payload.usage);
-      const outputText = extractOutputText(payload);
+      const outputText = response.outputText;
       if (!outputText) {
         this.logStructured('warn', {
           event: 'product_check_ai_review_failed',
           reason: 'empty_output',
           model,
+          attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
           durationMs,
         });
         this.recordMetricInBackground({
@@ -222,6 +227,7 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
           reason: 'invalid_output',
           message: error instanceof Error ? error.message : 'Unknown error',
           model,
+          attempt: response.attempt,
           durationMs,
         });
         this.recordMetricInBackground({

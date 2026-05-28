@@ -5,22 +5,26 @@ import {
   SQSClient,
   type Message,
 } from '@aws-sdk/client-sqs';
-
-const SQS_MESSAGE_WAIT_TIMEOUT_MS = 45_000;
+import {
+  INGREDIENT_PRODUCT_ANALYSIS_EVALUATION_SQS_WAIT_TIMEOUT_MS,
+  INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
+} from '../ingredient-analysis-runtime.constants';
 
 export async function waitForEvaluationMessage(input: {
   client: SQSClient;
   queueUrl: string;
   jobId: string;
 }): Promise<{ receiptHandle: string; body: string }> {
-  const deadline = Date.now() + SQS_MESSAGE_WAIT_TIMEOUT_MS;
+  const deadline =
+    Date.now() + INGREDIENT_PRODUCT_ANALYSIS_EVALUATION_SQS_WAIT_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const response = await input.client.send(
       new ReceiveMessageCommand({
         QueueUrl: input.queueUrl,
         MaxNumberOfMessages: 5,
         WaitTimeSeconds: 5,
-        VisibilityTimeout: 180,
+        VisibilityTimeout:
+          INGREDIENT_PRODUCT_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS,
       }),
     );
 

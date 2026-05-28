@@ -91,7 +91,7 @@ describe('SkinJournalAnalysisWorkerService', () => {
     queue.claimJob.mockResolvedValue(job);
     journal.processAnalysisJob.mockReturnValue(
       new Promise((resolve) => {
-        setTimeout(resolve, 50000);
+        setTimeout(resolve, 70000);
       }),
     );
     const worker = new SkinJournalAnalysisWorkerService(
@@ -101,8 +101,8 @@ describe('SkinJournalAnalysisWorkerService', () => {
 
     const poll = worker.pollOnce();
     await Promise.resolve();
-    await jest.advanceTimersByTimeAsync(45000);
-    await jest.advanceTimersByTimeAsync(5000);
+    await jest.advanceTimersByTimeAsync(60000);
+    await jest.advanceTimersByTimeAsync(10000);
     await poll;
 
     expect(queue.extendMessageVisibility).toHaveBeenCalledWith('receipt-1');

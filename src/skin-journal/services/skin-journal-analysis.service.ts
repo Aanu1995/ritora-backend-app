@@ -1056,7 +1056,7 @@ function validateAnalysisObservations(
   const safetyFlags = expectRecord(value.safety_flags, 'safety_flags');
   const observations: AnalysisObservations = {
     schema_version: expectEnum(value.schema_version, ['1.0', '1.1', '1.2']),
-    model_version: stringOr(value.model_version, model),
+    model_version: model,
     image_quality: {
       face_detected: expectBoolean(imageQuality.face_detected),
       lighting_quality: expectEnum(imageQuality.lighting_quality, [
