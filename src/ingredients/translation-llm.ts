@@ -8,7 +8,10 @@ import {
   INGREDIENT_TRANSLATION_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_INGREDIENT_TRANSLATION_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
 import {
   INGREDIENT_TRANSLATION_AI_MAX_BATCH_OUTPUT_TOKENS,
   INGREDIENT_TRANSLATION_AI_MAX_OUTPUT_TOKENS_PER_TRANSLATION,
@@ -65,7 +68,10 @@ export async function translateWithOpenAi(
         store: false,
         text: { verbosity: 'low' },
         max_output_tokens: maxOutputTokens,
-        ...openAiRepeatabilityRequestOptions(model),
+        ...openAiRepeatabilityRequestOptions(
+          model,
+          OPENAI_INGREDIENT_TRANSLATION_REASONING_EFFORT,
+        ),
         input: buildTranslationInput(sourceTexts, targetLanguage),
       }),
       signal: AbortSignal.timeout(INGREDIENT_TRANSLATION_AI_REQUEST_TIMEOUT_MS),

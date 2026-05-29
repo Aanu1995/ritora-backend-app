@@ -1,7 +1,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import {
+  OPENAI_SMART_PICKS_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../../common/utils/openai-request-options';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { PlatformGlobalRestrictionCapability } from '../../platform-controls/platform-global-restrictions';
 import { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
@@ -538,7 +541,10 @@ export class SmartPicksAiGenerator {
           store: false,
           input: options.input,
           max_output_tokens: options.maxOutputTokens,
-          ...openAiRepeatabilityRequestOptions(options.model),
+          ...openAiRepeatabilityRequestOptions(
+            options.model,
+            OPENAI_SMART_PICKS_REASONING_EFFORT,
+          ),
           text: {
             verbosity: 'low',
             format: options.responseFormat,

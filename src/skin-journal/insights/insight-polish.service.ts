@@ -9,7 +9,10 @@ import {
   INSIGHTS_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import {
+  OPENAI_SKIN_JOURNAL_INSIGHT_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../../common/utils/openai-request-options';
 import { PlatformGlobalRestrictionCapability } from '../../platform-controls/platform-global-restrictions';
 import { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
 import { estimateCost } from '../../suggestions/services/suggestion-ai-contract';
@@ -273,7 +276,10 @@ export class InsightPolishService {
             },
           ],
           max_output_tokens: 1200,
-          ...openAiRepeatabilityRequestOptions(model),
+          ...openAiRepeatabilityRequestOptions(
+            model,
+            OPENAI_SKIN_JOURNAL_INSIGHT_REASONING_EFFORT,
+          ),
           text: {
             verbosity: 'low',
             format: OPENAI_RESPONSE_FORMAT,

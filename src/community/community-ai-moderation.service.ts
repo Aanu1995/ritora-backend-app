@@ -7,7 +7,10 @@ import {
 } from '../catalogue/openai-extraction.utils';
 import type { OpenAiTextFormat } from '../catalogue/openai-response-schemas';
 import { COMMUNITY_MODERATION_AI_MODEL_ENV_KEY } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
 import {
   CommunityContentType,
   CommunityDisclosureType,
@@ -126,7 +129,10 @@ export class CommunityAiModerationService {
       model,
       store: false,
       max_output_tokens: COMMUNITY_MODERATION_AI_MAX_OUTPUT_TOKENS,
-      ...openAiRepeatabilityRequestOptions(model),
+      ...openAiRepeatabilityRequestOptions(
+        model,
+        OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT,
+      ),
       input: [
         {
           role: 'system',

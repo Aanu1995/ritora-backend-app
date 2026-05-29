@@ -1,5 +1,16 @@
 import {
+  OPENAI_CATALOGUE_REASONING_EFFORT,
+  OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT,
+  OPENAI_INGREDIENT_ANALYSIS_REASONING_EFFORT,
+  OPENAI_INGREDIENT_EXPLANATION_REASONING_EFFORT,
+  OPENAI_INGREDIENT_TRANSLATION_REASONING_EFFORT,
+  OPENAI_PRODUCT_CHECK_REASONING_EFFORT,
+  OPENAI_PRODUCT_COMPARE_REASONING_EFFORT,
+  OPENAI_QUICK_SUGGESTION_REASONING_EFFORT,
   OPENAI_REASONING_EFFORT,
+  OPENAI_SKIN_JOURNAL_ANALYSIS_REASONING_EFFORT,
+  OPENAI_SKIN_JOURNAL_INSIGHT_REASONING_EFFORT,
+  OPENAI_SMART_PICKS_REASONING_EFFORT,
   OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
   OpenAiReasoningEffort,
   openAiRepeatabilityRequestOptions,
@@ -14,6 +25,40 @@ describe('openai request options', () => {
   it("keeps a named high-effort exception for Today's Suggestion", () => {
     expect(OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT).toBe(
       OpenAiReasoningEffort.High,
+    );
+  });
+
+  it('centralizes feature-specific reasoning levels', () => {
+    expect(OPENAI_SKIN_JOURNAL_ANALYSIS_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.High,
+    );
+    expect(OPENAI_QUICK_SUGGESTION_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Medium,
+    );
+    expect(OPENAI_SMART_PICKS_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Medium,
+    );
+    expect(OPENAI_INGREDIENT_ANALYSIS_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Medium,
+    );
+    expect(OPENAI_PRODUCT_CHECK_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Medium,
+    );
+    expect(OPENAI_PRODUCT_COMPARE_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Medium,
+    );
+    expect(OPENAI_SKIN_JOURNAL_INSIGHT_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Medium,
+    );
+    expect(OPENAI_CATALOGUE_REASONING_EFFORT).toBe(OpenAiReasoningEffort.Low);
+    expect(OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Low,
+    );
+    expect(OPENAI_INGREDIENT_EXPLANATION_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Low,
+    );
+    expect(OPENAI_INGREDIENT_TRANSLATION_REASONING_EFFORT).toBe(
+      OpenAiReasoningEffort.Low,
     );
   });
 

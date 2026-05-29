@@ -11,7 +11,10 @@ import {
   PRODUCT_CHECK_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_PRODUCT_CHECK_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
 import { estimateCost } from '../suggestions/services/suggestion-ai-contract';
 import {
   PRODUCT_CHECK_AI_MAX_OUTPUT_TOKENS,
@@ -138,7 +141,10 @@ export class OpenAiProductCheckReviewProvider implements ProductCheckAiReviewPor
           model,
           store: false,
           max_output_tokens: OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
-          ...openAiRepeatabilityRequestOptions(model),
+          ...openAiRepeatabilityRequestOptions(
+            model,
+            OPENAI_PRODUCT_CHECK_REASONING_EFFORT,
+          ),
           input: [
             {
               role: 'system',

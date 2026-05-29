@@ -1,5 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
-import { OPENAI_REASONING_EFFORT } from '../common/utils/openai-request-options';
+import { OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT } from '../common/utils/openai-request-options';
 import { CommunityAiModerationService } from './community-ai-moderation.service';
 import {
   CommunityContentType,
@@ -97,7 +97,9 @@ describe('CommunityAiModerationService', () => {
       reasoning: { effort: string };
     };
     expect(requestBody.max_output_tokens).toBe(2_000);
-    expect(requestBody.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
+    expect(requestBody.reasoning).toEqual({
+      effort: OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT,
+    });
     expect(result.status).toBe(CommunityModerationStatus.NeedsEdit);
     expect(result.automation.provider).toBe('openai');
     expect(result.automation.reason).toBe('Disclosure is unclear.');

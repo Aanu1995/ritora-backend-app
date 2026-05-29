@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { OPENAI_REASONING_EFFORT } from '../common/utils/openai-request-options';
+import { OPENAI_CATALOGUE_REASONING_EFFORT } from '../common/utils/openai-request-options';
 import {
   CatalogueSource,
   DataProvenance,
@@ -127,7 +127,9 @@ describe('OpenAiExtractorProvider', () => {
     expect(body.max_output_tokens).toBe(
       OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
     );
-    expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
+    expect(body.reasoning).toEqual({
+      effort: OPENAI_CATALOGUE_REASONING_EFFORT,
+    });
     expect(body.temperature).toBe(0);
     expect(body.text).toMatchObject({
       verbosity: 'low',
@@ -292,7 +294,9 @@ describe('OpenAiExtractorProvider', () => {
     expect(body.max_output_tokens).toBe(
       OPENAI_PRODUCT_DISCOVERY_MAX_OUTPUT_TOKENS,
     );
-    expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
+    expect(body.reasoning).toEqual({
+      effort: OPENAI_CATALOGUE_REASONING_EFFORT,
+    });
     expect(timeoutSpy).toHaveBeenCalledWith(20000);
   });
 

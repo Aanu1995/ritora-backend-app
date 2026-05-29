@@ -4,7 +4,10 @@ import {
   readFeatureOpenAiModel,
   SKIN_JOURNAL_ANALYSIS_AI_MODEL_ENV_KEY,
 } from '../../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import {
+  OPENAI_SKIN_JOURNAL_ANALYSIS_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../../common/utils/openai-request-options';
 import {
   extractJsonObject,
   extractOutputText,
@@ -553,7 +556,10 @@ export class SkinJournalAnalysisService {
             },
           ],
           max_output_tokens: SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS,
-          ...openAiRepeatabilityRequestOptions(params.model),
+          ...openAiRepeatabilityRequestOptions(
+            params.model,
+            OPENAI_SKIN_JOURNAL_ANALYSIS_REASONING_EFFORT,
+          ),
           text: {
             verbosity: 'low',
             format: RESPONSE_FORMAT,

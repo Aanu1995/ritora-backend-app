@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import {
-  OPENAI_REASONING_EFFORT,
+  OPENAI_QUICK_SUGGESTION_REASONING_EFFORT,
   OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
 } from '../../common/utils/openai-request-options';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
@@ -152,7 +152,7 @@ describe('SuggestionAiGenerator', () => {
     ) as Record<string, unknown>;
     expect(body).toEqual(
       expect.objectContaining({
-        reasoning: { effort: OPENAI_REASONING_EFFORT },
+        reasoning: { effort: OPENAI_QUICK_SUGGESTION_REASONING_EFFORT },
       }),
     );
   });

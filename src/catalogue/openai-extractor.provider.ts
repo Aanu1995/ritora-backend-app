@@ -5,7 +5,7 @@ import {
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
 import {
-  OPENAI_REASONING_EFFORT,
+  OPENAI_CATALOGUE_REASONING_EFFORT,
   openAiRepeatabilityRequestOptions,
 } from '../common/utils/openai-request-options';
 import { isSafeExternalHttpUrl } from '../common/utils/url-security';
@@ -341,6 +341,7 @@ export class OpenAiExtractorProvider {
             OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
           ...openAiRepeatabilityRequestOptions(
             options.model ?? this.getModel(),
+            OPENAI_CATALOGUE_REASONING_EFFORT,
           ),
           text: {
             verbosity: 'low',
@@ -409,7 +410,7 @@ export class OpenAiExtractorProvider {
     return hashStableValue(scope, {
       model,
       prompt,
-      reasoningEffort: OPENAI_REASONING_EFFORT,
+      reasoningEffort: OPENAI_CATALOGUE_REASONING_EFFORT,
       responseFormat: responseFormat.name,
       useWebSearch,
     });
@@ -418,7 +419,7 @@ export class OpenAiExtractorProvider {
   private toPhotoRequestCacheKey(input: CataloguePhotoExtractionInput): string {
     return hashStableValue('openai-photo-extraction:v1', {
       model: this.getModel(),
-      reasoningEffort: OPENAI_REASONING_EFFORT,
+      reasoningEffort: OPENAI_CATALOGUE_REASONING_EFFORT,
       responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT.name,
       heroImageIndex: input.heroImageIndex,
       sourceImageCount: input.sourceImageCount ?? input.images.length,

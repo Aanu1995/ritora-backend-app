@@ -10,7 +10,10 @@ import {
   OPENAI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_INGREDIENT_ANALYSIS_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
 import {
   INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
   INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
@@ -340,7 +343,10 @@ export class OpenAiIngredientClassifierProvider implements IngredientClassifierP
           model: input.model,
           store: false,
           max_output_tokens: OPENAI_INGREDIENT_CLASSIFIER_MAX_OUTPUT_TOKENS,
-          ...openAiRepeatabilityRequestOptions(input.model),
+          ...openAiRepeatabilityRequestOptions(
+            input.model,
+            OPENAI_INGREDIENT_ANALYSIS_REASONING_EFFORT,
+          ),
           text: {
             verbosity: 'low',
             format: INGREDIENT_CLASSIFICATION_RESPONSE_FORMAT,

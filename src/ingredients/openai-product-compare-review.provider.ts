@@ -6,7 +6,10 @@ import {
   PRODUCT_CHECK_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_PRODUCT_COMPARE_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
 import {
   INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
   INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
@@ -86,7 +89,10 @@ export class OpenAiProductCompareReviewProvider implements ProductCompareAiRevie
           model,
           store: false,
           max_output_tokens: OPENAI_PRODUCT_COMPARE_REVIEW_MAX_OUTPUT_TOKENS,
-          ...openAiRepeatabilityRequestOptions(model),
+          ...openAiRepeatabilityRequestOptions(
+            model,
+            OPENAI_PRODUCT_COMPARE_REASONING_EFFORT,
+          ),
           input: [
             {
               role: 'system',

@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { OPENAI_REASONING_EFFORT } from '../../common/utils/openai-request-options';
+import { OPENAI_PRODUCT_CHECK_REASONING_EFFORT } from '../../common/utils/openai-request-options';
 import {
   ingredientAnalysisAssertions,
   productCheckAssertions,
@@ -73,7 +73,7 @@ export async function evaluateProductCheckRealLifeCases(
       aiReviewStructuredOutputAttempts:
         OPENAI_PRODUCT_CHECK_REVIEW_STRUCTURED_OUTPUT_ATTEMPTS,
       aiReviewTimeoutMs: OPENAI_PRODUCT_CHECK_REVIEW_REQUEST_TIMEOUT_MS,
-      reasoningEffort: OPENAI_REASONING_EFFORT,
+      reasoningEffort: OPENAI_PRODUCT_CHECK_REASONING_EFFORT,
     },
     totalCases: cases.length,
     passedCases,

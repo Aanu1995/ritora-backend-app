@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
 import type { PlatformGlobalRestrictionsService } from '../../platform-controls/platform-global-restrictions.service';
-import { OPENAI_REASONING_EFFORT } from '../../common/utils/openai-request-options';
+import { OPENAI_SKIN_JOURNAL_ANALYSIS_REASONING_EFFORT } from '../../common/utils/openai-request-options';
 import { SkinJournalAnalysisService } from './skin-journal-analysis.service';
 import { SkinJournalPhotoStorageService } from './skin-journal-photo-storage.service';
 import {
@@ -145,7 +145,7 @@ type OpenAiRequestBody = {
   store: boolean;
   temperature: number;
   max_output_tokens: number;
-  reasoning: { effort: typeof OPENAI_REASONING_EFFORT };
+  reasoning: { effort: typeof OPENAI_SKIN_JOURNAL_ANALYSIS_REASONING_EFFORT };
   input: Array<{
     role: string;
     content: Array<{
@@ -270,7 +270,9 @@ describe('SkinJournalAnalysisService', () => {
     expect(body.max_output_tokens).toBe(
       SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS,
     );
-    expect(body.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
+    expect(body.reasoning).toEqual({
+      effort: OPENAI_SKIN_JOURNAL_ANALYSIS_REASONING_EFFORT,
+    });
     expect(body.text.format.strict).toBe(true);
   });
 

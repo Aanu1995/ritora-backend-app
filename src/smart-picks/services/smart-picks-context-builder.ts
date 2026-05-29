@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DEFAULT_TIME_ZONE } from '../../common/timezone/timezone.utils';
-import { OPENAI_REASONING_EFFORT } from '../../common/utils/openai-request-options';
+import { OPENAI_SMART_PICKS_REASONING_EFFORT } from '../../common/utils/openai-request-options';
 import { EnvironmentContextService } from '../../environment-intelligence/environment-context.service';
 import { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
@@ -107,7 +107,7 @@ export class SmartPicksContextBuilder {
       : [[], null];
     const inputsHash = hashInputs({
       smartPicksInputsVersion: SMART_PICKS_INPUTS_VERSION,
-      reasoningEffort: OPENAI_REASONING_EFFORT,
+      reasoningEffort: OPENAI_SMART_PICKS_REASONING_EFFORT,
       mode,
       budgetTier,
       profile: profile

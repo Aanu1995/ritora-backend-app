@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
 import {
-  OPENAI_REASONING_EFFORT,
+  OPENAI_QUICK_SUGGESTION_REASONING_EFFORT,
   OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
   OpenAiReasoningEffort,
   openAiRepeatabilityRequestOptions,
@@ -465,7 +465,7 @@ function suggestionReasoningEffort(
 ): OpenAiReasoningEffort {
   return inputs.requestSource === SuggestionRequestSource.Scheduled
     ? OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT
-    : OPENAI_REASONING_EFFORT;
+    : OPENAI_QUICK_SUGGESTION_REASONING_EFFORT;
 }
 
 function buildManualBaselineSteps(
