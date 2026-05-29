@@ -524,7 +524,7 @@ describe('suggestion AI contract', () => {
             safetyReasons: ['eye_area_involvement'],
             flaggedEntryCount: 1,
           },
-        } as unknown as SuggestionContextSummary['journalSignals'],
+        },
       },
     });
 

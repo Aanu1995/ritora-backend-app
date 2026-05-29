@@ -1,8 +1,12 @@
-export const OPENAI_REASONING_EFFORT = 'high' as const;
+export enum OpenAiReasoningEffort {
+  High = 'high',
+}
+
+export const OPENAI_REASONING_EFFORT = OpenAiReasoningEffort.High;
 
 export type OpenAiRepeatabilityRequestOptions = {
   reasoning: {
-    effort: typeof OPENAI_REASONING_EFFORT;
+    effort: OpenAiReasoningEffort;
   };
   temperature?: 0;
 };

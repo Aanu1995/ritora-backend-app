@@ -1363,10 +1363,6 @@ function expectString(value: unknown): string {
   return value.trim();
 }
 
-function stringOr(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
-}
-
 function expectBoolean(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('Expected boolean');
   return value;

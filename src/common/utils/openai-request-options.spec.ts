@@ -1,10 +1,15 @@
 import {
   OPENAI_REASONING_EFFORT,
+  OpenAiReasoningEffort,
   openAiRepeatabilityRequestOptions,
   supportsOpenAiTemperature,
 } from './openai-request-options';
 
 describe('openai request options', () => {
+  it('uses the shared high reasoning enum for every OpenAI request', () => {
+    expect(OPENAI_REASONING_EFFORT).toBe(OpenAiReasoningEffort.High);
+  });
+
   it('keeps low-temperature sampling for models that support it', () => {
     expect(openAiRepeatabilityRequestOptions('gpt-4.1-mini')).toEqual({
       reasoning: { effort: OPENAI_REASONING_EFFORT },

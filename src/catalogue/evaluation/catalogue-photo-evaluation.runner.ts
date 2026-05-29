@@ -1,6 +1,10 @@
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
-import { ProductCategory } from '../../shelf/shelf.types';
+import {
+  ApplicationMethod,
+  ProductCategory,
+  Quantity,
+} from '../../shelf/shelf.types';
 import { CataloguePhotoProcessorService } from '../catalogue-photo-processor.service';
 import type { UploadedCatalogueImage } from '../catalogue-photo.types';
 import {
@@ -76,8 +80,8 @@ type CataloguePhotoEvaluationCase = {
     ingredientsInclude: string[];
     stepsInclude?: string[];
     cautionsInclude?: string[];
-    applicationMethod?: string;
-    quantity?: string;
+    applicationMethod?: ApplicationMethod;
+    quantity?: Quantity;
   };
 };
 
@@ -119,7 +123,7 @@ const CATALOGUE_PHOTO_EVALUATION_CASES: CataloguePhotoEvaluationCase[] = [
       ingredientsInclude: ['Aqua', 'Glycerin', 'Ceramide NP'],
       stepsInclude: ['massage', 'wet skin', 'rinse'],
       cautionsInclude: ['external use', 'eyes'],
-      applicationMethod: 'fingertips',
+      applicationMethod: ApplicationMethod.Fingertips,
     },
   },
   {
@@ -155,7 +159,7 @@ const CATALOGUE_PHOTO_EVALUATION_CASES: CataloguePhotoEvaluationCase[] = [
       sizeMl: 50,
       ingredientsInclude: ['Ethylhexyl Triazone', 'Niacinamide'],
       stepsInclude: ['morning', 'reapply'],
-      quantity: 'generous',
+      quantity: Quantity.Generous,
     },
   },
   {
@@ -191,7 +195,7 @@ const CATALOGUE_PHOTO_EVALUATION_CASES: CataloguePhotoEvaluationCase[] = [
       ingredientsInclude: ['Retinal', 'Squalane'],
       stepsInclude: ['night', 'moisturizer'],
       cautionsInclude: ['patch test', 'sunscreen'],
-      quantity: 'two-to-three-drops',
+      quantity: Quantity.TwoToThreeDrops,
     },
   },
 ];

@@ -104,15 +104,25 @@ type ReviewContextModerationSnapshot = {
 };
 
 function moderationLine(label: string, value: unknown): string | null {
-  const text = Array.isArray(value)
-    ? value.filter(Boolean).join(', ')
-    : typeof value === 'string'
-      ? value
-      : value == null
-        ? ''
-        : String(value);
+  const text = moderationValueText(value);
   const cleaned = text.replace(/\s+/g, ' ').trim();
   return cleaned ? `${label}: ${cleaned}` : null;
+}
+
+function moderationValueText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .filter((item) => item.trim())
+      .join(', ');
+  }
+
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return '';
 }
 
 function buildRoutineModerationText(input: {

@@ -126,7 +126,8 @@ describe('OpenAiProductCheckReviewProvider', () => {
       string,
       RequestInit,
     ];
-    const requestBody = JSON.parse(String(init?.body)) as {
+    if (typeof init?.body !== 'string') throw new Error('Expected string body');
+    const requestBody = JSON.parse(init.body) as {
       max_output_tokens?: number;
     };
     expect(requestBody.max_output_tokens).toBe(

@@ -1170,11 +1170,7 @@ function sanitizeSmartPicksPlan(
         applyCoveredShelfGapGuardrails(
           context,
           coverageWithShelfRoles,
-          applyStarterBasicGapGuardrails(
-            context,
-            coverageWithShelfRoles,
-            gaps,
-          ),
+          applyStarterBasicGapGuardrails(context, coverageWithShelfRoles, gaps),
         ),
       ),
     ),
@@ -1187,11 +1183,10 @@ function sanitizeSmartPicksPlan(
     .filter((gap) => gap.priority === 'consider')
     .slice(0, aiConsiderGapLimit(context));
   const finalCoverageSlots = applyGapCoverageGuardrails(
-    applyMaintenanceNoBuyCoverageGuardrails(
-      context,
-      coverageWithShelfRoles,
-      [...priorityGaps, ...considerGaps],
-    ),
+    applyMaintenanceNoBuyCoverageGuardrails(context, coverageWithShelfRoles, [
+      ...priorityGaps,
+      ...considerGaps,
+    ]),
     [...priorityGaps, ...considerGaps],
   );
   diagnostics.acceptedCoverageSlotCount = finalCoverageSlots.length;
@@ -1278,9 +1273,7 @@ function applyActiveShelfCoverageGuardrails(
     }
     if (coverageSlots.length + additions.length >= 10) break;
   }
-  return additions.length > 0
-    ? [...updatedSlots, ...additions]
-    : updatedSlots;
+  return additions.length > 0 ? [...updatedSlots, ...additions] : updatedSlots;
 }
 
 function inferCoverageRolesFromProduct(
@@ -1504,7 +1497,8 @@ function requiredConsiderGapGuardrailCandidates(
     );
   const hasIrritationHistory = context.productPerformance.some(
     (summary) =>
-      summary.goalTrend === SmartPicksProductPerformanceSignal.IrritationSignal ||
+      summary.goalTrend ===
+        SmartPicksProductPerformanceSignal.IrritationSignal ||
       summary.reactionSignalCount > 0 ||
       /irrit|redness|reaction|stinging|burning/.test(
         `${summary.concernTrend ?? ''} ${summary.replacementReason ?? ''}`.toLowerCase(),

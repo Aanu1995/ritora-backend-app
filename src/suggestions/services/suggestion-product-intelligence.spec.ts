@@ -131,10 +131,7 @@ describe('suggestion product intelligence', () => {
       ),
     ).toBe(false);
     expect(
-      isPreferredTimeCompatibleWithDaypart(
-        PreferredTimeOfDay.Morning,
-        'noon',
-      ),
+      isPreferredTimeCompatibleWithDaypart(PreferredTimeOfDay.Morning, 'noon'),
     ).toBe(true);
     expect(morningScore.cautionReasons).toContain(
       'preferred time of day does not match this slot',

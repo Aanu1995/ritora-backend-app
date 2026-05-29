@@ -480,16 +480,22 @@ function queueConfigService(
   configService: ConfigService,
   queueUrl: string,
 ): ConfigService {
+  const queueValue = (key: string): string | undefined => {
+    if (key === 'INGREDIENT_ANALYSIS_QUEUE_DRIVER') return 'sqs';
+    if (key === 'INGREDIENT_ANALYSIS_SQS_QUEUE_URL') return queueUrl;
+    return undefined;
+  };
+
   return {
-    get: (key: string) => {
-      if (key === 'INGREDIENT_ANALYSIS_QUEUE_DRIVER') return 'sqs';
-      if (key === 'INGREDIENT_ANALYSIS_SQS_QUEUE_URL') return queueUrl;
-      return configService.get(key);
+    get: <T = unknown>(key: string): T | undefined => {
+      const value = queueValue(key);
+      if (value !== undefined) return value as T;
+      return configService.get<T>(key);
     },
-    getOrThrow: (key: string) => {
-      if (key === 'INGREDIENT_ANALYSIS_QUEUE_DRIVER') return 'sqs';
-      if (key === 'INGREDIENT_ANALYSIS_SQS_QUEUE_URL') return queueUrl;
-      return configService.getOrThrow(key);
+    getOrThrow: <T = unknown>(key: string): T => {
+      const value = queueValue(key);
+      if (value !== undefined) return value as T;
+      return configService.getOrThrow<T>(key);
     },
   } as ConfigService;
 }

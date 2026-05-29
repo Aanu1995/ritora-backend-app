@@ -712,8 +712,8 @@ describe('SuggestionAiGenerator', () => {
     serum.user_fields = {
       preferredTimeOfDay: PreferredTimeOfDay.Evening,
     } as InventoryProduct['user_fields'];
-    inputs.contextSummary.productScores = inputs.contextSummary.productScores.map(
-      (score) =>
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
         score.productId === 'serum-1'
           ? {
               ...score,
@@ -723,7 +723,7 @@ describe('SuggestionAiGenerator', () => {
               ],
             }
           : score,
-    );
+      );
 
     const result = await generator.generate(inputs);
 
@@ -798,8 +798,8 @@ describe('SuggestionAiGenerator', () => {
     serum.user_fields = {
       preferredTimeOfDay: PreferredTimeOfDay.Morning,
     } as InventoryProduct['user_fields'];
-    inputs.contextSummary.productScores = inputs.contextSummary.productScores.map(
-      (score) =>
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
         score.productId === 'serum-1'
           ? {
               ...score,
@@ -809,7 +809,7 @@ describe('SuggestionAiGenerator', () => {
               ],
             }
           : score,
-    );
+      );
 
     const result = await generator.generate(inputs);
 
@@ -1428,13 +1428,10 @@ describe('SuggestionAiGenerator', () => {
                   gapRecommendations: [
                     {
                       ingredientOrCategory: 'Azelaic acid',
-                      reason:
-                        'Gentler acne support once the reaction settles.',
+                      reason: 'Gentler acne support once the reaction settles.',
                       budgetTier: 'mid',
                       goalAlignment: 'acne and pigment support',
-                      sourceIds: [
-                        SuggestionEvidenceSourceId.AadAcneTreatment,
-                      ],
+                      sourceIds: [SuggestionEvidenceSourceId.AadAcneTreatment],
                     },
                   ],
                   safetyFlags: [],

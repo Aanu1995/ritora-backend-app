@@ -90,9 +90,12 @@ describe('CommunityAiModerationService', () => {
         method: 'POST',
       }),
     );
-    const requestBody = JSON.parse(
-      String((fetchSpy.mock.calls[0]?.[1] as RequestInit).body),
-    ) as { max_output_tokens: number; reasoning: { effort: string } };
+    const body = (fetchSpy.mock.calls[0]?.[1] as RequestInit).body;
+    if (typeof body !== 'string') throw new Error('Expected string body');
+    const requestBody = JSON.parse(body) as {
+      max_output_tokens: number;
+      reasoning: { effort: string };
+    };
     expect(requestBody.max_output_tokens).toBe(2_000);
     expect(requestBody.reasoning).toEqual({ effort: OPENAI_REASONING_EFFORT });
     expect(result.status).toBe(CommunityModerationStatus.NeedsEdit);
