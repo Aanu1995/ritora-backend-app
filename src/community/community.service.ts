@@ -82,6 +82,24 @@ import {
 
 const DEFAULT_LIMIT = 30;
 
+type CommunitySubmissionModerationGuidance = {
+  reason: string;
+  source: 'ai' | 'admin' | 'system';
+  createdAt: string;
+};
+
+type CommunitySubmissionContentReference = {
+  id: string;
+  status: CommunityModerationStatus;
+  type: CommunityContentType;
+};
+
+const GUIDANCE_MODERATION_STATUSES = new Set<CommunityModerationStatus>([
+  CommunityModerationStatus.NeedsEdit,
+  CommunityModerationStatus.Rejected,
+  CommunityModerationStatus.Hidden,
+]);
+
 function cleanText(
   value: string | null | undefined,
   maxLength: number,
@@ -91,6 +109,13 @@ function cleanText(
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned ? cleaned.slice(0, maxLength) : null;
+}
+
+function communityContentKey(
+  type: CommunityContentType,
+  contentId: string,
+): string {
+  return `${type}:${contentId}`;
 }
 
 function normalizeTags(values: string[] | null | undefined): string[] {
@@ -1612,6 +1637,18 @@ export class CommunityService {
       this.loadSteps(routines.map((item) => item.id)),
       this.loadReviewContext(reviews.map((item) => item.id)),
     ]);
+    const guidanceByContent = await this.loadSubmissionModerationGuidance([
+      ...routines.map((item) => ({
+        id: item.id,
+        status: item.moderation_status,
+        type: CommunityContentType.Routine,
+      })),
+      ...reviews.map((item) => ({
+        id: item.id,
+        status: item.moderation_status,
+        type: CommunityContentType.Review,
+      })),
+    ]);
     return {
       items: [
         ...routines.map((item) =>
@@ -1619,6 +1656,9 @@ export class CommunityService {
             CommunityContentType.Routine,
             item,
             stepsByRoutine.get(item.id) ?? [],
+            guidanceByContent.get(
+              communityContentKey(CommunityContentType.Routine, item.id),
+            ) ?? null,
           ),
         ),
         ...reviews.map((item) =>
@@ -1626,10 +1666,182 @@ export class CommunityService {
             CommunityContentType.Review,
             item,
             contextByReview.get(item.id) ?? [],
+            guidanceByContent.get(
+              communityContentKey(CommunityContentType.Review, item.id),
+            ) ?? null,
           ),
         ),
       ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     };
+  }
+
+  private async loadSubmissionModerationGuidance(
+    references: CommunitySubmissionContentReference[],
+  ): Promise<Map<string, CommunitySubmissionModerationGuidance>> {
+    const eligibleReferences = references.filter((reference) =>
+      GUIDANCE_MODERATION_STATUSES.has(reference.status),
+    );
+    const contentIds = Array.from(
+      new Set(eligibleReferences.map((reference) => reference.id)),
+    );
+    const guidanceByContent = new Map<
+      string,
+      CommunitySubmissionModerationGuidance
+    >();
+
+    if (contentIds.length === 0) {
+      return guidanceByContent;
+    }
+
+    const [safetyScans, decisions] = await Promise.all([
+      this.safetyScans.find({
+        where: { content_id: In(contentIds) },
+        order: { created_at: 'DESC' },
+      }),
+      this.decisions.find({
+        where: { content_id: In(contentIds) },
+        order: { created_at: 'DESC' },
+      }),
+    ]);
+    const latestScanByContent = this.latestSafetyScanByContent(safetyScans);
+    const latestDecisionByContent = this.latestDecisionByContent(decisions);
+
+    for (const reference of eligibleReferences) {
+      const key = communityContentKey(reference.type, reference.id);
+      const scan = latestScanByContent.get(key);
+      const decision = latestDecisionByContent.get(key);
+      const scanGuidance = this.guidanceFromSafetyScan(scan);
+      const decisionGuidance = this.guidanceFromDecision(decision);
+      const guidance = this.newestSubmissionGuidance(
+        scanGuidance,
+        decisionGuidance,
+      );
+
+      if (guidance) {
+        guidanceByContent.set(key, guidance);
+      }
+    }
+
+    return guidanceByContent;
+  }
+
+  private newestSubmissionGuidance(
+    ...guidances: Array<CommunitySubmissionModerationGuidance | null>
+  ): CommunitySubmissionModerationGuidance | null {
+    let newestGuidance: CommunitySubmissionModerationGuidance | null = null;
+
+    for (const guidance of guidances) {
+      if (
+        guidance &&
+        (!newestGuidance || guidance.createdAt > newestGuidance.createdAt)
+      ) {
+        newestGuidance = guidance;
+      }
+    }
+
+    return newestGuidance;
+  }
+
+  private latestSafetyScanByContent(
+    scans: CommunitySafetyScanResult[],
+  ): Map<string, CommunitySafetyScanResult> {
+    const byContent = new Map<string, CommunitySafetyScanResult>();
+
+    for (const scan of scans) {
+      const key = communityContentKey(scan.content_type, scan.content_id);
+      if (!byContent.has(key)) {
+        byContent.set(key, scan);
+      }
+    }
+
+    return byContent;
+  }
+
+  private latestDecisionByContent(
+    decisions: CommunityModerationDecision[],
+  ): Map<string, CommunityModerationDecision> {
+    const byContent = new Map<string, CommunityModerationDecision>();
+
+    for (const decision of decisions) {
+      const key = communityContentKey(
+        decision.content_type,
+        decision.content_id,
+      );
+      if (!byContent.has(key)) {
+        byContent.set(key, decision);
+      }
+    }
+
+    return byContent;
+  }
+
+  private guidanceFromSafetyScan(
+    scan: CommunitySafetyScanResult | undefined,
+  ): CommunitySubmissionModerationGuidance | null {
+    const reason = this.cleanSubmissionGuidanceReason(
+      scan?.result?.automation?.reason,
+    );
+
+    if (!scan || !reason) {
+      return null;
+    }
+
+    return {
+      reason,
+      source: scan.result.automation?.provider === 'openai' ? 'ai' : 'system',
+      createdAt: scan.created_at.toISOString(),
+    };
+  }
+
+  private guidanceFromDecision(
+    decision: CommunityModerationDecision | undefined,
+  ): CommunitySubmissionModerationGuidance | null {
+    const reason = this.cleanSubmissionGuidanceReason(decision?.reason);
+
+    if (!decision || !reason) {
+      return null;
+    }
+
+    return {
+      reason,
+      source: this.moderationGuidanceSource(decision),
+      createdAt: decision.created_at.toISOString(),
+    };
+  }
+
+  private cleanSubmissionGuidanceReason(
+    value: string | null | undefined,
+  ): string | null {
+    const reason = cleanText(value, 500);
+
+    if (!reason) {
+      return null;
+    }
+
+    const withoutUserPrefix = reason.replace(
+      /^User (?:edited|resubmitted) (?:routine|review|content)\.\s*/i,
+      '',
+    );
+    const withoutAiPrefix = withoutUserPrefix.replace(
+      /^AI moderation\s+[a-z_]+:\s*/i,
+      '',
+    );
+
+    return cleanText(withoutAiPrefix, 500);
+  }
+
+  private moderationGuidanceSource(
+    decision: CommunityModerationDecision,
+  ): CommunitySubmissionModerationGuidance['source'] {
+    if (decision.actor_admin_id) {
+      return 'admin';
+    }
+
+    if (/^AI moderation\s+/i.test(decision.reason)) {
+      return 'ai';
+    }
+
+    return 'system';
   }
 
   async withdrawContent(userId: string, contentId: string) {
@@ -2916,7 +3128,9 @@ export class CommunityService {
     type: CommunityContentType.Routine,
     item: CommunityRoutine,
     relations: CommunityRoutineStep[],
+    moderationGuidance: CommunitySubmissionModerationGuidance | null,
   ): ReturnType<CommunityService['toAdminContentItem']> & {
+    moderationGuidance: CommunitySubmissionModerationGuidance | null;
     editableRoutine: ReturnType<
       CommunityService['toEditableRoutineSubmission']
     >;
@@ -2926,7 +3140,9 @@ export class CommunityService {
     type: CommunityContentType.Review,
     item: CommunityReview,
     relations: CommunityReviewContextProduct[],
+    moderationGuidance: CommunitySubmissionModerationGuidance | null,
   ): ReturnType<CommunityService['toAdminContentItem']> & {
+    moderationGuidance: CommunitySubmissionModerationGuidance | null;
     editableRoutine: null;
     editableReview: ReturnType<CommunityService['toEditableReviewSubmission']>;
   };
@@ -2934,11 +3150,13 @@ export class CommunityService {
     type: CommunityContentType,
     item: CommunityRoutine | CommunityReview,
     relations: CommunityRoutineStep[] | CommunityReviewContextProduct[],
+    moderationGuidance: CommunitySubmissionModerationGuidance | null,
   ) {
     const base = this.toAdminContentItem(type, item);
     if (type === CommunityContentType.Routine) {
       return {
         ...base,
+        moderationGuidance,
         editableRoutine: this.toEditableRoutineSubmission(
           item as CommunityRoutine,
           relations as CommunityRoutineStep[],
@@ -2948,6 +3166,7 @@ export class CommunityService {
     }
     return {
       ...base,
+      moderationGuidance,
       editableRoutine: null,
       editableReview: this.toEditableReviewSubmission(
         item as CommunityReview,

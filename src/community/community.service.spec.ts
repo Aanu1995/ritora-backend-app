@@ -700,7 +700,7 @@ describe('CommunityService content integrity policy', () => {
       updated_at: now,
     } as unknown as CommunityRoutine;
     const review = {
-      id: 'review_pending',
+      id: 'review_needs_edit',
       author_user_id: user.id,
       community_profile_id: 'community_profile_1',
       product_id: 'product_review_1',
@@ -720,7 +720,7 @@ describe('CommunityService content integrity policy', () => {
       outcomes: ['less stinging'],
       repurchase: 'yes',
       body: 'It worked best with a gentle cleanser.',
-      moderation_status: CommunityModerationStatus.PendingReview,
+      moderation_status: CommunityModerationStatus.NeedsEdit,
       assigned_admin_id: null,
       safety_flags: [],
       withdrawn_at: null,
@@ -748,17 +748,58 @@ describe('CommunityService content integrity policy', () => {
       product_name: 'Milky Cleanser',
       category: 'cleanser',
     } as CommunityReviewContextProduct;
+    const routineScan = {
+      id: 'scan_1',
+      content_type: CommunityContentType.Routine,
+      content_id: routine.id,
+      result: {
+        flags: [],
+        status: CommunityModerationStatus.NeedsEdit,
+        scannedTextLength: 120,
+        scannerVersion: 'deterministic-v1+ai-triage-v1',
+        automation: {
+          action: 'request_edit',
+          handledBy: 'automation',
+          reason: 'Remove treatment claims before resubmitting.',
+          critical: false,
+          confidence: 0.9,
+          provider: 'openai',
+          model: 'gpt-5.4-mini',
+          fallbackReason: null,
+          durationMs: 1200,
+        },
+      },
+      created_at: now,
+    } as unknown as CommunitySafetyScanResult;
+    const reviewDecision = {
+      id: 'decision_1',
+      content_type: CommunityContentType.Review,
+      content_id: review.id,
+      actor_admin_id: null,
+      from_status: CommunityModerationStatus.Draft,
+      to_status: CommunityModerationStatus.NeedsEdit,
+      reason:
+        'AI moderation request_edit: Add sunscreen context and clarify the hyperpigmentation claim wording.',
+      created_at: now,
+    } as CommunityModerationDecision;
 
     repositories.routines.find.mockResolvedValue([routine]);
     repositories.reviews.find.mockResolvedValue([review]);
     repositories.routineSteps.find.mockResolvedValue([step]);
     repositories.reviewContext.find.mockResolvedValue([contextProduct]);
+    repositories.safetyScans.find.mockResolvedValue([routineScan]);
+    repositories.decisions.find.mockResolvedValue([reviewDecision]);
 
     const result = await service.listMySubmissions(user.id);
     const routineItem = result.items.find((item) => item.id === routine.id);
     const reviewItem = result.items.find((item) => item.id === review.id);
 
     expect(routineItem).toMatchObject({
+      moderationGuidance: {
+        reason: 'Remove treatment claims before resubmitting.',
+        source: 'ai',
+        createdAt: now.toISOString(),
+      },
       editableRoutine: {
         title: routine.title,
         summary: routine.summary,
@@ -785,6 +826,12 @@ describe('CommunityService content integrity policy', () => {
       },
     });
     expect(reviewItem).toMatchObject({
+      moderationGuidance: {
+        reason:
+          'Add sunscreen context and clarify the hyperpigmentation claim wording.',
+        source: 'ai',
+        createdAt: now.toISOString(),
+      },
       editableReview: {
         productId: review.product_id,
         productBrand: review.product_brand,
