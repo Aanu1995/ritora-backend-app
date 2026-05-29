@@ -42,6 +42,11 @@ const baselineCopy = {
     sv: 'Inga hyllsteg an',
     es: 'Aun no hay pasos',
   },
+  noExtraStepHeadline: {
+    en: 'No extra step needed',
+    sv: 'Inget extra steg behovs',
+    es: 'No hace falta otro paso',
+  },
   quickHeadline: {
     en: 'Quick shelf suggestion',
     sv: 'Snabbt hyllforslag',
@@ -61,6 +66,16 @@ const baselineCopy = {
     en: 'No active shelf products are available to apply right now.',
     sv: 'Inga aktiva hyllprodukter finns att applicera just nu.',
     es: 'No hay productos activos disponibles para aplicar ahora.',
+  },
+  noExtraStep: {
+    en: 'No extra shelf product looks necessary right now.',
+    sv: 'Ingen extra hyllprodukt verkar behovas just nu.',
+    es: 'No parece necesario otro producto del estante ahora.',
+  },
+  preferredTimeMismatch: {
+    en: 'Your shelf products are better saved for their preferred time.',
+    sv: 'Dina hyllprodukter passar battre vid sin foredragna tid.',
+    es: 'Tus productos del estante encajan mejor en su horario preferido.',
   },
   missingSunscreen: {
     en: 'Sunscreen is missing from your shelf, so it stays a gap instead of an invented step.',
@@ -192,7 +207,7 @@ export function deterministicExplanation(
   return {
     headline:
       steps.length === 0
-        ? baselineCopy.noStepsHeadline[language]
+        ? noStepHeadline(inputs, language)
         : inputs.requestSource === SuggestionRequestSource.OnDemand
           ? baselineCopy.quickHeadline[language]
           : baselineCopy.shelfHeadline[language],
@@ -203,7 +218,7 @@ export function deterministicExplanation(
       ...(hasPregnancyOrMedicationCaution(inputs)
         ? [baselineCopy.medicationCaution[language]]
         : []),
-      ...(steps.length === 0 ? [baselineCopy.noActiveProducts[language]] : []),
+      ...(steps.length === 0 ? [noStepBodyLine(inputs, language)] : []),
       ...(missingSunscreen ? [baselineCopy.missingSunscreen[language]] : []),
       ...(missingSunscreen && needsPigmentProtection(inputs)
         ? [baselineCopy.pigmentSpfGap[language]]
@@ -248,6 +263,34 @@ export function deterministicExplanation(
         : []),
     ],
   };
+}
+
+function noStepHeadline(
+  inputs: SuggestionGenerationInputs,
+  language: AppLanguage,
+): string {
+  return inputs.shelfActiveProducts.length === 0
+    ? baselineCopy.noStepsHeadline[language]
+    : baselineCopy.noExtraStepHeadline[language];
+}
+
+function noStepBodyLine(
+  inputs: SuggestionGenerationInputs,
+  language: AppLanguage,
+): string {
+  if (inputs.shelfActiveProducts.length === 0) {
+    return baselineCopy.noActiveProducts[language];
+  }
+  const scores = resolveSuggestionProductScores(inputs);
+  const hasPreferredTimeCompatibleProduct = scores.some((score) =>
+    isPreferredTimeCompatibleWithDaypart(
+      score.preferredTimeOfDay,
+      inputs.daypart,
+    ),
+  );
+  return hasPreferredTimeCompatibleProduct
+    ? baselineCopy.noExtraStep[language]
+    : baselineCopy.preferredTimeMismatch[language];
 }
 
 function needsMissingDaytimeSunscreen(

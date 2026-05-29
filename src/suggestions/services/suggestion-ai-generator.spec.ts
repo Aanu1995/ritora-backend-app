@@ -1674,6 +1674,50 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('explains zero-step quick suggestions without claiming the shelf is empty', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    const eveningIncompatibleSpf = product(
+      'spf-1',
+      'Daily SPF 50',
+      ProductCategory.SunProtection,
+    );
+    inputs.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.requestContext = {
+      intent: 'quick_refresh',
+      intensity: 'minimal',
+      note: 'Skin feels comfortable and I am staying indoors. Do I need anything else?',
+      activityAt: null,
+      requestedAt: '2026-04-29T20:30:00.000Z',
+    };
+    inputs.targetTime = '20:30';
+    inputs.contextSummary.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.contextSummary.onDemand = inputs.requestContext;
+    inputs.contextSummary.targetTime = '20:30';
+    inputs.shelfActiveProducts = [eveningIncompatibleSpf];
+    inputs.contextSummary.productScores = [
+      {
+        ...productScore('spf-1', ProductCategory.SunProtection, 92, ['spf']),
+        preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      },
+    ];
+    inputs.contextSummary.safetyConstraints = [];
+
+    const result = await generator.generate(inputs);
+
+    expect(result.steps).toEqual([]);
+    expect(result.gapRecommendations).toEqual([]);
+    expect(result.explanation.headline).toBe('No extra step needed');
+    expect(result.explanation.body.join(' ')).toContain(
+      'Your shelf products are better saved for their preferred time.',
+    );
+    expect(result.explanation.body.join(' ')).not.toContain(
+      'No active shelf products are available',
+    );
+  });
+
   it('does not treat missing score context as an empty shelf when active products exist', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
