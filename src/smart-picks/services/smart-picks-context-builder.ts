@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DEFAULT_TIME_ZONE } from '../../common/timezone/timezone.utils';
+import { OPENAI_REASONING_EFFORT } from '../../common/utils/openai-request-options';
 import { EnvironmentContextService } from '../../environment-intelligence/environment-context.service';
 import { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
@@ -18,8 +19,11 @@ import {
   SmartPicksMissingProfileField,
   SmartPicksMode,
   SmartPicksProductPerformanceSummary,
+  SmartPicksSkinJournalSummary,
 } from '../smart-picks.types';
 import { SmartPicksProductPerformanceService } from './smart-picks-product-performance.service';
+
+const SMART_PICKS_INPUTS_VERSION = 'smart-picks-v2026-05-29-journal-summary';
 
 export interface SmartPicksContext {
   user: User;
@@ -33,6 +37,7 @@ export interface SmartPicksContext {
   budgetTier: SmartPicksBudgetTier | null;
   mode: SmartPicksMode;
   productPerformance: SmartPicksProductPerformanceSummary[];
+  skinJournalSummary: SmartPicksSkinJournalSummary | null;
   inputsHash: string;
 }
 
@@ -85,16 +90,24 @@ export class SmartPicksContextBuilder {
         : null;
 
     const budgetTier = toSmartPicksBudget(profile?.budget_tier ?? null);
-    const productPerformance = sortProductPerformance(
-      profile && !skinProfileRequired && !consentRequired
-        ? await this.productPerformanceService.summarizeForUser({
+    const canUseJournalSignals =
+      Boolean(profile) && !skinProfileRequired && !consentRequired;
+    const [productPerformance, skinJournalSummary] = canUseJournalSignals
+      ? await Promise.all([
+          this.productPerformanceService.summarizeForUser({
             userId: user.id,
             products: allProducts,
-            primaryGoal: profile.primary_goal ?? null,
-          })
-        : [],
-    );
+            primaryGoal: profile?.primary_goal ?? null,
+          }),
+          this.productPerformanceService.summarizeJournalForUser({
+            userId: user.id,
+            primaryGoal: profile?.primary_goal ?? null,
+          }),
+        ])
+      : [[], null];
     const inputsHash = hashInputs({
+      smartPicksInputsVersion: SMART_PICKS_INPUTS_VERSION,
+      reasoningEffort: OPENAI_REASONING_EFFORT,
       mode,
       budgetTier,
       profile: profile
@@ -131,8 +144,10 @@ export class SmartPicksContextBuilder {
         benefits: product.identity?.benefits ?? [],
       })),
       environment: stableSmartPicksEnvironment(environment),
-      productPerformance,
+      productPerformance: sortProductPerformance(productPerformance),
+      skinJournalSummary,
     });
+    const sortedProductPerformance = sortProductPerformance(productPerformance);
 
     return {
       user,
@@ -145,7 +160,8 @@ export class SmartPicksContextBuilder {
       environment,
       budgetTier,
       mode,
-      productPerformance,
+      productPerformance: sortedProductPerformance,
+      skinJournalSummary,
       inputsHash,
     };
   }

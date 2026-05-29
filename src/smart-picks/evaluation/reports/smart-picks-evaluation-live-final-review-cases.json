@@ -1,0 +1,356 @@
+{
+  "generatedAt": "2026-05-29T02:15:00.076Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "smart-picks-ai-first-v2-journal-summary",
+  "totalCases": 2,
+  "passedCases": 2,
+  "reviewCases": 0,
+  "failedCases": 0,
+  "gate": {
+    "passed": true,
+    "blockers": []
+  },
+  "driftHash": "39b2a2bf55b8d5e4fe2b888e1bb3e3ec1ac10929bb19d82a48737ee4a3800190",
+  "cases": [
+    {
+      "id": "refine_pregnancy_fine_lines_uk_retinoid_block",
+      "mode": "refine",
+      "countryCode": "GB",
+      "budgetTier": "mid",
+      "primaryGoal": "support fine lines while pregnant",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"peptide\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"barrier-support\",\"cleanse\",\"hydrate\",\"moisturise\",\"peptide\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[\"peptide-serum\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"peptide-or-barrier-support-serum\"]",
+          "actual": "{\"actual\":[\"peptide-or-barrier-support-serum\",\"gentle-antioxidant-serum\",\"peptide-serum\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 1",
+          "actual": "2"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 3",
+          "actual": "3"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"peptide-or-barrier-support-serum\"]",
+          "actual": "{\"actual\":[\"peptide-serum\",\"peptide-or-barrier-support-serum\",\"gentle-antioxidant-serum\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 5,
+        "acceptedCoverageSlotCount": 7,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 2,
+        "acceptedGapCount": 3,
+        "acceptedPriorityGapCount": 1,
+        "acceptedConsiderGapCount": 2,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1987,
+        "outputTokens": 9343,
+        "totalTokens": 11330,
+        "estimatedCostUsd": 0.005904
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 3,
+        "rawGapCount": 3,
+        "acceptedPickCount": 3,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 6704,
+        "outputTokens": 23436,
+        "totalTokens": 30140,
+        "estimatedCostUsd": 0.015068
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "peptide",
+        "antioxidant",
+        "hydrate",
+        "barrier-support"
+      ],
+      "priorityGapKeys": [
+        "peptide-serum"
+      ],
+      "considerGapKeys": [
+        "peptide-or-barrier-support-serum",
+        "gentle-antioxidant-serum"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "peptide-serum",
+          "brand": "CeraVe",
+          "productName": "Skin Renewing Peptide Serum",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best fit now: peptide support for fine lines with added hydration, while staying in a retinoid-free lane during pregnancy."
+        },
+        {
+          "normalizedKey": "peptide-or-barrier-support-serum",
+          "brand": "The Ordinary",
+          "productName": "Multi-Peptide + HA Serum",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best direct fit for a pregnancy-safe fine-line support step with added hydration for dry skin."
+        },
+        {
+          "normalizedKey": "gentle-antioxidant-serum",
+          "brand": "The Ordinary",
+          "productName": "Ascorbyl Glucoside Solution 12%",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 0,
+          "recommendationRankReason": "Gentle and easy to tolerate, but lighter on fine-line support."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Is the retinoid blocked because pregnancy context overrides goal speed?",
+        "Does the plan offer a safer optional lane instead of leaving the user with nothing?",
+        "Does it avoid medical advice about pregnancy beyond cautious product filtering?",
+        "Are filled coverage slots tied only to active shelf products?"
+      ]
+    },
+    {
+      "id": "starter_firmness_texture_luxury_japan",
+      "mode": "starter",
+      "countryCode": "JP",
+      "budgetTier": "luxury",
+      "primaryGoal": "improve early fine lines and keep texture smooth",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"retinoid\",\"peptide\",\"antioxidant\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"cleanse\",\"moisturise\",\"peptide\",\"retinoid\",\"spf\",\"texture-exfoliant\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"low-stripping-gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50\",\"beginner-retinal-night-treatment\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-daily-spf\",\"low-strength-retinoid\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"peptide-support-serum\",\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"peptide-or-barrier-support-serum\",\"antioxidant-serum-vitamin-c-or-similar\",\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-daily-spf\",\"low-strength-retinoid\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 2",
+          "actual": "2"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 6",
+          "actual": "6"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"low-stripping-gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50\",\"beginner-retinal-night-treatment\",\"peptide-support-serum\",\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-daily-spf\",\"low-strength-retinoid\",\"peptide-or-barrier-support-serum\",\"antioxidant-serum-vitamin-c-or-similar\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 6,
+        "acceptedCoverageSlotCount": 7,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 6,
+        "acceptedGapCount": 6,
+        "acceptedPriorityGapCount": 4,
+        "acceptedConsiderGapCount": 2,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1793,
+        "outputTokens": 10088,
+        "totalTokens": 11881,
+        "estimatedCostUsd": 0.006322
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 6,
+        "rawGapCount": 6,
+        "acceptedPickCount": 6,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 13000,
+        "outputTokens": 45038,
+        "totalTokens": 58038,
+        "estimatedCostUsd": 0.028971999999999998
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "retinoid",
+        "antioxidant",
+        "texture-exfoliant",
+        "peptide"
+      ],
+      "priorityGapKeys": [
+        "gentle-cleanser",
+        "barrier-support-moisturizer",
+        "broad-spectrum-daily-spf",
+        "low-strength-retinoid"
+      ],
+      "considerGapKeys": [
+        "peptide-or-barrier-support-serum",
+        "antioxidant-serum-vitamin-c-or-similar"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-cleanser",
+          "brand": "Shu Uemura",
+          "productName": "Ultime8 Sublime Beauty Cleansing Oil",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best starter base: it lifts sunscreen cleanly and still feels gentle enough to keep daily cleansing comfortable."
+        },
+        {
+          "normalizedKey": "barrier-support-moisturizer",
+          "brand": "SkinCeuticals",
+          "productName": "Triple Lipid Restore 2:4:2",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best first support step now: a barrier-rich cream should help keep skin comfortable and make future actives easier to stick with."
+        },
+        {
+          "normalizedKey": "broad-spectrum-daily-spf",
+          "brand": "Clé de Peau Beauté",
+          "productName": "UV Protective Cream SPF 50+ PA++++",
+          "budgetTier": "luxury",
+          "sellerNameCount": 0,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Daily UV coverage is the most important anti-aging support for early fine lines; this is a refined high-protection face sunscreen that should stay comfortable enough for consistent use."
+        },
+        {
+          "normalizedKey": "low-strength-retinoid",
+          "brand": "Medik8",
+          "productName": "Crystal Retinal 3",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best first retinoid lane for early fine lines and smoother texture, with starter strength suited to a careful intro."
+        },
+        {
+          "normalizedKey": "peptide-or-barrier-support-serum",
+          "brand": "SkinCeuticals",
+          "productName": "P-TIOX Wrinkle Modulating Serum",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit for a supportive peptide step when you want early fine lines and texture to look smoother without leaning on harsher actives."
+        },
+        {
+          "normalizedKey": "antioxidant-serum-vitamin-c-or-similar",
+          "brand": "SkinCeuticals",
+          "productName": "C E Ferulic",
+          "budgetTier": "luxury",
+          "sellerNameCount": 0,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit for early lines, smoother texture, and a steady AM antioxidant step."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the high budget produce a complete but still staged starter routine?",
+        "Does the treatment lane directly match texture and fine lines?",
+        "Are optional supports secondary to sunscreen, moisturizer, and retinoid pacing?",
+        "Does the output avoid promising fast or guaranteed results?"
+      ]
+    }
+  ]
+}

@@ -22,6 +22,7 @@ import {
   SmartPicksProductAdherence,
   SmartPicksProductPerformanceSignal,
   SmartPicksProductPerformanceSummary,
+  SmartPicksSkinJournalSummary,
 } from '../smart-picks.types';
 
 const HISTORY_WINDOW_DAYS = 90;
@@ -49,9 +50,21 @@ export interface SmartPicksProductPerformanceParams {
   referenceDate?: Date;
 }
 
+export interface SmartPicksSkinJournalSummaryParams {
+  userId: string;
+  primaryGoal: string | null;
+  referenceDate?: Date;
+}
+
 interface SummarizeProductPerformanceInput {
   products: InventoryProduct[];
   applicationLogs: ApplicationLog[];
+  journalEntries: SkinJournalEntry[];
+  primaryGoal: string | null;
+  referenceDate: Date;
+}
+
+interface SummarizeSkinJournalInput {
   journalEntries: SkinJournalEntry[];
   primaryGoal: string | null;
   referenceDate: Date;
@@ -115,6 +128,41 @@ export class SmartPicksProductPerformanceService {
       primaryGoal: params.primaryGoal,
       referenceDate,
     });
+  }
+
+  async summarizeJournalForUser(
+    params: SmartPicksSkinJournalSummaryParams,
+  ): Promise<SmartPicksSkinJournalSummary | null> {
+    try {
+      const latestJournalDate = params.referenceDate
+        ? toIsoDate(params.referenceDate)
+        : await this.latestJournalEntryDate(params.userId);
+      if (!latestJournalDate) return null;
+
+      const referenceDate = isoDateToUtc(latestJournalDate);
+      const fromDate = shiftIsoDate(referenceDate, -HISTORY_WINDOW_DAYS);
+      const journalEntries = await this.journalEntryRepo.find({
+        where: {
+          user_id: params.userId,
+          entry_date: Between(fromDate, latestJournalDate),
+          analysis_status: AnalysisStatusValue.Completed,
+        },
+        order: { entry_date: 'ASC' },
+      });
+
+      return summarizeSmartPicksSkinJournal({
+        journalEntries,
+        primaryGoal: params.primaryGoal,
+        referenceDate,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Smart Picks journal summary unavailable; skipping journal signals: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      return null;
+    }
   }
 
   private async latestUserHistoryDate(userId: string): Promise<Date> {
@@ -225,6 +273,96 @@ export function summarizeSmartPicksProductPerformance(
       replacementReason,
     };
   });
+}
+
+export function summarizeSmartPicksSkinJournal(
+  input: SummarizeSkinJournalInput,
+): SmartPicksSkinJournalSummary | null {
+  const entries = input.journalEntries
+    .filter((entry) => inWindow(entry.entry_date, input.referenceDate, 90))
+    .sort((a, b) => a.entry_date.localeCompare(b.entry_date));
+  if (entries.length === 0) return null;
+
+  const usableEntries = entries.filter((entry) =>
+    isTrendUsable(entry.analysis_observations),
+  );
+  const latestEntry = entries.at(-1) ?? null;
+  const latestObservations = latestEntry?.analysis_observations ?? null;
+  const trend = summarizePhotoTrend(entries, input.primaryGoal);
+
+  return {
+    entryCountLast90: entries.length,
+    usableAnalysisEntryCount: usableEntries.length,
+    latestEntryDate: latestEntry?.entry_date ?? null,
+    latestSummary: latestJournalSummary(latestEntry),
+    overallChangeFromPrevious:
+      latestObservations?.overall_change_from_previous ?? null,
+    trendSignal: trend.signal,
+    concernTrend: trend.concernTrend,
+    photoCheckpoints: trend.photoCheckpoints,
+    photoInputImages: trend.photoInputImages,
+    multiAnglePhotoCheckpoints: trend.multiAnglePhotoCheckpoints,
+    topConcerns: topJournalConcerns(usableEntries),
+    reactionSignalCount: entries.filter(hasReactionSignal).length,
+    barrierCompromiseCount: entries.filter(
+      (entry) => entry.analysis_observations?.barrier_signs.barrier_compromise,
+    ).length,
+    doctorFollowUpRecommended: entries.some((entry) =>
+      Boolean(
+        entry.analysis_observations?.should_flag_for_doctor ||
+        entry.analysis_observations?.safety_flags
+          ?.doctor_follow_up_recommended ||
+        entry.analysis_observations?.safety_flags?.urgent_review_recommended,
+      ),
+    ),
+  };
+}
+
+function latestJournalSummary(entry: SkinJournalEntry | null): string | null {
+  const text =
+    entry?.analysis_observations?.user_visible_message ??
+    entry?.analysis_observations?.overall_assessment ??
+    entry?.analysis_summary ??
+    null;
+  return sanitizeSummaryText(text, 260);
+}
+
+function sanitizeSummaryText(
+  value: string | null | undefined,
+  maxLength: number,
+): string | null {
+  const normalized = value?.replace(/\s+/g, ' ').trim() ?? '';
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+function topJournalConcerns(
+  entries: SkinJournalEntry[],
+): SmartPicksSkinJournalSummary['topConcerns'] {
+  const latestWithConcerns = [...entries]
+    .reverse()
+    .find(
+      (entry) => (entry.analysis_observations?.detected_concerns ?? []).length,
+    );
+  const concerns =
+    latestWithConcerns?.analysis_observations?.detected_concerns ?? [];
+  return [...concerns]
+    .sort(
+      (left, right) =>
+        severityScore(right.severity) * right.confidence -
+        severityScore(left.severity) * left.confidence,
+    )
+    .slice(0, 5)
+    .map((concern) => ({
+      concern: concern.concern,
+      severity: concern.severity,
+      confidence: roundConfidence(concern.confidence),
+      changeFromPrevious: concern.change_from_previous ?? null,
+      locations: concern.locations.slice(0, 5),
+    }));
+}
+
+function roundConfidence(value: number): number {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
 }
 
 function buildProductUsageDateMap(

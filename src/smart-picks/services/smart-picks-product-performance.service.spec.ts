@@ -12,6 +12,7 @@ import { SmartPicksProductPerformanceSignal } from '../smart-picks.types';
 import {
   SmartPicksProductPerformanceService,
   summarizeSmartPicksProductPerformance,
+  summarizeSmartPicksSkinJournal,
 } from './smart-picks-product-performance.service';
 
 describe('summarizeSmartPicksProductPerformance', () => {
@@ -342,6 +343,67 @@ describe('summarizeSmartPicksProductPerformance', () => {
   });
 });
 
+describe('summarizeSmartPicksSkinJournal', () => {
+  it('summarizes completed upgraded journal analysis even when there are no shelf products', () => {
+    const summary = summarizeSmartPicksSkinJournal({
+      journalEntries: [
+        journalEntry('2026-03-10', concern('hyperpigmentation', 'moderate')),
+        journalEntry('2026-04-12', concern('hyperpigmentation', 'moderate'), {
+          angleCount: 3,
+        }),
+        journalEntry('2026-05-10', concern('hyperpigmentation', 'severe'), {
+          userVisibleMessage: 'Dark marks still look visible this week.',
+          overallChange: 'worsened',
+        }),
+      ],
+      primaryGoal: 'fade dark marks',
+      referenceDate: new Date('2026-05-12T09:00:00.000Z'),
+    });
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        entryCountLast90: 3,
+        usableAnalysisEntryCount: 3,
+        latestEntryDate: '2026-05-10',
+        latestSummary: 'Dark marks still look visible this week.',
+        overallChangeFromPrevious: 'worsened',
+        trendSignal: SmartPicksProductPerformanceSignal.NotImproving,
+        concernTrend: 'hyperpigmentation',
+        photoInputImages: 5,
+        multiAnglePhotoCheckpoints: 1,
+      }),
+    );
+    expect(summary?.topConcerns[0]).toEqual(
+      expect.objectContaining({
+        concern: 'hyperpigmentation',
+        severity: 'severe',
+      }),
+    );
+  });
+
+  it('carries journal safety signals into Smart Picks without raw photos', () => {
+    const summary = summarizeSmartPicksSkinJournal({
+      journalEntries: [
+        journalEntry('2026-05-08', concern('redness_inflammation', 'severe'), {
+          reactionDetected: true,
+          barrierCompromise: true,
+          doctorFollowUpRecommended: true,
+        }),
+      ],
+      primaryGoal: 'calm redness',
+      referenceDate: new Date('2026-05-12T09:00:00.000Z'),
+    });
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        reactionSignalCount: 1,
+        barrierCompromiseCount: 1,
+        doctorFollowUpRecommended: true,
+      }),
+    );
+  });
+});
+
 describe('SmartPicksProductPerformanceService', () => {
   it('does not read history repositories when there are no products', async () => {
     const applicationLogs = { find: jest.fn(), findOne: jest.fn() };
@@ -366,6 +428,50 @@ describe('SmartPicksProductPerformanceService', () => {
     expect(journalEntries.find).not.toHaveBeenCalled();
     expect(applicationLogs.findOne).not.toHaveBeenCalled();
     expect(journalEntries.findOne).not.toHaveBeenCalled();
+  });
+
+  it('still reads journal analysis summaries for no-product Smart Picks users', async () => {
+    const applicationLogs = { find: jest.fn(), findOne: jest.fn() };
+    const journalEntries = {
+      findOne: jest.fn().mockResolvedValue({ entry_date: '2026-05-10' }),
+      find: jest
+        .fn()
+        .mockResolvedValue([
+          journalEntry('2026-05-10', concern('hyperpigmentation', 'moderate')),
+        ]),
+    };
+    const service = new SmartPicksProductPerformanceService(
+      applicationLogs as unknown as ConstructorParameters<
+        typeof SmartPicksProductPerformanceService
+      >[0],
+      journalEntries as unknown as ConstructorParameters<
+        typeof SmartPicksProductPerformanceService
+      >[1],
+    );
+
+    const summary = await service.summarizeJournalForUser({
+      userId: 'user-1',
+      primaryGoal: 'fade dark marks',
+    });
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        entryCountLast90: 1,
+        latestEntryDate: '2026-05-10',
+        topConcerns: [
+          expect.objectContaining({ concern: 'hyperpigmentation' }),
+        ],
+      }),
+    );
+    expect(applicationLogs.find).not.toHaveBeenCalled();
+    expect(journalEntries.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          user_id: 'user-1',
+          analysis_status: AnalysisStatusValue.Completed,
+        }),
+      }),
+    );
   });
 
   it('anchors relative history windows to the latest user log or photo event', async () => {
@@ -522,6 +628,9 @@ function journalEntry(
     faceDetected?: boolean;
     overallChange?: AnalysisObservations['overall_change_from_previous'];
     angleCount?: number;
+    barrierCompromise?: boolean;
+    doctorFollowUpRecommended?: boolean;
+    userVisibleMessage?: string;
   } = {},
 ): SkinJournalEntry {
   const reactionDetected = options.reactionDetected ?? false;
@@ -566,12 +675,19 @@ function journalEntry(
         confidence: reactionDetected ? 0.84 : 0.2,
       },
       barrier_signs: {
-        barrier_compromise: false,
-        indicators: [],
+        barrier_compromise: options.barrierCompromise ?? false,
+        indicators: options.barrierCompromise ? ['flaking'] : [],
       },
       overall_assessment: 'Stable.',
       overall_change_from_previous: options.overallChange ?? 'stable',
-      should_flag_for_doctor: false,
+      user_visible_message: options.userVisibleMessage,
+      safety_flags: {
+        urgent_review_recommended: false,
+        doctor_follow_up_recommended:
+          options.doctorFollowUpRecommended ?? false,
+        reasons: [],
+      },
+      should_flag_for_doctor: options.doctorFollowUpRecommended ?? false,
     },
   } as unknown as SkinJournalEntry;
 }

@@ -1,0 +1,1571 @@
+{
+  "generatedAt": "2026-05-29T02:04:12.025Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "smart-picks-ai-first-v2-journal-summary",
+  "totalCases": 10,
+  "passedCases": 8,
+  "reviewCases": 2,
+  "failedCases": 0,
+  "gate": {
+    "passed": false,
+    "blockers": [
+      "2 Smart Picks evaluation case(s) need review."
+    ]
+  },
+  "driftHash": "957d1cb3fbfa9cbcc0abba0e8ddd195f570b3f2e655483190b649b3f0b9655a8",
+  "cases": [
+    {
+      "id": "starter_deep_skin_premium_dark_marks_canada",
+      "mode": "starter",
+      "countryCode": "CA",
+      "budgetTier": "premium",
+      "primaryGoal": "fade post-breakout dark marks",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"dark-spot-treatment\",\"antioxidant\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"cleanse\",\"dark-spot-treatment\",\"moisturise\",\"retinoid\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"gentle-low-stripping-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50-with-white-cast-checked-finish\",\"azelaic-acid-or-tranexamic-acid-dark-mark-serum\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-spf-50-with-no-white-cast-finish\",\"targeted-pigment-treatment-serum-azelaic-acid-tranexamic-acid-or-similar\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"vitamin-c-or-other-antioxidant-serum\",\"gentle-retinoid-retinol-retinal-or-adapalene\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 2",
+          "actual": "2"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 6",
+          "actual": "6"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"gentle-low-stripping-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50-with-white-cast-checked-finish\",\"azelaic-acid-or-tranexamic-acid-dark-mark-serum\",\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-spf-50-with-no-white-cast-finish\",\"targeted-pigment-treatment-serum-azelaic-acid-tranexamic-acid-or-similar\",\"vitamin-c-or-other-antioxidant-serum\",\"gentle-retinoid-retinol-retinal-or-adapalene\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 6,
+        "acceptedCoverageSlotCount": 6,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 6,
+        "acceptedGapCount": 6,
+        "acceptedPriorityGapCount": 4,
+        "acceptedConsiderGapCount": 2,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1964,
+        "outputTokens": 8291,
+        "totalTokens": 10255,
+        "estimatedCostUsd": 0.005269
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 6,
+        "rawGapCount": 6,
+        "acceptedPickCount": 6,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 14075,
+        "outputTokens": 53872,
+        "totalTokens": 67947,
+        "estimatedCostUsd": 0.034434
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "dark-spot-treatment",
+        "antioxidant",
+        "retinoid"
+      ],
+      "priorityGapKeys": [
+        "gentle-cleanser",
+        "barrier-support-moisturizer",
+        "broad-spectrum-spf-50-with-no-white-cast-finish",
+        "targeted-pigment-treatment-serum-azelaic-acid-tranexamic-acid-or-similar"
+      ],
+      "considerGapKeys": [
+        "vitamin-c-or-other-antioxidant-serum",
+        "gentle-retinoid-retinol-retinal-or-adapalene"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-cleanser",
+          "brand": "Skinfix",
+          "productName": "Barrier+ Foaming Oil Cleanser",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best first buy because a gentle cleanser keeps the base routine steady without adding extra irritation while marks are still lingering."
+        },
+        {
+          "normalizedKey": "barrier-support-moisturizer",
+          "brand": "Dieux",
+          "productName": "Instant Angel",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "A comfort-first moisturizer helps make the starter routine easier to keep using every day."
+        },
+        {
+          "normalizedKey": "broad-spectrum-spf-50-with-no-white-cast-finish",
+          "brand": "ISDIN",
+          "productName": "Eryfotona Ageless Tinted Mineral Sunscreen SPF 50",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 0,
+          "recommendationRankReason": "Strong SPF 50 tinted option, but the tint is usually less adaptable than the top pick."
+        },
+        {
+          "normalizedKey": "targeted-pigment-treatment-serum-azelaic-acid-tranexamic-acid-or-similar",
+          "brand": "Topicals",
+          "productName": "Faded Brightening & Clearing Serum",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best first pick for steady post-breakout marks; the journal looks non-reactive, so a dedicated pigment serum is the most direct next step."
+        },
+        {
+          "normalizedKey": "vitamin-c-or-other-antioxidant-serum",
+          "brand": "SkinCeuticals",
+          "productName": "Phloretin CF",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Worth considering now: the mark pattern is still visible, and this adds antioxidant support without jumping straight to harsher options."
+        },
+        {
+          "normalizedKey": "gentle-retinoid-retinol-retinal-or-adapalene",
+          "brand": "Avène",
+          "productName": "RetrinAL 0.05 Cream",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best starter pick for a cautious retinoid step: it can support turnover for lingering post-breakout marks while keeping the formula style relatively gentle."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the plan include the core starter steps before optional extras?",
+        "Does the pigment lane go beyond generic glow or hydration wording?",
+        "Does sunscreen finish matter for deeper skin without making ethnicity claims?",
+        "Are optional premium-support products clearly secondary to essentials?"
+      ]
+    },
+    {
+      "id": "refine_full_shelf_premium_tone_australia_optional_support",
+      "mode": "refine",
+      "countryCode": "AU",
+      "budgetTier": "premium",
+      "primaryGoal": "keep dark marks fading while avoiding irritation",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"dark-spot-treatment\",\"antioxidant\",\"exfoliation-mask\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"barrier-support\",\"cleanse\",\"dark-spot-treatment\",\"exfoliation-mask\",\"hydrate\",\"moisturise\",\"retinoid\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"vitamin-c-antioxidant-serum\",\"gentle-resurfacing-mask\"]",
+          "actual": "{\"actual\":[\"gentle-resurfacing-mask-or-peel\",\"antioxidant-serum\",\"gentle-retinoid\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 2",
+          "actual": "3"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 3",
+          "actual": "3"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"vitamin-c-antioxidant-serum\",\"gentle-resurfacing-mask\"]",
+          "actual": "{\"actual\":[\"gentle-resurfacing-mask-or-peel\",\"antioxidant-serum\",\"gentle-retinoid\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 6,
+        "acceptedCoverageSlotCount": 9,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 2,
+        "acceptedGapCount": 3,
+        "acceptedPriorityGapCount": 0,
+        "acceptedConsiderGapCount": 3,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 2065,
+        "outputTokens": 6933,
+        "totalTokens": 8998,
+        "estimatedCostUsd": 0.00447
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 3,
+        "rawGapCount": 3,
+        "acceptedPickCount": 3,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 6865,
+        "outputTokens": 24219,
+        "totalTokens": 31084,
+        "estimatedCostUsd": 0.015561
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "dark-spot-treatment",
+        "antioxidant",
+        "retinoid",
+        "hydrate",
+        "barrier-support",
+        "exfoliation-mask"
+      ],
+      "priorityGapKeys": [],
+      "considerGapKeys": [
+        "gentle-resurfacing-mask-or-peel",
+        "antioxidant-serum",
+        "gentle-retinoid"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-resurfacing-mask-or-peel",
+          "brand": "Dr. Dennis Gross",
+          "productName": "Alpha Beta Ultra Gentle Daily Peel",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit for a first resurfacing step: gentle peel format, PIH-aware, and lower overlap with your current azelaic acid."
+        },
+        {
+          "normalizedKey": "antioxidant-serum",
+          "brand": "Medik8",
+          "productName": "C-Tetra Luxe",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best daytime PIH support with lower sting."
+        },
+        {
+          "normalizedKey": "gentle-retinoid",
+          "brand": "Medik8",
+          "productName": "Crystal Retinal 3",
+          "budgetTier": "premium",
+          "sellerNameCount": 2,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit to start now for lingering marks and mild texture while keeping the ramp-up gentle."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the output avoid inventing urgent gaps when core products are present?",
+        "Are optional products still suggested when they could help the goal?",
+        "Does the plan respect the premium budget without talking about budget in the reason?",
+        "Does the coverage meter match the tone goal instead of a generic eight-slot routine?"
+      ]
+    },
+    {
+      "id": "starter_sensitive_hydration_sweden_safety_block",
+      "mode": "starter",
+      "countryCode": "SE",
+      "budgetTier": "drugstore",
+      "primaryGoal": "reduce tightness and flaky dry patches",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"hydrate\"]",
+          "actual": "{\"actual\":[\"barrier-support\",\"cleanse\",\"hydrate\",\"moisturise\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"low-stripping-gentle-cleanser\",\"bland-barrier-moisturizer\",\"sensitive-skin-sunscreen\"]",
+          "actual": "{\"actual\":[\"gentle-non-foaming-fragrance-free-cleanser\",\"barrier-support-moisturizer\",\"sensitive-skin-sunscreen\",\"ceramide-panthenol-barrier-cream-or-balm\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 4",
+          "actual": "4"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"low-stripping-gentle-cleanser\",\"bland-barrier-moisturizer\",\"sensitive-skin-sunscreen\"]",
+          "actual": "{\"actual\":[\"gentle-non-foaming-fragrance-free-cleanser\",\"barrier-support-moisturizer\",\"sensitive-skin-sunscreen\",\"ceramide-panthenol-barrier-cream-or-balm\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 5,
+        "acceptedCoverageSlotCount": 5,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 5,
+        "acceptedGapCount": 4,
+        "acceptedPriorityGapCount": 4,
+        "acceptedConsiderGapCount": 0,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1798,
+        "outputTokens": 9810,
+        "totalTokens": 11608,
+        "estimatedCostUsd": 0.006156
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 4,
+        "rawGapCount": 4,
+        "acceptedPickCount": 4,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 8670,
+        "outputTokens": 26749,
+        "totalTokens": 35419,
+        "estimatedCostUsd": 0.01735
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "barrier-support",
+        "hydrate"
+      ],
+      "priorityGapKeys": [
+        "gentle-non-foaming-fragrance-free-cleanser",
+        "barrier-support-moisturizer",
+        "sensitive-skin-sunscreen",
+        "ceramide-panthenol-barrier-cream-or-balm"
+      ],
+      "considerGapKeys": [],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-non-foaming-fragrance-free-cleanser",
+          "brand": "CeraVe",
+          "productName": "Hydrating Cleanser",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best first cleanser for tight, flaky skin: non-foaming, fragrance-free, and less likely to leave your face feeling stripped after washing."
+        },
+        {
+          "normalizedKey": "barrier-support-moisturizer",
+          "brand": "CeraVe",
+          "productName": "Moisturising Cream",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Core starter step: a bland, fragrance-free cream that can ease tightness and support flaky patches."
+        },
+        {
+          "normalizedKey": "sensitive-skin-sunscreen",
+          "brand": "CeraVe",
+          "productName": "Hydrating Mineral Sunscreen Face Lotion SPF 50",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 0,
+          "recommendationRankReason": "Daily SPF is the main missing step now; this one is gentle, cushiony, and better suited to dry sensitive skin."
+        },
+        {
+          "normalizedKey": "ceramide-panthenol-barrier-cream-or-balm",
+          "brand": "CeraVe",
+          "productName": "Moisturising Cream",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 0,
+          "recommendationRankReason": "Simple ceramide cream for daily barrier support when you want a lighter, no-frills option."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the starter kit stay simple for a dry sensitive profile?",
+        "Are fragrance-related suggestions blocked rather than softened?",
+        "Does the plan avoid exfoliation and retinoids unless clearly justified?",
+        "Are sunscreen and moisturizer still present despite the hydration goal?"
+      ]
+    },
+    {
+      "id": "refine_pregnancy_fine_lines_uk_retinoid_block",
+      "mode": "refine",
+      "countryCode": "GB",
+      "budgetTier": "mid",
+      "primaryGoal": "support fine lines while pregnant",
+      "status": "review",
+      "score": 0.8888888888888888,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"peptide\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"barrier-support\",\"cleanse\",\"hydrate\",\"moisturise\",\"peptide\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[\"peptide-serum\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": false,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"peptide-or-barrier-support-serum\"]",
+          "actual": "{\"actual\":[\"gentle-antioxidant-serum-vitamin-c-or-derivative\"],\"missing\":[\"peptide-or-barrier-support-serum\"]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 1",
+          "actual": "1"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 2",
+          "actual": "2"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"peptide-or-barrier-support-serum\"]",
+          "actual": "{\"actual\":[\"peptide-serum\",\"gentle-antioxidant-serum-vitamin-c-or-derivative\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 5,
+        "acceptedCoverageSlotCount": 7,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 2,
+        "acceptedGapCount": 2,
+        "acceptedPriorityGapCount": 1,
+        "acceptedConsiderGapCount": 1,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1987,
+        "outputTokens": 8640,
+        "totalTokens": 10627,
+        "estimatedCostUsd": 0.005482
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 2,
+        "rawGapCount": 2,
+        "acceptedPickCount": 2,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 4500,
+        "outputTokens": 24121,
+        "totalTokens": 28621,
+        "estimatedCostUsd": 0.015148000000000002
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "peptide",
+        "antioxidant",
+        "hydrate",
+        "barrier-support"
+      ],
+      "priorityGapKeys": [
+        "peptide-serum"
+      ],
+      "considerGapKeys": [
+        "gentle-antioxidant-serum-vitamin-c-or-derivative"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "peptide-serum",
+          "brand": "The INKEY List",
+          "productName": "Collagen Booster",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best next step now: peptide support for fine lines with a low-irritation formula that layers well in a pregnancy-friendly routine."
+        },
+        {
+          "normalizedKey": "gentle-antioxidant-serum-vitamin-c-or-derivative",
+          "brand": "Mad Hippie",
+          "productName": "Vitamin C Serum",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best gentle AM antioxidant fit for dry skin; supports fine-line care and PIH-aware brightening without pushing into a harsher vitamin C."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Is the retinoid blocked because pregnancy context overrides goal speed?",
+        "Does the plan offer a safer optional lane instead of leaving the user with nothing?",
+        "Does it avoid medical advice about pregnancy beyond cautious product filtering?",
+        "Are filled coverage slots tied only to active shelf products?"
+      ]
+    },
+    {
+      "id": "refine_replacement_history_not_improving_us",
+      "mode": "refine",
+      "countryCode": "US",
+      "budgetTier": "luxury",
+      "primaryGoal": "fade stubborn marks without irritation",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"spf\",\"dark-spot-treatment\",\"goal-primary\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"barrier-support\",\"dark-spot-treatment\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"replacement-pigment-serum-with-tranexamic-acid-or-azelaic-acid\"]",
+          "actual": "{\"actual\":[\"replacement-for-brightening-serum-tranexamic-acid-or-azelaic-acid-serum\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[\"gentle-antioxidant-serum-vitamin-c-derivative\",\"lightweight-barrier-support-moisturizer-ceramides-glycerin\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 0",
+          "actual": "2"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 3",
+          "actual": "3"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"replacement-pigment-serum-with-tranexamic-acid-or-azelaic-acid\"]",
+          "actual": "{\"actual\":[\"replacement-for-brightening-serum-tranexamic-acid-or-azelaic-acid-serum\",\"gentle-antioxidant-serum-vitamin-c-derivative\",\"lightweight-barrier-support-moisturizer-ceramides-glycerin\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 4,
+        "acceptedCoverageSlotCount": 4,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 3,
+        "acceptedGapCount": 3,
+        "acceptedPriorityGapCount": 1,
+        "acceptedConsiderGapCount": 2,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1999,
+        "outputTokens": 12353,
+        "totalTokens": 14352,
+        "estimatedCostUsd": 0.007712
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 3,
+        "rawGapCount": 3,
+        "acceptedPickCount": 3,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 6994,
+        "outputTokens": 39155,
+        "totalTokens": 46149,
+        "estimatedCostUsd": 0.024542
+      },
+      "coverageRoles": [
+        "spf",
+        "dark-spot-treatment",
+        "antioxidant",
+        "barrier-support"
+      ],
+      "priorityGapKeys": [
+        "replacement-for-brightening-serum-tranexamic-acid-or-azelaic-acid-serum"
+      ],
+      "considerGapKeys": [
+        "gentle-antioxidant-serum-vitamin-c-derivative",
+        "lightweight-barrier-support-moisturizer-ceramides-glycerin"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "replacement-for-brightening-serum-tranexamic-acid-or-azelaic-acid-serum",
+          "brand": "SkinCeuticals",
+          "productName": "Discoloration Defense",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "68 logged use days and four photo checkpoints still show little change, so a more targeted pigment serum is a better swap now."
+        },
+        {
+          "normalizedKey": "gentle-antioxidant-serum-vitamin-c-derivative",
+          "brand": "Revision Skincare",
+          "productName": "C+ Correcting Complex 30%",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Worth considering as a gentle brightening step: stable antioxidant support, a smoother feel for combo/oily skin, and a good next step if you want more tone support after a slow-response brightening serum."
+        },
+        {
+          "normalizedKey": "lightweight-barrier-support-moisturizer-ceramides-glycerin",
+          "brand": "Paula's Choice",
+          "productName": "Omega+ Complex Moisturizer",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Barrier support that should stay comfortable in an oily-combo routine."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Is replacement justified with both usage history and photo checkpoints?",
+        "Does the reason clearly state why this is a replacement, not a shopping nudge?",
+        "Does the product tier match a user who selected a high-spend budget?",
+        "Does the output avoid saying photos clinically prove failure?"
+      ]
+    },
+    {
+      "id": "refine_full_shelf_no_buy_sweden",
+      "mode": "refine",
+      "countryCode": "SE",
+      "budgetTier": "mid",
+      "primaryGoal": "maintain a calm clear routine",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"texture-exfoliant\",\"acne-treatment\"]",
+          "actual": "{\"actual\":[\"acne-treatment\",\"barrier-support\",\"cleanse\",\"hydrate\",\"moisturise\",\"spf\",\"texture-exfoliant\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 5,
+        "acceptedCoverageSlotCount": 7,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 1,
+        "acceptedGapCount": 0,
+        "acceptedPriorityGapCount": 0,
+        "acceptedConsiderGapCount": 0,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 2061,
+        "outputTokens": 10099,
+        "totalTokens": 12160,
+        "estimatedCostUsd": 0.006369
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 0,
+        "rawGapCount": 0,
+        "acceptedPickCount": 0,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": "no_gaps",
+        "model": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "estimatedCostUsd": null
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "acne-treatment",
+        "texture-exfoliant",
+        "hydrate",
+        "barrier-support"
+      ],
+      "priorityGapKeys": [],
+      "considerGapKeys": [],
+      "productPicks": [],
+      "manualReviewChecklist": [
+        "Does the plan confidently recommend buying nothing new?",
+        "Does coverage reflect the maintenance goal rather than a generic routine?",
+        "Does the absence of gaps avoid triggering a false no-pick quality alarm?",
+        "Does redundancy elsewhere remain responsible for duplicate-active warnings?"
+      ]
+    },
+    {
+      "id": "starter_oily_congestion_drugstore_us",
+      "mode": "starter",
+      "countryCode": "US",
+      "budgetTier": "drugstore",
+      "primaryGoal": "reduce clogged pores and breakouts without stripping",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"acne-treatment\"]",
+          "actual": "{\"actual\":[\"acne-treatment\",\"cleanse\",\"moisturise\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"low-stripping-gentle-cleanser\",\"lightweight-barrier-support-moisturizer\",\"sensitive-skin-sunscreen\",\"adapalene-or-benzoyl-peroxide-breakout-treatment\"]",
+          "actual": "{\"actual\":[\"gentle-low-foam-cleanser\",\"lightweight-non-comedogenic-moisturizer-with-barrier-support\",\"sensitive-skin-sunscreen\",\"salicylic-acid-0-5-2-acne-treatment-leave-on-or-gentle-wash\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 4",
+          "actual": "4"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"low-stripping-gentle-cleanser\",\"lightweight-barrier-support-moisturizer\",\"sensitive-skin-sunscreen\",\"adapalene-or-benzoyl-peroxide-breakout-treatment\"]",
+          "actual": "{\"actual\":[\"gentle-low-foam-cleanser\",\"lightweight-non-comedogenic-moisturizer-with-barrier-support\",\"sensitive-skin-sunscreen\",\"salicylic-acid-0-5-2-acne-treatment-leave-on-or-gentle-wash\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 4,
+        "acceptedCoverageSlotCount": 4,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 5,
+        "acceptedGapCount": 4,
+        "acceptedPriorityGapCount": 4,
+        "acceptedConsiderGapCount": 0,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1829,
+        "outputTokens": 12448,
+        "totalTokens": 14277,
+        "estimatedCostUsd": 0.007743
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 4,
+        "rawGapCount": 4,
+        "acceptedPickCount": 4,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 8760,
+        "outputTokens": 30310,
+        "totalTokens": 39070,
+        "estimatedCostUsd": 0.0195
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "acne-treatment"
+      ],
+      "priorityGapKeys": [
+        "gentle-low-foam-cleanser",
+        "lightweight-non-comedogenic-moisturizer-with-barrier-support",
+        "sensitive-skin-sunscreen",
+        "salicylic-acid-0-5-2-acne-treatment-leave-on-or-gentle-wash"
+      ],
+      "considerGapKeys": [],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-low-foam-cleanser",
+          "brand": "CeraVe",
+          "productName": "Foaming Facial Cleanser",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Priority: daily residue removal without harsh rubbing can help reduce clogging while avoiding your over-scrubbing trigger."
+        },
+        {
+          "normalizedKey": "lightweight-non-comedogenic-moisturizer-with-barrier-support",
+          "brand": "CeraVe",
+          "productName": "PM Facial Moisturizing Lotion",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit for a starter pore-clearing routine: lightweight daily support that helps keep skin comfortable so you can stick with treatment without feeling stripped."
+        },
+        {
+          "normalizedKey": "sensitive-skin-sunscreen",
+          "brand": "Australian Gold",
+          "productName": "Botanical Tinted Face Sunscreen Lotion SPF 50",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Daily SPF is the most important missing step for a breakout-prone starter routine; this pick is tint- and finish-checked for oily skin and avoids a fragrance trigger."
+        },
+        {
+          "normalizedKey": "salicylic-acid-0-5-2-acne-treatment-leave-on-or-gentle-wash",
+          "brand": "CeraVe",
+          "productName": "Acne Control Gel",
+          "budgetTier": "drugstore",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best starter fit for clogged pores and mild breakouts; salicylic acid targets buildup without physical scrubbing."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the starter kit keep the routine simple for a drugstore budget?",
+        "Does it recommend one breakout treatment lane instead of many actives?",
+        "Does it avoid fragrance-heavy suggestions after the user preference signal?",
+        "Does it keep moisturizer and sunscreen in the plan despite oiliness?"
+      ]
+    },
+    {
+      "id": "refine_reactive_barrier_france_irritation_replacement",
+      "mode": "refine",
+      "countryCode": "FR",
+      "budgetTier": "mid",
+      "primaryGoal": "calm redness and rebuild barrier after irritation",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"spf\",\"barrier-support\",\"recovery-mask\"]",
+          "actual": "{\"actual\":[\"barrier-support\",\"cleanse\",\"hydrate\",\"moisturise\",\"recovery-mask\",\"spf\",\"texture-exfoliant\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"replacement-calming-barrier-serum\",\"ceramide-barrier-moisturizer\"]",
+          "actual": "{\"actual\":[\"fragrance-free-ceramide-barrier-cream\",\"replacement-for-glycolic-night-toner-panthenol-soothing-serum\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"recovery-mask-or-balm\"]",
+          "actual": "{\"actual\":[\"recovery-mask-or-balm\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 1",
+          "actual": "1"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 3",
+          "actual": "3"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"replacement-calming-barrier-serum\",\"ceramide-barrier-moisturizer\",\"recovery-mask-or-balm\"]",
+          "actual": "{\"actual\":[\"fragrance-free-ceramide-barrier-cream\",\"replacement-for-glycolic-night-toner-panthenol-soothing-serum\",\"recovery-mask-or-balm\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 3,
+        "acceptedCoverageSlotCount": 7,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 2,
+        "acceptedGapCount": 3,
+        "acceptedPriorityGapCount": 2,
+        "acceptedConsiderGapCount": 1,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 2143,
+        "outputTokens": 13935,
+        "totalTokens": 16078,
+        "estimatedCostUsd": 0.008682
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 3,
+        "rawGapCount": 3,
+        "acceptedPickCount": 3,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 7218,
+        "outputTokens": 20169,
+        "totalTokens": 27387,
+        "estimatedCostUsd": 0.013184
+      },
+      "coverageRoles": [
+        "cleanse",
+        "barrier-support",
+        "spf",
+        "hydrate",
+        "texture-exfoliant",
+        "moisturise",
+        "recovery-mask"
+      ],
+      "priorityGapKeys": [
+        "fragrance-free-ceramide-barrier-cream",
+        "replacement-for-glycolic-night-toner-panthenol-soothing-serum"
+      ],
+      "considerGapKeys": [
+        "recovery-mask-or-balm"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "fragrance-free-ceramide-barrier-cream",
+          "brand": "CeraVe",
+          "productName": "Moisturising Cream",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Best daily leave-on for your missing barrier step after irritation."
+        },
+        {
+          "normalizedKey": "replacement-for-glycolic-night-toner-panthenol-soothing-serum",
+          "brand": "La Roche-Posay",
+          "productName": "Cicaplast B5 Serum",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Logged use plus photo/history signals suggest the glycolic step is no longer a good fit; this is a calmer replacement for barrier repair."
+        },
+        {
+          "normalizedKey": "recovery-mask-or-balm",
+          "brand": "La Roche-Posay",
+          "productName": "Cicaplast Baume B5+",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Good flare-day recovery balm: helps support a compromised-feeling barrier without strong actives or fragrance."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the replacement reason use history as support rather than clinical proof?",
+        "Does the output move away from strong acids after irritation signals?",
+        "Does it prioritize barrier recovery before optional extras?",
+        "Does it avoid raw photo or journal details in evaluator output?"
+      ]
+    },
+    {
+      "id": "starter_firmness_texture_luxury_japan",
+      "mode": "starter",
+      "countryCode": "JP",
+      "budgetTier": "luxury",
+      "primaryGoal": "improve early fine lines and keep texture smooth",
+      "status": "review",
+      "score": 0.7777777777777778,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"retinoid\",\"peptide\",\"antioxidant\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"barrier-support\",\"cleanse\",\"moisturise\",\"retinoid\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"low-stripping-gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50\",\"beginner-retinal-night-treatment\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-spf-50-sunscreen\",\"gentle-retinoid-night-treatment\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": false,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"peptide-support-serum\",\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"antioxidant-serum\",\"ceramide-barrier-serum\"],\"missing\":[\"peptide-support-serum\"]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 2",
+          "actual": "2"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 6",
+          "actual": "6"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": false,
+          "expected": "Product picks exist for every expected gap concept: [\"low-stripping-gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50\",\"beginner-retinal-night-treatment\",\"peptide-support-serum\",\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-spf-50-sunscreen\",\"gentle-retinoid-night-treatment\",\"antioxidant-serum\",\"ceramide-barrier-serum\"],\"missing\":[\"peptide-support-serum\"]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 6,
+        "acceptedCoverageSlotCount": 6,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 6,
+        "acceptedGapCount": 6,
+        "acceptedPriorityGapCount": 4,
+        "acceptedConsiderGapCount": 2,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1793,
+        "outputTokens": 9995,
+        "totalTokens": 11788,
+        "estimatedCostUsd": 0.006266
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 6,
+        "rawGapCount": 6,
+        "acceptedPickCount": 6,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 12950,
+        "outputTokens": 46191,
+        "totalTokens": 59141,
+        "estimatedCostUsd": 0.029658
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "retinoid",
+        "antioxidant",
+        "barrier-support"
+      ],
+      "priorityGapKeys": [
+        "gentle-cleanser",
+        "barrier-support-moisturizer",
+        "broad-spectrum-spf-50-sunscreen",
+        "gentle-retinoid-night-treatment"
+      ],
+      "considerGapKeys": [
+        "antioxidant-serum",
+        "ceramide-barrier-serum"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-cleanser",
+          "brand": "Tatcha",
+          "productName": "The Camellia Cleansing Oil",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best first step for this starter gap: it removes sunscreen thoroughly while keeping cleansing comfortable, which matters before adding any active step."
+        },
+        {
+          "normalizedKey": "barrier-support-moisturizer",
+          "brand": "SkinCeuticals",
+          "productName": "Triple Lipid Restore 2:4:2",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Missing core step; helps keep skin comfortable so routines stick."
+        },
+        {
+          "normalizedKey": "broad-spectrum-spf-50-sunscreen",
+          "brand": "Clé de Peau Beauté",
+          "productName": "UV Protective Cream SPF 50+ PA++++",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Strong daily UVA/UVB coverage with an elegant finish makes it the best single prevention step for fine lines now."
+        },
+        {
+          "normalizedKey": "gentle-retinoid-night-treatment",
+          "brand": "Medik8",
+          "productName": "Crystal Retinal 3",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best first retinoid lane for early fine lines and smoother texture; encapsulated retinal is a strong starter-friendly way to begin visible smoothing now."
+        },
+        {
+          "normalizedKey": "antioxidant-serum",
+          "brand": "SkinCeuticals",
+          "productName": "C E Ferulic",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Strong add-on for daytime antioxidant support; helpful but optional if your routine is already minimal."
+        },
+        {
+          "normalizedKey": "ceramide-barrier-serum",
+          "brand": "Elizabeth Arden",
+          "productName": "Advanced Ceramide Capsules Daily Youth Restoring Serum",
+          "budgetTier": "luxury",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Useful support if dryness or flaking shows up, with extra fit for early fine lines."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the high budget produce a complete but still staged starter routine?",
+        "Does the treatment lane directly match texture and fine lines?",
+        "Are optional supports secondary to sunscreen, moisturizer, and retinoid pacing?",
+        "Does the output avoid promising fast or guaranteed results?"
+      ]
+    },
+    {
+      "id": "refine_body_roughness_mid_germany",
+      "mode": "refine",
+      "countryCode": "DE",
+      "budgetTier": "mid",
+      "primaryGoal": "smooth rough bumps on arms without irritating my face",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"texture-exfoliant\",\"barrier-support\"]",
+          "actual": "{\"actual\":[\"barrier-support\",\"cleanse\",\"hydrate\",\"moisturise\",\"spf\",\"texture-exfoliant\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"gentle-body-exfoliant-with-lactic-acid-or-urea\"]",
+          "actual": "{\"actual\":[\"fragrance-free-body-exfoliant-lotion-with-urea-or-lactic-acid\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"fragrance-free-body-barrier-moisturizer\"]",
+          "actual": "{\"actual\":[\"fragrance-free-body-barrier-moisturizer\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 1",
+          "actual": "1"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 2",
+          "actual": "2"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"gentle-body-exfoliant-with-lactic-acid-or-urea\",\"fragrance-free-body-barrier-moisturizer\"]",
+          "actual": "{\"actual\":[\"fragrance-free-body-exfoliant-lotion-with-urea-or-lactic-acid\",\"fragrance-free-body-barrier-moisturizer\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 4,
+        "acceptedCoverageSlotCount": 6,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 1,
+        "acceptedGapCount": 2,
+        "acceptedPriorityGapCount": 1,
+        "acceptedConsiderGapCount": 1,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 2015,
+        "outputTokens": 10090,
+        "totalTokens": 12105,
+        "estimatedCostUsd": 0.006356
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 2,
+        "rawGapCount": 2,
+        "acceptedPickCount": 2,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 4529,
+        "outputTokens": 14148,
+        "totalTokens": 18677,
+        "estimatedCostUsd": 0.009167999999999999
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "texture-exfoliant",
+        "hydrate",
+        "barrier-support"
+      ],
+      "priorityGapKeys": [
+        "fragrance-free-body-exfoliant-lotion-with-urea-or-lactic-acid"
+      ],
+      "considerGapKeys": [
+        "fragrance-free-body-barrier-moisturizer"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "fragrance-free-body-exfoliant-lotion-with-urea-or-lactic-acid",
+          "brand": "Eucerin",
+          "productName": "UreaRepair PLUS 10% Urea Lotion",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Priority gap: this is the most direct body-only smoothing step for the arm bumps, while keeping the face routine unchanged."
+        },
+        {
+          "normalizedKey": "fragrance-free-body-barrier-moisturizer",
+          "brand": "CeraVe",
+          "productName": "Moisturising Cream",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 1,
+          "recommendationRankReason": "Good support layer for dry arms while you smooth bumps."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the plan honor the body-specific goal instead of only face routine roles?",
+        "Does it use one appropriate smoothing lane rather than multiple exfoliants?",
+        "Does it keep fragrance avoidance in the optional support wording?",
+        "Does coverage stay goal-specific rather than generic?"
+      ]
+    }
+  ]
+}

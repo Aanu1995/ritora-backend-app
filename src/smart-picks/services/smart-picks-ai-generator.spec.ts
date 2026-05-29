@@ -203,7 +203,7 @@ describe('SmartPicksAiGenerator', () => {
     const systemPrompt = requestBody.input?.[0]?.content?.[0]?.text ?? '';
     const userPrompt = requestBody.input?.[1]?.content?.[0]?.text ?? '';
     expect(requestBody).toEqual(
-      expect.objectContaining({ max_output_tokens: 6000, temperature: 0 }),
+      expect.objectContaining({ max_output_tokens: 24000, temperature: 0 }),
     );
     const responseSchema =
       requestBody.text?.format?.schema?.properties?.gaps?.items?.properties;
@@ -264,6 +264,7 @@ describe('SmartPicksAiGenerator', () => {
     expect(userPrompt).not.toContain('retailer');
     expect(userPrompt).not.toContain('availability');
     expect(userPrompt).toContain('Product performance summary');
+    expect(userPrompt).toContain('Skin Journal analysis summary');
     expect(userPrompt).toContain('usageDaysLast90');
     expect(userPrompt).toContain(
       'For replacement gaps, recommend a true replacement',
@@ -363,6 +364,7 @@ describe('SmartPicksAiGenerator', () => {
           product('owned-spf', ProductCategory.SunProtection, 'Daily SPF'),
           product('owned-cleanser', ProductCategory.Cleanser, 'Owned Cleanser'),
         ],
+        productPerformance: [],
         skinProfile: profile({
           active_tolerances: {
             retinol: { tolerance: 'cannot_use' },
@@ -374,8 +376,8 @@ describe('SmartPicksAiGenerator', () => {
     expect(plan).toEqual(
       expect.objectContaining({
         coverage: expect.objectContaining({
-          filled: 1,
-          total: 2,
+          filled: 2,
+          total: 3,
           slots: [
             {
               role: 'spf',
@@ -389,6 +391,13 @@ describe('SmartPicksAiGenerator', () => {
               state: 'missing-priority',
               filledByProductId: null,
               filledByName: null,
+              goalRelevance: 'essential',
+            },
+            {
+              role: 'cleanse',
+              state: 'filled',
+              filledByProductId: 'owned-cleanser',
+              filledByName: 'Owned Brand Owned Cleanser',
               goalRelevance: 'essential',
             },
           ],
@@ -418,7 +427,8 @@ describe('SmartPicksAiGenerator', () => {
       'Decide the coverage meter and purchase gaps from the full context',
     );
     expect(userPrompt).toContain('Product performance summary');
-    expect(userPrompt).toContain('Photo and journal trends');
+    expect(userPrompt).toContain('Skin Journal analysis summary');
+    expect(userPrompt).toContain('Photo and journal analysis trends');
     expect(userPrompt).toContain(
       'Do not add generic hydration, eye, or nice-to-have coverage just to fill space',
     );
@@ -764,6 +774,51 @@ describe('SmartPicksAiGenerator', () => {
     expect(plan?.considerGaps).toEqual([]);
   });
 
+  it('keeps replacement semantics when AI names only the replacement category', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock.mockResolvedValue(
+      openAiResponse({
+        coverage: {
+          slots: [
+            {
+              role: 'barrier-support',
+              state: 'missing-priority',
+              filledByProductId: null,
+              goalRelevance: 'essential',
+            },
+          ],
+        },
+        gaps: [
+          {
+            ingredientOrCategory: 'Calming barrier serum',
+            priority: 'consider',
+            reason:
+              'Use logs and photo checkpoints suggest the current product is not the right fit.',
+            shortReason: 'Consider a calmer replacement.',
+            goalAlignment: 'replacement for irritation',
+            sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+            gapKind: SmartPicksGapKind.Replacement,
+            replacementForProductId: 'owned-1',
+          },
+        ],
+      }),
+    );
+    const generator = new SmartPicksAiGenerator(configService());
+
+    const plan = await generator.generatePlan(context());
+
+    expect(plan?.priorityGaps).toContainEqual(
+      expect.objectContaining({
+        ingredientOrCategory:
+          'Replacement for Owned Cleanser: Calming barrier serum',
+        normalizedKey: 'replacement-for-owned-cleanser-calming-barrier-serum',
+        priority: 'priority',
+        gapKind: SmartPicksGapKind.Replacement,
+      }),
+    );
+  });
+
   it('removes urgent refine gaps when AI coverage says the shelf is already covered', async () => {
     const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
     global.fetch = fetchMock;
@@ -844,6 +899,97 @@ describe('SmartPicksAiGenerator', () => {
     expect(plan?.priorityGaps).toEqual([]);
     expect(plan?.considerGaps.map((gap) => gap.normalizedKey)).toEqual([
       'optional-calming-mask',
+    ]);
+  });
+
+  it('keeps maintenance shelves as no-buy when active products already cover the goal', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock.mockResolvedValue(
+      openAiResponse({
+        coverage: {
+          slots: [
+            {
+              role: 'cleanse',
+              state: 'filled',
+              filledByProductId: 'owned-cleanser',
+              goalRelevance: 'essential',
+            },
+            {
+              role: 'moisturise',
+              state: 'filled',
+              filledByProductId: 'owned-moisturizer',
+              goalRelevance: 'supportive',
+            },
+            {
+              role: 'spf',
+              state: 'filled',
+              filledByProductId: 'owned-spf',
+              goalRelevance: 'supportive',
+            },
+            {
+              role: 'acne-treatment',
+              state: 'filled',
+              filledByProductId: 'owned-bha',
+              goalRelevance: 'supportive',
+            },
+            {
+              role: 'antioxidant',
+              state: 'missing',
+              filledByProductId: null,
+              goalRelevance: 'optional',
+            },
+          ],
+        },
+        gaps: [
+          {
+            ingredientOrCategory: 'Antioxidant serum',
+            priority: 'consider',
+            reason: 'Optional routine support.',
+            shortReason: 'Optional support.',
+            goalAlignment: 'maintenance',
+            sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+            gapKind: SmartPicksGapKind.GoalSupport,
+          },
+        ],
+      }),
+    );
+    const generator = new SmartPicksAiGenerator(configService());
+    const activeProducts = [
+      product('owned-cleanser', ProductCategory.Cleanser, 'Cleanser'),
+      product('owned-moisturizer', ProductCategory.Moisturizer, 'Moisturizer'),
+      product('owned-spf', ProductCategory.SunProtection, 'SPF'),
+      ownedProduct({
+        id: 'owned-bha',
+        category: ProductCategory.Exfoliant,
+        name: 'Skin Perfecting 2% BHA Liquid Exfoliant',
+        identity: {
+          inciIngredients: ['salicylic acid'],
+        } as InventoryProduct['identity'],
+      }),
+    ];
+
+    const plan = await generator.generatePlan(
+      context({
+        activeProducts,
+        allProducts: activeProducts,
+        productPerformance: [],
+        budgetTier: 'mid',
+        skinProfile: profile({
+          primary_goal: 'maintain a calm clear routine',
+          current_concerns: ['occasional congestion'],
+        }),
+      }),
+    );
+
+    expect(plan?.priorityGaps).toEqual([]);
+    expect(plan?.considerGaps).toEqual([]);
+    expect(plan?.coverage.slots.map((slot) => slot.role)).toEqual([
+      'cleanse',
+      'moisturise',
+      'spf',
+      'acne-treatment',
+      'texture-exfoliant',
     ]);
   });
 
@@ -1581,6 +1727,7 @@ describe('SmartPicksAiGenerator', () => {
           product('owned-spf', ProductCategory.SunProtection, 'Daily SPF'),
           product('owned-cleanser', ProductCategory.Cleanser, 'Owned Cleanser'),
         ],
+        productPerformance: [],
         skinProfile: profile({
           active_tolerances: {
             retinol: { tolerance: 'cannot_use' },
@@ -1591,17 +1738,17 @@ describe('SmartPicksAiGenerator', () => {
 
     expect(result.plan).toEqual(
       expect.objectContaining({
-        coverage: expect.objectContaining({ filled: 1, total: 1 }),
+        coverage: expect.objectContaining({ filled: 2, total: 2 }),
       }),
     );
     expect(result.diagnostics).toEqual(
       expect.objectContaining({
         rawCoverageSlotCount: 2,
-        acceptedCoverageSlotCount: 1,
+        acceptedCoverageSlotCount: 2,
         invalidCoverageSlotCount: 1,
         rawGapCount: 4,
-        acceptedGapCount: 1,
-        acceptedPriorityGapCount: 1,
+        acceptedGapCount: 0,
+        acceptedPriorityGapCount: 0,
         invalidGapCount: 1,
         blockedOwnedGapCount: 1,
         blockedSafetyGapCount: 1,
@@ -1791,7 +1938,7 @@ describe('SmartPicksAiGenerator', () => {
 
     await generator.generateWithDiagnostics(context(), gaps().slice(0, 1));
 
-    expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(180_000);
   });
 
   it('accepts AI gap keys that need the same normalization as backend gaps', async () => {
@@ -1883,6 +2030,49 @@ describe('SmartPicksAiGenerator', () => {
     );
     expect(JSON.stringify(result.diagnostics)).not.toContain('Mineral SPF');
     expect(JSON.stringify(result.diagnostics)).not.toContain('example.com');
+  });
+
+  it('retries malformed structured output before failing Smart Picks', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock
+      .mockResolvedValueOnce(openAiTextResponse('{not-json'))
+      .mockResolvedValueOnce(
+        openAiResponse({
+          gaps: [
+            {
+              normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+              brand: 'Good Brand',
+              productName: 'Mineral SPF 50',
+              budgetTier: 'mid',
+              recommendationRankReason: 'Matches the protection gap.',
+              sellerNames: [],
+              reasoningChips: [],
+              reasoningFacts: {},
+              ruledOut: [],
+              alternatives: [],
+              sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+            },
+          ],
+        }),
+      );
+    const generator = new SmartPicksAiGenerator(configService());
+
+    const result = await generator.generateWithDiagnostics(context(), [
+      gap(
+        'Broad-spectrum sunscreen SPF 30+',
+        'broad-spectrum-sunscreen-spf-30',
+      ),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.diagnostics).toEqual(
+      expect.objectContaining({
+        providerFailed: false,
+        acceptedPickCount: 1,
+        missingPickCount: 0,
+      }),
+    );
   });
 
   it('counts unsafe AI product output blocked by user preferences', async () => {
@@ -2384,6 +2574,7 @@ describe('SmartPicksAiGenerator', () => {
     expect(systemPrompt).not.toMatch(/\bYou are a dermatologist\b/i);
     expect(userPrompt).toContain('Starter treatment assessment');
     expect(userPrompt).toContain('Product performance summary');
+    expect(userPrompt).toContain('Skin Journal analysis summary');
     expect(userPrompt).not.toContain('user-1');
   });
 
@@ -2544,6 +2735,10 @@ describe('SmartPicksAiGenerator', () => {
 });
 
 function openAiResponse(body: unknown): Response {
+  return openAiTextResponse(JSON.stringify(body));
+}
+
+function openAiTextResponse(text: string): Response {
   return {
     ok: true,
     json: jest.fn().mockResolvedValue({
@@ -2552,7 +2747,7 @@ function openAiResponse(body: unknown): Response {
           content: [
             {
               type: 'output_text',
-              text: JSON.stringify(body),
+              text,
             },
           ],
         },
@@ -2589,6 +2784,7 @@ function context(
     budgetTier: 'mid',
     mode: 'refine',
     inputsHash: 'hash-1',
+    skinJournalSummary: null,
     productPerformance: [
       {
         productId: 'owned-1',
@@ -2646,6 +2842,7 @@ function goldenPersonaContext(
     }),
     activeProducts,
     allProducts,
+    skinJournalSummary: persona.skinJournalSummary ?? null,
     productPerformance: persona.productPerformance.map((summary) => ({
       productId: summary.productId,
       brand: summary.brand,

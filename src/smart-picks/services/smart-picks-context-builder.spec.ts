@@ -54,6 +54,30 @@ describe('SmartPicksContextBuilder', () => {
             '44 logged use days and photo history still shows dryness.',
         },
       ]),
+      summarizeJournalForUser: jest.fn().mockResolvedValue({
+        entryCountLast90: 3,
+        usableAnalysisEntryCount: 3,
+        latestEntryDate: '2026-05-10',
+        latestSummary: 'Recent journal analysis still shows dryness.',
+        overallChangeFromPrevious: 'stable',
+        trendSignal: SmartPicksProductPerformanceSignal.NotImproving,
+        concernTrend: 'dryness',
+        photoCheckpoints: 2,
+        photoInputImages: 3,
+        multiAnglePhotoCheckpoints: 0,
+        topConcerns: [
+          {
+            concern: 'dryness',
+            severity: 'moderate',
+            confidence: 0.8,
+            changeFromPrevious: 'stable',
+            locations: ['cheeks'],
+          },
+        ],
+        reactionSignalCount: 0,
+        barrierCompromiseCount: 1,
+        doctorFollowUpRecommended: false,
+      }),
     } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
     skinProfileRepo.findOne.mockResolvedValue(profile());
     inventoryRepo.find.mockResolvedValue([
@@ -72,12 +96,24 @@ describe('SmartPicksContextBuilder', () => {
     expect(context.mode).toBe('starter');
     expect(context.activeProducts).toHaveLength(2);
     expect(context.productPerformance).toHaveLength(1);
+    expect(context.skinJournalSummary).toEqual(
+      expect.objectContaining({
+        latestEntryDate: '2026-05-10',
+        latestSummary: 'Recent journal analysis still shows dryness.',
+      }),
+    );
     expect(productPerformance.summarizeForUser).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
         products: expect.arrayContaining([
           expect.objectContaining({ id: 'cream-1' }),
         ]),
+        primaryGoal: 'dark_marks',
+      }),
+    );
+    expect(productPerformance.summarizeJournalForUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
         primaryGoal: 'dark_marks',
       }),
     );
@@ -228,6 +264,7 @@ async function buildContextWithProfile(profileFixture: SkinProfile) {
   } as unknown as EnvironmentContextService;
   const productPerformance = {
     summarizeForUser: jest.fn().mockResolvedValue([]),
+    summarizeJournalForUser: jest.fn().mockResolvedValue(null),
   } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
   skinProfileRepo.findOne.mockResolvedValue(profileFixture);
   inventoryRepo.find.mockResolvedValue([
@@ -250,6 +287,7 @@ async function buildContextWithEnvironment(summary: EnvironmentContextSummary) {
   } as unknown as EnvironmentContextService;
   const productPerformance = {
     summarizeForUser: jest.fn().mockResolvedValue([]),
+    summarizeJournalForUser: jest.fn().mockResolvedValue(null),
   } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
   skinProfileRepo.findOne.mockResolvedValue(profile());
   inventoryRepo.find.mockResolvedValue([
@@ -272,6 +310,7 @@ async function buildContextWithProducts(products: InventoryProduct[]) {
   } as unknown as EnvironmentContextService;
   const productPerformance = {
     summarizeForUser: jest.fn().mockResolvedValue([]),
+    summarizeJournalForUser: jest.fn().mockResolvedValue(null),
   } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
   skinProfileRepo.findOne.mockResolvedValue(profile());
   inventoryRepo.find.mockResolvedValue(products);
@@ -294,6 +333,7 @@ async function buildContextWithPerformance(
   } as unknown as EnvironmentContextService;
   const productPerformance = {
     summarizeForUser: jest.fn().mockResolvedValue(summaries),
+    summarizeJournalForUser: jest.fn().mockResolvedValue(null),
   } as unknown as jest.Mocked<SmartPicksProductPerformanceService>;
   skinProfileRepo.findOne.mockResolvedValue(profile());
   inventoryRepo.find.mockResolvedValue([

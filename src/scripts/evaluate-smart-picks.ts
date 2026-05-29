@@ -1,21 +1,33 @@
-import 'dotenv/config';
 import { mkdir, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { ConfigService } from '@nestjs/config';
-import { SmartPicksAiGenerator } from '../smart-picks/services/smart-picks-ai-generator';
+import { evaluationEnvFilePaths, loadEnvFiles } from '../config/env-files';
+import { readFeatureOpenAiModel } from '../common/utils/openai-config';
+import {
+  SMART_PICKS_AI_MODEL_ENV_KEY,
+  SmartPicksAiGenerator,
+} from '../smart-picks/services/smart-picks-ai-generator';
 import { SMART_PICKS_GOLDEN_PERSONAS } from '../smart-picks/evaluation/smart-picks-golden-personas';
-import { evaluateSmartPicksGoldenPersonas } from '../smart-picks/evaluation/smart-picks-evaluation.runner';
+import {
+  evaluateSmartPicksGoldenPersonas,
+  type SmartPicksEvaluationReport,
+} from '../smart-picks/evaluation/smart-picks-evaluation.runner';
 
 interface EvaluationCliOptions {
+  envFile: string | null;
   out: string;
   personaIds: string[];
   includeProductPicks: boolean;
 }
 
-const SMART_PICKS_EVALUATION_PROMPT_VERSION = 'smart-picks-ai-first-v1';
+const SMART_PICKS_EVALUATION_PROMPT_VERSION =
+  'smart-picks-ai-first-v2-journal-summary';
+const SMART_PICKS_EVALUATION_DEFAULT_MODEL = 'gpt-4.1-mini';
 
-async function main(): Promise<void> {
+async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
+  loadEnvFiles(evaluationEnvFilePaths(options.envFile));
+
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error(
@@ -32,7 +44,12 @@ async function main(): Promise<void> {
   }
 
   const config = new ConfigService();
-  const model = config.get<string>('SMART_PICKS_AI_MODEL') ?? 'gpt-4.1-mini';
+  const model =
+    readFeatureOpenAiModel(
+      config,
+      SMART_PICKS_AI_MODEL_ENV_KEY,
+      SMART_PICKS_EVALUATION_DEFAULT_MODEL,
+    ) ?? SMART_PICKS_EVALUATION_DEFAULT_MODEL;
   const generator = new SmartPicksAiGenerator(config);
   const report = await evaluateSmartPicksGoldenPersonas({
     generator,
@@ -40,6 +57,17 @@ async function main(): Promise<void> {
     promptVersion: SMART_PICKS_EVALUATION_PROMPT_VERSION,
     personas,
     includeProductPicks: options.includeProductPicks,
+    onProgress: (event) => {
+      if (event.phase === 'started') {
+        console.log(
+          `Smart Picks evaluation case ${event.index}/${event.total} started: ${event.personaId}`,
+        );
+        return;
+      }
+      console.log(
+        `Smart Picks evaluation case ${event.index}/${event.total} completed: ${event.personaId} (${event.status}, score=${event.score})`,
+      );
+    },
   });
 
   await mkdir(resolve(options.out, '..'), { recursive: true });
@@ -47,12 +75,20 @@ async function main(): Promise<void> {
   console.log(
     `Smart Picks evaluation saved to ${options.out}: ${report.passedCases}/${report.totalCases} passed, ${report.reviewCases} review, ${report.failedCases} failed.`,
   );
+
+  if (!report.gate.passed) {
+    console.error(formatSmartPicksEvaluationFailures(report));
+    return 1;
+  }
+
+  return 0;
 }
 
 function parseArgs(args: string[]): EvaluationCliOptions {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const personas = readRepeatedFlag(args, '--persona');
   return {
+    envFile: readFlag(args, '--env-file'),
     out: resolve(
       readFlag(args, '--out') ??
         join(
@@ -82,7 +118,31 @@ function readRepeatedFlag(args: readonly string[], flag: string): string[] {
   return values;
 }
 
-void main().catch((error) => {
-  console.error(error instanceof Error ? error.message : 'unknown error');
-  process.exitCode = 1;
-});
+function formatSmartPicksEvaluationFailures(
+  report: SmartPicksEvaluationReport,
+): string {
+  const failedOrReviewCases = report.cases
+    .filter((result) => result.status !== 'passed')
+    .map((result) => {
+      const failedChecks = result.checks
+        .filter((check) => !check.passed)
+        .map((check) => check.id)
+        .join(', ');
+      return `- ${result.id} (${result.status}): ${failedChecks || 'manual review required'}`;
+    });
+
+  return [
+    'Smart Picks evaluation gate failed.',
+    ...report.gate.blockers.map((blocker) => `Blocker: ${blocker}`),
+    ...failedOrReviewCases,
+  ].join('\n');
+}
+
+void main()
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : 'unknown error');
+    process.exitCode = 1;
+  });

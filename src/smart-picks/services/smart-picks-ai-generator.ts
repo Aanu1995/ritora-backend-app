@@ -28,8 +28,12 @@ import { SMART_PICKS_COVERAGE_ROLES } from './smart-picks-localization';
 import { SmartPicksContext } from './smart-picks-context-builder';
 
 export const SMART_PICKS_AI_MODEL_ENV_KEY = 'SMART_PICKS_AI_MODEL';
-const SMART_PICKS_AI_TIMEOUT_MS = 120_000;
-const SMART_PICKS_AI_MAX_OUTPUT_TOKENS = 6000;
+const SMART_PICKS_AI_TIMEOUT_MS = 180_000;
+const SMART_PICKS_AI_DEFAULT_MODEL = 'gpt-4.1-mini';
+const SMART_PICKS_AI_PLAN_MAX_OUTPUT_TOKENS = 24_000;
+const SMART_PICKS_AI_PRODUCT_PICK_MAX_OUTPUT_TOKENS = 24_000;
+const SMART_PICKS_AI_STARTER_TREATMENT_MAX_OUTPUT_TOKENS = 4_000;
+const SMART_PICKS_AI_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 const SOURCE_ID_ENUM = Object.values(SuggestionEvidenceSourceId);
 const SMART_PICKS_STARTER_TREATMENT_CONFIDENCES = [
   'low',
@@ -205,6 +209,39 @@ type OpenAiResponsePayload = {
   usage?: OpenAiUsagePayload;
 };
 
+type SmartPicksOpenAiRawResponseResult =
+  | {
+      ok: true;
+      outputText: string | null;
+      payload: OpenAiResponsePayload;
+    }
+  | {
+      ok: false;
+      reason: string;
+      retryable: boolean;
+    };
+
+type SmartPicksOpenAiJsonResult<T> =
+  | {
+      ok: true;
+      parsed: T;
+      payload: OpenAiResponsePayload;
+    }
+  | {
+      ok: false;
+      reason: string;
+      usage?: OpenAiUsagePayload;
+    };
+
+function isRetryableOpenAiStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+function isOpenAiTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === 'TimeoutError' || error.name === 'AbortError';
+}
+
 @Injectable()
 export class SmartPicksAiGenerator {
   private readonly logger = new Logger(SmartPicksAiGenerator.name);
@@ -237,12 +274,7 @@ export class SmartPicksAiGenerator {
     }
 
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
-    const model =
-      readFeatureOpenAiModel(
-        this.configService,
-        SMART_PICKS_AI_MODEL_ENV_KEY,
-        'gpt-4.1-mini',
-      ) ?? 'gpt-4.1-mini';
+    const model = this.getModel();
     if (!apiKey || !model) {
       return {
         plan: null,
@@ -255,81 +287,53 @@ export class SmartPicksAiGenerator {
       };
     }
 
-    try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          store: false,
-          input: [
-            {
-              role: 'system',
-              content: [{ type: 'input_text', text: PLAN_SYSTEM_PROMPT }],
-            },
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: buildPlanPrompt(context),
-                },
-              ],
-            },
-          ],
-          max_output_tokens: 4500,
-          ...openAiRepeatabilityRequestOptions(model),
-          text: {
-            verbosity: 'low',
-            format: PLAN_RESPONSE_FORMAT,
+    const response =
+      await this.requestStructuredJson<RawSmartPicksPlanResponse>({
+        apiKey,
+        model,
+        operation: 'coverage plan',
+        input: [
+          {
+            role: 'system',
+            content: [{ type: 'input_text', text: PLAN_SYSTEM_PROMPT }],
           },
-        }),
-        signal: AbortSignal.timeout(SMART_PICKS_AI_TIMEOUT_MS),
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: buildPlanPrompt(context),
+              },
+            ],
+          },
+        ],
+        maxOutputTokens: SMART_PICKS_AI_PLAN_MAX_OUTPUT_TOKENS,
+        responseFormat: PLAN_RESPONSE_FORMAT,
       });
-      if (!response.ok) {
-        throw new Error(await openAiErrorMessage(response, 'coverage plan'));
-      }
-
-      const payload = (await response.json()) as OpenAiResponsePayload;
-      const usageDiagnostics = buildAiUsageDiagnostics(payload.usage, model);
-      const rawText = extractOutputText(payload);
-      if (!rawText) {
-        return {
-          plan: null,
-          diagnostics: {
-            ...basePlanDiagnostics(),
-            ...usageDiagnostics,
-            missingPlan: true,
-          },
-        };
-      }
-      const parsed = JSON.parse(rawText) as RawSmartPicksPlanResponse;
-      const sanitized = sanitizeSmartPicksPlan(context, parsed);
-      return {
-        ...sanitized,
-        diagnostics: {
-          ...sanitized.diagnostics,
-          ...usageDiagnostics,
-        },
-      };
-    } catch (error) {
-      this.logger.warn(
-        `Smart Picks AI plan failed: ${
-          error instanceof Error ? error.message : 'unknown error'
-        }`,
-      );
+    if (!response.ok) {
       return {
         plan: null,
         diagnostics: {
           ...basePlanDiagnostics(),
+          ...buildAiUsageDiagnostics(response.usage, model),
           providerFailed: true,
           missingPlan: true,
         },
       };
     }
+
+    const usageDiagnostics = buildAiUsageDiagnostics(
+      response.payload.usage,
+      model,
+    );
+    const sanitized = sanitizeSmartPicksPlan(context, response.parsed);
+    return {
+      ...sanitized,
+      diagnostics: {
+        ...sanitized.diagnostics,
+        ...usageDiagnostics,
+      },
+    };
   }
 
   async assessStarterTreatment(
@@ -340,76 +344,44 @@ export class SmartPicksAiGenerator {
     }
 
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
-    const model =
-      readFeatureOpenAiModel(
-        this.configService,
-        SMART_PICKS_AI_MODEL_ENV_KEY,
-        'gpt-4.1-mini',
-      ) ?? 'gpt-4.1-mini';
+    const model = this.getModel();
     if (!apiKey || !model) {
       return null;
     }
 
-    try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          store: false,
-          input: [
-            {
-              role: 'system',
-              content: [
-                {
-                  type: 'input_text',
-                  text: STARTER_TREATMENT_SYSTEM_PROMPT,
-                },
-              ],
-            },
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: buildStarterTreatmentPrompt(context),
-                },
-              ],
-            },
-          ],
-          max_output_tokens: 650,
-          ...openAiRepeatabilityRequestOptions(model),
-          text: {
-            verbosity: 'low',
-            format: STARTER_TREATMENT_RESPONSE_FORMAT,
+    const response =
+      await this.requestStructuredJson<RawStarterTreatmentAssessment>({
+        apiKey,
+        model,
+        operation: 'starter treatment',
+        input: [
+          {
+            role: 'system',
+            content: [
+              {
+                type: 'input_text',
+                text: STARTER_TREATMENT_SYSTEM_PROMPT,
+              },
+            ],
           },
-        }),
-        signal: AbortSignal.timeout(SMART_PICKS_AI_TIMEOUT_MS),
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: buildStarterTreatmentPrompt(context),
+              },
+            ],
+          },
+        ],
+        maxOutputTokens: SMART_PICKS_AI_STARTER_TREATMENT_MAX_OUTPUT_TOKENS,
+        responseFormat: STARTER_TREATMENT_RESPONSE_FORMAT,
       });
-      if (!response.ok) {
-        throw new Error(
-          await openAiErrorMessage(response, 'starter treatment'),
-        );
-      }
-
-      const payload = (await response.json()) as {
-        output?: { content?: { type: string; text?: string }[] }[];
-      };
-      const rawText = extractOutputText(payload);
-      if (!rawText) return null;
-      const parsed = JSON.parse(rawText) as RawStarterTreatmentAssessment;
-      return sanitizeStarterTreatmentAssessment(context, parsed);
-    } catch (error) {
-      this.logger.warn(
-        `Smart Picks starter treatment assessment failed: ${
-          error instanceof Error ? error.message : 'unknown error'
-        }`,
-      );
+    if (!response.ok) {
       return null;
     }
+
+    return sanitizeStarterTreatmentAssessment(context, response.parsed);
   }
 
   async generate(
@@ -437,12 +409,7 @@ export class SmartPicksAiGenerator {
     }
 
     const apiKey = this.configService.get<string>('OPENAI_API_KEY')?.trim();
-    const model =
-      readFeatureOpenAiModel(
-        this.configService,
-        SMART_PICKS_AI_MODEL_ENV_KEY,
-        'gpt-4.1-mini',
-      ) ?? 'gpt-4.1-mini';
+    const model = this.getModel();
     if (!apiKey || !model) {
       return emptyGenerationResult(
         gaps.length,
@@ -450,66 +417,39 @@ export class SmartPicksAiGenerator {
       );
     }
 
-    try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
+    const response = await this.requestStructuredJson<RawSmartPickResponse>({
+      apiKey,
+      model,
+      operation: 'product picks',
+      input: [
+        {
+          role: 'system',
+          content: [{ type: 'input_text', text: SYSTEM_PROMPT }],
         },
-        body: JSON.stringify({
-          model,
-          store: false,
-          input: [
+        {
+          role: 'user',
+          content: [
             {
-              role: 'system',
-              content: [{ type: 'input_text', text: SYSTEM_PROMPT }],
-            },
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'input_text',
-                  text: buildPrompt(context, gaps),
-                },
-              ],
+              type: 'input_text',
+              text: buildPrompt(context, gaps),
             },
           ],
-          max_output_tokens: SMART_PICKS_AI_MAX_OUTPUT_TOKENS,
-          ...openAiRepeatabilityRequestOptions(model),
-          text: {
-            verbosity: 'low',
-            format: RESPONSE_FORMAT,
-          },
-        }),
-        signal: AbortSignal.timeout(SMART_PICKS_AI_TIMEOUT_MS),
-      });
-      if (!response.ok) {
-        throw new Error(await openAiErrorMessage(response, 'product picks'));
-      }
-
-      const payload = (await response.json()) as OpenAiResponsePayload;
-      const usageDiagnostics = buildAiUsageDiagnostics(payload.usage, model);
-      const rawText = extractOutputText(payload);
-      if (!rawText) {
-        return withGenerationUsageDiagnostics(
-          failedGenerationResult(gaps.length),
-          usageDiagnostics,
-        );
-      }
-      const parsed = JSON.parse(rawText) as RawSmartPickResponse;
+        },
+      ],
+      maxOutputTokens: SMART_PICKS_AI_PRODUCT_PICK_MAX_OUTPUT_TOKENS,
+      responseFormat: RESPONSE_FORMAT,
+    });
+    if (!response.ok) {
       return withGenerationUsageDiagnostics(
-        sanitizeGeneratedPicks(context, gaps, parsed),
-        usageDiagnostics,
+        failedGenerationResult(gaps.length),
+        buildAiUsageDiagnostics(response.usage, model),
       );
-    } catch (error) {
-      this.logger.warn(
-        `Smart Picks AI generation failed: ${
-          error instanceof Error ? error.message : 'unknown error'
-        }`,
-      );
-      return failedGenerationResult(gaps.length);
     }
+
+    return withGenerationUsageDiagnostics(
+      sanitizeGeneratedPicks(context, gaps, response.parsed),
+      buildAiUsageDiagnostics(response.payload.usage, model),
+    );
   }
 
   private async isAiGenerationDisabled(): Promise<boolean> {
@@ -517,6 +457,125 @@ export class SmartPicksAiGenerator {
       await this.platformRestrictions?.isCapabilityDisabled(
         PlatformGlobalRestrictionCapability.DisableAiGeneration,
       ),
+    );
+  }
+
+  private async requestStructuredJson<T>(options: {
+    apiKey: string;
+    model: string;
+    operation: string;
+    input: unknown;
+    maxOutputTokens: number;
+    responseFormat: unknown;
+  }): Promise<SmartPicksOpenAiJsonResult<T>> {
+    let lastReason = 'unknown error';
+    let lastUsage: OpenAiUsagePayload | undefined;
+    for (
+      let attempt = 1;
+      attempt <= SMART_PICKS_AI_STRUCTURED_OUTPUT_ATTEMPTS;
+      attempt += 1
+    ) {
+      const response = await this.requestOutputTextOnce(options);
+      if (!response.ok) {
+        lastReason = response.reason;
+        if (
+          attempt < SMART_PICKS_AI_STRUCTURED_OUTPUT_ATTEMPTS &&
+          response.retryable
+        ) {
+          continue;
+        }
+        break;
+      }
+
+      lastUsage = response.payload.usage;
+      if (!response.outputText) {
+        lastReason = 'empty output';
+        if (attempt < SMART_PICKS_AI_STRUCTURED_OUTPUT_ATTEMPTS) {
+          continue;
+        }
+        break;
+      }
+
+      try {
+        return {
+          ok: true,
+          parsed: JSON.parse(response.outputText) as T,
+          payload: response.payload,
+        };
+      } catch (error) {
+        lastReason =
+          error instanceof Error ? error.message : 'invalid JSON output';
+        if (attempt < SMART_PICKS_AI_STRUCTURED_OUTPUT_ATTEMPTS) {
+          continue;
+        }
+        break;
+      }
+    }
+
+    this.logger.warn(
+      `Smart Picks AI ${options.operation} failed: ${lastReason}`,
+    );
+    return { ok: false, reason: lastReason, usage: lastUsage };
+  }
+
+  private async requestOutputTextOnce(options: {
+    apiKey: string;
+    model: string;
+    operation: string;
+    input: unknown;
+    maxOutputTokens: number;
+    responseFormat: unknown;
+  }): Promise<SmartPicksOpenAiRawResponseResult> {
+    try {
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: options.model,
+          store: false,
+          input: options.input,
+          max_output_tokens: options.maxOutputTokens,
+          ...openAiRepeatabilityRequestOptions(options.model),
+          text: {
+            verbosity: 'low',
+            format: options.responseFormat,
+          },
+        }),
+        signal: AbortSignal.timeout(SMART_PICKS_AI_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        return {
+          ok: false,
+          reason: await openAiErrorMessage(response, options.operation),
+          retryable: isRetryableOpenAiStatus(response.status),
+        };
+      }
+
+      const payload = (await response.json()) as OpenAiResponsePayload;
+      return {
+        ok: true,
+        outputText: extractOutputText(payload),
+        payload,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : 'unknown error',
+        retryable: !isOpenAiTimeoutError(error),
+      };
+    }
+  }
+
+  private getModel(): string {
+    return (
+      readFeatureOpenAiModel(
+        this.configService,
+        SMART_PICKS_AI_MODEL_ENV_KEY,
+        SMART_PICKS_AI_DEFAULT_MODEL,
+      ) ?? SMART_PICKS_AI_DEFAULT_MODEL
     );
   }
 }
@@ -860,8 +919,9 @@ function buildPlanPrompt(context: SmartPicksContext): string {
     `Safety and preferences: ${JSON.stringify(buildSafetyAndPreferenceSummary(context))}`,
     `Active shelf products that may fill coverage:\n${context.activeProducts.map(formatProductWithId).join('\n') || '(none)'}`,
     `All shelf products to avoid recommending again:\n${context.allProducts.map(formatProductWithId).join('\n') || '(none)'}`,
+    `Skin Journal analysis summary:\n${formatSkinJournalSummary(context)}`,
     `Product performance summary:\n${formatProductPerformance(context)}`,
-    'Photo and journal trends are already summarized above. Use them to decide whether a replacement gap is justified, but do not imply clinical proof.',
+    'Photo and journal analysis trends are summarized above. Use them for goal, safety, and replacement decisions, but do not imply clinical proof.',
     `Allowed coverage roles: ${SMART_PICKS_COVERAGE_ROLES.join(', ')}.`,
     'Coverage instructions: choose only roles needed for this user goal and shelf. Do not force every user into the same number of slots. Mark filled only when one active shelf product id clearly fills the role. Use missing-priority for essential missing roles, missing for optional/supportive roles.',
     'Do not add generic hydration, eye, or nice-to-have coverage just to fill space. Optional coverage should still support the stated goal, history signal, safety need, climate need, or routine tolerance.',
@@ -894,6 +954,7 @@ function buildPrompt(
     `Skin profile: type=${profile?.skin_type ?? '?'}, tone=${profile?.skin_tone ?? '?'}, ethnicity=${profile?.ethnicity ?? '?'}, primaryGoal=${profile?.primary_goal ?? '?'}, concerns=${(profile?.current_concerns ?? []).join(', ') || 'none'}.`,
     `Safety and preferences: ${JSON.stringify(buildSafetyAndPreferenceSummary(context))}`,
     `Shelf products to avoid recommending again:\n${context.allProducts.map(formatProduct).join('\n') || '(none)'}`,
+    `Skin Journal analysis summary:\n${formatSkinJournalSummary(context)}`,
     `Product performance summary:\n${formatProductPerformance(context)}`,
     `Gaps needing product picks:\n${gaps.map((gap) => `- key=${gap.normalizedKey}; kind=${gap.gapKind}; priority=${gap.priority}; category=${gap.ingredientOrCategory}; reason=${gap.reason}; replacementFor=${gap.replacementFor ? `${gap.replacementFor.productName}; usageDaysLast90=${gap.replacementFor.usageDaysLast90}; photoCheckpoints=${gap.replacementFor.photoCheckpoints}; photoInputImages=${gap.replacementFor.photoInputImages ?? gap.replacementFor.photoCheckpoints}; multiAnglePhotoCheckpoints=${gap.replacementFor.multiAnglePhotoCheckpoints ?? 0}; reactionSignalCount=${gap.replacementFor.reactionSignalCount}` : 'none'}; sourceIds=${gap.sourceIds.join(',')}`).join('\n')}`,
     'Return one concrete product pick for every listed gap, including priority=consider gaps. The only difference is where Ritora displays the card.',
@@ -933,6 +994,7 @@ function buildStarterTreatmentPrompt(context: SmartPicksContext): string {
     })}`,
     `Safety and preferences: ${JSON.stringify(buildSafetyAndPreferenceSummary(context))}`,
     `Current shelf:\n${context.activeProducts.map(formatProduct).join('\n') || '(none)'}`,
+    `Skin Journal analysis summary:\n${formatSkinJournalSummary(context)}`,
     `Product performance summary:\n${formatProductPerformance(context)}`,
     'Return shouldRecommend=false when cleanser, moisturizer, and sunscreen should come first without a treatment product.',
     'Return shouldRecommend=true only for one low-risk treatment category clearly tied to the stated goal or concern.',
@@ -982,6 +1044,30 @@ function formatProductPerformance(context: SmartPicksContext): string {
         `- product=${summary.brand} ${summary.productName}; category=${summary.category ?? 'unknown'}; adherence=${summary.adherence}; goalTrend=${summary.goalTrend}; concernTrend=${summary.concernTrend ?? 'unknown'}; usageDaysLast30=${summary.usageDaysLast30}; usageDaysLast90=${summary.usageDaysLast90}; photoCheckpoints=${summary.photoCheckpoints}; photoInputImages=${summary.photoInputImages ?? summary.photoCheckpoints}; multiAnglePhotoCheckpoints=${summary.multiAnglePhotoCheckpoints ?? 0}; reactionSignalCount=${summary.reactionSignalCount}; replacementCandidate=${summary.replacementCandidate}; reason=${summary.replacementReason ?? 'none'}`,
     )
     .join('\n');
+}
+
+function formatSkinJournalSummary(context: SmartPicksContext): string {
+  const summary = context.skinJournalSummary;
+  if (!summary || summary.entryCountLast90 === 0) {
+    return '(no completed journal analysis in the recent window)';
+  }
+
+  return JSON.stringify({
+    entryCountLast90: summary.entryCountLast90,
+    usableAnalysisEntryCount: summary.usableAnalysisEntryCount,
+    latestEntryDate: summary.latestEntryDate,
+    latestSummary: summary.latestSummary,
+    overallChangeFromPrevious: summary.overallChangeFromPrevious,
+    trendSignal: summary.trendSignal,
+    concernTrend: summary.concernTrend,
+    photoCheckpoints: summary.photoCheckpoints,
+    photoInputImages: summary.photoInputImages,
+    multiAnglePhotoCheckpoints: summary.multiAnglePhotoCheckpoints,
+    topConcerns: summary.topConcerns,
+    reactionSignalCount: summary.reactionSignalCount,
+    barrierCompromiseCount: summary.barrierCompromiseCount,
+    doctorFollowUpRecommended: summary.doctorFollowUpRecommended,
+  });
 }
 
 function extractOutputText(payload: {
@@ -1070,14 +1156,26 @@ function sanitizeSmartPicksPlan(
     };
   }
 
+  const coverageWithShelfRoles = applyActiveShelfCoverageGuardrails(
+    context,
+    coverageResult.slots,
+  );
   const guardedGaps = applyMinimumConsiderGapGuardrails(
     context,
-    applyReplacementGapGuardrails(
+    applyMaintenanceNoBuyGapGuardrails(
       context,
-      applyCoveredShelfGapGuardrails(
+      coverageWithShelfRoles,
+      applyReplacementGapGuardrails(
         context,
-        coverageResult.slots,
-        applyStarterBasicGapGuardrails(context, coverageResult.slots, gaps),
+        applyCoveredShelfGapGuardrails(
+          context,
+          coverageWithShelfRoles,
+          applyStarterBasicGapGuardrails(
+            context,
+            coverageWithShelfRoles,
+            gaps,
+          ),
+        ),
       ),
     ),
   );
@@ -1088,10 +1186,14 @@ function sanitizeSmartPicksPlan(
   const considerGaps = guardedGaps
     .filter((gap) => gap.priority === 'consider')
     .slice(0, aiConsiderGapLimit(context));
-  const finalCoverageSlots = applyGapCoverageGuardrails(coverageResult.slots, [
-    ...priorityGaps,
-    ...considerGaps,
-  ]);
+  const finalCoverageSlots = applyGapCoverageGuardrails(
+    applyMaintenanceNoBuyCoverageGuardrails(
+      context,
+      coverageWithShelfRoles,
+      [...priorityGaps, ...considerGaps],
+    ),
+    [...priorityGaps, ...considerGaps],
+  );
   diagnostics.acceptedCoverageSlotCount = finalCoverageSlots.length;
   diagnostics.acceptedPriorityGapCount = priorityGaps.length;
   diagnostics.acceptedConsiderGapCount = considerGaps.length;
@@ -1137,6 +1239,133 @@ function applyGapCoverageGuardrails(
     : coverageSlots;
 }
 
+function applyActiveShelfCoverageGuardrails(
+  context: SmartPicksContext,
+  coverageSlots: SmartPicksCoverageSlot[],
+): SmartPicksCoverageSlot[] {
+  if (context.mode !== 'refine') return coverageSlots;
+  const productByRole = new Map<SmartPicksCoverageRole, InventoryProduct>();
+  for (const product of context.activeProducts) {
+    for (const role of inferCoverageRolesFromProduct(product)) {
+      if (!productByRole.has(role)) productByRole.set(role, product);
+    }
+  }
+  const updatedSlots = coverageSlots.map((slot) => {
+    if (slot.state === 'filled') return slot;
+    const product = productByRole.get(slot.role);
+    if (!product) return slot;
+    return {
+      ...slot,
+      state: 'filled' as const,
+      filledByProductId: product.id,
+      filledByName: `${product.brand} ${product.name}`,
+    };
+  });
+  const seenRoles = new Set(updatedSlots.map((slot) => slot.role));
+  const additions: SmartPicksCoverageSlot[] = [];
+  for (const product of context.activeProducts) {
+    for (const role of inferCoverageRolesFromProduct(product)) {
+      if (seenRoles.has(role)) continue;
+      seenRoles.add(role);
+      additions.push({
+        role,
+        state: 'filled',
+        filledByProductId: product.id,
+        filledByName: `${product.brand} ${product.name}`,
+        goalRelevance: isCoreCoverageRole(role) ? 'essential' : 'supportive',
+      });
+      if (coverageSlots.length + additions.length >= 10) break;
+    }
+    if (coverageSlots.length + additions.length >= 10) break;
+  }
+  return additions.length > 0
+    ? [...updatedSlots, ...additions]
+    : updatedSlots;
+}
+
+function inferCoverageRolesFromProduct(
+  product: InventoryProduct,
+): SmartPicksCoverageRole[] {
+  const text = [
+    product.category ?? '',
+    product.brand,
+    product.name,
+    ...(product.identity?.inciIngredients ?? []),
+    ...(product.identity?.benefits ?? []),
+  ]
+    .join(' ')
+    .toLowerCase();
+  const roles: SmartPicksCoverageRole[] = [];
+  const add = (role: SmartPicksCoverageRole) => {
+    if (!roles.includes(role)) roles.push(role);
+  };
+
+  if (/\b(cleanser|cleansing|cleanse|face wash|gel wash)\b/.test(text)) {
+    add('cleanse');
+  }
+  if (/\b(sun-protection|spf|sunscreen|sun protection)\b/.test(text)) {
+    add('spf');
+  }
+  if (/\b(moisturi[sz]er|moisturi[sz]e|cream|lotion|emulsion)\b/.test(text)) {
+    add('moisturise');
+  }
+  if (/\b(vitamin c|ascorbic|ascorbyl|antioxidant)\b/.test(text)) {
+    add('antioxidant');
+  }
+  if (/\b(peptide|matrixyl|argireline)\b/.test(text)) add('peptide');
+  if (/\b(retinol|retinal|retinoid|adapalene|tretinoin)\b/.test(text)) {
+    add('retinoid');
+  }
+  if (
+    /\b(aha|bha|pha|glycolic|lactic|mandelic|salicylic|exfoliant|exfoliating|peel|resurfacing)\b/.test(
+      text,
+    )
+  ) {
+    add('texture-exfoliant');
+  }
+  if (
+    /\b(acne|breakout|blemish|benzoyl peroxide|spot treatment|salicylic|bha)\b/.test(
+      text,
+    )
+  ) {
+    add('acne-treatment');
+  }
+  if (
+    /\b(dark spot|dark mark|hyperpigmentation|melasma|pigment|brighten|brightening|discoloration|discolouration|tranexamic|kojic|alpha arbutin|arbutin|azelaic)\b/.test(
+      text,
+    )
+  ) {
+    add('dark-spot-treatment');
+  }
+  if (
+    /\b(hydrat|hyaluronic|humectant|glycerin|beta glucan|urea)\b/.test(text)
+  ) {
+    add('hydrate');
+  }
+  if (
+    /\b(barrier|niacinamide|panthenol|centella|ceramide|cica|squalane)\b/.test(
+      text,
+    )
+  ) {
+    add('barrier-support');
+  }
+  if (/\b(clay|kaolin|bentonite|sulfur|congestion mask)\b/.test(text)) {
+    add('congestion-mask');
+  }
+  if (/\b(mask|sleeping mask|overnight mask|balm)\b/.test(text)) {
+    add(
+      /\b(recovery|sleeping|overnight|cica|barrier|balm)\b/.test(text)
+        ? 'recovery-mask'
+        : 'exfoliation-mask',
+    );
+  }
+  return roles;
+}
+
+function isCoreCoverageRole(role: SmartPicksCoverageRole): boolean {
+  return role === 'cleanse' || role === 'moisturise' || role === 'spf';
+}
+
 function inferCoverageRoleFromGap(
   gap: SmartPicksGapSnapshot,
 ): SmartPicksCoverageRole | null {
@@ -1168,7 +1397,7 @@ function inferCoverageRoleFromGap(
       : 'exfoliation-mask';
   }
   if (
-    /\b(dark spot|dark mark|hyperpigmentation|melasma|pigment|tranexamic|kojic|alpha arbutin|arbutin)\b/.test(
+    /\b(dark spot|dark mark|hyperpigmentation|melasma|pigment|brighten|brightening|discoloration|discolouration|tranexamic|kojic|alpha arbutin|arbutin)\b/.test(
       text,
     )
   ) {
@@ -1269,6 +1498,18 @@ function requiredConsiderGapGuardrailCandidates(
     .join(' ')
     .toLowerCase();
   const hasFineLineGoal = /fine line|wrinkle|firm|aging|ageing/.test(goalText);
+  const hasReactiveBarrierGoal =
+    /\b(redness|sensitive|sensitivity|barrier|irritat|reactive|stinging|burning)\b/.test(
+      goalText,
+    );
+  const hasIrritationHistory = context.productPerformance.some(
+    (summary) =>
+      summary.goalTrend === SmartPicksProductPerformanceSignal.IrritationSignal ||
+      summary.reactionSignalCount > 0 ||
+      /irrit|redness|reaction|stinging|burning/.test(
+        `${summary.concernTrend ?? ''} ${summary.replacementReason ?? ''}`.toLowerCase(),
+      ),
+  );
   const lacksPeptideSupport = !hasConsiderGapMatching(
     gaps,
     /\b(peptide|barrier|ceramide|panthenol|glycerin|squalane)\b/,
@@ -1290,6 +1531,42 @@ function requiredConsiderGapGuardrailCandidates(
           SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
           SuggestionEvidenceSourceId.AadMelasmaTreatment,
         ],
+      ),
+    );
+  }
+  if (
+    (context.budgetTier === 'premium' || context.budgetTier === 'luxury') &&
+    /dark|mark|hyperpigment|pigment|melasma|uneven tone|tone/.test(goalText) &&
+    /\b(texture|rough|dull|smooth|bumpy)\b/.test(goalText) &&
+    !hasConsiderGapMatching(
+      gaps,
+      /\b(mask|peel|exfoliation|exfoliant|resurfacing)\b/,
+    )
+  ) {
+    candidates.push(
+      considerCandidate(
+        'Gentle resurfacing mask or peel',
+        'A low-frequency resurfacing support may help texture and dullness if the current pigment routine stays calm.',
+        'texture support',
+        [SuggestionEvidenceSourceId.FdaAhaSunSensitivity],
+      ),
+    );
+  }
+  if (
+    context.mode === 'refine' &&
+    hasReactiveBarrierGoal &&
+    hasIrritationHistory &&
+    !hasConsiderGapMatching(
+      gaps,
+      /\b(recovery|balm|mask|oat|colloidal|cica|panthenol)\b/,
+    )
+  ) {
+    candidates.push(
+      considerCandidate(
+        'Recovery mask or balm',
+        'An occasional recovery step can support flare days without adding another strong active.',
+        'redness recovery support',
+        [SuggestionEvidenceSourceId.MayoDrySkinCare],
       ),
     );
   }
@@ -1549,6 +1826,83 @@ function applyCoveredShelfGapGuardrails(
     if (gap.priority === 'consider') return [gap];
     return canKeepOptionalExtras ? [{ ...gap, priority: 'consider' }] : [];
   });
+}
+
+function applyMaintenanceNoBuyGapGuardrails(
+  context: SmartPicksContext,
+  coverageSlots: SmartPicksCoverageSlot[],
+  gaps: SmartPicksGapSnapshot[],
+): SmartPicksGapSnapshot[] {
+  if (!isMaintenanceNoBuyCandidate(context, coverageSlots)) return gaps;
+  return gaps.filter(
+    (gap) =>
+      gap.priority === 'priority' ||
+      gap.gapKind === SmartPicksGapKind.Replacement,
+  );
+}
+
+function applyMaintenanceNoBuyCoverageGuardrails(
+  context: SmartPicksContext,
+  coverageSlots: SmartPicksCoverageSlot[],
+  gaps: SmartPicksGapSnapshot[],
+): SmartPicksCoverageSlot[] {
+  if (!isMaintenanceNoBuyCandidate(context, coverageSlots)) {
+    return coverageSlots;
+  }
+  if (gaps.some((gap) => gap.gapKind !== SmartPicksGapKind.Replacement)) {
+    return coverageSlots;
+  }
+  return coverageSlots.filter((slot) => slot.state === 'filled');
+}
+
+function isMaintenanceNoBuyCandidate(
+  context: SmartPicksContext,
+  coverageSlots: SmartPicksCoverageSlot[],
+): boolean {
+  if (context.mode !== 'refine') return false;
+  if (context.budgetTier === 'premium' || context.budgetTier === 'luxury') {
+    return false;
+  }
+  if (
+    context.productPerformance.some((summary) => summary.replacementCandidate)
+  ) {
+    return false;
+  }
+  const goalText = [
+    context.skinProfile?.primary_goal ?? '',
+    ...(context.skinProfile?.current_concerns ?? []),
+  ]
+    .join(' ')
+    .toLowerCase();
+  if (
+    !/\b(maintain|maintenance|calm clear|clear routine|occasional congestion)\b/.test(
+      goalText,
+    )
+  ) {
+    return false;
+  }
+  const roles = new Set<SmartPicksCoverageRole>(
+    coverageSlots
+      .filter((slot) => slot.state === 'filled')
+      .map((slot) => slot.role),
+  );
+  for (const product of context.activeProducts) {
+    for (const role of inferCoverageRolesFromProduct(product)) {
+      roles.add(role);
+    }
+  }
+  const hasCore =
+    roles.has('cleanse') &&
+    (roles.has('moisturise') ||
+      roles.has('barrier-support') ||
+      roles.has('hydrate')) &&
+    roles.has('spf');
+  const hasTreatment =
+    roles.has('acne-treatment') ||
+    roles.has('texture-exfoliant') ||
+    roles.has('dark-spot-treatment') ||
+    roles.has('retinoid');
+  return hasCore && hasTreatment;
 }
 
 function applyReplacementGapGuardrails(
@@ -1838,17 +2192,13 @@ function sanitizePlanGaps(
       invalidCount += 1;
       continue;
     }
-    const normalizedKey = normalizeSuggestionGapKey(ingredientOrCategory);
-    if (seenKeys.has(normalizedKey)) {
-      invalidCount += 1;
-      continue;
-    }
+    const rawNormalizedKey = normalizeSuggestionGapKey(ingredientOrCategory);
     const combinedText = `${ingredientOrCategory} ${reason} ${
       rawGap.goalAlignment ?? ''
     }`.toLowerCase();
     if (
       ownedKeys.has(productIdentityKey('', ingredientOrCategory)) ||
-      ownedNameKeys.has(normalizedKey)
+      ownedNameKeys.has(rawNormalizedKey)
     ) {
       blockedOwnedCount += 1;
       continue;
@@ -1882,9 +2232,18 @@ function sanitizePlanGaps(
       ? SmartPicksGapKind.Replacement
       : requestedGapKind;
     const sanitizedPriority = replacementFor ? 'priority' : priority;
+    const finalIngredientOrCategory =
+      replacementFor && !/\b(replace|replacement)\b/i.test(ingredientOrCategory)
+        ? `Replacement for ${replacementFor.productName}: ${ingredientOrCategory}`
+        : ingredientOrCategory;
+    const normalizedKey = normalizeSuggestionGapKey(finalIngredientOrCategory);
+    if (seenKeys.has(normalizedKey)) {
+      invalidCount += 1;
+      continue;
+    }
     seenKeys.add(normalizedKey);
     gaps.push({
-      ingredientOrCategory,
+      ingredientOrCategory: finalIngredientOrCategory,
       normalizedKey,
       priority: sanitizedPriority,
       reason,

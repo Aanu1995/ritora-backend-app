@@ -65,6 +65,31 @@ export interface SmartPicksProductPerformanceSummary {
   replacementReason: string | null;
 }
 
+export interface SmartPicksSkinJournalConcernSignal {
+  concern: string;
+  severity: 'mild' | 'moderate' | 'severe';
+  confidence: number;
+  changeFromPrevious: string | null;
+  locations: string[];
+}
+
+export interface SmartPicksSkinJournalSummary {
+  entryCountLast90: number;
+  usableAnalysisEntryCount: number;
+  latestEntryDate: string | null;
+  latestSummary: string | null;
+  overallChangeFromPrevious: string | null;
+  trendSignal: SmartPicksProductPerformanceSignal;
+  concernTrend: string | null;
+  photoCheckpoints: number;
+  photoInputImages: number;
+  multiAnglePhotoCheckpoints: number;
+  topConcerns: SmartPicksSkinJournalConcernSignal[];
+  reactionSignalCount: number;
+  barrierCompromiseCount: number;
+  doctorFollowUpRecommended: boolean;
+}
+
 export const SmartPicksEmptyReason = {
   ProfileRequired: 'profile_required',
   ConsentRequired: 'consent_required',

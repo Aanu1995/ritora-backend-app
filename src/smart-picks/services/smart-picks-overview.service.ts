@@ -84,7 +84,7 @@ import { SmartPicksRedundancyService } from './smart-picks-redundancy.service';
 const DISMISSAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 const MIN_REPLACEMENT_USAGE_DAYS = 20;
 const MIN_REPLACEMENT_PHOTO_CHECKPOINTS = 2;
-const SMART_PICKS_AI_GAP_BATCH_SIZE = 2;
+const SMART_PICKS_AI_GAP_BATCH_SIZE = 1;
 const PRODUCT_GENERATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 type StarterTreatmentDecision = {
   ingredientOrCategory: string;

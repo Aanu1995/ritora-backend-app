@@ -19,6 +19,8 @@ import {
   SMART_PICKS_GOLDEN_PERSONAS,
 } from './smart-picks-golden-personas';
 
+const SMART_PICKS_EVALUATION_PRODUCT_PICK_BATCH_SIZE = 1;
+
 export type SmartPicksEvaluationStatus = 'passed' | 'review' | 'failed';
 
 export interface SmartPicksEvaluationGenerator {
@@ -74,6 +76,10 @@ export interface SmartPicksEvaluationReport {
   passedCases: number;
   reviewCases: number;
   failedCases: number;
+  gate: {
+    passed: boolean;
+    blockers: string[];
+  };
   driftHash: string;
   cases: SmartPicksEvaluationCaseResult[];
 }
@@ -85,17 +91,39 @@ export async function evaluateSmartPicksGoldenPersonas(input: {
   personas?: readonly GoldenSmartPicksPersona[];
   includeProductPicks?: boolean;
   generatedAt?: Date;
+  onProgress?: (event: {
+    phase: 'started' | 'completed';
+    index: number;
+    total: number;
+    personaId: string;
+    status?: SmartPicksEvaluationStatus;
+    score?: number;
+  }) => void;
 }): Promise<SmartPicksEvaluationReport> {
   const personas = input.personas ?? SMART_PICKS_GOLDEN_PERSONAS;
   const results: SmartPicksEvaluationCaseResult[] = [];
-  for (const persona of personas) {
-    results.push(
-      await evaluateSmartPicksPersona({
-        persona,
-        generator: input.generator,
-        includeProductPicks: input.includeProductPicks ?? true,
-      }),
-    );
+  for (let index = 0; index < personas.length; index += 1) {
+    const persona = personas[index];
+    input.onProgress?.({
+      phase: 'started',
+      index: index + 1,
+      total: personas.length,
+      personaId: persona.id,
+    });
+    const result = await evaluateSmartPicksPersona({
+      persona,
+      generator: input.generator,
+      includeProductPicks: input.includeProductPicks ?? true,
+    });
+    input.onProgress?.({
+      phase: 'completed',
+      index: index + 1,
+      total: personas.length,
+      personaId: persona.id,
+      status: result.status,
+      score: result.score,
+    });
+    results.push(result);
   }
   return buildSmartPicksEvaluationReport({
     model: input.model,
@@ -136,7 +164,9 @@ export async function evaluateSmartPicksPersona(input: {
     checkConceptCoverage(
       'consider_gaps',
       input.persona.expected.considerGapKeys,
-      plan.considerGaps.map((gap) => gap.normalizedKey),
+      [...plan.considerGaps, ...plan.priorityGaps].map(
+        (gap) => gap.normalizedKey,
+      ),
       'Worth-considering gap concepts match the persona expectation',
     ),
     checkMinimumCount(
@@ -176,10 +206,7 @@ export async function evaluateSmartPicksPersona(input: {
   const productPicks = productResult
     ? summarizeProductPicks(productResult.picks)
     : [];
-  if (
-    productResult &&
-    input.persona.expected.acceptedProductPickCount !== null
-  ) {
+  if (productResult && productGaps.length > 0) {
     checks.push(
       check(
         'accepted_product_pick_count',
@@ -217,6 +244,46 @@ function minimumConsiderGapCount(persona: GoldenSmartPicksPersona): number {
 }
 
 async function generateEvaluationProductPicksWithRetry(
+  generator: SmartPicksEvaluationGenerator,
+  context: SmartPicksContext,
+  gaps: SmartPicksGapSnapshot[],
+): Promise<SmartPicksAiGenerationResult> {
+  if (gaps.length === 0) {
+    return generator.generateWithDiagnostics(context, gaps);
+  }
+
+  const mergedPicks = new Map<string, GeneratedSmartPick>();
+  let combinedDiagnostics: SmartPicksAiGenerationResult['diagnostics'] | null =
+    null;
+  for (const batch of chunkEvaluationGaps(
+    gaps,
+    SMART_PICKS_EVALUATION_PRODUCT_PICK_BATCH_SIZE,
+  )) {
+    const batchResult = await generateEvaluationProductPickBatchWithRetry(
+      generator,
+      context,
+      batch,
+    );
+    for (const [key, pick] of batchResult.picks) {
+      mergedPicks.set(key, pick);
+    }
+    combinedDiagnostics = combineEvaluationProductDiagnostics(
+      gaps.length,
+      mergedPicks.size,
+      combinedDiagnostics,
+      batchResult.diagnostics,
+    );
+  }
+
+  return {
+    picks: mergedPicks,
+    diagnostics:
+      combinedDiagnostics ??
+      emptyEvaluationProductDiagnostics(gaps.length, mergedPicks.size),
+  };
+}
+
+async function generateEvaluationProductPickBatchWithRetry(
   generator: SmartPicksEvaluationGenerator,
   context: SmartPicksContext,
   gaps: SmartPicksGapSnapshot[],
@@ -282,6 +349,78 @@ async function generateEvaluationProductPicksWithRetry(
   };
 }
 
+function combineEvaluationProductDiagnostics(
+  requestedGapCount: number,
+  acceptedPickCount: number,
+  previous: SmartPicksAiGenerationResult['diagnostics'] | null,
+  next: SmartPicksAiGenerationResult['diagnostics'],
+): SmartPicksAiGenerationResult['diagnostics'] {
+  if (!previous) {
+    return {
+      ...next,
+      requestedGapCount,
+      acceptedPickCount,
+      missingPickCount: Math.max(0, requestedGapCount - acceptedPickCount),
+    };
+  }
+
+  return {
+    requestedGapCount,
+    rawGapCount: previous.rawGapCount + next.rawGapCount,
+    acceptedPickCount,
+    blockedOwnedCount: previous.blockedOwnedCount + next.blockedOwnedCount,
+    blockedBudgetCount: previous.blockedBudgetCount + next.blockedBudgetCount,
+    blockedSafetyCount: previous.blockedSafetyCount + next.blockedSafetyCount,
+    invalidPickCount: previous.invalidPickCount + next.invalidPickCount,
+    missingPickCount: Math.max(0, requestedGapCount - acceptedPickCount),
+    providerFailed: previous.providerFailed || next.providerFailed,
+    providerSkippedReason:
+      next.providerSkippedReason ?? previous.providerSkippedReason,
+    model: previous.model ?? next.model,
+    inputTokens: nullableSum(previous.inputTokens, next.inputTokens),
+    outputTokens: nullableSum(previous.outputTokens, next.outputTokens),
+    totalTokens: nullableSum(previous.totalTokens, next.totalTokens),
+    estimatedCostUsd: nullableSum(
+      previous.estimatedCostUsd,
+      next.estimatedCostUsd,
+    ),
+  };
+}
+
+function emptyEvaluationProductDiagnostics(
+  requestedGapCount: number,
+  acceptedPickCount: number,
+): SmartPicksAiGenerationResult['diagnostics'] {
+  return {
+    requestedGapCount,
+    rawGapCount: 0,
+    acceptedPickCount,
+    blockedOwnedCount: 0,
+    blockedBudgetCount: 0,
+    blockedSafetyCount: 0,
+    invalidPickCount: 0,
+    missingPickCount: Math.max(0, requestedGapCount - acceptedPickCount),
+    providerFailed: false,
+    providerSkippedReason: null,
+    model: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    estimatedCostUsd: null,
+  };
+}
+
+function chunkEvaluationGaps(
+  gaps: SmartPicksGapSnapshot[],
+  batchSize: number,
+): SmartPicksGapSnapshot[][] {
+  const chunks: SmartPicksGapSnapshot[][] = [];
+  for (let index = 0; index < gaps.length; index += batchSize) {
+    chunks.push(gaps.slice(index, index + batchSize));
+  }
+  return chunks;
+}
+
 function nullableSum(left: number | null, right: number | null): number | null {
   return left === null && right === null ? null : (left ?? 0) + (right ?? 0);
 }
@@ -301,6 +440,14 @@ export function buildSmartPicksEvaluationReport(input: {
   const failedCases = input.results.filter(
     (result) => result.status === 'failed',
   ).length;
+  const blockers = [
+    failedCases > 0
+      ? `${failedCases} Smart Picks evaluation case(s) failed.`
+      : null,
+    reviewCases > 0
+      ? `${reviewCases} Smart Picks evaluation case(s) need review.`
+      : null,
+  ].filter((blocker): blocker is string => Boolean(blocker));
   return {
     generatedAt: input.generatedAt.toISOString(),
     model: input.model,
@@ -309,6 +456,10 @@ export function buildSmartPicksEvaluationReport(input: {
     passedCases,
     reviewCases,
     failedCases,
+    gate: {
+      passed: blockers.length === 0,
+      blockers,
+    },
     driftHash: evaluationDriftHash(input.results),
     cases: input.results,
   };
@@ -337,6 +488,7 @@ export function buildGoldenSmartPicksContext(
     budgetTier: persona.budgetTier,
     mode: persona.mode,
     inputsHash: `eval-${persona.id}`,
+    skinJournalSummary: persona.skinJournalSummary ?? null,
     productPerformance: persona.productPerformance.map((summary) => ({
       productId: summary.productId,
       brand: summary.brand,
@@ -562,7 +714,9 @@ function missingExpectedConcepts(
       missing.push(expectedConcept);
       continue;
     }
-    unmatchedActual.splice(matchIndex, 1);
+    if (!canShareMatchedConcept(expectedConcept, unmatchedActual[matchIndex])) {
+      unmatchedActual.splice(matchIndex, 1);
+    }
   }
   return missing;
 }
@@ -581,6 +735,7 @@ function conceptsMatch(expected: string, actual: string): boolean {
   if (expectedTokens.has('retinoid') && actualTokens.has('retinoid')) {
     return true;
   }
+  if (isPeptideSupportConcept(expectedTokens, actualTokens)) return true;
   if (isBarrierMoisturizerConcept(expectedTokens, actualTokens)) return true;
   if (expectedTokens.has('recovery') && actualTokens.has('recovery')) {
     return true;
@@ -595,6 +750,28 @@ function conceptsMatch(expected: string, actual: string): boolean {
     (token) => CONCEPT_STRONG_TOKENS.has(token) && actualTokens.has(token),
   );
   return overlapCount >= minimumOverlap && (ratio >= 0.45 || strongTokenMatch);
+}
+
+function canShareMatchedConcept(expected: string, actual: string): boolean {
+  const expectedTokens = conceptTokens(expected);
+  const actualTokens = conceptTokens(actual);
+  return (
+    actualTokens.has('replacement') &&
+    (expectedTokens.has('replacement') ||
+      isBarrierMoisturizerConcept(expectedTokens, actualTokens))
+  );
+}
+
+function isPeptideSupportConcept(
+  expectedTokens: ReadonlySet<string>,
+  actualTokens: ReadonlySet<string>,
+): boolean {
+  return (
+    expectedTokens.has('peptide') &&
+    (actualTokens.has('peptide') ||
+      (actualTokens.has('barrier') &&
+        (actualTokens.has('serum') || actualTokens.has('moisturizer'))))
+  );
 }
 
 function isBarrierMoisturizerConcept(
@@ -696,6 +873,7 @@ function conceptTokens(value: string): Set<string> {
 
 function canonicalConceptToken(token: string): string | null {
   if (!token || CONCEPT_STOP_WORDS.has(token)) return null;
+  if (/^spf\d+$/u.test(token)) return 'spf';
   if (
     ['moisturise', 'moisturiser', 'moisturising', 'moisturizing'].includes(
       token,

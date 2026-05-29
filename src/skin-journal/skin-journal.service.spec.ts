@@ -1012,6 +1012,9 @@ describe('SkinJournalService', () => {
         }),
       }),
     );
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('allows partial check-in edits only when the stored entry is already complete', async () => {

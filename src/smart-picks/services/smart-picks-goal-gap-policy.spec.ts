@@ -439,6 +439,7 @@ function context(
     budgetTier: 'mid',
     mode: 'refine',
     inputsHash: 'hash-1',
+    skinJournalSummary: null,
     productPerformance: [
       {
         productId: 'owned-1',

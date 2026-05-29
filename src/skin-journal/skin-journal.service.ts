@@ -1228,6 +1228,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       entry.analysis_observations,
     );
     const saved = await this.entries.save(entry);
+    this.scheduleSmartPicksPreparation(userId);
     return this.buildEntryResponse(
       saved,
       await this.loadEntryPhotoRows(userId, saved.id),
