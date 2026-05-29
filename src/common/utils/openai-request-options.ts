@@ -1,8 +1,11 @@
 export enum OpenAiReasoningEffort {
+  Medium = 'medium',
   High = 'high',
 }
 
-export const OPENAI_REASONING_EFFORT = OpenAiReasoningEffort.High;
+export const OPENAI_REASONING_EFFORT = OpenAiReasoningEffort.Medium;
+export const OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT =
+  OpenAiReasoningEffort.High;
 
 export type OpenAiRepeatabilityRequestOptions = {
   reasoning: {
@@ -18,9 +21,10 @@ const TEMPERATURE_UNSUPPORTED_MODEL_PATTERNS = [
 
 export function openAiRepeatabilityRequestOptions(
   model: string,
+  reasoningEffort = OPENAI_REASONING_EFFORT,
 ): OpenAiRepeatabilityRequestOptions {
   const options: OpenAiRepeatabilityRequestOptions = {
-    reasoning: { effort: OPENAI_REASONING_EFFORT },
+    reasoning: { effort: reasoningEffort },
   };
 
   return supportsOpenAiTemperature(model)

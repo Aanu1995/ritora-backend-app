@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import {
+  OPENAI_REASONING_EFFORT,
+  OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
+  OpenAiReasoningEffort,
+  openAiRepeatabilityRequestOptions,
+} from '../../common/utils/openai-request-options';
 import {
   DEFAULT_LANGUAGE,
   normalizeLanguage,
@@ -192,6 +197,7 @@ export class SuggestionAiGenerator {
         apiKey,
         model,
         prompt,
+        reasoningEffort: suggestionReasoningEffort(inputs),
       });
       if (!outputText) {
         throw new Error('OpenAI returned no usable structured output.');
@@ -335,6 +341,7 @@ export class SuggestionAiGenerator {
     apiKey: string;
     model: string;
     prompt: string;
+    reasoningEffort: OpenAiReasoningEffort;
   }): Promise<{
     outputText: string | null;
     payload: OpenAiResponsePayload;
@@ -363,6 +370,7 @@ export class SuggestionAiGenerator {
     apiKey: string;
     model: string;
     prompt: string;
+    reasoningEffort: OpenAiReasoningEffort;
   }): Promise<OpenAiResponsePayload> {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -384,7 +392,10 @@ export class SuggestionAiGenerator {
           },
         ],
         max_output_tokens: SUGGESTION_AI_MAX_OUTPUT_TOKENS,
-        ...openAiRepeatabilityRequestOptions(input.model),
+        ...openAiRepeatabilityRequestOptions(
+          input.model,
+          input.reasoningEffort,
+        ),
         text: {
           verbosity: 'low',
           format: RESPONSE_FORMAT,
@@ -447,6 +458,14 @@ export class SuggestionAiGenerator {
       },
     };
   }
+}
+
+function suggestionReasoningEffort(
+  inputs: SuggestionGenerationInputs,
+): OpenAiReasoningEffort {
+  return inputs.requestSource === SuggestionRequestSource.Scheduled
+    ? OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT
+    : OPENAI_REASONING_EFFORT;
 }
 
 function buildManualBaselineSteps(

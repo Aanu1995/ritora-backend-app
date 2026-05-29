@@ -1,7 +1,10 @@
 import { createHash } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
+import {
+  OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../../common/utils/openai-request-options';
 import { ProductCategory } from '../../shelf/shelf.types';
 import type { SuggestionProductScore } from '../suggestion-context.types';
 import {
@@ -410,7 +413,10 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
           SUGGESTION_AI_MAX_OUTPUT_TOKENS,
           SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS,
         ),
-        ...openAiRepeatabilityRequestOptions(input.model),
+        ...openAiRepeatabilityRequestOptions(
+          input.model,
+          OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
+        ),
         text: {
           verbosity: 'low',
           format: JUDGE_RESPONSE_FORMAT,

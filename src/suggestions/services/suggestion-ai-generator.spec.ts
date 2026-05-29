@@ -1,4 +1,8 @@
 import { ConfigService } from '@nestjs/config';
+import {
+  OPENAI_REASONING_EFFORT,
+  OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
+} from '../../common/utils/openai-request-options';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
@@ -87,7 +91,68 @@ describe('SuggestionAiGenerator', () => {
       expect.objectContaining({
         model: 'gpt-4.1-mini',
         store: false,
+        reasoning: { effort: OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT },
         temperature: 0,
+      }),
+    );
+  });
+
+  it('uses medium reasoning for on-demand quick suggestions', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Quick answer',
+                    body: ['Use a light shelf step now.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Noon);
+    inputs.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.requestContext = {
+      intent: 'quick_refresh',
+      intensity: 'minimal',
+      note: 'Need a quick check.',
+      activityAt: null,
+      requestedAt: '2026-04-29T12:00:00.000Z',
+    };
+    inputs.contextSummary.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.contextSummary.onDemand = inputs.requestContext;
+
+    await generator.generate(inputs);
+
+    const body = JSON.parse(
+      fetchMock.mock.calls[0]?.[1]?.body as string,
+    ) as Record<string, unknown>;
+    expect(body).toEqual(
+      expect.objectContaining({
+        reasoning: { effort: OPENAI_REASONING_EFFORT },
       }),
     );
   });
