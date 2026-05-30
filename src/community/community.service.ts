@@ -42,6 +42,7 @@ import {
   type AdminCommunityReportStatusDto,
   type AdminCommunitySettingsDto,
   type AdminCommunityWarningDto,
+  type CommunityCursorPageQueryDto,
   type CommunityHelpfulnessDto,
   type CommunityListQueryDto,
   type CommunityOutcomeSignalDto,
@@ -104,12 +105,45 @@ import {
 } from './community-privacy';
 
 const DEFAULT_LIMIT = COMMUNITY_DISCOVERY_LIMIT;
+const COMMUNITY_RESULT_SUBMISSION_KIND = 'result' as const;
+const COMMUNITY_PUBLISHED_CONTENT_KIND_VALUES = new Set<string>([
+  CommunityContentType.Review,
+  CommunityContentType.Routine,
+]);
 
-type CommunityListContentKind = 'routine' | 'review';
+type CommunityListContentKind =
+  | 'people-like-me'
+  | 'review'
+  | 'routine'
+  | 'submission';
+
+type CommunityPublishedContentKind =
+  | CommunityContentType.Review
+  | CommunityContentType.Routine;
+
+type CommunitySubmissionContentKind =
+  | CommunityPublishedContentKind
+  | typeof COMMUNITY_RESULT_SUBMISSION_KIND;
 
 type CommunityCursorEntity = {
   id: string;
   updated_at: Date;
+};
+
+type CommunityCombinedCursorEntity = CommunityCursorEntity & {
+  contentKind: CommunitySubmissionContentKind;
+};
+
+type CommunityScoredCursorEntity = CommunityCursorEntity & {
+  contentKind: CommunityPublishedContentKind;
+  matchScore: number;
+};
+
+type CommunityRawCursorRow = {
+  content_kind: string;
+  id: string;
+  match_score?: number | string | null;
+  updated_at: Date | string;
 };
 
 type CommunityListPage<T extends CommunityCursorEntity> = {
@@ -155,8 +189,27 @@ type CommunitySubmissionContentReference = {
 
 type CommunityResultParentContent = {
   id: string;
+  status: CommunityModerationStatus;
   title: string;
   type: CommunityContentType;
+};
+
+type CommunitySubmissionListItem = {
+  id: string;
+  type: CommunityContentType | typeof COMMUNITY_RESULT_SUBMISSION_KIND;
+  title: string;
+  editableText: string | null;
+  status: CommunityModerationStatus;
+  disclosureType: CommunityDisclosureType;
+  safetyFlags: CommunitySafetyFlag[];
+  moderationGuidance: CommunitySubmissionModerationGuidance | null;
+  editableRoutine: unknown;
+  editableReview: unknown;
+  parentContent?: CommunityResultParentContent | null;
+  resultSignal?: CommunityOutcomeSignal | null;
+  authorUserId: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 const GUIDANCE_MODERATION_STATUSES = new Set<CommunityModerationStatus>([
@@ -229,6 +282,152 @@ function communityListPage<T extends CommunityCursorEntity>(
           })
         : null,
   };
+}
+
+function decodeCommunityCombinedCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [updatedAtValue, contentKindValue, idValue] = decoded.tuple;
+  if (
+    typeof updatedAtValue !== 'string' ||
+    typeof contentKindValue !== 'string' ||
+    typeof idValue !== 'string'
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const updatedAt = new Date(updatedAtValue);
+  if (
+    Number.isNaN(updatedAt.getTime()) ||
+    !isCommunitySubmissionContentKind(contentKindValue)
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return { contentKind: contentKindValue, id: idValue, updatedAt };
+}
+
+function decodeCommunityScoredCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [scoreValue, updatedAtValue, contentKindValue, idValue] = decoded.tuple;
+  if (
+    typeof scoreValue !== 'number' ||
+    typeof updatedAtValue !== 'string' ||
+    typeof contentKindValue !== 'string' ||
+    typeof idValue !== 'string'
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const updatedAt = new Date(updatedAtValue);
+  if (
+    Number.isNaN(updatedAt.getTime()) ||
+    !isCommunityPublishedContentKind(contentKindValue)
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return {
+    contentKind: contentKindValue,
+    id: idValue,
+    matchScore: scoreValue,
+    updatedAt,
+  };
+}
+
+function communityCombinedCursorTuple(
+  item: CommunityCombinedCursorEntity,
+): [string, string, string] {
+  return [item.updated_at.toISOString(), item.contentKind, item.id];
+}
+
+function communityScoredCursorTuple(
+  item: CommunityScoredCursorEntity,
+): [number, string, string, string] {
+  return [
+    item.matchScore,
+    item.updated_at.toISOString(),
+    item.contentKind,
+    item.id,
+  ];
+}
+
+function communityCombinedListPage<T extends CommunityCombinedCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+): CommunityListPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityCombinedCursorTuple(lastRow),
+          })
+        : null,
+  };
+}
+
+function communityScoredListPage<T extends CommunityScoredCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+): CommunityListPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityScoredCursorTuple(lastRow),
+          })
+        : null,
+  };
+}
+
+function isCommunityPublishedContentKind(
+  value: string,
+): value is CommunityPublishedContentKind {
+  return COMMUNITY_PUBLISHED_CONTENT_KIND_VALUES.has(value);
+}
+
+function isCommunitySubmissionContentKind(
+  value: string,
+): value is CommunitySubmissionContentKind {
+  return (
+    isCommunityPublishedContentKind(value) ||
+    value === COMMUNITY_RESULT_SUBMISSION_KIND
+  );
+}
+
+function parseCursorRowDate(value: Date | string): Date {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException('Invalid cursor row');
+  }
+  return date;
+}
+
+function parseCursorRowScore(
+  value: number | string | null | undefined,
+): number {
+  const score = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(score)) {
+    throw new BadRequestException('Invalid cursor row');
+  }
+  return score;
 }
 
 function cleanQueryString(
@@ -328,6 +527,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function communityContentKey(
   type: CommunityContentType,
+  contentId: string,
+): string {
+  return `${type}:${contentId}`;
+}
+
+function submissionCursorKey(
+  type: CommunitySubmissionContentKind,
   contentId: string,
 ): string {
   return `${type}:${contentId}`;
@@ -736,18 +942,256 @@ export class CommunityService {
     return this.getPostingEligibility(userId);
   }
 
-  async getPeopleLikeMe(userId: string) {
-    const [facets, routines, reviews] = await Promise.all([
-      this.getSafeFacets(userId),
-      this.listRoutines(userId, { limit: DEFAULT_LIMIT }),
-      this.listReviews(userId, { limit: DEFAULT_LIMIT }),
+  async getPeopleLikeMe(
+    userId: string,
+    query: Partial<CommunityCursorPageQueryDto> = {},
+  ) {
+    const facets = await this.getSafeFacets(userId);
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(
+      userId,
+      'people-like-me',
+      limit,
+    );
+    const page = communityScoredListPage(
+      await this.findPeopleLikeMeCursorRows(
+        facets,
+        query.cursor,
+        limit,
+        fingerprint,
+      ),
+      limit,
+      fingerprint,
+    );
+    const [routineMap, reviewMap] = await Promise.all([
+      this.loadRoutinesById(
+        page.rows
+          .filter((row) => row.contentKind === CommunityContentType.Routine)
+          .map((row) => row.id),
+      ),
+      this.loadReviewsById(
+        page.rows
+          .filter((row) => row.contentKind === CommunityContentType.Review)
+          .map((row) => row.id),
+      ),
     ]);
+    const [stepsByRoutine, contextByReview] = await Promise.all([
+      this.loadSteps(Array.from(routineMap.keys())),
+      this.loadReviewContext(Array.from(reviewMap.keys())),
+    ]);
+    const items = page.rows
+      .map((row) => {
+        if (row.contentKind === CommunityContentType.Routine) {
+          const routine = routineMap.get(row.id);
+          return routine
+            ? this.toRoutineResponse(
+                routine,
+                stepsByRoutine.get(row.id) ?? [],
+                facets,
+                userId,
+              )
+            : null;
+        }
+
+        const review = reviewMap.get(row.id);
+        return review
+          ? this.toReviewResponse(
+              review,
+              contextByReview.get(row.id) ?? [],
+              facets,
+              userId,
+            )
+          : null;
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
     return {
       profileFacets: facets,
-      items: [...routines.items, ...reviews.items]
-        .sort((a, b) => b.matchScore - a.matchScore)
-        .slice(0, DEFAULT_LIMIT),
+      items,
+      nextCursor: page.nextCursor,
     };
+  }
+
+  private async findPeopleLikeMeCursorRows(
+    facets: CommunitySafeProfileFacets,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityScoredCursorEntity[]> {
+    const params: unknown[] = [];
+    const addParam = (value: unknown) => {
+      params.push(value);
+      return `$${params.length}`;
+    };
+    const statusParam = addParam(CommunityModerationStatus.Published);
+    const skinTypeParam = addParam(facets.skinType);
+    const sensitivityParam = addParam(facets.sensitivityLevel);
+    const skinToneParam = addParam(facets.skinToneRange);
+    const climateParam = addParam(facets.climateBucket);
+    const routinePaceParam = addParam(facets.routinePace);
+    const concernTagsParam = addParam(facets.concernTags);
+    const ordinaryParam = addParam(CommunityDisclosureType.Ordinary);
+    const sponsoredParam = addParam(CommunityDisclosureType.Sponsored);
+    const affiliateParam = addParam(CommunityDisclosureType.Affiliate);
+    const brandRepParam = addParam(CommunityDisclosureType.BrandRep);
+    const usedAloneParam = addParam(
+      CommunityReviewRoutineContextUsage.UsedAlone,
+    );
+    let cursorFilter = '';
+
+    if (cursor) {
+      const decoded = decodeCommunityScoredCursor(cursor, fingerprint);
+      const scoreParam = addParam(decoded.matchScore);
+      const updatedAtParam = addParam(decoded.updatedAt);
+      const contentKindParam = addParam(decoded.contentKind);
+      const cursorIdParam = addParam(decoded.id);
+      cursorFilter = `
+        WHERE (
+          "match_score" < ${scoreParam}
+          OR ("match_score" = ${scoreParam} AND "updated_at" < ${updatedAtParam})
+          OR (
+            "match_score" = ${scoreParam}
+            AND "updated_at" = ${updatedAtParam}
+            AND "content_kind" < ${contentKindParam}
+          )
+          OR (
+            "match_score" = ${scoreParam}
+            AND "updated_at" = ${updatedAtParam}
+            AND "content_kind" = ${contentKindParam}
+            AND "id" < ${cursorIdParam}
+          )
+        )
+      `;
+    }
+
+    const limitParam = addParam(limit + 1);
+    const scoreExpression = (
+      alias: string,
+      tagExpression: string,
+      evidenceBoost = '0',
+    ) => `
+      GREATEST(0, LEAST(100,
+        ${evidenceBoost}
+        + CASE
+            WHEN ${skinTypeParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'skinType' = ${skinTypeParam}::varchar
+            THEN 25 ELSE 0
+          END
+        + CASE
+            WHEN ${sensitivityParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'sensitivityLevel' = ${sensitivityParam}::varchar
+            THEN 15 ELSE 0
+          END
+        + CASE
+            WHEN ${skinToneParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'skinToneRange' = ${skinToneParam}::varchar
+            THEN 10 ELSE 0
+          END
+        + CASE
+            WHEN ${climateParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'climateBucket' = ${climateParam}::varchar
+            THEN 10 ELSE 0
+          END
+        + CASE
+            WHEN ${routinePaceParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'routinePace' = ${routinePaceParam}::varchar
+            THEN 10 ELSE 0
+          END
+        + LEAST(25, (
+            SELECT COUNT(*)::int * 8
+            FROM jsonb_array_elements_text(${tagExpression}) tag(value)
+            WHERE tag.value = ANY(${concernTagsParam}::text[])
+          ))
+        + CASE
+            WHEN ${alias}."disclosure_type" = ${ordinaryParam} THEN 10
+            ELSE 0
+          END
+        - CASE
+            WHEN ${alias}."disclosure_type" IN (
+              ${sponsoredParam},
+              ${affiliateParam},
+              ${brandRepParam}
+            )
+            THEN 30 ELSE 0
+          END
+      ))`;
+    const routineTags = `
+      COALESCE(routine."concern_tags", '[]'::jsonb)
+      || COALESCE(routine."goal_tags", '[]'::jsonb)
+      || COALESCE(routine."avoid_tags", '[]'::jsonb)
+      || COALESCE(routine."habit_tags", '[]'::jsonb)
+    `;
+    const reviewEvidenceBoost = `
+      CASE WHEN review."overall_rating" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE WHEN review."effectiveness_rating" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE WHEN review."irritation_rating" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE WHEN review."skin_response" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM "community_review_context_products" context_product
+            WHERE context_product."review_id" = review."id"
+              AND NULLIF(context_product."product_name", '') IS NOT NULL
+          )
+          THEN 6 ELSE 0
+        END
+      + CASE
+          WHEN review."routine_context_usage" = ${usedAloneParam} THEN 4
+          ELSE 0
+        END
+      + LEAST(
+          8,
+          GREATEST(
+            0,
+            (review."helpful_count" - review."not_helpful_count") * 2
+          )
+        )
+    `;
+    const rows = await this.dataSource.query<CommunityRawCursorRow[]>(
+      `
+        WITH scored AS (
+          SELECT
+            'routine'::varchar AS "content_kind",
+            routine."id" AS "id",
+            routine."updated_at" AS "updated_at",
+            ${scoreExpression('routine', routineTags)} AS "match_score"
+          FROM "community_routines" routine
+          WHERE routine."moderation_status" = ${statusParam}
+            AND routine."withdrawn_at" IS NULL
+          UNION ALL
+          SELECT
+            'review'::varchar AS "content_kind",
+            review."id" AS "id",
+            review."updated_at" AS "updated_at",
+            ${scoreExpression(
+              'review',
+              `COALESCE(review."outcomes", '[]'::jsonb)`,
+              reviewEvidenceBoost,
+            )} AS "match_score"
+          FROM "community_reviews" review
+          WHERE review."moderation_status" = ${statusParam}
+            AND review."withdrawn_at" IS NULL
+        )
+        SELECT "content_kind", "id", "updated_at", "match_score"
+        FROM scored
+        ${cursorFilter}
+        ORDER BY "match_score" DESC, "updated_at" DESC, "content_kind" DESC, "id" DESC
+        LIMIT ${limitParam}
+      `,
+      params,
+    );
+
+    return rows.map((row) => {
+      if (!isCommunityPublishedContentKind(row.content_kind)) {
+        throw new BadRequestException('Invalid cursor row');
+      }
+      return {
+        contentKind: row.content_kind,
+        id: row.id,
+        matchScore: parseCursorRowScore(row.match_score),
+        updated_at: parseCursorRowDate(row.updated_at),
+      };
+    });
   }
 
   async listRoutines(
@@ -2409,24 +2853,45 @@ export class CommunityService {
     return { saved: true };
   }
 
-  async listMySubmissions(userId: string) {
-    const [routines, reviews, resultSignals] = await Promise.all([
-      this.routines.find({
-        where: { author_user_id: userId, withdrawn_at: IsNull() },
-        order: { updated_at: 'DESC' },
-        take: DEFAULT_LIMIT,
-      }),
-      this.reviews.find({
-        where: { author_user_id: userId, withdrawn_at: IsNull() },
-        order: { updated_at: 'DESC' },
-        take: DEFAULT_LIMIT,
-      }),
-      this.outcomeVotes.find({
-        where: { user_id: userId, withdrawn_at: IsNull() },
-        order: { updated_at: 'DESC' },
-        take: DEFAULT_LIMIT,
-      }),
+  async listMySubmissions(
+    userId: string,
+    query: Partial<CommunityCursorPageQueryDto> = {},
+  ) {
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(userId, 'submission', limit);
+    const page = communityCombinedListPage(
+      await this.findMySubmissionCursorRows(
+        userId,
+        query.cursor,
+        limit,
+        fingerprint,
+      ),
+      limit,
+      fingerprint,
+    );
+    const routineIds = page.rows
+      .filter((item) => item.contentKind === CommunityContentType.Routine)
+      .map((item) => item.id);
+    const reviewIds = page.rows
+      .filter((item) => item.contentKind === CommunityContentType.Review)
+      .map((item) => item.id);
+    const resultIds = page.rows
+      .filter((item) => item.contentKind === COMMUNITY_RESULT_SUBMISSION_KIND)
+      .map((item) => item.id);
+    const [routineMap, reviewMap, resultSignalMap] = await Promise.all([
+      this.loadRoutinesById(routineIds),
+      this.loadReviewsById(reviewIds),
+      this.loadOutcomeVotesById(resultIds),
     ]);
+    const routines = routineIds
+      .map((id) => routineMap.get(id))
+      .filter((item): item is CommunityRoutine => Boolean(item));
+    const reviews = reviewIds
+      .map((id) => reviewMap.get(id))
+      .filter((item): item is CommunityReview => Boolean(item));
+    const resultSignals = resultIds
+      .map((id) => resultSignalMap.get(id))
+      .filter((item): item is CommunityOutcomeSignalVote => Boolean(item));
     const [stepsByRoutine, contextByReview, resultParents] = await Promise.all([
       this.loadSteps(routines.map((item) => item.id)),
       this.loadReviewContext(reviews.map((item) => item.id)),
@@ -2444,38 +2909,126 @@ export class CommunityService {
         type: CommunityContentType.Review,
       })),
     ]);
+    const itemsByCursorKey = new Map<string, CommunitySubmissionListItem>();
+    for (const item of routines) {
+      itemsByCursorKey.set(
+        submissionCursorKey(CommunityContentType.Routine, item.id),
+        this.toSubmissionItem(
+          CommunityContentType.Routine,
+          item,
+          stepsByRoutine.get(item.id) ?? [],
+          guidanceByContent.get(
+            communityContentKey(CommunityContentType.Routine, item.id),
+          ) ?? null,
+        ),
+      );
+    }
+    for (const item of reviews) {
+      itemsByCursorKey.set(
+        submissionCursorKey(CommunityContentType.Review, item.id),
+        this.toSubmissionItem(
+          CommunityContentType.Review,
+          item,
+          contextByReview.get(item.id) ?? [],
+          guidanceByContent.get(
+            communityContentKey(CommunityContentType.Review, item.id),
+          ) ?? null,
+        ),
+      );
+    }
+    for (const item of resultSignals) {
+      itemsByCursorKey.set(
+        submissionCursorKey(COMMUNITY_RESULT_SUBMISSION_KIND, item.id),
+        this.toResultSubmissionItem(
+          item,
+          resultParents.get(
+            communityContentKey(item.content_type, item.content_id),
+          ) ?? null,
+        ),
+      );
+    }
+
     return {
-      items: [
-        ...routines.map((item) =>
-          this.toSubmissionItem(
-            CommunityContentType.Routine,
-            item,
-            stepsByRoutine.get(item.id) ?? [],
-            guidanceByContent.get(
-              communityContentKey(CommunityContentType.Routine, item.id),
-            ) ?? null,
-          ),
-        ),
-        ...reviews.map((item) =>
-          this.toSubmissionItem(
-            CommunityContentType.Review,
-            item,
-            contextByReview.get(item.id) ?? [],
-            guidanceByContent.get(
-              communityContentKey(CommunityContentType.Review, item.id),
-            ) ?? null,
-          ),
-        ),
-        ...resultSignals.map((item) =>
-          this.toResultSubmissionItem(
-            item,
-            resultParents.get(
-              communityContentKey(item.content_type, item.content_id),
-            ) ?? null,
-          ),
-        ),
-      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      items: page.rows
+        .map((row) =>
+          itemsByCursorKey.get(submissionCursorKey(row.contentKind, row.id)),
+        )
+        .filter((item): item is CommunitySubmissionListItem => Boolean(item)),
+      nextCursor: page.nextCursor,
     };
+  }
+
+  private async findMySubmissionCursorRows(
+    userId: string,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityCombinedCursorEntity[]> {
+    const params: unknown[] = [
+      userId,
+      CommunityContentType.Routine,
+      CommunityContentType.Review,
+      COMMUNITY_RESULT_SUBMISSION_KIND,
+    ];
+    let cursorFilter = '';
+
+    if (cursor) {
+      const decoded = decodeCommunityCombinedCursor(cursor, fingerprint);
+      params.push(decoded.updatedAt, decoded.contentKind, decoded.id);
+      const updatedAtParam = `$${params.length - 2}`;
+      const contentKindParam = `$${params.length - 1}`;
+      const cursorIdParam = `$${params.length}`;
+      cursorFilter = `
+        WHERE (
+          "updated_at" < ${updatedAtParam}
+          OR ("updated_at" = ${updatedAtParam} AND "content_kind" < ${contentKindParam})
+          OR (
+            "updated_at" = ${updatedAtParam}
+            AND "content_kind" = ${contentKindParam}
+            AND "id" < ${cursorIdParam}
+          )
+        )
+      `;
+    }
+
+    params.push(limit + 1);
+    const limitParam = `$${params.length}`;
+    const rows = await this.dataSource.query<CommunityRawCursorRow[]>(
+      `
+        SELECT "content_kind", "id", "updated_at"
+        FROM (
+          SELECT $2::varchar AS "content_kind", routine."id", routine."updated_at"
+          FROM "community_routines" routine
+          WHERE routine."author_user_id" = $1
+            AND routine."withdrawn_at" IS NULL
+          UNION ALL
+          SELECT $3::varchar AS "content_kind", review."id", review."updated_at"
+          FROM "community_reviews" review
+          WHERE review."author_user_id" = $1
+            AND review."withdrawn_at" IS NULL
+          UNION ALL
+          SELECT $4::varchar AS "content_kind", vote."id", vote."updated_at"
+          FROM "community_outcome_signal_votes" vote
+          WHERE vote."user_id" = $1
+            AND vote."withdrawn_at" IS NULL
+        ) submissions
+        ${cursorFilter}
+        ORDER BY "updated_at" DESC, "content_kind" DESC, "id" DESC
+        LIMIT ${limitParam}
+      `,
+      params,
+    );
+
+    return rows.map((row) => {
+      if (!isCommunitySubmissionContentKind(row.content_kind)) {
+        throw new BadRequestException('Invalid cursor row');
+      }
+      return {
+        contentKind: row.content_kind,
+        id: row.id,
+        updated_at: parseCursorRowDate(row.updated_at),
+      };
+    });
   }
 
   private async loadResultParentContent(
@@ -2500,7 +3053,6 @@ export class CommunityService {
         ? this.reviews.find({
             where: {
               id: In(reviewIds),
-              moderation_status: CommunityModerationStatus.Published,
               withdrawn_at: IsNull(),
             },
           })
@@ -2509,34 +3061,26 @@ export class CommunityService {
         ? this.routines.find({
             where: {
               id: In(routineIds),
-              moderation_status: CommunityModerationStatus.Published,
               withdrawn_at: IsNull(),
             },
           })
         : Promise.resolve([]),
     ]);
     const parents = new Map<string, CommunityResultParentContent>();
-    reviews
-      .filter(
-        (review) =>
-          review.moderation_status === CommunityModerationStatus.Published &&
-          review.withdrawn_at === null,
-      )
-      .forEach((review) => {
-        parents.set(
-          communityContentKey(CommunityContentType.Review, review.id),
-          {
-            id: review.id,
-            title: `${review.product_brand} ${review.product_name}`.trim(),
-            type: CommunityContentType.Review,
-          },
-        );
+    reviews.forEach((review) => {
+      parents.set(communityContentKey(CommunityContentType.Review, review.id), {
+        id: review.id,
+        status: review.moderation_status,
+        title: `${review.product_brand} ${review.product_name}`.trim(),
+        type: CommunityContentType.Review,
       });
+    });
     routines.forEach((routine) => {
       parents.set(
         communityContentKey(CommunityContentType.Routine, routine.id),
         {
           id: routine.id,
+          status: routine.moderation_status,
           title: routine.title,
           type: CommunityContentType.Routine,
         },
@@ -3332,6 +3876,38 @@ export class CommunityService {
       map.set(row.review_id, [...(map.get(row.review_id) ?? []), row]);
     }
     return map;
+  }
+
+  private async loadRoutinesById(
+    ids: string[],
+  ): Promise<Map<string, CommunityRoutine>> {
+    if (ids.length === 0) return new Map<string, CommunityRoutine>();
+    const rows = await this.routines.find({
+      where: { id: In(ids), withdrawn_at: IsNull() },
+    });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private async loadReviewsById(
+    ids: string[],
+  ): Promise<Map<string, CommunityReview>> {
+    if (ids.length === 0) return new Map<string, CommunityReview>();
+    const rows = await this.reviews.find({
+      where: { id: In(ids), withdrawn_at: IsNull() },
+    });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private async loadOutcomeVotesById(
+    ids: string[],
+  ): Promise<Map<string, CommunityOutcomeSignalVote>> {
+    if (ids.length === 0) {
+      return new Map<string, CommunityOutcomeSignalVote>();
+    }
+    const rows = await this.outcomeVotes.find({
+      where: { id: In(ids), withdrawn_at: IsNull() },
+    });
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   private matchScore(
@@ -4403,10 +4979,14 @@ export class CommunityService {
     const guidanceReason = this.cleanSubmissionGuidanceReason(
       item.note_moderation_reason,
     );
+    const guidanceSource: CommunitySubmissionModerationGuidance['source'] =
+      /^AI moderation\s+/i.test(item.note_moderation_reason ?? '')
+        ? 'ai'
+        : 'system';
     return {
       id: item.id,
-      type: 'result',
-      title: parentContent?.title ?? item.signal,
+      type: COMMUNITY_RESULT_SUBMISSION_KIND,
+      title: parentContent?.title ?? '',
       editableText: item.note,
       status: item.note_moderation_status,
       disclosureType: CommunityDisclosureType.Ordinary,
@@ -4414,9 +4994,7 @@ export class CommunityService {
       moderationGuidance: guidanceReason
         ? {
             reason: guidanceReason,
-            source: /^AI moderation\s+/i.test(item.note_moderation_reason ?? '')
-              ? 'ai'
-              : 'system',
+            source: guidanceSource,
             createdAt: item.updated_at.toISOString(),
           }
         : null,

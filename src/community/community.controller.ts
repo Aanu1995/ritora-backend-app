@@ -26,6 +26,7 @@ import {
   AdminCommunityReportStatusDto,
   AdminCommunitySettingsDto,
   AdminCommunityWarningDto,
+  CommunityCursorPageQueryDto,
   CommunityHelpfulnessDto,
   CommunityListQueryDto,
   CommunityOutcomeSignalDto,
@@ -56,8 +57,11 @@ export class CommunityController {
   }
 
   @Get('people-like-me')
-  getPeopleLikeMe(@CurrentUser('id') userId: string) {
-    return this.communityService.getPeopleLikeMe(userId);
+  getPeopleLikeMe(
+    @CurrentUser('id') userId: string,
+    @Query() query: CommunityCursorPageQueryDto,
+  ) {
+    return this.communityService.getPeopleLikeMe(userId, query);
   }
 
   @Get('routines')
@@ -229,8 +233,11 @@ export class CommunityController {
   }
 
   @Get('me/submissions')
-  listMySubmissions(@CurrentUser('id') userId: string) {
-    return this.communityService.listMySubmissions(userId);
+  listMySubmissions(
+    @CurrentUser('id') userId: string,
+    @Query() query: CommunityCursorPageQueryDto,
+  ) {
+    return this.communityService.listMySubmissions(userId, query);
   }
 
   @Post('content/:id/resubmit')

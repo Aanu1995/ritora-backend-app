@@ -75,11 +75,16 @@ type MockRepository<T extends object> = {
   update: jest.Mock<Promise<UpdateResult>, [unknown, Partial<T>]>;
 };
 
+type DataSourceQueryRow = {
+  content_kind?: string;
+  count?: number | string;
+  id?: string;
+  match_score?: number | string;
+  updated_at?: Date | string;
+};
+
 type DataSourceMock = DataSource & {
-  query: jest.Mock<
-    Promise<Array<{ count: number | string }>>,
-    [string, unknown[]]
-  >;
+  query: jest.Mock<Promise<DataSourceQueryRow[]>, [string, unknown[]]>;
   transaction: jest.Mock<
     Promise<unknown>,
     [
@@ -188,7 +193,7 @@ function createService() {
   };
   const dataSource = {
     query: jest
-      .fn<Promise<Array<{ count: number | string }>>, [string, unknown[]]>()
+      .fn<Promise<DataSourceQueryRow[]>, [string, unknown[]]>()
       .mockResolvedValue([{ count: 0 }]),
     transaction: jest.fn(async (operation) =>
       operation(
@@ -454,6 +459,18 @@ function queryBuilderMock<T extends object>(rows: T[]): QueryBuilderMock<T> {
     .mockReturnValue(builder);
   builder.getMany = jest.fn<Promise<T[]>, []>().mockResolvedValue(rows);
   return builder;
+}
+
+function submissionCursorRow(
+  contentKind: CommunityContentType | 'result',
+  id: string,
+  updatedAt: Date,
+): DataSourceQueryRow {
+  return {
+    content_kind: contentKind,
+    id,
+    updated_at: updatedAt,
+  };
 }
 
 function consentFixture(userId: string): UserConsent {
@@ -1262,8 +1279,98 @@ describe('CommunityService content integrity policy', () => {
     );
   });
 
+  it('returns a cursor-paginated people-like-me feed ranked by similarity', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    const routine = communityRoutineFixture({
+      id: 'routine_best_match',
+      updated_at: new Date('2026-05-20T11:00:00.000Z'),
+    });
+    const review = communityReviewFixture({
+      id: 'review_second_match',
+      updated_at: new Date('2026-05-20T12:00:00.000Z'),
+    });
+
+    dataSource.query.mockResolvedValue([
+      {
+        content_kind: CommunityContentType.Routine,
+        id: routine.id,
+        match_score: '96',
+        updated_at: routine.updated_at,
+      },
+      {
+        content_kind: CommunityContentType.Review,
+        id: review.id,
+        match_score: '88',
+        updated_at: review.updated_at,
+      },
+    ]);
+    repositories.routines.find.mockResolvedValue([routine]);
+    repositories.reviews.find.mockResolvedValue([review]);
+    repositories.routineSteps.find.mockResolvedValue([]);
+    repositories.reviewContext.find.mockResolvedValue([]);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+
+    const result = await service.getPeopleLikeMe(user.id, { limit: 1 });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: routine.id,
+      type: CommunityContentType.Routine,
+    });
+    expect(result.nextCursor).toEqual(expect.any(String));
+    expect(dataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('community_routines'),
+      expect.arrayContaining([
+        CommunityModerationStatus.Published,
+        CommunityDisclosureType.Ordinary,
+        CommunityDisclosureType.Sponsored,
+        CommunityDisclosureType.Affiliate,
+        CommunityDisclosureType.BrandRep,
+      ]),
+    );
+  });
+
+  it('uses a scored cursor for subsequent people-like-me pages', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    const cursor = encodeCursor({
+      fingerprint: `community:people-like-me:v1:${user.id}:2`,
+      tuple: [
+        92,
+        '2026-05-20T12:00:00.000Z',
+        CommunityContentType.Routine,
+        'routine_cursor',
+      ],
+    });
+
+    dataSource.query.mockResolvedValue([]);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+
+    const result = await service.getPeopleLikeMe(user.id, {
+      cursor,
+      limit: 2,
+    });
+
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+    expect(dataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('"match_score" <'),
+      expect.arrayContaining([
+        92,
+        new Date('2026-05-20T12:00:00.000Z'),
+        CommunityContentType.Routine,
+        'routine_cursor',
+      ]),
+    );
+  });
+
   it('returns structured editable snapshots for author submissions', async () => {
-    const { repositories, service } = createService();
+    const { dataSource, repositories, service } = createService();
     const user = userFixture();
     const now = new Date();
     const routine = {
@@ -1374,6 +1481,10 @@ describe('CommunityService content integrity policy', () => {
       created_at: now,
     } as CommunityModerationDecision;
 
+    dataSource.query.mockResolvedValue([
+      submissionCursorRow(CommunityContentType.Routine, routine.id, now),
+      submissionCursorRow(CommunityContentType.Review, review.id, now),
+    ]);
     repositories.routines.find.mockResolvedValue([routine]);
     repositories.reviews.find.mockResolvedValue([review]);
     repositories.routineSteps.find.mockResolvedValue([step]);
@@ -1455,14 +1566,14 @@ describe('CommunityService content integrity policy', () => {
   });
 
   it('lists own review result notes as withdrawable submissions', async () => {
-    const { repositories, service } = createService();
+    const { dataSource, repositories, service } = createService();
     const user = userFixture();
     const review = {
       id: 'review_1',
       author_user_id: 'review_author',
       product_brand: 'The Ordinary',
       product_name: 'Azelaic Acid Suspension 10%',
-      moderation_status: CommunityModerationStatus.Published,
+      moderation_status: CommunityModerationStatus.PendingReview,
       withdrawn_at: null,
     } as CommunityReview;
     const vote = {
@@ -1505,22 +1616,28 @@ describe('CommunityService content integrity policy', () => {
       generateId: jest.fn(),
     } as unknown as CommunityOutcomeSignalVote;
 
+    dataSource.query.mockResolvedValue([
+      submissionCursorRow('result', vote.id, vote.updated_at),
+    ]);
     repositories.routines.find.mockResolvedValue([]);
-    repositories.reviews.find.mockResolvedValueOnce([]);
+    repositories.reviews.find.mockResolvedValue([review]);
     repositories.outcomeVotes.find.mockResolvedValue([vote]);
-    repositories.reviews.find.mockResolvedValueOnce([review]);
 
     const result = await service.listMySubmissions(user.id);
 
-    expect(repositories.reviews.find).toHaveBeenLastCalledWith(
+    const parentReviewCall = repositories.reviews.find.mock.calls.at(-1)?.[0];
+    const parentReviewWhere = parentReviewCall as
+      | { where?: Record<string, unknown> }
+      | undefined;
+    expect(parentReviewCall).toEqual(
       expect.objectContaining({
         where: expect.objectContaining({
           id: expect.any(Object),
-          moderation_status: CommunityModerationStatus.Published,
           withdrawn_at: expect.any(Object),
         }),
       }),
     );
+    expect(parentReviewWhere?.where).not.toHaveProperty('moderation_status');
     expect(result.items).toContainEqual(
       expect.objectContaining({
         id: vote.id,
@@ -1535,8 +1652,151 @@ describe('CommunityService content integrity policy', () => {
           source: 'ai',
           createdAt: vote.updated_at.toISOString(),
         },
+        parentContent: {
+          id: review.id,
+          title: 'The Ordinary Azelaic Acid Suspension 10%',
+          type: CommunityContentType.Review,
+          status: CommunityModerationStatus.PendingReview,
+        },
         authorUserId: user.id,
       }),
+    );
+  });
+
+  it('does not use outcome signal values as submission titles when a parent is unavailable', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    const vote = {
+      id: 'vote_without_parent',
+      user_id: user.id,
+      content_type: CommunityContentType.Review,
+      content_id: 'review_under_cleanup',
+      signal: CommunityOutcomeSignal.DidNotWork,
+      context: {
+        sameGoal: true,
+        trialDuration: CommunityOutcomeTrialDuration.EightWeeks,
+        followedParts: [CommunityOutcomeFollowedPart.Products],
+        irritationLevel: CommunityOutcomeIrritationLevel.Mild,
+        routineSlot: CommunityReviewRoutineSlot.PM,
+        usedWithProducts: [],
+      },
+      safe_facets: {
+        skinType: null,
+        concernTags: [],
+        sensitivityLevel: null,
+        skinToneRange: null,
+        climateBucket: null,
+        routinePace: null,
+        goalTags: [],
+      },
+      note: 'I had a different result.',
+      note_moderation_status: CommunityModerationStatus.Published,
+      note_safety_flags: [],
+      note_moderation_reason: null,
+      withdrawn_at: null,
+      withdrawn_by_user_id: null,
+      created_at: new Date('2026-05-01T10:00:00.000Z'),
+      updated_at: new Date('2026-05-01T10:00:00.000Z'),
+      generateId: jest.fn(),
+    } as unknown as CommunityOutcomeSignalVote;
+
+    dataSource.query.mockResolvedValue([
+      submissionCursorRow('result', vote.id, vote.updated_at),
+    ]);
+    repositories.routines.find.mockResolvedValue([]);
+    repositories.reviews.find.mockResolvedValue([]);
+    repositories.outcomeVotes.find.mockResolvedValue([vote]);
+
+    const result = await service.listMySubmissions(user.id);
+
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        id: vote.id,
+        type: 'result',
+        title: '',
+        resultSignal: CommunityOutcomeSignal.DidNotWork,
+      }),
+    );
+  });
+
+  it('returns author submissions as cursor pages across content types', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    const review = communityReviewFixture({
+      id: 'review_newest_submission',
+      author_user_id: user.id,
+      updated_at: new Date('2026-05-20T12:00:00.000Z'),
+    });
+    const routine = communityRoutineFixture({
+      id: 'routine_next_submission',
+      author_user_id: user.id,
+      updated_at: new Date('2026-05-20T11:00:00.000Z'),
+    });
+
+    dataSource.query.mockResolvedValue([
+      submissionCursorRow(
+        CommunityContentType.Review,
+        review.id,
+        review.updated_at,
+      ),
+      submissionCursorRow(
+        CommunityContentType.Routine,
+        routine.id,
+        routine.updated_at,
+      ),
+    ]);
+    repositories.routines.find.mockResolvedValue([routine]);
+    repositories.reviews.find.mockResolvedValue([review]);
+    repositories.reviewContext.find.mockResolvedValue([]);
+    repositories.routineSteps.find.mockResolvedValue([]);
+
+    const result = await service.listMySubmissions(user.id, { limit: 1 });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: review.id,
+      type: CommunityContentType.Review,
+    });
+    expect(result.nextCursor).toEqual(expect.any(String));
+    expect(dataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('community_outcome_signal_votes'),
+      expect.arrayContaining([
+        user.id,
+        CommunityContentType.Routine,
+        CommunityContentType.Review,
+        'result',
+      ]),
+    );
+  });
+
+  it('uses the combined submission cursor on later author pages', async () => {
+    const { dataSource, service } = createService();
+    const user = userFixture();
+    const cursor = encodeCursor({
+      fingerprint: `community:submission:v1:${user.id}:2`,
+      tuple: [
+        '2026-05-20T12:00:00.000Z',
+        CommunityContentType.Review,
+        'review_cursor',
+      ],
+    });
+
+    dataSource.query.mockResolvedValue([]);
+
+    const result = await service.listMySubmissions(user.id, {
+      cursor,
+      limit: 2,
+    });
+
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+    expect(dataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('"updated_at" <'),
+      expect.arrayContaining([
+        new Date('2026-05-20T12:00:00.000Z'),
+        CommunityContentType.Review,
+        'review_cursor',
+      ]),
     );
   });
 

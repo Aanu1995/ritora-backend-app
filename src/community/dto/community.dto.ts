@@ -186,6 +186,22 @@ export class CommunityListQueryDto {
   warningTag?: string;
 }
 
+export class CommunityCursorPageQueryDto {
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  cursor?: string;
+
+  @EmptyStringToDefault(COMMUNITY_LIST_PAGE_DEFAULT_LIMIT)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(COMMUNITY_LIST_PAGE_MAX_LIMIT)
+  limit: number = COMMUNITY_LIST_PAGE_DEFAULT_LIMIT;
+}
+
 export class CommunityRoutineStepDto {
   @IsIn(['am', 'pm', 'either'])
   slot: 'am' | 'pm' | 'either';
