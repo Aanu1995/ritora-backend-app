@@ -5,6 +5,7 @@ describe('community privacy shaping', () => {
   it('only exposes safe matching facets from a sensitive skin profile', () => {
     const profile = {
       skin_type: 'sensitive',
+      sensitivity_level: 'high',
       skin_tone: 'iv',
       ethnicity: 'private-ethnicity',
       current_concerns: ['Dark marks', 'Dryness'],
@@ -33,7 +34,7 @@ describe('community privacy shaping', () => {
     expect(facets).toEqual({
       skinType: 'sensitive',
       concernTags: ['dark-marks', 'dryness'],
-      sensitivityLevel: 'sensitive',
+      sensitivityLevel: 'high',
       skinToneRange: 'iv',
       climateBucket: 'cold-weather',
       routinePace: 'cautious',

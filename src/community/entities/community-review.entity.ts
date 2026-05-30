@@ -13,6 +13,7 @@ import {
   CommunityModerationStatus,
   type CommunityOutcomeSignal,
   CommunityReviewRoutineSlot,
+  CommunityReviewRoutineContextUsage,
   CommunityReviewSkinResponse,
   type CommunitySafeProfileFacets,
   type CommunitySafetyFlag,
@@ -57,6 +58,9 @@ export class CommunityReview {
 
   @Column({ type: 'varchar', length: 50 })
   frequency: string;
+
+  @Column({ type: 'varchar', length: 30, default: 'with_products' })
+  routine_context_usage: CommunityReviewRoutineContextUsage;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
   routine_slot: CommunityReviewRoutineSlot | null;

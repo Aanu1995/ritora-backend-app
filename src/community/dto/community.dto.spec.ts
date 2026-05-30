@@ -8,6 +8,7 @@ import {
   CommunityOutcomeIrritationLevel,
   CommunityOutcomeSignal,
   CommunityOutcomeTrialDuration,
+  CommunityReviewRoutineContextUsage,
   CommunityReviewRoutineSlot,
   CommunityReviewSkinResponse,
 } from '../community.types';
@@ -29,6 +30,7 @@ const validReviewPayload = {
   disclosureType: CommunityDisclosureType.Ordinary,
   usageDuration: '8-weeks',
   frequency: 'daily',
+  routineContextUsage: CommunityReviewRoutineContextUsage.WithProducts,
   routineSlot: CommunityReviewRoutineSlot.PM,
   skinResponse: CommunityReviewSkinResponse.Improved,
   outcomes: ['barrier-support', 'less-stinging'],
@@ -119,6 +121,35 @@ describe('CreateCommunityReviewDto', () => {
 
     expect(errors).toHaveLength(0);
   });
+
+  it('accepts older review clients that provide context products without the usage field', async () => {
+    const dto = plainToInstance(CreateCommunityReviewDto, {
+      ...validReviewPayload,
+      routineContextUsage: undefined,
+      routineContext: [
+        {
+          category: 'cleanser',
+          productName: 'Milky Cleanser',
+        },
+      ],
+    });
+
+    const errors = await validate(dto, validationOptions);
+
+    expect(errors).toHaveLength(0);
+  });
+
+  it('accepts standalone reviews without forcing paired products', async () => {
+    const dto = plainToInstance(CreateCommunityReviewDto, {
+      ...validReviewPayload,
+      routineContextUsage: CommunityReviewRoutineContextUsage.UsedAlone,
+      routineContext: [],
+    });
+
+    const errors = await validate(dto, validationOptions);
+
+    expect(errors).toHaveLength(0);
+  });
 });
 
 const validGoalPlaybookPayload = {
@@ -197,6 +228,15 @@ describe('CommunityOutcomeSignalDto', () => {
         CommunityOutcomeFollowedPart.AvoidList,
       ],
       irritationLevel: CommunityOutcomeIrritationLevel.None,
+      note: 'I used this with a gentle cleanser.',
+      routineSlot: CommunityReviewRoutineSlot.PM,
+      usedWithProducts: [
+        {
+          category: 'cleanser',
+          productBrand: 'Ritora',
+          productName: 'Milky Cleanser',
+        },
+      ],
     });
 
     const errors = await validate(dto, validationOptions);
@@ -219,6 +259,23 @@ describe('CommunityOutcomeSignalDto', () => {
         'followedParts',
         'irritationLevel',
       ]),
+    );
+  });
+
+  it('rejects overly long result notes before moderation', async () => {
+    const dto = plainToInstance(CommunityOutcomeSignalDto, {
+      signal: CommunityOutcomeSignal.WorkedForMeToo,
+      sameGoal: true,
+      trialDuration: CommunityOutcomeTrialDuration.EightWeeks,
+      followedParts: [CommunityOutcomeFollowedPart.Products],
+      irritationLevel: CommunityOutcomeIrritationLevel.None,
+      note: 'x'.repeat(501),
+    });
+
+    const errors = await validate(dto, validationOptions);
+
+    expect(errors.map((error) => error.property)).toEqual(
+      expect.arrayContaining(['note']),
     );
   });
 });

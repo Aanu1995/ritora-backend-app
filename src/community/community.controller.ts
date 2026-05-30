@@ -27,6 +27,7 @@ import {
   AdminCommunitySettingsDto,
   AdminCommunityWarningDto,
   CommunityHelpfulnessDto,
+  CommunityListQueryDto,
   CommunityOutcomeSignalDto,
   CreateCommunityReportDto,
   CreateCommunityReviewDto,
@@ -60,8 +61,11 @@ export class CommunityController {
   }
 
   @Get('routines')
-  listRoutines(@CurrentUser('id') userId: string) {
-    return this.communityService.listRoutines(userId);
+  listRoutines(
+    @CurrentUser('id') userId: string,
+    @Query() query: CommunityListQueryDto,
+  ) {
+    return this.communityService.listRoutines(userId, query);
   }
 
   @Get('routines/:id')
@@ -143,8 +147,11 @@ export class CommunityController {
   }
 
   @Get('reviews')
-  listReviews(@CurrentUser('id') userId: string) {
-    return this.communityService.listReviews(userId);
+  listReviews(
+    @CurrentUser('id') userId: string,
+    @Query() query: CommunityListQueryDto,
+  ) {
+    return this.communityService.listReviews(userId, query);
   }
 
   @Post('reviews')
@@ -194,6 +201,15 @@ export class CommunityController {
     @Body() dto: CommunityOutcomeSignalDto,
   ) {
     return this.communityService.signalReviewOutcome(userId, id, dto);
+  }
+
+  @Get('reviews/:id/results')
+  listReviewResults(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Query('signal') signal?: string,
+  ) {
+    return this.communityService.listReviewResults(userId, id, signal);
   }
 
   @Get('warnings')

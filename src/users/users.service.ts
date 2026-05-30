@@ -623,7 +623,10 @@ export class UsersService {
         `
           SELECT "signal", COUNT(*)::int AS "count"
           FROM "community_outcome_signal_votes"
-          WHERE "content_type" = $1 AND "content_id" = $2
+          WHERE "content_type" = $1
+            AND "content_id" = $2
+            AND "note_moderation_status" = 'published'
+            AND "withdrawn_at" IS NULL
           GROUP BY "signal"
         `,
         [reference.content_type, reference.content_id],

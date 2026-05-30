@@ -19,7 +19,7 @@ export function buildCommunitySafeFacets(
   return {
     skinType: profile?.skin_type ?? null,
     concernTags: normalizeCommunityTags(profile?.current_concerns ?? []),
-    sensitivityLevel: profile?.skin_type === 'sensitive' ? 'sensitive' : null,
+    sensitivityLevel: profile?.sensitivity_level ?? null,
     skinToneRange: profile?.skin_tone ?? null,
     climateBucket:
       normalizeCommunityTags(

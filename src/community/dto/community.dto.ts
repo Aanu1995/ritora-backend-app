@@ -16,11 +16,20 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
+  EmptyStringToDefault,
+  EmptyStringToUndefined,
+} from '../../common/dto/empty-string.transforms';
+import {
+  COMMUNITY_LIST_PAGE_DEFAULT_LIMIT,
+  COMMUNITY_LIST_PAGE_MAX_LIMIT,
+} from '../community.constants';
+import {
   CommunityDisclosureType,
   CommunityContentType,
   CommunityGoalResult,
   CommunityGoalTimeframe,
   CommunityHelpfulnessVote,
+  CommunityListSort,
   CommunityModerationStatus,
   CommunityOutcomeFollowedPart,
   CommunityOutcomeIrritationLevel,
@@ -29,10 +38,153 @@ import {
   CommunityReportReason,
   CommunityReportStatus,
   CommunityReviewRoutineSlot,
+  CommunityReviewRoutineContextUsage,
   CommunityReviewSkinResponse,
   CommunitySafetySeverity,
 } from '../community.types';
 import { MAX_COMMUNITY_MIN_ACCOUNT_AGE_DAYS } from '../entities/community-settings.entity';
+
+export class CommunityListQueryDto {
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  cursor?: string;
+
+  @EmptyStringToDefault(COMMUNITY_LIST_PAGE_DEFAULT_LIMIT)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(COMMUNITY_LIST_PAGE_MAX_LIMIT)
+  limit: number = COMMUNITY_LIST_PAGE_DEFAULT_LIMIT;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  search?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  skinType?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  concern?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  sensitivity?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityDisclosureType)
+  disclosureType?: CommunityDisclosureType;
+
+  @EmptyStringToDefault(CommunityListSort.Newest)
+  @IsOptional()
+  @IsEnum(CommunityListSort)
+  sort: CommunityListSort = CommunityListSort.Newest;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  productCategory?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityReviewRoutineContextUsage)
+  routineContextUsage?: CommunityReviewRoutineContextUsage;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityReviewRoutineSlot)
+  routineSlot?: CommunityReviewRoutineSlot;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  contextProductCategory?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityReviewSkinResponse)
+  skinResponse?: CommunityReviewSkinResponse;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  usageDuration?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  minRating?: number;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  outcome?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityOutcomeSignal)
+  resultSignal?: CommunityOutcomeSignal;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  goal?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityGoalResult)
+  result?: CommunityGoalResult;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityGoalTimeframe)
+  timeframe?: CommunityGoalTimeframe;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  productRole?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  avoidTag?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  habitTag?: string;
+
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  warningTag?: string;
+}
 
 export class CommunityRoutineStepDto {
   @IsIn(['am', 'pm', 'either'])
@@ -40,6 +192,7 @@ export class CommunityRoutineStepDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(26)
   productId?: string | null;
 
   @IsOptional()
@@ -249,6 +402,10 @@ export class CreateCommunityReviewDto {
   @MaxLength(50)
   frequency: string;
 
+  @IsOptional()
+  @IsEnum(CommunityReviewRoutineContextUsage)
+  routineContextUsage?: CommunityReviewRoutineContextUsage;
+
   @IsEnum(CommunityReviewRoutineSlot)
   routineSlot: CommunityReviewRoutineSlot;
 
@@ -338,6 +495,10 @@ export class EditCommunityReviewDto {
   frequency?: string;
 
   @IsOptional()
+  @IsEnum(CommunityReviewRoutineContextUsage)
+  routineContextUsage?: CommunityReviewRoutineContextUsage;
+
+  @IsOptional()
   @IsEnum(CommunityReviewRoutineSlot)
   routineSlot?: CommunityReviewRoutineSlot;
 
@@ -388,7 +549,6 @@ export class EditCommunityReviewDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => CommunityReviewContextProductDto)
@@ -415,6 +575,26 @@ export class CommunityHelpfulnessDto {
   vote: CommunityHelpfulnessVote;
 }
 
+export class CommunityOutcomeSignalProductDto {
+  @IsOptional()
+  @IsString()
+  productId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  productBrand?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  productName?: string | null;
+
+  @IsString()
+  @MaxLength(40)
+  category: string;
+}
+
 export class CommunityOutcomeSignalDto {
   @IsEnum(CommunityOutcomeSignal)
   signal: CommunityOutcomeSignal;
@@ -433,6 +613,22 @@ export class CommunityOutcomeSignalDto {
 
   @IsEnum(CommunityOutcomeIrritationLevel)
   irritationLevel: CommunityOutcomeIrritationLevel;
+
+  @IsOptional()
+  @IsEnum(CommunityReviewRoutineSlot)
+  routineSlot?: CommunityReviewRoutineSlot | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => CommunityOutcomeSignalProductDto)
+  usedWithProducts?: CommunityOutcomeSignalProductDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string | null;
 }
 
 export class SaveCommunityAdaptationDto {

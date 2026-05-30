@@ -5,7 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, ILike, In, IsNull, MoreThan, Repository } from 'typeorm';
+import {
+  Brackets,
+  DataSource,
+  type FindOptionsWhere,
+  ILike,
+  In,
+  IsNull,
+  MoreThan,
+  Repository,
+  type SelectQueryBuilder,
+} from 'typeorm';
 import { ulid } from 'ulid';
 import { AdminAccount } from '../admin/entities/admin-account.entity';
 import {
@@ -19,6 +29,12 @@ import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { User } from '../users/entities/user.entity';
 import { UserConsentType } from '../users/user-consent.constants';
+import { decodeCursor, encodeCursor } from '../common/utils/cursor-pagination';
+import {
+  COMMUNITY_DISCOVERY_LIMIT,
+  COMMUNITY_LIST_PAGE_DEFAULT_LIMIT,
+  COMMUNITY_LIST_PAGE_MAX_LIMIT,
+} from './community.constants';
 import {
   type AdminCommunityAssignDto,
   type AdminCommunityModerationDto,
@@ -27,6 +43,7 @@ import {
   type AdminCommunitySettingsDto,
   type AdminCommunityWarningDto,
   type CommunityHelpfulnessDto,
+  type CommunityListQueryDto,
   type CommunityOutcomeSignalDto,
   type CreateCommunityReportDto,
   type CreateCommunityReviewDto,
@@ -58,12 +75,16 @@ import {
   CommunityContentType,
   CommunityDisclosureType,
   CommunityHelpfulnessVote,
+  CommunityListSort,
   CommunityModerationStatus,
   CommunityOutcomeFollowedPart,
   CommunityOutcomeIrritationLevel,
   CommunityOutcomeSignal,
+  type CommunityOutcomeSignalProductContext,
   type CommunityOutcomeSignalContext,
   CommunityOutcomeTrialDuration,
+  type CommunityReviewResultPublic,
+  type CommunityReviewResultsResponse,
   CommunityReportStatus,
   CommunityReportReason,
   CommunitySafetySeverity,
@@ -74,13 +95,51 @@ import {
   type CommunityRoutineStepPublic,
   type CommunitySafeProfileFacets,
   type CommunitySafetyFlag,
+  CommunityReviewRoutineContextUsage,
+  CommunityReviewRoutineSlot,
 } from './community.types';
 import {
   buildCommunitySafeFacets,
   normalizeCommunityTags,
 } from './community-privacy';
 
-const DEFAULT_LIMIT = 30;
+const DEFAULT_LIMIT = COMMUNITY_DISCOVERY_LIMIT;
+
+type CommunityListContentKind = 'routine' | 'review';
+
+type CommunityCursorEntity = {
+  id: string;
+  updated_at: Date;
+};
+
+type CommunityListPage<T extends CommunityCursorEntity> = {
+  rows: T[];
+  nextCursor: string | null;
+};
+
+type CommunityListFilterKey =
+  | 'avoidTag'
+  | 'concern'
+  | 'contextProductCategory'
+  | 'disclosureType'
+  | 'goal'
+  | 'habitTag'
+  | 'minRating'
+  | 'outcome'
+  | 'productCategory'
+  | 'productRole'
+  | 'result'
+  | 'resultSignal'
+  | 'routineContextUsage'
+  | 'routineSlot'
+  | 'search'
+  | 'sensitivity'
+  | 'skinResponse'
+  | 'skinType'
+  | 'sort'
+  | 'timeframe'
+  | 'usageDuration'
+  | 'warningTag';
 
 type CommunitySubmissionModerationGuidance = {
   reason: string;
@@ -94,11 +153,163 @@ type CommunitySubmissionContentReference = {
   type: CommunityContentType;
 };
 
+type CommunityResultParentContent = {
+  id: string;
+  title: string;
+  type: CommunityContentType;
+};
+
 const GUIDANCE_MODERATION_STATUSES = new Set<CommunityModerationStatus>([
   CommunityModerationStatus.NeedsEdit,
   CommunityModerationStatus.Rejected,
   CommunityModerationStatus.Hidden,
 ]);
+
+function normalizeCommunityListLimit(limit?: number): number {
+  if (typeof limit !== 'number' || !Number.isFinite(limit)) {
+    return COMMUNITY_LIST_PAGE_DEFAULT_LIMIT;
+  }
+  return Math.min(
+    COMMUNITY_LIST_PAGE_MAX_LIMIT,
+    Math.max(1, Math.floor(limit)),
+  );
+}
+
+function communityListFingerprint(
+  userId: string,
+  kind: CommunityListContentKind,
+  limit: number,
+  query: Partial<CommunityListQueryDto> = {},
+): string {
+  const filterKey = communityListFilterFingerprint(query);
+  return filterKey
+    ? `community:${kind}:v1:${userId}:${limit}:${filterKey}`
+    : `community:${kind}:v1:${userId}:${limit}`;
+}
+
+function decodeCommunityListCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [updatedAtValue, idValue] = decoded.tuple;
+  if (typeof updatedAtValue !== 'string' || typeof idValue !== 'string') {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const updatedAt = new Date(updatedAtValue);
+  if (Number.isNaN(updatedAt.getTime())) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return { updatedAt, id: idValue };
+}
+
+function communityListCursorTuple(
+  item: CommunityCursorEntity,
+): [string, string] {
+  return [item.updated_at.toISOString(), item.id];
+}
+
+function communityListPage<T extends CommunityCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+): CommunityListPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityListCursorTuple(lastRow),
+          })
+        : null,
+  };
+}
+
+function cleanQueryString(
+  value: string | null | undefined,
+  maxLength: number,
+): string | undefined {
+  return cleanText(value, maxLength) ?? undefined;
+}
+
+function communityListFilterFingerprint(
+  query: Partial<CommunityListQueryDto>,
+): string | null {
+  const values = communityListFilterEntries(query);
+  if (values.length === 0) return null;
+  return Buffer.from(
+    JSON.stringify(Object.fromEntries(values)),
+    'utf8',
+  ).toString('base64url');
+}
+
+function communityListFilterEntries(
+  query: Partial<CommunityListQueryDto>,
+): Array<[CommunityListFilterKey, string | number]> {
+  const filters: Array<[CommunityListFilterKey, string | number]> = [];
+  const addString = (
+    key: CommunityListFilterKey,
+    value: string | null | undefined,
+    maxLength: number,
+  ) => {
+    const cleaned = cleanQueryString(value, maxLength);
+    if (cleaned) filters.push([key, cleaned]);
+  };
+
+  addString('avoidTag', query.avoidTag, 60);
+  addString('concern', query.concern, 60);
+  addString('contextProductCategory', query.contextProductCategory, 40);
+  addString('disclosureType', query.disclosureType, 30);
+  addString('goal', query.goal, 60);
+  addString('habitTag', query.habitTag, 60);
+  addString('outcome', query.outcome, 60);
+  addString('productCategory', query.productCategory, 40);
+  addString('productRole', query.productRole, 40);
+  addString('result', query.result, 30);
+  addString('resultSignal', query.resultSignal, 30);
+  addString('routineContextUsage', query.routineContextUsage, 30);
+  addString('routineSlot', query.routineSlot, 20);
+  addString('search', query.search, 80);
+  addString('sensitivity', query.sensitivity, 40);
+  addString('skinResponse', query.skinResponse, 30);
+  addString('skinType', query.skinType, 40);
+  addString('timeframe', query.timeframe, 30);
+  addString('usageDuration', query.usageDuration, 40);
+  addString('warningTag', query.warningTag, 60);
+  if (typeof query.minRating === 'number' && Number.isFinite(query.minRating)) {
+    filters.push(['minRating', Math.floor(query.minRating)]);
+  }
+  if (query.sort && query.sort !== CommunityListSort.Newest) {
+    filters.push(['sort', query.sort]);
+  }
+  return filters.sort(([first], [second]) => first.localeCompare(second));
+}
+
+function hasCommunityListFilters(
+  query: Partial<CommunityListQueryDto>,
+  keys: readonly CommunityListFilterKey[],
+): boolean {
+  const keySet = new Set(keys);
+  return communityListFilterEntries(query).some(([key]) => keySet.has(key));
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function queryLikePattern(
+  value: string | null | undefined,
+  maxLength: number,
+): string | null {
+  const cleaned = cleanQueryString(value, maxLength);
+  return cleaned ? `%${escapeLikePattern(cleaned)}%` : null;
+}
 
 function cleanText(
   value: string | null | undefined,
@@ -109,6 +320,10 @@ function cleanText(
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned ? cleaned.slice(0, maxLength) : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function communityContentKey(
@@ -204,6 +419,7 @@ function buildReviewModerationText(input: {
   disclosureType: CommunityDisclosureType;
   usageDuration?: string | null;
   frequency?: string | null;
+  routineContextUsage: CommunityReviewRoutineContextUsage;
   routineSlot?: string | null;
   skinResponse?: string | null;
   overallRating?: number | null;
@@ -224,6 +440,7 @@ function buildReviewModerationText(input: {
     moderationLine('Disclosure', input.disclosureType),
     moderationLine('Usage duration', input.usageDuration),
     moderationLine('Frequency', input.frequency),
+    moderationLine('Routine context usage', input.routineContextUsage),
     moderationLine('Routine slot', input.routineSlot),
     moderationLine('Skin response', input.skinResponse),
     moderationLine('Ratings', [
@@ -251,6 +468,50 @@ function buildReviewModerationText(input: {
     .join('\n');
 }
 
+function buildOutcomeSignalModerationText(input: {
+  signal: CommunityOutcomeSignal;
+  sameGoal: boolean;
+  trialDuration: CommunityOutcomeTrialDuration;
+  followedParts: CommunityOutcomeFollowedPart[];
+  irritationLevel: CommunityOutcomeIrritationLevel;
+  routineSlot: CommunityReviewRoutineSlot | null;
+  reviewedProduct?: CommunityOutcomeSignalProductContext | null;
+  usedWithProducts: CommunityOutcomeSignalProductContext[];
+  note: string | null;
+}): string {
+  return [
+    moderationLine('Community result note', input.note),
+    moderationLine('Result type', input.signal),
+    moderationLine('Same goal', input.sameGoal),
+    moderationLine('Trial duration', input.trialDuration),
+    moderationLine('Matched context', input.followedParts),
+    moderationLine('Irritation level', input.irritationLevel),
+    moderationLine('Routine slot', input.routineSlot),
+    moderationLine(
+      'Reviewed product',
+      input.reviewedProduct
+        ? [
+            input.reviewedProduct.productBrand,
+            input.reviewedProduct.productName,
+            input.reviewedProduct.category,
+          ]
+            .filter(Boolean)
+            .join(' | ')
+        : null,
+    ),
+    moderationLine(
+      'Products used alongside',
+      input.usedWithProducts.map((item) =>
+        [item.productBrand, item.productName, item.category]
+          .filter(Boolean)
+          .join(' | '),
+      ),
+    ),
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
 function publicProfileName(userId: string): string {
   return `Ritora member ${userId.slice(-4).toUpperCase()}`;
 }
@@ -273,6 +534,10 @@ const SEVERE_REPORT_REASONS = new Set<CommunityReportReason>([
   CommunityReportReason.MedicalClaims,
   CommunityReportReason.PrivacyViolation,
   CommunityReportReason.MisleadingBeforeAfter,
+]);
+const RESULT_NOTE_REJECTION_FLAG_CODES = new Set([
+  'possible_harassment',
+  'possible_spam_or_moderation_manipulation',
 ]);
 
 const REPORT_ESCALATION_THRESHOLD = 3;
@@ -351,8 +616,8 @@ export class CommunityService {
     const facets = await this.getSafeFacets(userId);
     const [routines, reviews, warnings, postingEligibility] = await Promise.all(
       [
-        this.listRoutines(userId),
-        this.listReviews(userId),
+        this.listRoutines(userId, { limit: DEFAULT_LIMIT }),
+        this.listReviews(userId, { limit: DEFAULT_LIMIT }),
         this.listWarnings(),
         this.getPostingEligibility(userId),
       ],
@@ -474,8 +739,8 @@ export class CommunityService {
   async getPeopleLikeMe(userId: string) {
     const [facets, routines, reviews] = await Promise.all([
       this.getSafeFacets(userId),
-      this.listRoutines(userId),
-      this.listReviews(userId),
+      this.listRoutines(userId, { limit: DEFAULT_LIMIT }),
+      this.listReviews(userId, { limit: DEFAULT_LIMIT }),
     ]);
     return {
       profileFacets: facets,
@@ -485,23 +750,255 @@ export class CommunityService {
     };
   }
 
-  async listRoutines(userId: string) {
+  async listRoutines(
+    userId: string,
+    query: Partial<CommunityListQueryDto> = {},
+  ) {
     const facets = await this.getSafeFacets(userId);
-    const rows = await this.routines.find({
-      where: { moderation_status: CommunityModerationStatus.Published },
-      order: { updated_at: 'DESC' },
-      take: DEFAULT_LIMIT,
-    });
-    const stepsByRoutine = await this.loadSteps(rows.map((row) => row.id));
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(
+      userId,
+      'routine',
+      limit,
+      query,
+    );
+    const page = communityListPage(
+      await this.findPublishedRoutineRows(query, limit, fingerprint),
+      limit,
+      fingerprint,
+    );
+    const stepsByRoutine = await this.loadSteps(page.rows.map((row) => row.id));
     return {
-      items: rows.map((routine) =>
+      items: page.rows.map((routine) =>
         this.toRoutineResponse(
           routine,
           stepsByRoutine.get(routine.id) ?? [],
           facets,
+          userId,
         ),
       ),
+      nextCursor: page.nextCursor,
     };
+  }
+
+  private findPublishedRoutineRows(
+    query: Partial<CommunityListQueryDto>,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityRoutine[]> {
+    const pageSize = limit + 1;
+    if (!query.cursor && !this.hasRoutineListFilters(query)) {
+      return this.routines.find({
+        where: {
+          moderation_status: CommunityModerationStatus.Published,
+          withdrawn_at: IsNull(),
+        },
+        order: { updated_at: 'DESC', id: 'DESC' },
+        take: pageSize,
+      });
+    }
+
+    const builder = this.routines
+      .createQueryBuilder('routine')
+      .where('routine.moderation_status = :status', {
+        status: CommunityModerationStatus.Published,
+      })
+      .andWhere('routine.withdrawn_at IS NULL');
+
+    this.applyRoutineListFilters(builder, query);
+    this.applyCommunityListCursor(
+      builder,
+      'routine',
+      query.cursor,
+      fingerprint,
+    );
+
+    return builder
+      .orderBy('routine.updated_at', 'DESC')
+      .addOrderBy('routine.id', 'DESC')
+      .take(pageSize)
+      .getMany();
+  }
+
+  private applyCommunityListCursor<T extends CommunityCursorEntity>(
+    builder: SelectQueryBuilder<T>,
+    alias: string,
+    cursor: string | null | undefined,
+    fingerprint: string,
+  ) {
+    if (!cursor) return;
+
+    const decoded = decodeCommunityListCursor(cursor, fingerprint);
+    builder.andWhere(
+      new Brackets((where) => {
+        where
+          .where(`${alias}.updated_at < :updatedAt`, {
+            updatedAt: decoded.updatedAt,
+          })
+          .orWhere(
+            `${alias}.updated_at = :updatedAt AND ${alias}.id < :cursorId`,
+            {
+              cursorId: decoded.id,
+              updatedAt: decoded.updatedAt,
+            },
+          );
+      }),
+    );
+  }
+
+  private applyCommonListFilters<T extends CommunityCursorEntity>(
+    builder: SelectQueryBuilder<T>,
+    alias: string,
+    query: Partial<CommunityListQueryDto>,
+    contentConcernExpression?: string,
+  ) {
+    const skinType = cleanQueryString(query.skinType, 40);
+    if (skinType) {
+      builder.andWhere(`${alias}.safe_facets ->> 'skinType' = :skinType`, {
+        skinType,
+      });
+    }
+
+    const concern = cleanQueryString(query.concern, 60);
+    if (concern) {
+      builder.andWhere(
+        new Brackets((where) => {
+          where.where(`${alias}.safe_facets -> 'concernTags' ? :concern`, {
+            concern,
+          });
+          if (contentConcernExpression) {
+            where.orWhere(`${contentConcernExpression} ? :concern`, {
+              concern,
+            });
+          }
+        }),
+      );
+    }
+
+    const sensitivity = cleanQueryString(query.sensitivity, 40);
+    if (sensitivity) {
+      builder.andWhere(
+        `${alias}.safe_facets ->> 'sensitivityLevel' = :sensitivity`,
+        { sensitivity },
+      );
+    }
+
+    if (query.disclosureType) {
+      builder.andWhere(`${alias}.disclosure_type = :disclosureType`, {
+        disclosureType: query.disclosureType,
+      });
+    }
+  }
+
+  private hasRoutineListFilters(
+    query: Partial<CommunityListQueryDto>,
+  ): boolean {
+    return hasCommunityListFilters(query, [
+      'avoidTag',
+      'concern',
+      'disclosureType',
+      'goal',
+      'habitTag',
+      'productRole',
+      'result',
+      'search',
+      'sensitivity',
+      'skinType',
+      'timeframe',
+      'warningTag',
+    ]);
+  }
+
+  private applyRoutineListFilters(
+    builder: SelectQueryBuilder<CommunityRoutine>,
+    query: Partial<CommunityListQueryDto>,
+  ) {
+    this.applyCommonListFilters(
+      builder,
+      'routine',
+      query,
+      'routine.concern_tags',
+    );
+
+    const search = queryLikePattern(query.search, 80);
+    if (search) {
+      builder.andWhere(
+        new Brackets((where) => {
+          where
+            .where("routine.title ILIKE :search ESCAPE '\\'", { search })
+            .orWhere("routine.summary ILIKE :search ESCAPE '\\'", { search })
+            .orWhere("routine.concern_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("routine.goal_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("routine.avoid_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("routine.habit_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere(
+              `EXISTS (
+                SELECT 1
+                FROM community_routine_steps step
+                WHERE step.routine_id = routine.id
+                  AND (
+                    step.product_brand ILIKE :search ESCAPE '\\'
+                    OR step.product_name ILIKE :search ESCAPE '\\'
+                    OR step.category ILIKE :search ESCAPE '\\'
+                    OR step.notes ILIKE :search ESCAPE '\\'
+                  )
+              )`,
+              { search },
+            );
+        }),
+      );
+    }
+
+    const goal = cleanQueryString(query.goal, 60);
+    if (goal) builder.andWhere('routine.goal_tags ? :goal', { goal });
+
+    if (query.result) {
+      builder.andWhere('routine.goal_result = :goalResult', {
+        goalResult: query.result,
+      });
+    }
+
+    if (query.timeframe) {
+      builder.andWhere('routine.timeframe = :timeframe', {
+        timeframe: query.timeframe,
+      });
+    }
+
+    const productRole = cleanQueryString(query.productRole, 40);
+    if (productRole) {
+      builder.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM community_routine_steps step
+          WHERE step.routine_id = routine.id
+            AND step.category = :productRole
+        )`,
+        { productRole },
+      );
+    }
+
+    const avoidTag = cleanQueryString(query.avoidTag, 60);
+    if (avoidTag) {
+      builder.andWhere('routine.avoid_tags ? :avoidTag', { avoidTag });
+    }
+
+    const habitTag = cleanQueryString(query.habitTag, 60);
+    if (habitTag) {
+      builder.andWhere('routine.habit_tags ? :habitTag', { habitTag });
+    }
+
+    const warningTag = cleanQueryString(query.warningTag, 60);
+    if (warningTag) {
+      builder.andWhere('routine.warning_tags ? :warningTag', { warningTag });
+    }
   }
 
   async getRoutine(userId: string, id: string) {
@@ -514,7 +1011,7 @@ export class CommunityService {
       where: { routine_id: id },
       order: { step_order: 'ASC' },
     });
-    return this.toRoutineResponse(routine, steps, facets);
+    return this.toRoutineResponse(routine, steps, facets, userId);
   }
 
   async getProductEvidence(userId: string, productId: string) {
@@ -935,25 +1432,201 @@ export class CommunityService {
     return this.getRoutine(userId, routineId);
   }
 
-  async listReviews(userId: string) {
+  async listReviews(
+    userId: string,
+    query: Partial<CommunityListQueryDto> = {},
+  ) {
     const facets = await this.getSafeFacets(userId);
-    const rows = await this.reviews.find({
-      where: { moderation_status: CommunityModerationStatus.Published },
-      order: { updated_at: 'DESC' },
-      take: DEFAULT_LIMIT,
-    });
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(
+      userId,
+      'review',
+      limit,
+      query,
+    );
+    const page = communityListPage(
+      await this.findPublishedReviewRows(query, limit, fingerprint),
+      limit,
+      fingerprint,
+    );
     const contextByReview = await this.loadReviewContext(
-      rows.map((row) => row.id),
+      page.rows.map((row) => row.id),
     );
     return {
-      items: rows.map((review) =>
+      items: page.rows.map((review) =>
         this.toReviewResponse(
           review,
           contextByReview.get(review.id) ?? [],
           facets,
+          userId,
         ),
       ),
+      nextCursor: page.nextCursor,
     };
+  }
+
+  private findPublishedReviewRows(
+    query: Partial<CommunityListQueryDto>,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityReview[]> {
+    const pageSize = limit + 1;
+    if (!query.cursor && !this.hasReviewListFilters(query)) {
+      return this.reviews.find({
+        where: {
+          moderation_status: CommunityModerationStatus.Published,
+          withdrawn_at: IsNull(),
+        },
+        order: { updated_at: 'DESC', id: 'DESC' },
+        take: pageSize,
+      });
+    }
+
+    const builder = this.reviews
+      .createQueryBuilder('review')
+      .where('review.moderation_status = :status', {
+        status: CommunityModerationStatus.Published,
+      })
+      .andWhere('review.withdrawn_at IS NULL');
+
+    this.applyReviewListFilters(builder, query);
+    this.applyCommunityListCursor(builder, 'review', query.cursor, fingerprint);
+
+    return builder
+      .orderBy('review.updated_at', 'DESC')
+      .addOrderBy('review.id', 'DESC')
+      .take(pageSize)
+      .getMany();
+  }
+
+  private hasReviewListFilters(query: Partial<CommunityListQueryDto>): boolean {
+    return hasCommunityListFilters(query, [
+      'concern',
+      'contextProductCategory',
+      'disclosureType',
+      'minRating',
+      'outcome',
+      'productCategory',
+      'resultSignal',
+      'routineContextUsage',
+      'routineSlot',
+      'search',
+      'sensitivity',
+      'skinResponse',
+      'skinType',
+      'usageDuration',
+    ]);
+  }
+
+  private applyReviewListFilters(
+    builder: SelectQueryBuilder<CommunityReview>,
+    query: Partial<CommunityListQueryDto>,
+  ) {
+    this.applyCommonListFilters(builder, 'review', query);
+
+    const search = queryLikePattern(query.search, 80);
+    if (search) {
+      builder.andWhere(
+        new Brackets((where) => {
+          where
+            .where("review.product_brand ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("review.product_name ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("review.product_category ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("review.body ILIKE :search ESCAPE '\\'", { search })
+            .orWhere("review.outcomes::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere(
+              `EXISTS (
+                SELECT 1
+                FROM community_review_context_products context_product
+                WHERE context_product.review_id = review.id
+                  AND (
+                    context_product.product_brand ILIKE :search ESCAPE '\\'
+                    OR context_product.product_name ILIKE :search ESCAPE '\\'
+                    OR context_product.category ILIKE :search ESCAPE '\\'
+                  )
+              )`,
+              { search },
+            );
+        }),
+      );
+    }
+
+    const productCategory = cleanQueryString(query.productCategory, 40);
+    if (productCategory) {
+      builder.andWhere('review.product_category = :productCategory', {
+        productCategory,
+      });
+    }
+
+    if (query.routineContextUsage) {
+      builder.andWhere('review.routine_context_usage = :routineContextUsage', {
+        routineContextUsage: query.routineContextUsage,
+      });
+    }
+
+    if (query.routineSlot) {
+      builder.andWhere('review.routine_slot = :routineSlot', {
+        routineSlot: query.routineSlot,
+      });
+    }
+
+    const contextProductCategory = cleanQueryString(
+      query.contextProductCategory,
+      40,
+    );
+    if (contextProductCategory) {
+      builder.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM community_review_context_products context_product
+          WHERE context_product.review_id = review.id
+            AND context_product.category = :contextProductCategory
+        )`,
+        { contextProductCategory },
+      );
+    }
+
+    if (query.skinResponse) {
+      builder.andWhere('review.skin_response = :skinResponse', {
+        skinResponse: query.skinResponse,
+      });
+    }
+
+    const usageDuration = cleanQueryString(query.usageDuration, 40);
+    if (usageDuration) {
+      builder.andWhere('review.usage_duration = :usageDuration', {
+        usageDuration,
+      });
+    }
+
+    if (
+      typeof query.minRating === 'number' &&
+      Number.isFinite(query.minRating)
+    ) {
+      builder.andWhere('review.overall_rating >= :minRating', {
+        minRating: Math.floor(query.minRating),
+      });
+    }
+
+    const outcome = cleanQueryString(query.outcome, 60);
+    if (outcome) {
+      builder.andWhere('review.outcomes ? :outcome', { outcome });
+    }
+
+    if (query.resultSignal) {
+      builder.andWhere(
+        `COALESCE((review.outcome_signal_counts ->> :resultSignal)::int, 0) > 0`,
+        { resultSignal: query.resultSignal },
+      );
+    }
   }
 
   async createReview(userId: string, dto: CreateCommunityReviewDto) {
@@ -965,13 +1638,35 @@ export class CommunityService {
       userId,
       maxPerDay: 10,
     });
-    if (dto.outcomes.length === 0 || dto.routineContext.length === 0) {
+    const routineContextUsage =
+      dto.routineContextUsage ??
+      CommunityReviewRoutineContextUsage.WithProducts;
+    const submittedRoutineContext = dto.routineContext ?? [];
+    const routineContext =
+      routineContextUsage === CommunityReviewRoutineContextUsage.WithProducts
+        ? submittedRoutineContext
+        : [];
+    if ((dto.outcomes ?? []).length === 0) {
+      throw new BadRequestException('Review requires outcomes');
+    }
+    if (
+      routineContextUsage === CommunityReviewRoutineContextUsage.WithProducts &&
+      routineContext.length === 0
+    ) {
       throw new BadRequestException(
-        'Review requires outcomes and routine context',
+        'Review requires at least one product used with it',
       );
     }
     if (
-      dto.routineContext.some(
+      routineContextUsage !== CommunityReviewRoutineContextUsage.WithProducts &&
+      submittedRoutineContext.length > 0
+    ) {
+      throw new BadRequestException(
+        'Routine context products are only allowed when products were used together',
+      );
+    }
+    if (
+      routineContext.some(
         (item) => !item.productId && !cleanText(item.productName, 255),
       )
     ) {
@@ -982,14 +1677,14 @@ export class CommunityService {
     const profile = await this.ensureCommunityProfile(userId);
     const productIds = [
       ...(dto.productId ? [dto.productId] : []),
-      ...dto.routineContext.map((item) => item.productId).filter(Boolean),
+      ...routineContext.map((item) => item.productId).filter(Boolean),
     ] as string[];
     const products = await this.loadOwnedProductMap(userId, productIds);
     if (dto.productId && !products.has(dto.productId)) {
       throw new BadRequestException('Reviewed product must be on your shelf');
     }
     const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
-    const contextSnapshots = dto.routineContext.map((item) => {
+    const contextSnapshots = routineContext.map((item) => {
       const product = item.productId ? products.get(item.productId) : null;
       if (item.productId && !product) {
         throw new BadRequestException(
@@ -1009,6 +1704,7 @@ export class CommunityService {
       disclosureType: dto.disclosureType,
       usageDuration: cleanText(dto.usageDuration, 30),
       frequency: cleanText(dto.frequency, 50),
+      routineContextUsage,
       routineSlot: dto.routineSlot,
       skinResponse: dto.skinResponse,
       overallRating: dto.overallRating,
@@ -1050,6 +1746,7 @@ export class CommunityService {
           disclosure_type: dto.disclosureType,
           usage_duration: cleanText(dto.usageDuration, 30) ?? 'unspecified',
           frequency: cleanText(dto.frequency, 50) ?? 'unspecified',
+          routine_context_usage: routineContextUsage,
           routine_slot: dto.routineSlot,
           skin_response: dto.skinResponse,
           overall_rating: dto.overallRating,
@@ -1066,7 +1763,7 @@ export class CommunityService {
         }),
       );
       await manager.getRepository(CommunityReviewContextProduct).save(
-        dto.routineContext.map((item, index) =>
+        routineContext.map((item, index) =>
           manager.getRepository(CommunityReviewContextProduct).create({
             review_id: review.id,
             product_id: item.productId ?? null,
@@ -1125,20 +1822,69 @@ export class CommunityService {
       );
     }
 
+    const existingContextRows =
+      dto.routineContext === undefined
+        ? await this.reviewContext.find({ where: { review_id: reviewId } })
+        : [];
+    const submittedRoutineContext = dto.routineContext;
+    const inferredRoutineContextUsage =
+      submittedRoutineContext !== undefined
+        ? submittedRoutineContext.length > 0
+          ? CommunityReviewRoutineContextUsage.WithProducts
+          : CommunityReviewRoutineContextUsage.UsedAlone
+        : existingContextRows.length > 0
+          ? CommunityReviewRoutineContextUsage.WithProducts
+          : CommunityReviewRoutineContextUsage.UsedAlone;
+    const nextRoutineContextUsage =
+      dto.routineContextUsage ??
+      review.routine_context_usage ??
+      inferredRoutineContextUsage;
+    const requestedRoutineContext =
+      submittedRoutineContext ??
+      existingContextRows.map((item) => ({
+        productId: item.product_id,
+        productBrand: item.product_brand,
+        productName: item.product_name,
+        category: item.category,
+      }));
+    const activeRoutineContext =
+      nextRoutineContextUsage ===
+      CommunityReviewRoutineContextUsage.WithProducts
+        ? requestedRoutineContext
+        : [];
+
+    if (
+      nextRoutineContextUsage ===
+        CommunityReviewRoutineContextUsage.WithProducts &&
+      activeRoutineContext.length === 0
+    ) {
+      throw new BadRequestException(
+        'Review requires at least one product used with it',
+      );
+    }
+    if (
+      nextRoutineContextUsage !==
+        CommunityReviewRoutineContextUsage.WithProducts &&
+      dto.routineContext !== undefined &&
+      dto.routineContext.length > 0
+    ) {
+      throw new BadRequestException(
+        'Routine context products are only allowed when products were used together',
+      );
+    }
+
     const productIds = [
       ...(dto.productId ? [dto.productId] : []),
-      ...(dto.routineContext ?? [])
-        .map((item) => item.productId)
-        .filter(Boolean),
+      ...activeRoutineContext.map((item) => item.productId).filter(Boolean),
     ] as string[];
     const products = await this.loadOwnedProductMap(userId, productIds);
     if (dto.productId && !products.has(dto.productId)) {
       throw new BadRequestException('Reviewed product must be on your shelf');
     }
     const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
-    if (dto.routineContext) {
+    if (activeRoutineContext.length > 0) {
       if (
-        dto.routineContext.some(
+        activeRoutineContext.some(
           (item) => !item.productId && !cleanText(item.productName, 255),
         )
       ) {
@@ -1146,7 +1892,7 @@ export class CommunityService {
           'Review routine context requires product names or shelf products',
         );
       }
-      for (const item of dto.routineContext) {
+      for (const item of activeRoutineContext) {
         if (item.productId && !products.has(item.productId)) {
           throw new BadRequestException(
             'Routine context products must be on your shelf',
@@ -1183,6 +1929,7 @@ export class CommunityService {
       dto.frequency === undefined
         ? review.frequency
         : (cleanText(dto.frequency, 50) ?? review.frequency);
+    review.routine_context_usage = nextRoutineContextUsage;
     review.routine_slot = dto.routineSlot ?? review.routine_slot;
     review.skin_response = dto.skinResponse ?? review.skin_response;
     review.overall_rating = dto.overallRating ?? review.overall_rating;
@@ -1205,22 +1952,14 @@ export class CommunityService {
         : (cleanText(dto.repurchase, 30) ?? review.repurchase);
     review.body =
       dto.body === undefined ? review.body : cleanText(dto.body, 1200);
-    const contextSnapshots = dto.routineContext
-      ? dto.routineContext.map((item) => {
-          const product = item.productId ? products.get(item.productId) : null;
-          return {
-            productBrand: product?.brand ?? cleanText(item.productBrand, 255),
-            productName: product?.name ?? cleanText(item.productName, 255),
-            category: product?.category ?? item.category,
-          };
-        })
-      : (await this.reviewContext.find({ where: { review_id: reviewId } })).map(
-          (item) => ({
-            productBrand: item.product_brand,
-            productName: item.product_name,
-            category: item.category,
-          }),
-        );
+    const contextSnapshots = activeRoutineContext.map((item) => {
+      const product = item.productId ? products.get(item.productId) : null;
+      return {
+        productBrand: product?.brand ?? cleanText(item.productBrand, 255),
+        productName: product?.name ?? cleanText(item.productName, 255),
+        category: product?.category ?? item.category,
+      };
+    });
     const scannedText = buildReviewModerationText({
       productBrand: review.product_brand,
       productName: review.product_name,
@@ -1228,6 +1967,7 @@ export class CommunityService {
       disclosureType: review.disclosure_type,
       usageDuration: review.usage_duration,
       frequency: review.frequency,
+      routineContextUsage: review.routine_context_usage,
       routineSlot: review.routine_slot,
       skinResponse: review.skin_response,
       overallRating: review.overall_rating,
@@ -1259,12 +1999,15 @@ export class CommunityService {
         : null;
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(CommunityReview).save(review);
-      if (dto.routineContext !== undefined) {
+      if (
+        dto.routineContext !== undefined ||
+        dto.routineContextUsage !== undefined
+      ) {
         await manager
           .getRepository(CommunityReviewContextProduct)
           .delete({ review_id: review.id });
         await manager.getRepository(CommunityReviewContextProduct).save(
-          dto.routineContext.map((item, index) =>
+          activeRoutineContext.map((item, index) =>
             manager.getRepository(CommunityReviewContextProduct).create({
               review_id: review.id,
               product_id: item.productId ?? null,
@@ -1301,6 +2044,7 @@ export class CommunityService {
       review,
       await this.reviewContext.find({ where: { review_id: reviewId } }),
       await this.getSafeFacets(userId),
+      userId,
     );
   }
 
@@ -1473,7 +2217,52 @@ export class CommunityService {
       CommunityContentType.Review,
       reviewId,
       dto,
+      {
+        reviewedProduct: this.toOutcomeSignalProductContext({
+          category: review.product_category,
+          productBrand: review.product_brand,
+          productName: review.product_name,
+        }),
+      },
     );
+  }
+
+  async listReviewResults(
+    userId: string,
+    reviewId: string,
+    signal?: string,
+  ): Promise<CommunityReviewResultsResponse> {
+    const review = await this.reviews.findOne({ where: { id: reviewId } });
+    if (!review || !this.canRead(review, userId)) {
+      throw new NotFoundException('Community review not found');
+    }
+    const signalFilter = this.parseOutcomeSignalFilter(signal);
+    const where: FindOptionsWhere<CommunityOutcomeSignalVote> = {
+      content_type: CommunityContentType.Review,
+      content_id: reviewId,
+      note_moderation_status: CommunityModerationStatus.Published,
+      withdrawn_at: IsNull(),
+    };
+    if (signalFilter) where.signal = signalFilter;
+    const viewer = await this.getSafeFacets(userId);
+    const rows = await this.outcomeVotes.find({
+      where,
+      order: { created_at: 'DESC' },
+      take: DEFAULT_LIMIT,
+    });
+    const items = rows
+      .filter(
+        (row) =>
+          row.note_moderation_status === CommunityModerationStatus.Published &&
+          row.withdrawn_at === null &&
+          (!signalFilter || row.signal === signalFilter),
+      )
+      .map((row) => this.toReviewResultResponse(row, viewer));
+
+    return {
+      counts: this.defaultOutcomeSignalCounts(review.outcome_signal_counts),
+      items,
+    };
   }
 
   async adaptRoutine(userId: string, routineId: string) {
@@ -1621,7 +2410,7 @@ export class CommunityService {
   }
 
   async listMySubmissions(userId: string) {
-    const [routines, reviews] = await Promise.all([
+    const [routines, reviews, resultSignals] = await Promise.all([
       this.routines.find({
         where: { author_user_id: userId, withdrawn_at: IsNull() },
         order: { updated_at: 'DESC' },
@@ -1632,10 +2421,16 @@ export class CommunityService {
         order: { updated_at: 'DESC' },
         take: DEFAULT_LIMIT,
       }),
+      this.outcomeVotes.find({
+        where: { user_id: userId, withdrawn_at: IsNull() },
+        order: { updated_at: 'DESC' },
+        take: DEFAULT_LIMIT,
+      }),
     ]);
-    const [stepsByRoutine, contextByReview] = await Promise.all([
+    const [stepsByRoutine, contextByReview, resultParents] = await Promise.all([
       this.loadSteps(routines.map((item) => item.id)),
       this.loadReviewContext(reviews.map((item) => item.id)),
+      this.loadResultParentContent(resultSignals),
     ]);
     const guidanceByContent = await this.loadSubmissionModerationGuidance([
       ...routines.map((item) => ({
@@ -1671,8 +2466,83 @@ export class CommunityService {
             ) ?? null,
           ),
         ),
+        ...resultSignals.map((item) =>
+          this.toResultSubmissionItem(
+            item,
+            resultParents.get(
+              communityContentKey(item.content_type, item.content_id),
+            ) ?? null,
+          ),
+        ),
       ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     };
+  }
+
+  private async loadResultParentContent(
+    resultSignals: CommunityOutcomeSignalVote[],
+  ): Promise<Map<string, CommunityResultParentContent>> {
+    const reviewIds = Array.from(
+      new Set(
+        resultSignals
+          .filter((item) => item.content_type === CommunityContentType.Review)
+          .map((item) => item.content_id),
+      ),
+    );
+    const routineIds = Array.from(
+      new Set(
+        resultSignals
+          .filter((item) => item.content_type === CommunityContentType.Routine)
+          .map((item) => item.content_id),
+      ),
+    );
+    const [reviews, routines] = await Promise.all([
+      reviewIds.length > 0
+        ? this.reviews.find({
+            where: {
+              id: In(reviewIds),
+              moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          })
+        : Promise.resolve([]),
+      routineIds.length > 0
+        ? this.routines.find({
+            where: {
+              id: In(routineIds),
+              moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+    const parents = new Map<string, CommunityResultParentContent>();
+    reviews
+      .filter(
+        (review) =>
+          review.moderation_status === CommunityModerationStatus.Published &&
+          review.withdrawn_at === null,
+      )
+      .forEach((review) => {
+        parents.set(
+          communityContentKey(CommunityContentType.Review, review.id),
+          {
+            id: review.id,
+            title: `${review.product_brand} ${review.product_name}`.trim(),
+            type: CommunityContentType.Review,
+          },
+        );
+      });
+    routines.forEach((routine) => {
+      parents.set(
+        communityContentKey(CommunityContentType.Routine, routine.id),
+        {
+          id: routine.id,
+          title: routine.title,
+          type: CommunityContentType.Routine,
+        },
+      );
+    });
+    return parents;
   }
 
   private async loadSubmissionModerationGuidance(
@@ -1845,6 +2715,13 @@ export class CommunityService {
   }
 
   async withdrawContent(userId: string, contentId: string) {
+    const resultSignal = await this.outcomeVotes.findOne({
+      where: { id: contentId },
+    });
+    if (resultSignal) {
+      return this.withdrawResultSignal(userId, resultSignal);
+    }
+
     const content = await this.findContent(contentId);
     if (content.item.author_user_id !== userId) {
       throw new NotFoundException('Community content not found');
@@ -1871,6 +2748,30 @@ export class CommunityService {
           'User withdrew community content. Removed from public evidence and matching.',
       });
     });
+
+    return { deleted: true };
+  }
+
+  private async withdrawResultSignal(
+    userId: string,
+    resultSignal: CommunityOutcomeSignalVote,
+  ) {
+    if (resultSignal.user_id !== userId) {
+      throw new NotFoundException('Community content not found');
+    }
+    if (resultSignal.withdrawn_at) {
+      return { deleted: true };
+    }
+
+    resultSignal.note_moderation_status = CommunityModerationStatus.Hidden;
+    resultSignal.withdrawn_at = new Date();
+    resultSignal.withdrawn_by_user_id = userId;
+
+    await this.outcomeVotes.save(resultSignal);
+    await this.recountOutcomeSignals(
+      resultSignal.content_type,
+      resultSignal.content_id,
+    );
 
     return { deleted: true };
   }
@@ -2491,6 +3392,7 @@ export class CommunityService {
     routine: CommunityRoutine,
     steps: CommunityRoutineStep[],
     viewer: CommunitySafeProfileFacets,
+    viewerUserId: string,
   ) {
     const tags = [
       ...routine.concern_tags,
@@ -2520,6 +3422,8 @@ export class CommunityService {
       outcomeSignalCounts: this.defaultOutcomeSignalCounts(
         routine.outcome_signal_counts,
       ),
+      canSignalOutcome: routine.author_user_id !== viewerUserId,
+      canReportContent: routine.author_user_id !== viewerUserId,
       matchScore: this.matchScore(
         viewer,
         routine.safe_facets,
@@ -2541,6 +3445,7 @@ export class CommunityService {
     review: CommunityReview,
     context: CommunityReviewContextProduct[],
     viewer: CommunitySafeProfileFacets,
+    viewerUserId: string,
   ) {
     return {
       id: review.id,
@@ -2551,6 +3456,7 @@ export class CommunityService {
       disclosureType: review.disclosure_type,
       usageDuration: review.usage_duration,
       frequency: review.frequency,
+      routineContextUsage: review.routine_context_usage,
       routineSlot: review.routine_slot,
       skinResponse: review.skin_response,
       overallRating: review.overall_rating,
@@ -2570,6 +3476,8 @@ export class CommunityService {
       outcomeSignalCounts: this.defaultOutcomeSignalCounts(
         review.outcome_signal_counts,
       ),
+      canSignalOutcome: review.author_user_id !== viewerUserId,
+      canReportContent: review.author_user_id !== viewerUserId,
       matchScore: this.matchScore(
         viewer,
         review.safe_facets,
@@ -2596,6 +3504,12 @@ export class CommunityService {
     if (review.irritation_rating !== null) score += 4;
     if (review.skin_response !== null) score += 4;
     if (context.some((item) => item.product_name)) score += 6;
+    if (
+      review.routine_context_usage ===
+      CommunityReviewRoutineContextUsage.UsedAlone
+    ) {
+      score += 4;
+    }
     if (review.helpful_count > review.not_helpful_count) {
       score += Math.min(
         8,
@@ -2634,12 +3548,18 @@ export class CommunityService {
     });
   }
 
-  private toOutcomeSignalContext(
+  private async toOutcomeSignalContext(
+    userId: string,
     dto: CommunityOutcomeSignalDto,
-  ): CommunityOutcomeSignalContext {
+  ): Promise<CommunityOutcomeSignalContext> {
     const followedParts = Array.from(new Set(dto.followedParts)).filter(
       (part) => Object.values(CommunityOutcomeFollowedPart).includes(part),
     );
+    const routineSlot =
+      dto.routineSlot &&
+      Object.values(CommunityReviewRoutineSlot).includes(dto.routineSlot)
+        ? dto.routineSlot
+        : null;
     return {
       sameGoal: dto.sameGoal,
       trialDuration: Object.values(CommunityOutcomeTrialDuration).includes(
@@ -2656,7 +3576,164 @@ export class CommunityService {
       )
         ? dto.irritationLevel
         : CommunityOutcomeIrritationLevel.Mild,
+      routineSlot,
+      usedWithProducts: await this.buildOutcomeSignalProductContext(
+        userId,
+        dto.usedWithProducts ?? [],
+      ),
     };
+  }
+
+  private async buildOutcomeSignalProductContext(
+    userId: string,
+    products: NonNullable<CommunityOutcomeSignalDto['usedWithProducts']>,
+  ): Promise<CommunityOutcomeSignalProductContext[]> {
+    const productIds = Array.from(
+      new Set(products.map((item) => item.productId).filter(Boolean)),
+    ) as string[];
+    const ownedProducts = await this.loadOwnedProductMap(userId, productIds);
+    return products.map((item) => {
+      const ownedProduct = item.productId
+        ? ownedProducts.get(item.productId)
+        : null;
+      if (item.productId && !ownedProduct) {
+        throw new BadRequestException(
+          'Result context products must be on your shelf',
+        );
+      }
+      if (!item.productId && !cleanText(item.productName, 255)) {
+        throw new BadRequestException(
+          'Result context products require product names or shelf products',
+        );
+      }
+      return {
+        productBrand:
+          ownedProduct?.brand ?? cleanText(item.productBrand, 255) ?? null,
+        productName:
+          ownedProduct?.name ?? cleanText(item.productName, 255) ?? null,
+        category:
+          ownedProduct?.category ?? cleanText(item.category, 40) ?? 'other',
+      };
+    });
+  }
+
+  private toOutcomeSignalProductContext(input: {
+    category: string | null | undefined;
+    productBrand: string | null | undefined;
+    productName: string | null | undefined;
+  }): CommunityOutcomeSignalProductContext {
+    return {
+      category: cleanText(input.category, 40) ?? 'other',
+      productBrand: cleanText(input.productBrand, 255),
+      productName: cleanText(input.productName, 255),
+    };
+  }
+
+  private parseOutcomeSignalFilter(
+    signal: string | undefined,
+  ): CommunityOutcomeSignal | undefined {
+    if (!signal) return undefined;
+    if (
+      Object.values(CommunityOutcomeSignal).includes(
+        signal as CommunityOutcomeSignal,
+      )
+    ) {
+      return signal as CommunityOutcomeSignal;
+    }
+    throw new BadRequestException('Unknown community result type');
+  }
+
+  private toReviewResultResponse(
+    vote: CommunityOutcomeSignalVote,
+    viewer: CommunitySafeProfileFacets,
+  ): CommunityReviewResultPublic {
+    const context = this.normalizeStoredOutcomeSignalContext(vote.context);
+    const noteModerationStatus =
+      vote.note_moderation_status ?? CommunityModerationStatus.Published;
+    return {
+      id: vote.id,
+      signal: vote.signal,
+      sameGoal: context.sameGoal,
+      trialDuration: context.trialDuration,
+      followedParts: context.followedParts,
+      irritationLevel: context.irritationLevel,
+      routineSlot: context.routineSlot,
+      usedWithProducts:
+        noteModerationStatus === CommunityModerationStatus.Published
+          ? context.usedWithProducts
+          : [],
+      note:
+        noteModerationStatus === CommunityModerationStatus.Published
+          ? vote.note
+          : null,
+      noteModerationStatus,
+      similarToViewer: this.isSimilarFacets(viewer, vote.safe_facets),
+      createdAt: vote.created_at.toISOString(),
+      updatedAt: vote.updated_at.toISOString(),
+    };
+  }
+
+  private normalizeStoredOutcomeSignalContext(
+    context: CommunityOutcomeSignalContext | null | undefined,
+  ): CommunityOutcomeSignalContext {
+    const value: Record<string, unknown> = isRecord(context) ? context : {};
+    const followedParts = Array.isArray(value.followedParts)
+      ? value.followedParts.filter(
+          (part: unknown): part is CommunityOutcomeFollowedPart =>
+            Object.values(CommunityOutcomeFollowedPart).includes(
+              part as CommunityOutcomeFollowedPart,
+            ),
+        )
+      : [];
+    return {
+      sameGoal: value.sameGoal === true,
+      trialDuration: Object.values(CommunityOutcomeTrialDuration).includes(
+        value.trialDuration as CommunityOutcomeTrialDuration,
+      )
+        ? (value.trialDuration as CommunityOutcomeTrialDuration)
+        : CommunityOutcomeTrialDuration.UnderTwoWeeks,
+      followedParts:
+        followedParts.length > 0
+          ? followedParts
+          : [CommunityOutcomeFollowedPart.Partial],
+      irritationLevel: Object.values(CommunityOutcomeIrritationLevel).includes(
+        value.irritationLevel as CommunityOutcomeIrritationLevel,
+      )
+        ? (value.irritationLevel as CommunityOutcomeIrritationLevel)
+        : CommunityOutcomeIrritationLevel.Mild,
+      routineSlot: Object.values(CommunityReviewRoutineSlot).includes(
+        value.routineSlot as CommunityReviewRoutineSlot,
+      )
+        ? (value.routineSlot as CommunityReviewRoutineSlot)
+        : null,
+      usedWithProducts: this.normalizeStoredOutcomeSignalProducts(
+        value.usedWithProducts,
+      ),
+    };
+  }
+
+  private normalizeStoredOutcomeSignalProducts(
+    products: unknown,
+  ): CommunityOutcomeSignalProductContext[] {
+    if (!Array.isArray(products)) return [];
+    return products
+      .map((item): CommunityOutcomeSignalProductContext | null => {
+        if (!isRecord(item)) return null;
+        const category =
+          typeof item.category === 'string' && item.category.trim()
+            ? item.category
+            : 'other';
+        return {
+          productBrand:
+            typeof item.productBrand === 'string' ? item.productBrand : null,
+          productName:
+            typeof item.productName === 'string' ? item.productName : null,
+          category,
+        };
+      })
+      .filter(
+        (item): item is CommunityOutcomeSignalProductContext => item !== null,
+      );
   }
 
   private averageRating(values: Array<number | null>): number | null {
@@ -2738,6 +3815,12 @@ export class CommunityService {
     if (context.some((item) => item.product_name)) {
       reasons.push('named routine context');
     }
+    if (
+      review.routine_context_usage ===
+      CommunityReviewRoutineContextUsage.UsedAlone
+    ) {
+      reasons.push('used alone');
+    }
     return reasons;
   }
 
@@ -2781,8 +3864,8 @@ export class CommunityService {
       },
       {
         id: 'routine-context',
-        title: 'Reviews with routine context rank higher',
-        body: 'Ritora requires product reviews to include the surrounding routine before they can influence matching.',
+        title: 'Reviews with clear usage context rank higher',
+        body: 'Ritora asks whether a product was used alone, with other products, or from memory so evidence stays honest.',
       },
       {
         id: 'safe-facets',
@@ -2926,9 +4009,18 @@ export class CommunityService {
     contentType: CommunityContentType,
     contentId: string,
     dto: CommunityOutcomeSignalDto,
+    options: {
+      reviewedProduct?: CommunityOutcomeSignalProductContext | null;
+    } = {},
   ) {
-    const context = this.toOutcomeSignalContext(dto);
+    const context = await this.toOutcomeSignalContext(userId, dto);
     const safeFacets = await this.getSafeFacets(userId);
+    const noteModeration = await this.moderateOutcomeSignalNote({
+      contentType,
+      context,
+      dto,
+      reviewedProduct: options.reviewedProduct ?? null,
+    });
     await this.dataSource.query(
       `
         INSERT INTO "community_outcome_signal_votes" (
@@ -2939,24 +4031,149 @@ export class CommunityService {
           "signal",
           "context",
           "safe_facets",
+          "note",
+          "note_moderation_status",
+          "note_safety_flags",
+          "note_moderation_reason",
+          "withdrawn_at",
+          "withdrawn_by_user_id",
           "created_at",
           "updated_at"
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, now(), now())
         ON CONFLICT ("user_id", "content_type", "content_id")
         DO UPDATE SET
           "signal" = EXCLUDED."signal",
           "context" = EXCLUDED."context",
           "safe_facets" = EXCLUDED."safe_facets",
+          "note" = EXCLUDED."note",
+          "note_moderation_status" = EXCLUDED."note_moderation_status",
+          "note_safety_flags" = EXCLUDED."note_safety_flags",
+          "note_moderation_reason" = EXCLUDED."note_moderation_reason",
+          "withdrawn_at" = NULL,
+          "withdrawn_by_user_id" = NULL,
           "updated_at" = now()
       `,
-      [ulid(), userId, contentType, contentId, dto.signal, context, safeFacets],
+      [
+        ulid(),
+        userId,
+        contentType,
+        contentId,
+        dto.signal,
+        context,
+        safeFacets,
+        noteModeration.note,
+        noteModeration.status,
+        noteModeration.flags,
+        noteModeration.reason,
+      ],
     );
     const outcomeSignalCounts = await this.recountOutcomeSignals(
       contentType,
       contentId,
     );
-    return { signal: dto.signal, context, outcomeSignalCounts };
+    return {
+      signal: dto.signal,
+      context,
+      noteModerationStatus: noteModeration.status,
+      outcomeSignalCounts,
+    };
+  }
+
+  private async moderateOutcomeSignalNote(input: {
+    contentType: CommunityContentType;
+    context: CommunityOutcomeSignalContext;
+    dto: CommunityOutcomeSignalDto;
+    reviewedProduct: CommunityOutcomeSignalProductContext | null;
+  }): Promise<{
+    flags: CommunitySafetyFlag[];
+    note: string | null;
+    reason: string | null;
+    status: CommunityModerationStatus;
+  }> {
+    const note = cleanText(input.dto.note, 500);
+    const pairingFlags =
+      input.reviewedProduct && input.context.usedWithProducts.length > 0
+        ? this.safety.scanRoutine(
+            this.buildOutcomeSignalPairingSteps(
+              input.reviewedProduct,
+              input.context,
+            ),
+          )
+        : [];
+    const noteFlags = note ? this.safety.scanText(note) : [];
+    const flags = [...noteFlags, ...pairingFlags];
+    if (!note && input.context.usedWithProducts.length === 0) {
+      return {
+        flags: [],
+        note: null,
+        reason: null,
+        status: CommunityModerationStatus.Published,
+      };
+    }
+
+    const moderation = await this.aiModeration.triage({
+      contentType: input.contentType,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      flags,
+      text: buildOutcomeSignalModerationText({
+        signal: input.dto.signal,
+        sameGoal: input.context.sameGoal,
+        trialDuration: input.context.trialDuration,
+        followedParts: input.context.followedParts,
+        irritationLevel: input.context.irritationLevel,
+        routineSlot: input.context.routineSlot,
+        reviewedProduct: input.reviewedProduct,
+        usedWithProducts: input.context.usedWithProducts,
+        note,
+      }),
+    });
+    const shouldRejectNote = flags.some((flag) =>
+      RESULT_NOTE_REJECTION_FLAG_CODES.has(flag.code),
+    );
+    const shouldQueueForReview = flags.some(
+      (flag) =>
+        flag.severity === CommunitySafetySeverity.High ||
+        flag.code === 'possible_undisclosed_sponsorship',
+    );
+
+    return {
+      flags,
+      note,
+      reason: this.automationDecisionReason(moderation.automation),
+      status: shouldRejectNote
+        ? CommunityModerationStatus.Rejected
+        : shouldQueueForReview
+          ? CommunityModerationStatus.PendingReview
+          : moderation.status,
+    };
+  }
+
+  private buildOutcomeSignalPairingSteps(
+    reviewedProduct: CommunityOutcomeSignalProductContext,
+    context: CommunityOutcomeSignalContext,
+  ): CommunityRoutineStepSnapshot[] {
+    const slot = this.toRoutineSafetySlot(context.routineSlot);
+    return [reviewedProduct, ...context.usedWithProducts].map(
+      (product, index) => ({
+        stepOrder: index + 1,
+        slot,
+        productId: null,
+        productBrand: product.productBrand,
+        productName: product.productName,
+        category: product.category,
+        frequency: null,
+        notes: null,
+      }),
+    );
+  }
+
+  private toRoutineSafetySlot(
+    slot: CommunityReviewRoutineSlot | null,
+  ): CommunityRoutineStepSnapshot['slot'] {
+    if (slot === CommunityReviewRoutineSlot.AM) return 'am';
+    if (slot === CommunityReviewRoutineSlot.PM) return 'pm';
+    return 'either';
   }
 
   private async recountOutcomeSignals(
@@ -2969,6 +4186,10 @@ export class CommunityService {
       .addSelect('COUNT(*)::int', 'count')
       .where('vote.content_type = :contentType', { contentType })
       .andWhere('vote.content_id = :contentId', { contentId })
+      .andWhere('vote.note_moderation_status = :status', {
+        status: CommunityModerationStatus.Published,
+      })
+      .andWhere('vote.withdrawn_at IS NULL')
       .groupBy('vote.signal')
       .getRawMany<{ signal: CommunityOutcomeSignal; count: number | string }>();
     const counts = this.defaultOutcomeSignalCounts(
@@ -3175,6 +4396,40 @@ export class CommunityService {
     };
   }
 
+  private toResultSubmissionItem(
+    item: CommunityOutcomeSignalVote,
+    parentContent: CommunityResultParentContent | null,
+  ) {
+    const guidanceReason = this.cleanSubmissionGuidanceReason(
+      item.note_moderation_reason,
+    );
+    return {
+      id: item.id,
+      type: 'result',
+      title: parentContent?.title ?? item.signal,
+      editableText: item.note,
+      status: item.note_moderation_status,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      safetyFlags: item.note_safety_flags,
+      moderationGuidance: guidanceReason
+        ? {
+            reason: guidanceReason,
+            source: /^AI moderation\s+/i.test(item.note_moderation_reason ?? '')
+              ? 'ai'
+              : 'system',
+            createdAt: item.updated_at.toISOString(),
+          }
+        : null,
+      editableRoutine: null,
+      editableReview: null,
+      parentContent,
+      resultSignal: item.signal,
+      authorUserId: item.user_id,
+      createdAt: item.created_at.toISOString(),
+      updatedAt: item.updated_at.toISOString(),
+    };
+  }
+
   private toEditableRoutineSubmission(
     routine: CommunityRoutine,
     steps: CommunityRoutineStep[],
@@ -3215,6 +4470,7 @@ export class CommunityService {
       disclosureType: review.disclosure_type,
       usageDuration: review.usage_duration,
       frequency: review.frequency,
+      routineContextUsage: review.routine_context_usage,
       routineSlot: review.routine_slot,
       skinResponse: review.skin_response,
       overallRating: review.overall_rating,

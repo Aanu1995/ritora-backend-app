@@ -10,9 +10,11 @@ import {
 import { ulid } from 'ulid';
 import {
   CommunityContentType,
+  CommunityModerationStatus,
   CommunityOutcomeSignal,
   type CommunityOutcomeSignalContext,
   type CommunitySafeProfileFacets,
+  type CommunitySafetyFlag,
 } from '../community.types';
 
 @Entity('community_outcome_signal_votes')
@@ -42,6 +44,24 @@ export class CommunityOutcomeSignalVote {
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   safe_facets: CommunitySafeProfileFacets;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  note: string | null;
+
+  @Column({ type: 'varchar', length: 30, default: 'published' })
+  note_moderation_status: CommunityModerationStatus;
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  note_safety_flags: CommunitySafetyFlag[];
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  note_moderation_reason: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  withdrawn_at: Date | null;
+
+  @Column({ type: 'varchar', length: 26, nullable: true })
+  withdrawn_by_user_id: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;

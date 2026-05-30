@@ -50,6 +50,10 @@ export enum CommunityHelpfulnessVote {
   NotHelpful = 'not_helpful',
 }
 
+export enum CommunityListSort {
+  Newest = 'newest',
+}
+
 export enum CommunityGoalResult {
   Achieved = 'achieved',
   MostlyImproved = 'mostly_improved',
@@ -100,11 +104,40 @@ export enum CommunityOutcomeIrritationLevel {
   Severe = 'severe',
 }
 
+export type CommunityOutcomeSignalProductContext = {
+  productBrand: string | null;
+  productName: string | null;
+  category: string;
+};
+
 export type CommunityOutcomeSignalContext = {
   sameGoal: boolean;
   trialDuration: CommunityOutcomeTrialDuration;
   followedParts: CommunityOutcomeFollowedPart[];
   irritationLevel: CommunityOutcomeIrritationLevel;
+  routineSlot: CommunityReviewRoutineSlot | null;
+  usedWithProducts: CommunityOutcomeSignalProductContext[];
+};
+
+export type CommunityReviewResultPublic = {
+  id: string;
+  signal: CommunityOutcomeSignal;
+  sameGoal: boolean;
+  trialDuration: CommunityOutcomeTrialDuration;
+  followedParts: CommunityOutcomeFollowedPart[];
+  irritationLevel: CommunityOutcomeIrritationLevel;
+  routineSlot: CommunityReviewRoutineSlot | null;
+  usedWithProducts: CommunityOutcomeSignalProductContext[];
+  note: string | null;
+  noteModerationStatus: CommunityModerationStatus;
+  similarToViewer: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CommunityReviewResultsResponse = {
+  counts: Record<CommunityOutcomeSignal, number>;
+  items: CommunityReviewResultPublic[];
 };
 
 export enum CommunityReviewRoutineSlot {
@@ -112,6 +145,12 @@ export enum CommunityReviewRoutineSlot {
   PM = 'pm',
   AMPM = 'am-pm',
   Either = 'either',
+}
+
+export enum CommunityReviewRoutineContextUsage {
+  UsedAlone = 'used_alone',
+  WithProducts = 'with_products',
+  NotSure = 'not_sure',
 }
 
 export enum CommunityReviewSkinResponse {
