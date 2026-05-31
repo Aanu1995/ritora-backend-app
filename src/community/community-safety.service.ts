@@ -39,6 +39,12 @@ const SPAM_OR_MODERATION_MANIPULATION_PATTERNS = [
 const EXFOLIANT_CATEGORIES = new Set(['exfoliant', 'toner', 'treatment']);
 const RETINOID_WORDS = ['retinol', 'retinoid', 'tretinoin', 'adapalene'];
 const ACID_WORDS = ['aha', 'bha', 'glycolic', 'lactic', 'salicylic', 'acid'];
+const FREQUENT_ACTIVE_USE_PATTERNS = [
+  /\bdaily\b/i,
+  /\bevery (?:day|night|morning|evening)\b/i,
+  /\btwice (?:daily|a day|per day)\b/i,
+  /\b(?:am|morning)\s*(?:and|&|\+)\s*(?:pm|night|evening)\b/i,
+];
 
 @Injectable()
 export class CommunitySafetyService {
@@ -99,10 +105,8 @@ export class CommunitySafetyService {
       )
       .join(' ');
 
-    const activeStepCount = steps.filter(
-      (step) =>
-        EXFOLIANT_CATEGORIES.has(step.category) ||
-        ACID_WORDS.some((word) => this.stepContains(step, word)),
+    const activeStepCount = steps.filter((step) =>
+      this.isPotentiallyActiveStep(step),
     ).length;
     const hasRetinoid = RETINOID_WORDS.some((word) =>
       searchable.includes(word),
@@ -136,6 +140,15 @@ export class CommunitySafetyService {
         severity: CommunitySafetySeverity.Medium,
         message:
           'This routine includes photosensitizing-style actives but no sunscreen step.',
+      });
+    }
+
+    if (steps.some((step) => this.hasFrequentActiveUse(step))) {
+      flags.push({
+        code: 'over_exfoliation_frequency',
+        severity: CommunitySafetySeverity.Medium,
+        message:
+          'This routine appears to use exfoliating or retinoid-style actives very frequently.',
       });
     }
 
@@ -176,5 +189,22 @@ export class CommunitySafetyService {
       .join(' ')
       .toLowerCase()
       .includes(word);
+  }
+
+  private isPotentiallyActiveStep(step: CommunityRoutineStepSnapshot): boolean {
+    const category = step.category.toLowerCase();
+    return (
+      EXFOLIANT_CATEGORIES.has(category) ||
+      ACID_WORDS.some((word) => this.stepContains(step, word)) ||
+      RETINOID_WORDS.some((word) => this.stepContains(step, word))
+    );
+  }
+
+  private hasFrequentActiveUse(step: CommunityRoutineStepSnapshot): boolean {
+    if (!this.isPotentiallyActiveStep(step)) return false;
+    const useText = [step.frequency, step.notes].filter(Boolean).join(' ');
+    return FREQUENT_ACTIVE_USE_PATTERNS.some((pattern) =>
+      pattern.test(useText),
+    );
   }
 }

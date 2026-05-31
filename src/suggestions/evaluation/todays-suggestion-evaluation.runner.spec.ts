@@ -31,6 +31,9 @@ describe("Today's Suggestion evaluation hard checks", () => {
         'acne_pigment_priority_conflict',
         'sparse_history_partial_shelf',
         'repeated_morning_routine_history',
+        'twelve_product_dark_spots_morning',
+        'twelve_product_acne_evening',
+        'low_need_maintenance_morning_not_empty',
       ]),
     );
   });
@@ -155,6 +158,34 @@ describe("Today's Suggestion evaluation hard checks", () => {
 
     expect(failedCheckIds(evaluationCase, output)).toContain(
       'medical_claim_language',
+    );
+  });
+
+  it('fails empty action plans when a realistic shelf has required basics', () => {
+    const evaluationCase = goldenCase('low_need_maintenance_morning_not_empty');
+    const output = baseOutput({
+      steps: [],
+      gapRecommendations: [],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain('min_step_count');
+  });
+
+  it('fails products used outside their shelf preferred time', () => {
+    const evaluationCase = goldenCase('twelve_product_dark_spots_morning');
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          productId: 'retinoid-1',
+          productName: 'Retinol Night Serum',
+          label: ProductCategory.Treatment,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'preferred_time_compatibility',
     );
   });
 });
@@ -375,6 +406,55 @@ describe("Today's Suggestion evaluation reporting", () => {
     expect(summary.skinProfile.safetyContext.photosensitizingOther).toBe(true);
   });
 
+  it('includes routine preferences and active tolerances in judge case summaries', async () => {
+    const report = await evaluateTodaysSuggestionGoldenCases({
+      generator: {
+        generate: jest.fn().mockResolvedValue(
+          baseOutput({
+            steps: [
+              step({
+                order: 0,
+                productId: 'cleanser-1',
+                productName: 'Soft Cream Cleanser',
+                label: ProductCategory.Cleanser,
+              }),
+              step({
+                order: 1,
+                productId: 'niacinamide-1',
+                productName: 'Niacinamide Serum',
+                label: ProductCategory.Serum,
+              }),
+              step({
+                order: 2,
+                productId: 'moisturizer-1',
+                productName: 'Barrier Cream',
+                label: ProductCategory.Moisturizer,
+              }),
+            ],
+          }),
+        ),
+      },
+      judge: passingJudge,
+      model: 'gpt-4.1-mini',
+      generatedAt: '2026-05-18T08:00:00.000Z',
+      cases: [goldenCase('twelve_product_texture_evening')],
+    });
+    const summary = report.cases[0].sanitizedCaseSummary as {
+      skinProfile: {
+        activeTolerances: Record<string, unknown>;
+        routinePreferences: Record<string, unknown>;
+      };
+    };
+
+    expect(summary.skinProfile.activeTolerances).toMatchObject({
+      aha: { tolerance: 'low' },
+      retinoid: { tolerance: 'low' },
+    });
+    expect(summary.skinProfile.routinePreferences).toMatchObject({
+      max_active_nights_per_week: 2,
+    });
+  });
+
   it('records repeatability variation without failing when repeated outputs stay valid', async () => {
     const first = darkMarksOutput({ includeSpfGap: true });
     const second = darkMarksOutput({ includeSpfGap: true });
@@ -461,6 +541,12 @@ describe("Today's Suggestion evaluation reporting", () => {
     expect(sanitized).not.toContain('abc123');
     expect(sanitized).not.toContain('hunter2');
     expect(sanitized).toContain('[redacted');
+  });
+
+  it('does not redact product ids that merely contain sk hyphen text', () => {
+    const sanitized = sanitizeEvaluationText('mask-fragrance-1 clay-mask-1');
+
+    expect(sanitized).toBe('mask-fragrance-1 clay-mask-1');
   });
 
   it('sanitizes nested report objects', () => {

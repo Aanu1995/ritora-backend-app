@@ -650,10 +650,59 @@ function normalizeTags(values: string[] | null | undefined): string[] {
 }
 
 type ReviewContextModerationSnapshot = {
+  productId?: string | null;
   productBrand?: string | null;
   productName?: string | null;
   category?: string | null;
 };
+
+function toReviewSafetySlot(
+  slot: CommunityReviewRoutineSlot | string | null | undefined,
+): CommunityRoutineStepSnapshot['slot'] {
+  if (slot === CommunityReviewRoutineSlot.AM) return 'am';
+  if (slot === CommunityReviewRoutineSlot.PM) return 'pm';
+  return 'either';
+}
+
+function buildReviewRoutineSafetySteps(input: {
+  productId?: string | null;
+  productBrand?: string | null;
+  productName?: string | null;
+  productCategory?: string | null;
+  frequency?: string | null;
+  routineSlot?: CommunityReviewRoutineSlot | string | null;
+  routineContext: ReviewContextModerationSnapshot[];
+}): CommunityRoutineStepSnapshot[] {
+  const slot = toReviewSafetySlot(input.routineSlot);
+  const steps: CommunityRoutineStepSnapshot[] = [];
+  if (input.productBrand || input.productName || input.productCategory) {
+    steps.push({
+      stepOrder: 1,
+      slot,
+      productId: input.productId ?? null,
+      productBrand: input.productBrand ?? null,
+      productName: input.productName ?? null,
+      category: input.productCategory ?? 'reviewed_product',
+      frequency: input.frequency ?? null,
+      notes: 'Reviewed product',
+    });
+  }
+
+  input.routineContext.forEach((item, index) => {
+    steps.push({
+      stepOrder: index + 2,
+      slot,
+      productId: item.productId ?? null,
+      productBrand: item.productBrand ?? null,
+      productName: item.productName ?? null,
+      category: item.category ?? 'used_with_product',
+      frequency: null,
+      notes: 'Used alongside reviewed product',
+    });
+  });
+
+  return steps;
+}
 
 function moderationLine(label: string, value: unknown): string | null {
   const text = moderationValueText(value);
@@ -737,6 +786,8 @@ function buildReviewModerationText(input: {
   overallRating?: number | null;
   effectivenessRating?: number | null;
   irritationRating?: number | null;
+  textureRating?: number | null;
+  valueRating?: number | null;
   outcomes?: string[] | null;
   repurchase?: string | null;
   routineContext: ReviewContextModerationSnapshot[];
@@ -763,6 +814,8 @@ function buildReviewModerationText(input: {
       input.irritationRating == null
         ? null
         : `irritation ${input.irritationRating}`,
+      input.textureRating == null ? null : `texture ${input.textureRating}`,
+      input.valueRating == null ? null : `value ${input.valueRating}`,
     ]),
     moderationLine('Outcomes', input.outcomes),
     moderationLine('Repurchase', input.repurchase),
@@ -2561,6 +2614,7 @@ export class CommunityService {
         );
       }
       return {
+        productId: product?.id ?? item.productId ?? null,
         productBrand: product?.brand ?? cleanText(item.productBrand, 255),
         productName: product?.name ?? cleanText(item.productName, 255),
         category: product?.category ?? item.category,
@@ -2579,12 +2633,26 @@ export class CommunityService {
       overallRating: dto.overallRating,
       effectivenessRating: dto.effectivenessRating,
       irritationRating: dto.irritationRating,
+      textureRating: dto.textureRating ?? null,
+      valueRating: dto.valueRating ?? null,
       outcomes: normalizeTags(dto.outcomes),
       repurchase: cleanText(dto.repurchase, 30),
       routineContext: contextSnapshots,
       body: cleanText(dto.body, 1200),
     });
-    const flags = this.safety.scanText(scannedText);
+    const reviewSafetySteps = buildReviewRoutineSafetySteps({
+      productId: reviewedProduct?.id ?? dto.productId ?? null,
+      productBrand: reviewedProduct?.brand ?? cleanText(dto.productBrand, 255),
+      productName: reviewedProduct?.name ?? cleanText(dto.productName, 255),
+      productCategory: reviewedProduct?.category ?? dto.productCategory,
+      frequency: cleanText(dto.frequency, 50),
+      routineSlot: dto.routineSlot,
+      routineContext: contextSnapshots,
+    });
+    const flags = [
+      ...this.safety.scanText(scannedText),
+      ...this.safety.scanRoutine(reviewSafetySteps),
+    ];
     this.safety.resolveStatus({
       disclosureType: dto.disclosureType,
       flags,
@@ -2824,6 +2892,7 @@ export class CommunityService {
     const contextSnapshots = activeRoutineContext.map((item) => {
       const product = item.productId ? products.get(item.productId) : null;
       return {
+        productId: product?.id ?? item.productId ?? null,
         productBrand: product?.brand ?? cleanText(item.productBrand, 255),
         productName: product?.name ?? cleanText(item.productName, 255),
         category: product?.category ?? item.category,
@@ -2842,12 +2911,26 @@ export class CommunityService {
       overallRating: review.overall_rating,
       effectivenessRating: review.effectiveness_rating,
       irritationRating: review.irritation_rating,
+      textureRating: review.texture_rating,
+      valueRating: review.value_rating,
       outcomes: review.outcomes,
       repurchase: review.repurchase,
       routineContext: contextSnapshots,
       body: review.body,
     });
-    const flags = this.safety.scanText(scannedText);
+    const reviewSafetySteps = buildReviewRoutineSafetySteps({
+      productId: review.product_id,
+      productBrand: review.product_brand,
+      productName: review.product_name,
+      productCategory: review.product_category,
+      frequency: review.frequency,
+      routineSlot: review.routine_slot,
+      routineContext: contextSnapshots,
+    });
+    const flags = [
+      ...this.safety.scanText(scannedText),
+      ...this.safety.scanRoutine(reviewSafetySteps),
+    ];
     const from = review.moderation_status;
     this.safety.resolveStatus({
       disclosureType: review.disclosure_type,
@@ -3867,40 +3950,88 @@ export class CommunityService {
         'Only content needing edits can be resubmitted',
       );
     }
-    const scannedText =
-      content.type === CommunityContentType.Routine
-        ? (() => {
-            const routine = content.item as CommunityRoutine;
-            return [routine.title, routine.summary ?? ''].join(' ');
-          })()
-        : [
-            (content.item as CommunityReview).product_brand,
-            (content.item as CommunityReview).product_name,
-            (content.item as CommunityReview).body ?? '',
-          ].join(' ');
-    const scannedFlags =
-      content.type === CommunityContentType.Routine
-        ? [
-            ...this.safety.scanText(scannedText),
-            ...this.safety.scanRoutine(
-              (
-                await this.routineSteps.find({
-                  where: { routine_id: contentId },
-                  order: { step_order: 'ASC' },
-                })
-              ).map((step) => ({
-                stepOrder: step.step_order,
-                slot: step.slot,
-                productId: step.product_id,
-                productBrand: step.product_brand,
-                productName: step.product_name,
-                category: step.category,
-                frequency: step.frequency,
-                notes: step.notes,
-              })),
-            ),
-          ]
-        : this.safety.scanText(scannedText);
+    let scannedText: string;
+    let scannedFlags: CommunitySafetyFlag[];
+    if (content.type === CommunityContentType.Routine) {
+      const routine = content.item as CommunityRoutine;
+      const stepSnapshots = (
+        await this.routineSteps.find({
+          where: { routine_id: contentId },
+          order: { step_order: 'ASC' },
+        })
+      ).map((step) => ({
+        stepOrder: step.step_order,
+        slot: step.slot,
+        productId: step.product_id,
+        productBrand: step.product_brand,
+        productName: step.product_name,
+        category: step.category,
+        frequency: step.frequency,
+        notes: step.notes,
+      }));
+      scannedText = buildRoutineModerationText({
+        title: routine.title,
+        summary: routine.summary,
+        disclosureType: routine.disclosure_type,
+        concernTags: routine.concern_tags,
+        goalTags: routine.goal_tags,
+        goalResult: routine.goal_result,
+        timeframe: routine.timeframe,
+        avoidTags: routine.avoid_tags,
+        habitTags: routine.habit_tags,
+        didNotWorkTags: routine.did_not_work_tags,
+        warningTags: routine.warning_tags,
+        steps: stepSnapshots,
+      });
+      scannedFlags = [
+        ...this.safety.scanText(scannedText),
+        ...this.safety.scanRoutine(stepSnapshots),
+      ];
+    } else {
+      const review = content.item as CommunityReview;
+      const contextSnapshots = (
+        await this.reviewContext.find({ where: { review_id: contentId } })
+      ).map((item) => ({
+        productId: item.product_id,
+        productBrand: item.product_brand,
+        productName: item.product_name,
+        category: item.category,
+      }));
+      scannedText = buildReviewModerationText({
+        productBrand: review.product_brand,
+        productName: review.product_name,
+        productCategory: review.product_category,
+        disclosureType: review.disclosure_type,
+        usageDuration: review.usage_duration,
+        frequency: review.frequency,
+        routineContextUsage: review.routine_context_usage,
+        routineSlot: review.routine_slot,
+        skinResponse: review.skin_response,
+        overallRating: review.overall_rating,
+        effectivenessRating: review.effectiveness_rating,
+        irritationRating: review.irritation_rating,
+        textureRating: review.texture_rating,
+        valueRating: review.value_rating,
+        outcomes: review.outcomes,
+        repurchase: review.repurchase,
+        routineContext: contextSnapshots,
+        body: review.body,
+      });
+      scannedFlags = [
+        ...this.safety.scanText(scannedText),
+        ...this.safety.scanRoutine(
+          buildReviewRoutineSafetySteps({
+            productId: review.product_id,
+            productBrand: review.product_brand,
+            productName: review.product_name,
+            productCategory: review.product_category,
+            frequency: review.frequency,
+            routineSlot: review.routine_slot,
+            routineContext: contextSnapshots,
+          }),
+        ),
+      ];
+    }
     this.safety.resolveStatus({
       disclosureType: content.item.disclosure_type,
       flags: scannedFlags,
@@ -5870,7 +6001,7 @@ export class CommunityService {
           flags: input.flags,
           status: input.status,
           scannedTextLength: input.scannedTextLength,
-          scannerVersion: 'deterministic-v1+ai-triage-v1',
+          scannerVersion: 'deterministic-v2+ai-triage-v2',
           automation: input.automation,
         },
       }),

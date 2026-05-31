@@ -874,8 +874,8 @@ describe('CommunityService review evidence', () => {
     expect(moderationInput.text).toContain('Routine context usage: used_alone');
   });
 
-  it('passes labeled review context to AI moderation', async () => {
-    const { aiModeration, repositories, service } = createService();
+  it('passes labeled review context to AI moderation and safety scanning', async () => {
+    const { aiModeration, repositories, safety, service } = createService();
     const user = userFixture();
     const moisturizer = inventoryProductFixture({
       id: 'product_moisturizer',
@@ -914,6 +914,8 @@ describe('CommunityService review evidence', () => {
       overallRating: 5,
       effectivenessRating: 4,
       irritationRating: 1,
+      textureRating: 3,
+      valueRating: 4,
       outcomes: ['barrier'],
       repurchase: 'yes',
       routineContext: [
@@ -933,11 +935,26 @@ describe('CommunityService review evidence', () => {
       'Routine context: Ritora Eval | Soft Cleanser | cleanser',
     );
     expect(moderationInput.text).toContain(
+      'Ratings: overall 5, effectiveness 4, irritation 1, texture 3, value 4',
+    );
+    expect(moderationInput.text).toContain(
       'Review body: I bought this myself and it felt comfortable in a simple routine.',
     );
     expect(moderationInput.text).not.toContain(
       'Ritora Eval Barrier Cream improved barrier cleanser',
     );
+    expect(safety.scanRoutine).toHaveBeenCalledWith([
+      expect.objectContaining({
+        productId: moisturizer.id,
+        productName: 'Barrier Cream',
+        category: ProductCategory.Moisturizer,
+      }),
+      expect.objectContaining({
+        productId: cleanser.id,
+        productName: 'Soft Cleanser',
+        category: ProductCategory.Cleanser,
+      }),
+    ]);
   });
 
   it('infers paired context on returned-review edits from older clients', async () => {
@@ -1005,6 +1022,100 @@ describe('CommunityService review evidence', () => {
     expect(repositories.reviews.save).toHaveBeenCalledWith(
       expect.objectContaining({
         routine_context_usage: CommunityReviewRoutineContextUsage.WithProducts,
+      }),
+    );
+  });
+
+  it('resubmits returned reviews with current ratings and product-pair context', async () => {
+    const { aiModeration, repositories, safety, service } = createService();
+    const user = userFixture();
+    const returnedReview = {
+      id: 'review_returned_context',
+      author_user_id: user.id,
+      community_profile_id: 'community_profile_1',
+      product_id: 'product_retinol',
+      product_brand: 'Ritora',
+      product_name: 'Retinol Serum',
+      product_category: ProductCategory.Treatment,
+      disclosure_type: CommunityDisclosureType.Ordinary,
+      usage_duration: '12-weeks',
+      frequency: '3 nights weekly',
+      routine_context_usage: CommunityReviewRoutineContextUsage.WithProducts,
+      routine_slot: CommunityReviewRoutineSlot.PM,
+      skin_response: CommunityReviewSkinResponse.Improved,
+      overall_rating: 5,
+      effectiveness_rating: 5,
+      irritation_rating: 2,
+      texture_rating: 4,
+      value_rating: 3,
+      outcomes: ['smoother texture'],
+      repurchase: 'yes',
+      body: 'Worked only when I paired it carefully.',
+      moderation_status: CommunityModerationStatus.NeedsEdit,
+      assigned_admin_id: 'admin_assigned',
+      safe_facets: {},
+      safety_flags: [],
+      helpful_count: 0,
+      not_helpful_count: 0,
+      outcome_signal_counts: {},
+      withdrawn_at: null,
+      withdrawn_by_user_id: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    } as unknown as CommunityReview;
+    const contextProduct = {
+      id: 'context_aha',
+      review_id: returnedReview.id,
+      product_id: 'product_aha',
+      product_brand: 'Ritora',
+      product_name: 'AHA Toner',
+      category: ProductCategory.Toner,
+    } as CommunityReviewContextProduct;
+    const pairingFlag = {
+      code: 'retinoid_acid_conflict',
+      severity: CommunitySafetySeverity.High,
+      message:
+        'This product context combines retinoid-style and acid-style actives.',
+    };
+
+    repositories.users.findOne.mockResolvedValue(user);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+    repositories.inventory.count.mockResolvedValue(1);
+    repositories.consents.findOne.mockResolvedValue(consentFixture(user.id));
+    repositories.communitySettings.findOne.mockResolvedValue(
+      settingsFixture(1),
+    );
+    repositories.routines.findOne.mockResolvedValue(null);
+    repositories.reviews.findOne.mockResolvedValue(returnedReview);
+    repositories.reviewContext.find.mockResolvedValue([contextProduct]);
+    jest.mocked(safety.scanRoutine).mockReturnValue([pairingFlag]);
+
+    await service.resubmitContent(user.id, returnedReview.id);
+
+    expect(safety.scanText).toHaveBeenCalledWith(
+      expect.stringContaining('Ratings: overall 5, effectiveness 5'),
+    );
+    expect(safety.scanText).toHaveBeenCalledWith(
+      expect.stringContaining('Routine context: Ritora | AHA Toner | toner'),
+    );
+    expect(safety.scanRoutine).toHaveBeenCalledWith([
+      expect.objectContaining({
+        productId: returnedReview.product_id,
+        productName: 'Retinol Serum',
+        category: ProductCategory.Treatment,
+      }),
+      expect.objectContaining({
+        productId: contextProduct.product_id,
+        productName: 'AHA Toner',
+        category: ProductCategory.Toner,
+      }),
+    ]);
+    expect(aiModeration.triage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flags: expect.arrayContaining([pairingFlag]),
+        text: expect.stringContaining('value 3'),
       }),
     );
   });
@@ -1736,7 +1847,7 @@ describe('CommunityService content integrity policy', () => {
         flags: [],
         status: CommunityModerationStatus.NeedsEdit,
         scannedTextLength: 120,
-        scannerVersion: 'deterministic-v1+ai-triage-v1',
+        scannerVersion: 'deterministic-v2+ai-triage-v2',
         automation: {
           action: 'request_edit',
           handledBy: 'automation',

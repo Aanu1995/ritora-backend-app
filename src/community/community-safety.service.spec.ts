@@ -106,4 +106,28 @@ describe('CommunitySafetyService', () => {
       ]),
     );
   });
+
+  it('flags frequent leave-on active use before AI triage', () => {
+    const flags = service.scanRoutine([
+      {
+        stepOrder: 1,
+        slot: 'pm',
+        productId: null,
+        productBrand: 'Ritora',
+        productName: 'Glycolic Acid Serum',
+        category: 'treatment',
+        frequency: 'daily',
+        notes: 'Leave on every night.',
+      },
+    ]);
+
+    expect(flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'over_exfoliation_frequency',
+          severity: CommunitySafetySeverity.Medium,
+        }),
+      ]),
+    );
+  });
 });

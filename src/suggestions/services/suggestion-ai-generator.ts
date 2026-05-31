@@ -536,9 +536,12 @@ function repairRecoverableMissingSteps(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionGenerationStepOutput[] {
-  return repairMissingOnDemandMoisturizer(
+  return repairMissingGoalSupportStep(
     inputs,
-    repairMissingOwnedDaytimeSpf(inputs, steps),
+    repairMissingOnDemandMoisturizer(
+      inputs,
+      repairMissingOwnedDaytimeSpf(inputs, steps),
+    ),
   );
 }
 
@@ -605,6 +608,159 @@ function repairMissingOnDemandMoisturizer(
     : steps;
 }
 
+function repairMissingGoalSupportStep(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  if (!shouldRepairMissingGoalSupport(inputs, steps)) return steps;
+  const existingProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  const candidate = resolveSuggestionProductScores(inputs)
+    .filter((score) => !existingProductIds.has(score.productId))
+    .filter((score) =>
+      isPreferredTimeCompatibleWithDaypart(
+        score.preferredTimeOfDay,
+        inputs.daypart,
+      ),
+    )
+    .filter((score) => !hasStrongActive(score))
+    .filter((score) => isGoalSupportProduct(inputs, score))
+    .filter((score) => score.dataQuality !== 'insufficient')
+    .sort(compareGoalSupportProducts(inputs))[0];
+  if (!candidate) return steps;
+
+  const context = buildAssemblyContext(inputs);
+  const repaired = resolveRawStep(
+    {
+      stepOrder: steps.length,
+      routineStepId: null,
+      inventoryProductId: candidate.productId,
+      stepLabel: candidate.category,
+      explanation:
+        'Supports your current skin goal without adding a strong active.',
+      provenance: SuggestionStepProvenance.AiAdded,
+    },
+    steps.length,
+    context,
+  );
+  if (!repaired) return steps;
+  return orderBaselineSteps([...steps, repaired]);
+}
+
+function shouldRepairMissingGoalSupport(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): boolean {
+  if (inputs.requestSource !== SuggestionRequestSource.Scheduled) return false;
+  if (steps.length === 0 || steps.length >= 4) return false;
+  if (prefersMinimalRoutine(inputs)) return false;
+  if (
+    inputs.contextSummary.reaction.hasSignal ||
+    inputs.contextSummary.reaction.barrierCompromised ||
+    inputs.contextSummary.routineBreak.recentlyResumed ||
+    inputs.contextSummary.applicationPatterns.conservativeRestart
+  ) {
+    return false;
+  }
+  const selectedScores = selectedProductScores(inputs, steps);
+  if (selectedScores.some((score) => isGoalSupportProduct(inputs, score))) {
+    return false;
+  }
+  return hasGoalNeedingShelfSupport(inputs);
+}
+
+function hasGoalNeedingShelfSupport(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  return /(acne|breakout|clogged|spot|dark mark|hyperpigmentation|uneven tone|pigment|texture|pores?)/i.test(
+    goalSupportText(inputs),
+  );
+}
+
+function isGoalSupportProduct(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  if (
+    [
+      ProductCategory.Cleanser,
+      ProductCategory.Moisturizer,
+      ProductCategory.SunProtection,
+      ProductCategory.LipCare,
+    ].includes(score.category)
+  ) {
+    return false;
+  }
+  return goalSupportRank(inputs, score) > 0;
+}
+
+function compareGoalSupportProducts(inputs: SuggestionGenerationInputs) {
+  return (
+    left: SuggestionContextSummary['productScores'][number],
+    right: SuggestionContextSummary['productScores'][number],
+  ): number => {
+    const rankDelta =
+      goalSupportRank(inputs, right) - goalSupportRank(inputs, left);
+    return rankDelta || right.suitabilityScore - left.suitabilityScore;
+  };
+}
+
+function goalSupportRank(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): number {
+  const text = goalSupportText(inputs);
+  const tags = score.activeTags.map((tag) => tag.toLowerCase());
+  if (
+    /(acne|breakout|clogged)/i.test(text) &&
+    tags.some((tag) => /niacinamide|azelaic|azelaic_acid|acne|zinc/.test(tag))
+  ) {
+    return 4;
+  }
+  if (
+    /(dark mark|hyperpigmentation|uneven tone|pigment|spot)/i.test(text) &&
+    tags.some((tag) =>
+      /niacinamide|azelaic|azelaic_acid|vitamin_c|pigment/.test(tag),
+    )
+  ) {
+    return 4;
+  }
+  if (
+    /(texture|pores?)/i.test(text) &&
+    tags.some((tag) =>
+      /niacinamide|azelaic|azelaic_acid|pha|humectant|hydrating/.test(tag),
+    )
+  ) {
+    return 3;
+  }
+  return score.suitabilityReasons.some((reason) =>
+    /primary selected goal|secondary selected goal/i.test(reason),
+  )
+    ? 2
+    : 0;
+}
+
+function goalSupportText(inputs: SuggestionGenerationInputs): string {
+  return JSON.stringify([
+    inputs.skinProfile?.primary_goal ?? '',
+    inputs.skinProfile?.current_concerns ?? [],
+    inputs.contextSummary.skinProfile.primaryGoal ?? '',
+    inputs.contextSummary.skinProfile.activeConcerns,
+    inputs.contextSummary.goalSignals?.mainGoal ?? '',
+    inputs.contextSummary.goalSignals?.primaryGoal ?? '',
+    inputs.contextSummary.goalSignals?.selectedGoals ?? [],
+    inputs.contextSummary.goalSignals?.secondaryGoals.map(
+      (goal) => goal.concern,
+    ) ?? [],
+    inputs.contextSummary.journalSignals?.detectedConcerns.map(
+      (concern) => concern.concern,
+    ) ?? [],
+  ]);
+}
+
 function orderGeneratedSteps(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
@@ -664,7 +820,43 @@ function normalizeExplanationForSelectedSteps(
     body,
     perStepReasons,
     skipped,
+    inputs: normalizeExplanationInputs(inputs, explanation.inputs),
   };
+}
+
+function normalizeExplanationInputs(
+  inputs: SuggestionGenerationInputs,
+  explanationInputs: SuggestionExplanationJson['inputs'],
+): SuggestionExplanationJson['inputs'] {
+  return explanationInputs
+    .map((input) => ({
+      ...input,
+      detail: removeUnsupportedProfileClaims(inputs, input.detail),
+    }))
+    .filter((input) => input.label.trim() && input.detail.trim());
+}
+
+function removeUnsupportedProfileClaims(
+  inputs: SuggestionGenerationInputs,
+  detail: string,
+): string {
+  if (hasHighPihTendency(inputs)) return detail;
+  return detail
+    .replace(/,\s*high PIH tendency\b/gi, '')
+    .replace(/\bhigh PIH tendency,\s*/gi, '')
+    .replace(/\bhigh PIH tendency\b/gi, '')
+    .replace(/\s+,/g, ',')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function hasHighPihTendency(inputs: SuggestionGenerationInputs): boolean {
+  return /high|very|strong/i.test(
+    JSON.stringify([
+      inputs.skinProfile?.skin_behavior?.pih_tendency ?? '',
+      inputs.contextSummary.profileSignals?.skinBehavior.pihTendency ?? '',
+    ]),
+  );
 }
 
 function normalizeProductCopy(value: string): string {
@@ -969,6 +1161,12 @@ function resolveHardSafetyFallbackReason(
   ) {
     return 'unsafe_daytime_strong_active';
   }
+  if (
+    requiresRecentStrongActiveSpacing(inputs) &&
+    selectedScores.some(hasStrongActive)
+  ) {
+    return 'unsafe_recent_strong_active_spacing';
+  }
   if (hasAiAddedPreferredTimeMismatch(inputs, steps)) {
     return 'preferred_time_of_day_mismatch';
   }
@@ -1046,6 +1244,23 @@ function selectedProductScores(
       (score): score is SuggestionContextSummary['productScores'][number] =>
         Boolean(score),
     );
+}
+
+function requiresRecentStrongActiveSpacing(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  if (
+    !inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /space_strong_actives|avoid_new_strong_actives/i.test(constraint),
+    )
+  ) {
+    return false;
+  }
+  const latestStrongActive = latestStrongActiveApplication(inputs);
+  if (!latestStrongActive) return false;
+  return (
+    daysBetweenDates(latestStrongActive.lastAppliedDate, inputs.targetDate) <= 1
+  );
 }
 
 function hasAiAddedPreferredTimeMismatch(

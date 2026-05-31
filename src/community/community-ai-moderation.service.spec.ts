@@ -93,12 +93,28 @@ describe('CommunityAiModerationService', () => {
     const body = (fetchSpy.mock.calls[0]?.[1] as RequestInit).body;
     if (typeof body !== 'string') throw new Error('Expected string body');
     const requestBody = JSON.parse(body) as {
+      input: Array<{
+        content: Array<{ text: string; type: string }>;
+        role: string;
+      }>;
       max_output_tokens: number;
       reasoning: { effort: string };
     };
     expect(requestBody.max_output_tokens).toBe(2_000);
     expect(requestBody.reasoning).toEqual({
       effort: OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT,
+    });
+    expect(requestBody.input[0]?.content[0]?.text).toContain(
+      'review result notes',
+    );
+    expect(requestBody.input[0]?.content[0]?.text).toContain('playbook steps');
+    const promptPayload = JSON.parse(
+      requestBody.input[1]?.content[0]?.text ?? '{}',
+    ) as { policy?: Record<string, unknown> };
+    expect(promptPayload.policy).toMatchObject({
+      moderateOutcomeConfirmations: true,
+      moderatePlaybookEvidence: true,
+      moderateReviewContextProducts: true,
     });
     expect(result.status).toBe(CommunityModerationStatus.NeedsEdit);
     expect(result.automation.provider).toBe('openai');
@@ -237,5 +253,30 @@ describe('CommunityAiModerationService', () => {
     expect(result.status).toBe(CommunityModerationStatus.Published);
     expect(result.automation.provider).toBe('deterministic_fallback');
     expect(result.automation.fallbackReason).toBe('missing_api_key');
+  });
+
+  it('requests edits for over-exfoliation frequency when fallback moderation is used', async () => {
+    const service = new CommunityAiModerationService(
+      config({
+        OPENAI_API_KEY: '',
+        COMMUNITY_MODERATION_AI_MODEL: 'gpt-5-mini',
+      }),
+    );
+
+    const result = await service.triage({
+      contentType: CommunityContentType.Routine,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      flags: [
+        {
+          code: 'over_exfoliation_frequency',
+          severity: CommunitySafetySeverity.Medium,
+          message: 'Frequent active use detected.',
+        },
+      ],
+      text: 'Glycolic acid serum daily.',
+    });
+
+    expect(result.status).toBe(CommunityModerationStatus.NeedsEdit);
+    expect(result.automation.reason).toContain('frequency');
   });
 });

@@ -1,7 +1,7 @@
-import 'dotenv/config';
 import { mkdir, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { ConfigService } from '@nestjs/config';
+import { evaluationEnvFilePaths, loadEnvFiles } from '../config/env-files';
 import { TODAYS_SUGGESTION_GOLDEN_CASES } from '../suggestions/evaluation/todays-suggestion-golden-cases';
 import {
   createLiveTodaysSuggestionEvaluationRunner,
@@ -10,6 +10,7 @@ import {
 } from '../suggestions/evaluation/todays-suggestion-evaluation.runner';
 
 interface TodaysSuggestionEvaluationCliOptions {
+  envFile: string | null;
   out: string;
   caseIds: string[];
   repeatabilityRuns: number;
@@ -19,6 +20,7 @@ export async function runTodaysSuggestionEvaluationCli(
   args = process.argv.slice(2),
 ): Promise<number> {
   const options = parseTodaysSuggestionEvaluationArgs(args);
+  loadEnvFiles(evaluationEnvFilePaths(options.envFile));
   if (!process.env.OPENAI_API_KEY?.trim()) {
     throw new Error(
       "OPENAI_API_KEY is required to run Today's Suggestion live AI evaluation.",
@@ -47,6 +49,17 @@ export async function runTodaysSuggestionEvaluationCli(
     ...runner,
     cases,
     repeatabilityRuns: options.repeatabilityRuns,
+    onProgress: (event) => {
+      if (event.phase === 'started') {
+        console.log(
+          `Today's Suggestion evaluation case ${event.index}/${event.total} started: ${event.caseId}`,
+        );
+        return;
+      }
+      console.log(
+        `Today's Suggestion evaluation case ${event.index}/${event.total} completed: ${event.caseId} (${event.status})`,
+      );
+    },
   });
 
   await mkdir(resolve(options.out, '..'), { recursive: true });
@@ -76,6 +89,7 @@ export function parseTodaysSuggestionEvaluationArgs(
 ): TodaysSuggestionEvaluationCliOptions {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   return {
+    envFile: readFlag(args, '--env-file'),
     out: resolve(
       readFlag(args, '--out') ??
         join(

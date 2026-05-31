@@ -55,8 +55,11 @@ export type TodaysSuggestionEvaluationExpectations = {
   requiresPregnancySafetyFlag?: boolean;
   requiresGapRecommendation?: boolean;
   requiresOnDemandShape?: boolean;
+  minStepCount?: number;
   maxStepCount?: number;
+  maxStrongActiveCount?: number;
   requiredProductIds?: readonly string[];
+  requiredAnyProductIds?: readonly (readonly string[])[];
   forbiddenProductIds?: readonly string[];
   requiredGapKeywords?: readonly string[];
   requiredSafetyKeywords?: readonly string[];
@@ -616,6 +619,194 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
       ],
     }),
     buildCase({
+      id: 'twelve_product_dark_spots_morning',
+      title: 'Twelve-product dark spot shelf stays focused without going empty',
+      riskFocus: [
+        'large_shelf_selection',
+        'hyperpigmentation',
+        'morning_preferred_time',
+      ],
+      profile: profile({
+        skinTone: 'deep',
+        ethnicity: 'Black',
+        primaryGoal: 'fade dark spots without irritation',
+        currentConcerns: ['dark spots', 'uneven tone', 'dryness'],
+        skinBehavior: { pih_tendency: 'high', sunscreen_habit: 'most_days' },
+        routinePreferences: { pace: 'steady', am_minutes: 8, pm_minutes: 10 },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '08:15',
+      environment: environment({
+        uvRisk: EnvironmentUvRisk.High,
+        uvIndex: 7,
+      }),
+      products: twelveProductPigmentShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'moisturizer-1',
+          'spf-1',
+        ]),
+        application('2026-05-16', SuggestionDaypart.Evening, ['retinoid-1']),
+        application('2026-05-15', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'spf-1',
+        ]),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        minStepCount: 3,
+        maxStepCount: 5,
+        requiredProductIds: ['spf-1'],
+        requiredAnyProductIds: [
+          ['azelaic-1', 'niacinamide-1'],
+          ['moisturizer-1', 'hydrating-serum-1'],
+        ],
+        forbiddenProductIds: [
+          'retinoid-1',
+          'bha-1',
+          'aha-1',
+          'mask-fragrance-1',
+        ],
+        requiredEvidenceSourceIds: [
+          SuggestionEvidenceSourceId.AadSunscreenSelection,
+          SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+        ],
+      },
+      manualReviewChecklist: [
+        'Does a 12-product shelf still produce a useful non-empty morning plan?',
+        'Does it choose SPF and pigment support instead of arbitrary product variety?',
+        'Does it keep evening-only actives out of the morning slot?',
+      ],
+    }),
+    buildCase({
+      id: 'twelve_product_acne_evening',
+      title:
+        'Twelve-product acne shelf selects one sensible active path at night',
+      riskFocus: ['large_shelf_selection', 'acne', 'active_spacing'],
+      profile: profile({
+        primaryGoal: 'reduce breakouts while keeping barrier calm',
+        currentConcerns: ['acne', 'oiliness', 'clogged pores'],
+        activeTolerances: {
+          bha: { tolerance: 'medium' },
+          retinoid: { tolerance: 'low' },
+          benzoyl_peroxide: { tolerance: 'medium' },
+        },
+        routinePreferences: {
+          pace: 'steady',
+          max_active_nights_per_week: 3,
+          pm_minutes: 10,
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:45',
+      products: twelveProductAcneShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Evening, ['retinoid-1']),
+        application('2026-05-16', SuggestionDaypart.Evening, ['bha-1']),
+        application('2026-05-15', SuggestionDaypart.Evening, [
+          'cleanser-1',
+          'moisturizer-1',
+        ]),
+      ],
+      expected: {
+        minStepCount: 2,
+        maxStepCount: 4,
+        maxStrongActiveCount: 1,
+        requiredProductIds: ['moisturizer-1'],
+        requiredAnyProductIds: [['azelaic-1', 'niacinamide-1', 'benzoyl-1']],
+        forbiddenProductIds: ['aha-1', 'mask-fragrance-1'],
+      },
+      manualReviewChecklist: [
+        'Does it avoid returning empty just because several acne actives need spacing?',
+        'Does it choose one acne-support path rather than stacking multiple strong actives?',
+      ],
+    }),
+    buildCase({
+      id: 'twelve_product_texture_evening',
+      title:
+        'Twelve-product texture shelf spaces exfoliation after recent active use',
+      riskFocus: ['large_shelf_selection', 'texture', 'active_spacing'],
+      profile: profile({
+        primaryGoal: 'smooth rough texture gradually',
+        currentConcerns: ['texture', 'large pores', 'dryness'],
+        activeTolerances: {
+          aha: { tolerance: 'low' },
+          bha: { tolerance: 'medium' },
+          retinoid: { tolerance: 'low' },
+        },
+        routinePreferences: {
+          pace: 'cautious',
+          max_active_nights_per_week: 2,
+          pm_minutes: 10,
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '21:00',
+      products: twelveProductTextureShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Evening, ['bha-1']),
+        application('2026-05-16', SuggestionDaypart.Evening, [
+          'cleanser-1',
+          'moisturizer-1',
+        ]),
+      ],
+      expected: {
+        minStepCount: 2,
+        maxStepCount: 4,
+        maxStrongActiveCount: 1,
+        requiredProductIds: ['moisturizer-1'],
+        forbiddenProductIds: ['bha-1', 'mask-fragrance-1'],
+      },
+      manualReviewChecklist: [
+        'Does texture support stay gradual instead of stacking exfoliants?',
+        'Does it explain why recently used actives are delayed if they are skipped?',
+      ],
+    }),
+    buildCase({
+      id: 'low_need_maintenance_morning_not_empty',
+      title:
+        'Low-need maintenance shelf still recommends practical morning basics',
+      riskFocus: ['large_shelf_selection', 'low_need', 'empty_output_guard'],
+      profile: profile({
+        primaryGoal: 'maintain a healthy simple routine',
+        currentConcerns: ['mild dryness'],
+        skinBehavior: { sunscreen_habit: 'daily' },
+        routinePreferences: { pace: 'minimal', am_minutes: 5, pm_minutes: 8 },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '07:40',
+      products: twelveProductPigmentShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'moisturizer-1',
+          'spf-1',
+        ]),
+        application('2026-05-16', SuggestionDaypart.Morning, [
+          'moisturizer-1',
+          'spf-1',
+        ]),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        minStepCount: 2,
+        maxStepCount: 4,
+        requiredProductIds: ['spf-1'],
+        requiredAnyProductIds: [['cleanser-1', 'moisturizer-1']],
+        forbiddenProductIds: [
+          'retinoid-1',
+          'bha-1',
+          'aha-1',
+          'mask-fragrance-1',
+        ],
+      },
+      manualReviewChecklist: [
+        'Does a low-need user still get useful owned basics rather than an empty plan?',
+        'Does it avoid adding optional treatments just to use more products?',
+      ],
+    }),
+    buildCase({
       id: 'recent_routine_break_resume',
       title: 'Recently resumed routine restarts gently',
       riskFocus: ['routine_break', 'conservative_restart'],
@@ -1049,6 +1240,9 @@ function productSourceIds(
   if (product.identity?.benefits?.includes('bha')) {
     ids.push(SuggestionEvidenceSourceId.AadAcneTreatment);
   }
+  if (product.identity?.benefits?.includes('benzoyl_peroxide')) {
+    ids.push(SuggestionEvidenceSourceId.AadAcneTreatment);
+  }
   return ids;
 }
 
@@ -1294,6 +1488,114 @@ function fragranceMask() {
     tags: ['fragrance', 'mask'],
     ingredients: ['fragrance', 'limonene'],
   });
+}
+
+function soothingToner() {
+  return product({
+    id: 'soothing-toner-1',
+    brand: 'Plain Lab',
+    name: 'Soothing Toner',
+    category: ProductCategory.Toner,
+    tags: ['soothing', 'panthenol'],
+    ingredients: ['water', 'panthenol', 'allantoin'],
+  });
+}
+
+function barrierEssence() {
+  return product({
+    id: 'barrier-essence-1',
+    brand: 'Plain Lab',
+    name: 'Barrier Essence',
+    category: ProductCategory.Essence,
+    tags: ['barrier', 'hydrating'],
+    ingredients: ['glycerin', 'beta-glucan', 'panthenol'],
+  });
+}
+
+function lipBalm() {
+  return product({
+    id: 'lip-balm-1',
+    brand: 'Ava Lab',
+    name: 'Comfort Lip Balm',
+    category: ProductCategory.LipCare,
+    tags: ['lip-care', 'barrier'],
+    ingredients: ['petrolatum', 'shea butter'],
+  });
+}
+
+function benzoylTreatment() {
+  return product({
+    id: 'benzoyl-1',
+    brand: 'Ava Lab',
+    name: 'Benzoyl Peroxide Gel',
+    category: ProductCategory.Treatment,
+    tags: ['benzoyl_peroxide', 'acne'],
+    ingredients: ['benzoyl peroxide'],
+    cautions: ['Can dry or irritate when layered with other strong actives.'],
+    preferredTime: PreferredTimeOfDay.Evening,
+  });
+}
+
+function clayMask() {
+  return product({
+    id: 'clay-mask-1',
+    brand: 'Ava Lab',
+    name: 'Calm Clay Mask',
+    category: ProductCategory.Mask,
+    tags: ['oil-control', 'mask'],
+    ingredients: ['kaolin', 'glycerin'],
+  });
+}
+
+function twelveProductPigmentShelf() {
+  return [
+    cleanser(),
+    moisturizer(),
+    sunscreen(),
+    hydratingSerum(),
+    niacinamideSerum(),
+    azelaicSerum(),
+    soothingToner(),
+    barrierEssence(),
+    lipBalm(),
+    bhaExfoliant(),
+    retinoid(),
+    fragranceMask(),
+  ];
+}
+
+function twelveProductAcneShelf() {
+  return [
+    cleanser(),
+    moisturizer(),
+    sunscreen(),
+    hydratingSerum(),
+    niacinamideSerum(),
+    azelaicSerum(),
+    bhaExfoliant(),
+    retinoid(),
+    benzoylTreatment(),
+    clayMask(),
+    soothingToner(),
+    fragranceMask(),
+  ];
+}
+
+function twelveProductTextureShelf() {
+  return [
+    cleanser(),
+    moisturizer(),
+    sunscreen(),
+    hydratingSerum(),
+    niacinamideSerum(),
+    azelaicSerum(),
+    bhaExfoliant(),
+    ahaToner(),
+    retinoid(),
+    soothingToner(),
+    barrierEssence(),
+    fragranceMask(),
+  ];
 }
 
 function strongTags(product: InventoryProduct): string[] {

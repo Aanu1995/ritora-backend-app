@@ -62,6 +62,25 @@ describe('env file resolution', () => {
     expect(process.env.DATABASE_PASSWORD).toBe('from-env');
   });
 
+  it('lets app test env use the local database password when the test password is blank', () => {
+    writeFileSync(
+      join(tempDir, '.env.test'),
+      'DATABASE_NAME=ritora_test\nDATABASE_PASSWORD=\n',
+    );
+    writeFileSync(
+      join(tempDir, '.env'),
+      'DATABASE_NAME=ritora\nDATABASE_PASSWORD=from-env\n',
+    );
+
+    loadEnvFiles(appEnvFilePaths('test'), {
+      protectedKeys: new Set(),
+      rootDir: tempDir,
+    });
+
+    expect(process.env.DATABASE_NAME).toBe('ritora_test');
+    expect(process.env.DATABASE_PASSWORD).toBe('from-env');
+  });
+
   it('allows a single explicit evaluation env file', () => {
     expect(evaluationEnvFilePaths('/tmp/ritora-evaluation.env')).toEqual([
       '/tmp/ritora-evaluation.env',

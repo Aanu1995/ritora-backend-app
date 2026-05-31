@@ -86,9 +86,14 @@ const RESPONSE_FORMAT: OpenAiTextFormat = {
 
 const SYSTEM_PROMPT = [
   'You moderate signed-in Ritora skincare community content.',
+  'Content may be a product review, goal playbook, or review result note/outcome confirmation.',
   'Return one JSON decision only: publish, request_edit, or admin_review.',
   'Use request_edit for fixable non-critical issues, including unclear disclosure, missing sunscreen context, harsh wording, vague medical-adjacent phrasing, or private details the author can remove.',
   'Use admin_review for medical advice, prescription/diagnosis/cure claims, unsafe active stacking, privacy exposure, harassment threats, spam/scams, or any issue you are not confident automation should handle.',
+  'For reviews, moderate the reviewed product, ratings, routine slot, usage duration, outcomes, review text, and products used alongside it.',
+  'For playbooks, moderate goal evidence, timeframe, avoid tags, habit tags, warning tags, and playbook steps/products.',
+  'For review result notes, moderate the note plus the product pair context used by the confirming member.',
+  'Personal lifestyle experience is allowed when framed as personal experience, but medical certainty or cure language is not.',
   'Use publish only for content that is clearly safe, non-medical, non-diagnostic, and disclosure-consistent.',
   'Do not judge whether skincare advice is effective. Judge launch safety, disclosure integrity, and community policy risk.',
   'The deterministic safety flags are trusted guardrails. Never contradict high severity flags.',
@@ -276,6 +281,9 @@ export class CommunityAiModerationService {
         signedInOnly: true,
         noMedicalAdvice: true,
         noPrivateContactInfo: true,
+        moderateReviewContextProducts: true,
+        moderatePlaybookEvidence: true,
+        moderateOutcomeConfirmations: true,
         nonCriticalDefault: 'request_edit',
         criticalDefault: 'admin_review',
       },
@@ -323,6 +331,7 @@ export class CommunityAiModerationService {
       !DISCLOSED_COMMERCIAL_LABELS.has(input.disclosureType);
     const fixableSafetyIssue =
       this.hasFlag(input.flags, 'missing_sunscreen') ||
+      this.hasFlag(input.flags, 'over_exfoliation_frequency') ||
       this.hasFlag(input.flags, 'possible_harassment') ||
       this.hasFlag(input.flags, 'possible_spam_or_moderation_manipulation');
     if (
@@ -379,6 +388,15 @@ export class CommunityAiModerationService {
     if (this.hasFlag(input.flags, 'missing_sunscreen')) {
       return this.requestEdit(
         'Automation found photosensitizing-style active context without sunscreen guidance.',
+        model,
+        fallbackReason,
+        durationMs,
+      );
+    }
+
+    if (this.hasFlag(input.flags, 'over_exfoliation_frequency')) {
+      return this.requestEdit(
+        'Automation found exfoliating or retinoid-style active frequency that needs safer context.',
         model,
         fallbackReason,
         durationMs,
@@ -471,14 +489,16 @@ export class CommunityAiModerationService {
         ? 'disclosure mismatch needs author edit'
         : this.hasFlag(input.flags, 'missing_sunscreen')
           ? 'sunscreen context needs author edit'
-          : this.hasFlag(input.flags, 'possible_harassment')
-            ? 'tone needs author edit'
-            : this.hasFlag(
-                  input.flags,
-                  'possible_spam_or_moderation_manipulation',
-                )
-              ? 'spam or moderation-manipulation language needs author edit'
-              : 'deterministic policy requires safer handling')
+          : this.hasFlag(input.flags, 'over_exfoliation_frequency')
+            ? 'active frequency needs author edit'
+            : this.hasFlag(input.flags, 'possible_harassment')
+              ? 'tone needs author edit'
+              : this.hasFlag(
+                    input.flags,
+                    'possible_spam_or_moderation_manipulation',
+                  )
+                ? 'spam or moderation-manipulation language needs author edit'
+                : 'deterministic policy requires safer handling')
     );
   }
 

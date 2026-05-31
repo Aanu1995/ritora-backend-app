@@ -5,7 +5,7 @@ import {
   OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
   openAiRepeatabilityRequestOptions,
 } from '../../common/utils/openai-request-options';
-import { ProductCategory } from '../../shelf/shelf.types';
+import { PreferredTimeOfDay, ProductCategory } from '../../shelf/shelf.types';
 import type { SuggestionProductScore } from '../suggestion-context.types';
 import {
   SUGGESTION_MODES,
@@ -183,7 +183,23 @@ export interface TodaysSuggestionEvaluationRunnerOptions {
   cases?: readonly TodaysSuggestionEvaluationCase[];
   generatedAt?: string;
   repeatabilityRuns?: number;
+  onProgress?: (event: TodaysSuggestionEvaluationProgressEvent) => void;
 }
+
+export type TodaysSuggestionEvaluationProgressEvent =
+  | {
+      phase: 'started';
+      index: number;
+      total: number;
+      caseId: string;
+    }
+  | {
+      phase: 'completed';
+      index: number;
+      total: number;
+      caseId: string;
+      status: TodaysSuggestionEvaluationStatus;
+    };
 
 export async function evaluateTodaysSuggestionGoldenCases(
   options: TodaysSuggestionEvaluationRunnerOptions,
@@ -194,18 +210,30 @@ export async function evaluateTodaysSuggestionGoldenCases(
   const repeatabilityRuns = Math.max(1, options.repeatabilityRuns ?? 1);
   const results: TodaysSuggestionCaseResult[] = [];
 
-  for (const evaluationCase of cases) {
-    results.push(
-      await evaluateCase({
-        evaluationCase,
-        generator: options.generator,
-        judge: options.judge,
-        model: options.model,
-        promptVersion,
-        generatedAt,
-        repeatabilityRuns,
-      }),
-    );
+  for (const [index, evaluationCase] of cases.entries()) {
+    options.onProgress?.({
+      phase: 'started',
+      index: index + 1,
+      total: cases.length,
+      caseId: evaluationCase.id,
+    });
+    const result = await evaluateCase({
+      evaluationCase,
+      generator: options.generator,
+      judge: options.judge,
+      model: options.model,
+      promptVersion,
+      generatedAt,
+      repeatabilityRuns,
+    });
+    results.push(result);
+    options.onProgress?.({
+      phase: 'completed',
+      index: index + 1,
+      total: cases.length,
+      caseId: evaluationCase.id,
+      status: result.status,
+    });
   }
 
   const passedCases = results.filter(
@@ -248,9 +276,13 @@ export function runTodaysSuggestionHardChecks(
     checkEvidenceSourceIds(evaluationCase, output),
     checkMedicalClaims(output),
     checkExpectedProductIds(evaluationCase, output),
+    checkExpectedAnyProductIds(evaluationCase, output),
     checkExpectedGapKeywords(evaluationCase, output),
     checkExpectedSafetyKeywords(evaluationCase, output),
+    checkPreferredTimeCompatibility(evaluationCase, output),
+    checkMinStepCount(evaluationCase, output),
     checkMaxStepCount(evaluationCase, output),
+    checkMaxStrongActiveCount(evaluationCase, output),
   ];
 }
 
@@ -264,7 +296,10 @@ export function sanitizeEvaluationText(
     sanitized = sanitized.split(secret).join('[redacted-secret]');
   }
   return sanitized
-    .replace(/sk-[A-Za-z0-9_-]{10,}/g, '[redacted-openai-key]')
+    .replace(
+      /(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}/g,
+      '$1[redacted-openai-key]',
+    )
     .replace(
       /\b(OPENAI_API_KEY|SUGGESTION_AI_MODEL|AWS_SECRET_ACCESS_KEY|DATABASE_URL|JWT_SECRET)\b\s*[:=]\s*["']?[^"'\s,}]+/gi,
       '$1=[redacted]',
@@ -1115,6 +1150,30 @@ function checkExpectedProductIds(
   );
 }
 
+function checkExpectedAnyProductIds(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures: string[] = [];
+  const selected = new Set(
+    output.steps
+      .map((step) => step.inventoryProductId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  for (const group of evaluationCase.expected.requiredAnyProductIds ?? []) {
+    if (!group.some((id) => selected.has(id))) {
+      failures.push(
+        `Expected one of these products to be selected: ${group.join(', ')}.`,
+      );
+    }
+  }
+  return makeCheck(
+    'expected_any_product_ids',
+    'At least one product from each required product group is selected.',
+    failures,
+  );
+}
+
 function checkExpectedGapKeywords(
   evaluationCase: TodaysSuggestionEvaluationCase,
   output: SuggestionGenerationOutput,
@@ -1159,6 +1218,60 @@ function checkExpectedSafetyKeywords(
   );
 }
 
+function checkPreferredTimeCompatibility(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const productById = new Map(
+    evaluationCase.inputs.shelfActiveProducts.map((product) => [
+      product.id,
+      product,
+    ]),
+  );
+  const failures = output.steps
+    .filter(
+      (step) =>
+        step.provenance !== SuggestionStepProvenance.SpecialistLocked &&
+        step.inventoryProductId,
+    )
+    .flatMap((step) => {
+      const product = productById.get(step.inventoryProductId as string);
+      const preferredTime =
+        product?.user_fields?.preferredTimeOfDay ?? PreferredTimeOfDay.Either;
+      return isPreferredTimeCompatible(
+        preferredTime,
+        evaluationCase.inputs.daypart,
+      )
+        ? []
+        : [
+            `Product ${step.inventoryProductId} prefers ${preferredTime} but output daypart is ${evaluationCase.inputs.daypart}.`,
+          ];
+    });
+  return makeCheck(
+    'preferred_time_compatibility',
+    'Shelf preferred time is respected.',
+    failures,
+  );
+}
+
+function checkMinStepCount(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures: string[] = [];
+  const min = evaluationCase.expected.minStepCount;
+  if (typeof min === 'number' && output.steps.length < min) {
+    failures.push(
+      `Expected at least ${min} steps, got ${output.steps.length}.`,
+    );
+  }
+  return makeCheck(
+    'min_step_count',
+    'Step count meets the case minimum.',
+    failures,
+  );
+}
+
 function checkMaxStepCount(
   evaluationCase: TodaysSuggestionEvaluationCase,
   output: SuggestionGenerationOutput,
@@ -1171,6 +1284,33 @@ function checkMaxStepCount(
   return makeCheck(
     'max_step_count',
     'Step count stays within case limit.',
+    failures,
+  );
+}
+
+function checkMaxStrongActiveCount(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const max = evaluationCase.expected.maxStrongActiveCount;
+  const failures: string[] = [];
+  if (typeof max === 'number') {
+    const products = productScoresById(evaluationCase);
+    const selectedStrong = output.steps
+      .map((step) => productForStep(step, products))
+      .filter((product): product is SuggestionProductScore => Boolean(product))
+      .filter((product) => hasAnyTag(product, STRONG_ACTIVE_TAGS));
+    if (selectedStrong.length > max) {
+      failures.push(
+        `Expected at most ${max} strong active step(s), got ${selectedStrong
+          .map((product) => product.productId)
+          .join(', ')}.`,
+      );
+    }
+  }
+  return makeCheck(
+    'max_strong_active_count',
+    'Strong active count stays within the case limit.',
     failures,
   );
 }
@@ -1246,6 +1386,20 @@ function hasAnyTag(
     product.activeTags.map((tag) => tag.toLowerCase()),
   );
   return tags.some((tag) => normalizedTags.has(tag));
+}
+
+function isPreferredTimeCompatible(
+  preferredTime: PreferredTimeOfDay,
+  daypart: SuggestionDaypart,
+): boolean {
+  if (preferredTime === PreferredTimeOfDay.Either) return true;
+  if (preferredTime === PreferredTimeOfDay.Morning) {
+    return (
+      daypart === SuggestionDaypart.Morning ||
+      daypart === SuggestionDaypart.Noon
+    );
+  }
+  return daypart === SuggestionDaypart.Evening;
 }
 
 function collectSourceIds(
@@ -1370,6 +1524,22 @@ function buildCaseSummary(
             ?.photosensitizing_other ??
           false,
       },
+      activeTolerances: evaluationCase.inputs.contextSummary.profileSignals
+        ?.activeTolerances.length
+        ? Object.fromEntries(
+            evaluationCase.inputs.contextSummary.profileSignals.activeTolerances.map(
+              (item) => [
+                item.ingredient,
+                {
+                  tolerance: item.tolerance,
+                  lastUsed: item.lastUsed,
+                },
+              ],
+            ),
+          )
+        : (evaluationCase.inputs.skinProfile?.active_tolerances ?? {}),
+      routinePreferences:
+        evaluationCase.inputs.skinProfile?.routine_preferences ?? {},
     },
     contextSignals: {
       reaction: evaluationCase.inputs.contextSummary.reaction,

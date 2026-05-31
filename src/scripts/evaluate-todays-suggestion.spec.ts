@@ -19,6 +19,8 @@ describe('evaluate-todays-suggestion CLI helpers', () => {
       '/tmp/todays-suggestion-report.json',
       '--repeat',
       '2',
+      '--env-file',
+      '/tmp/todays-suggestion.env',
     ]);
 
     expect(options.caseIds).toEqual([
@@ -27,6 +29,7 @@ describe('evaluate-todays-suggestion CLI helpers', () => {
     ]);
     expect(options.out).toBe('/tmp/todays-suggestion-report.json');
     expect(options.repeatabilityRuns).toBe(2);
+    expect(options.envFile).toBe('/tmp/todays-suggestion.env');
   });
 
   it('rejects invalid repeatability counts', () => {

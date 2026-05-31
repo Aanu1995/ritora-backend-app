@@ -1,13 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { appEnvFilePaths } from './env-files';
+import { appEnvFilePaths, loadEnvFiles } from './env-files';
 import { envValidationSchema } from './env.validation';
+
+loadEnvFiles(appEnvFilePaths());
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: appEnvFilePaths(),
+      ignoreEnvFile: true,
       validationSchema: envValidationSchema,
       validationOptions: {
         abortEarly: true,

@@ -1,6 +1,6 @@
-import { config as loadEnv } from 'dotenv';
 import { mkdir, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
+import { evaluationEnvFilePaths, loadEnvFiles } from '../config/env-files';
 import {
   buildCommunityEvaluationReport,
   type CommunityEvaluationReport,
@@ -15,11 +15,7 @@ type CommunityEvaluationCliOptions = {
 
 async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
-  if (options.envFile) {
-    loadEnv({ path: options.envFile, override: true });
-  } else {
-    loadEnv();
-  }
+  loadEnvFiles(evaluationEnvFilePaths(options.envFile));
 
   const report = await buildCommunityEvaluationReport({
     requireLiveAi: options.requireLiveAi,

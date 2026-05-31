@@ -717,6 +717,243 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('falls back when OpenAI selects a strong active too soon after another strong active', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening pores',
+                    body: ['Use BHA for clogged pores.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'bha-1', ProductCategory.Exfoliant),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.targetDate = '2026-05-18';
+    inputs.contextSummary.targetDate = '2026-05-18';
+    inputs.shelfActiveProducts.push(
+      product('retinoid-1', 'Retinol Night Serum', ProductCategory.Treatment),
+      product('bha-1', 'BHA 2% Liquid', ProductCategory.Exfoliant),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('retinoid-1', ProductCategory.Treatment, 90, ['retinoid']),
+      productScore('bha-1', ProductCategory.Exfoliant, 88, ['bha']),
+    );
+    inputs.contextSummary.safetyConstraints.push('space_strong_actives');
+    inputs.contextSummary.appliedProductHistory = {
+      windowStartDate: '2026-04-19',
+      windowEndDate: '2026-05-18',
+      recordsConsidered: 30,
+      products: [
+        {
+          productId: 'retinoid-1',
+          brand: 'Ava Lab',
+          name: 'Retinol Night Serum',
+          category: ProductCategory.Treatment,
+          stepLabel: ProductCategory.Treatment,
+          sourceTypes: ['recommended'],
+          dayparts: ['evening'],
+          statuses: ['applied'],
+          useCount: 1,
+          lastAppliedDate: '2026-05-17',
+          lastAppliedAt: '2026-05-17T20:00:00.000Z',
+          isOffShelf: false,
+          isSubstitution: false,
+        },
+      ],
+    };
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe(
+      'unsafe_recent_strong_active_spacing',
+    );
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'bha-1' }),
+      ]),
+    );
+  });
+
+  it('adds a compatible non-strong goal support step when OpenAI returns only basics', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Calm acne night',
+                    body: ['Keep the routine simple tonight.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(
+                      1,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.skinProfile = {
+      primary_goal: 'reduce breakouts',
+      current_concerns: ['acne', 'clogged pores'],
+      routine_preferences: { pm_minutes: 10 },
+    } as SkinProfile;
+    inputs.contextSummary.skinProfile.primaryGoal = 'reduce breakouts';
+    inputs.contextSummary.skinProfile.activeConcerns = [
+      'acne',
+      'clogged pores',
+    ];
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
+        score.productId === 'serum-1'
+          ? {
+              ...score,
+              suitabilityScore: 96,
+              activeTags: ['niacinamide'],
+              suitabilityReasons: [
+                'matches this slot',
+                'primary selected goal',
+              ],
+            }
+          : score,
+      );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'serum-1' }),
+      ]),
+    );
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'serum-1',
+      'moisturizer-1',
+    ]);
+  });
+
+  it('removes unsupported PIH tendency claims from AI explanation inputs', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning base',
+                    body: ['Cleanse and moisturize.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [
+                      {
+                        label: 'Skin',
+                        detail:
+                          'Combination skin, medium sensitivity, high PIH tendency',
+                      },
+                    ],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(
+                      1,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+
+    const result = await generator.generate(inputs);
+
+    expect(result.explanation.inputs).toEqual([
+      {
+        label: 'Skin',
+        detail: 'Combination skin, medium sensitivity',
+      },
+    ]);
+  });
+
   it('falls back when OpenAI selects a product outside its user-preferred time', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,

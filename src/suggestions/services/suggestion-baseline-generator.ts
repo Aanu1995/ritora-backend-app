@@ -34,7 +34,10 @@ import {
   stableSameDaypartRepeatProductIds,
 } from './suggestion-routine-repeat-policy';
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
-import { isPreferredTimeCompatibleWithDaypart } from './suggestion-product-intelligence';
+import {
+  isPreferredTimeCompatibleWithDaypart,
+  isStrongActiveTag,
+} from './suggestion-product-intelligence';
 
 const baselineCopy = {
   noStepsHeadline: {
@@ -700,9 +703,19 @@ function preferredCategoryOrder(
 
   if (shouldAvoidStrongActives(inputs)) {
     return inputs.daypart === SuggestionDaypart.Evening
-      ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
+      ? [
+          ProductCategory.Cleanser,
+          ProductCategory.Toner,
+          ProductCategory.Essence,
+          ProductCategory.Serum,
+          ProductCategory.Treatment,
+          ProductCategory.Moisturizer,
+        ]
       : [
           ProductCategory.Cleanser,
+          ProductCategory.Toner,
+          ProductCategory.Essence,
+          ProductCategory.Serum,
           ProductCategory.Moisturizer,
           ProductCategory.SunProtection,
         ];
@@ -732,6 +745,7 @@ function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
     inputs.contextSummary.reaction.barrierCompromised ||
     inputs.contextSummary.routineBreak.recentlyResumed ||
     inputs.contextSummary.applicationPatterns.conservativeRestart ||
+    hasRecentStrongActiveApplication(inputs) ||
     inputs.contextSummary.safetyConstraints.some((constraint) =>
       /avoid_strong_actives|avoid_new_strong_actives|photosensit/i.test(
         constraint,
@@ -753,6 +767,45 @@ function shouldAvoidDaytimeStrongActives(
       /space_strong_actives/i.test(constraint),
     )
   );
+}
+
+function hasRecentStrongActiveApplication(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  if (
+    !inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /space_strong_actives|avoid_new_strong_actives/i.test(constraint),
+    )
+  ) {
+    return false;
+  }
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const latestAppliedDate =
+    inputs.contextSummary.appliedProductHistory?.products
+      .filter(
+        (product) =>
+          product.productId &&
+          product.lastAppliedDate &&
+          scoreByProductId
+            .get(product.productId)
+            ?.activeTags.some(isStrongActiveTag),
+      )
+      .map((product) => product.lastAppliedDate as string)
+      .sort((left, right) => right.localeCompare(left))[0] ?? null;
+  if (!latestAppliedDate) return false;
+  return daysBetweenDates(latestAppliedDate, inputs.targetDate) <= 1;
+}
+
+function daysBetweenDates(startDate: string, endDate: string): number {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
 function hasPregnancyOrMedicationCaution(

@@ -67,6 +67,33 @@ describe('suggestion generation history loaders', () => {
     );
   });
 
+  it('backfills sparse recent application history with at least seven older rows when available', async () => {
+    const repo = mockRepo<ApplicationLog>(
+      applicationLogs('window', 2, '2026-05-04'),
+      applicationLogs('older', 7, '2026-03-01'),
+    );
+
+    const result = await loadSuggestionApplicationHistory(
+      repo,
+      'user-1',
+      '2026-05-04',
+    );
+
+    expect(result.rows).toHaveLength(9);
+    expect(result.windowRowCount).toBe(2);
+    expect(result.backfillRowCount).toBe(7);
+    expect(repo.find).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        take: 28,
+        where: expect.objectContaining({
+          user_id: 'user-1',
+          target_date: expect.objectContaining({ _type: 'lessThan' }),
+        }),
+      }),
+    );
+  });
+
   it('uses indexed user/date predicates for dense journal history', async () => {
     const repo = mockRepo<SkinJournalEntry>(
       journalEntries('window', 1_000, '2026-05-04'),
