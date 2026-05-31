@@ -202,6 +202,13 @@ export class CommunityCursorPageQueryDto {
   limit: number = COMMUNITY_LIST_PAGE_DEFAULT_LIMIT;
 }
 
+export class CommunityOutcomeResultsQueryDto extends CommunityCursorPageQueryDto {
+  @EmptyStringToUndefined()
+  @IsOptional()
+  @IsEnum(CommunityOutcomeSignal)
+  signal?: CommunityOutcomeSignal;
+}
+
 export class CommunityRoutineStepDto {
   @IsIn(['am', 'pm', 'either'])
   slot: 'am' | 'pm' | 'either';

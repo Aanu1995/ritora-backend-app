@@ -138,6 +138,7 @@ export type CommunityReviewResultPublic = {
 export type CommunityReviewResultsResponse = {
   counts: Record<CommunityOutcomeSignal, number>;
   items: CommunityReviewResultPublic[];
+  nextCursor: string | null;
 };
 
 export enum CommunityReviewRoutineSlot {

@@ -29,6 +29,7 @@ import {
   CommunityCursorPageQueryDto,
   CommunityHelpfulnessDto,
   CommunityListQueryDto,
+  CommunityOutcomeResultsQueryDto,
   CommunityOutcomeSignalDto,
   CreateCommunityReportDto,
   CreateCommunityReviewDto,
@@ -134,6 +135,15 @@ export class CommunityController {
     return this.communityService.signalRoutineOutcome(userId, id, dto);
   }
 
+  @Get('routines/:id/results')
+  listRoutineResults(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Query() query: CommunityOutcomeResultsQueryDto,
+  ) {
+    return this.communityService.listRoutineResults(userId, id, query);
+  }
+
   @Post('routines/:id/adapt-to-shelf')
   @UseGuards(OriginCheckGuard)
   adaptRoutine(@CurrentUser('id') userId: string, @Param('id') id: string) {
@@ -211,9 +221,9 @@ export class CommunityController {
   listReviewResults(
     @CurrentUser('id') userId: string,
     @Param('id') id: string,
-    @Query('signal') signal?: string,
+    @Query() query: CommunityOutcomeResultsQueryDto,
   ) {
-    return this.communityService.listReviewResults(userId, id, signal);
+    return this.communityService.listReviewResults(userId, id, query);
   }
 
   @Get('warnings')

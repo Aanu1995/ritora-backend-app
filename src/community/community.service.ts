@@ -8,10 +8,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import {
   Brackets,
   DataSource,
+  Equal,
   type FindOptionsWhere,
   ILike,
   In,
   IsNull,
+  LessThan,
   MoreThan,
   Repository,
   type SelectQueryBuilder,
@@ -45,6 +47,7 @@ import {
   type CommunityCursorPageQueryDto,
   type CommunityHelpfulnessDto,
   type CommunityListQueryDto,
+  type CommunityOutcomeResultsQueryDto,
   type CommunityOutcomeSignalDto,
   type CreateCommunityReportDto,
   type CreateCommunityReviewDto,
@@ -137,6 +140,11 @@ type CommunityCombinedCursorEntity = CommunityCursorEntity & {
 type CommunityScoredCursorEntity = CommunityCursorEntity & {
   contentKind: CommunityPublishedContentKind;
   matchScore: number;
+};
+
+type CommunityResultCursorEntity = {
+  created_at: Date;
+  id: string;
 };
 
 type CommunityRawCursorRow = {
@@ -263,6 +271,75 @@ function communityListCursorTuple(
   item: CommunityCursorEntity,
 ): [string, string] {
   return [item.updated_at.toISOString(), item.id];
+}
+
+function communityResultFingerprint({
+  contentId,
+  contentType,
+  limit,
+  signal,
+  userId,
+}: {
+  contentId: string;
+  contentType: CommunityContentType;
+  limit: number;
+  signal: CommunityOutcomeSignal | null | undefined;
+  userId: string;
+}): string {
+  return [
+    'community',
+    'results',
+    'v1',
+    userId,
+    contentType,
+    contentId,
+    limit,
+    signal ?? 'all',
+  ].join(':');
+}
+
+function decodeCommunityResultCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [createdAtValue, idValue] = decoded.tuple;
+  if (typeof createdAtValue !== 'string' || typeof idValue !== 'string') {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const createdAt = new Date(createdAtValue);
+  if (Number.isNaN(createdAt.getTime())) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return { createdAt, id: idValue };
+}
+
+function communityResultCursorTuple(
+  item: CommunityResultCursorEntity,
+): [string, string] {
+  return [item.created_at.toISOString(), item.id];
+}
+
+function communityResultListPage<T extends CommunityResultCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+) {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityResultCursorTuple(lastRow),
+          })
+        : null,
+  };
 }
 
 function communityListPage<T extends CommunityCursorEntity>(
@@ -2674,27 +2751,73 @@ export class CommunityService {
   async listReviewResults(
     userId: string,
     reviewId: string,
-    signal?: string,
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
   ): Promise<CommunityReviewResultsResponse> {
     const review = await this.reviews.findOne({ where: { id: reviewId } });
     if (!review || !this.canRead(review, userId)) {
       throw new NotFoundException('Community review not found');
     }
-    const signalFilter = this.parseOutcomeSignalFilter(signal);
-    const where: FindOptionsWhere<CommunityOutcomeSignalVote> = {
-      content_type: CommunityContentType.Review,
-      content_id: reviewId,
-      note_moderation_status: CommunityModerationStatus.Published,
-      withdrawn_at: IsNull(),
-    };
-    if (signalFilter) where.signal = signalFilter;
-    const viewer = await this.getSafeFacets(userId);
-    const rows = await this.outcomeVotes.find({
-      where,
-      order: { created_at: 'DESC' },
-      take: DEFAULT_LIMIT,
+    return this.listContentResults(
+      userId,
+      CommunityContentType.Review,
+      reviewId,
+      review.outcome_signal_counts,
+      queryOrSignal,
+    );
+  }
+
+  async listRoutineResults(
+    userId: string,
+    routineId: string,
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
+  ): Promise<CommunityReviewResultsResponse> {
+    const routine = await this.routines.findOne({ where: { id: routineId } });
+    if (!routine || !this.canRead(routine, userId)) {
+      throw new NotFoundException('Community routine not found');
+    }
+    return this.listContentResults(
+      userId,
+      CommunityContentType.Routine,
+      routineId,
+      routine.outcome_signal_counts,
+      queryOrSignal,
+    );
+  }
+
+  private async listContentResults(
+    userId: string,
+    contentType: CommunityContentType,
+    contentId: string,
+    outcomeSignalCounts:
+      | Partial<Record<CommunityOutcomeSignal, number>>
+      | null
+      | undefined,
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
+  ): Promise<CommunityReviewResultsResponse> {
+    const query = this.normalizeOutcomeResultsQuery(queryOrSignal);
+    const limit = normalizeCommunityListLimit(query.limit);
+    const signalFilter = this.parseOutcomeSignalFilter(query.signal);
+    const fingerprint = communityResultFingerprint({
+      contentId,
+      contentType,
+      limit,
+      signal: signalFilter,
+      userId,
     });
-    const items = rows
+    const viewer = await this.getSafeFacets(userId);
+    const page = communityResultListPage(
+      await this.findContentResultRows(
+        contentType,
+        contentId,
+        signalFilter,
+        query.cursor,
+        limit,
+        fingerprint,
+      ),
+      limit,
+      fingerprint,
+    );
+    const items = page.rows
       .filter(
         (row) =>
           row.note_moderation_status === CommunityModerationStatus.Published &&
@@ -2704,9 +2827,66 @@ export class CommunityService {
       .map((row) => this.toReviewResultResponse(row, viewer));
 
     return {
-      counts: this.defaultOutcomeSignalCounts(review.outcome_signal_counts),
+      counts: this.defaultOutcomeSignalCounts(outcomeSignalCounts),
       items,
+      nextCursor: page.nextCursor,
     };
+  }
+
+  private normalizeOutcomeResultsQuery(
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
+  ): Partial<CommunityOutcomeResultsQueryDto> {
+    if (typeof queryOrSignal === 'string') {
+      return { signal: queryOrSignal as CommunityOutcomeSignal };
+    }
+
+    return queryOrSignal ?? {};
+  }
+
+  private findContentResultRows(
+    contentType: CommunityContentType,
+    contentId: string,
+    signalFilter: CommunityOutcomeSignal | null | undefined,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityOutcomeSignalVote[]> {
+    const pageSize = limit + 1;
+    const baseWhere: FindOptionsWhere<CommunityOutcomeSignalVote> = {
+      content_id: contentId,
+      content_type: contentType,
+      note_moderation_status: CommunityModerationStatus.Published,
+      withdrawn_at: IsNull(),
+    };
+
+    if (signalFilter) {
+      baseWhere.signal = signalFilter;
+    }
+
+    const decodedCursor = cursor
+      ? decodeCommunityResultCursor(cursor, fingerprint)
+      : null;
+    const where:
+      | FindOptionsWhere<CommunityOutcomeSignalVote>[]
+      | FindOptionsWhere<CommunityOutcomeSignalVote> = decodedCursor
+      ? [
+          {
+            ...baseWhere,
+            created_at: LessThan(decodedCursor.createdAt),
+          },
+          {
+            ...baseWhere,
+            created_at: Equal(decodedCursor.createdAt),
+            id: LessThan(decodedCursor.id),
+          },
+        ]
+      : baseWhere;
+
+    return this.outcomeVotes.find({
+      where,
+      order: { created_at: 'DESC', id: 'DESC' },
+      take: pageSize,
+    });
   }
 
   async adaptRoutine(userId: string, routineId: string) {
@@ -4668,14 +4848,13 @@ export class CommunityService {
     status: CommunityModerationStatus;
   }> {
     const note = cleanText(input.dto.note, 500);
+    const productContextSteps = this.buildOutcomeSignalProductContextSteps(
+      input.reviewedProduct,
+      input.context,
+    );
     const pairingFlags =
-      input.reviewedProduct && input.context.usedWithProducts.length > 0
-        ? this.safety.scanRoutine(
-            this.buildOutcomeSignalPairingSteps(
-              input.reviewedProduct,
-              input.context,
-            ),
-          )
+      productContextSteps.length > 1
+        ? this.safety.scanRoutine(productContextSteps)
         : [];
     const noteFlags = note ? this.safety.scanText(note) : [];
     const flags = [...noteFlags, ...pairingFlags];
@@ -4725,23 +4904,24 @@ export class CommunityService {
     };
   }
 
-  private buildOutcomeSignalPairingSteps(
-    reviewedProduct: CommunityOutcomeSignalProductContext,
+  private buildOutcomeSignalProductContextSteps(
+    reviewedProduct: CommunityOutcomeSignalProductContext | null,
     context: CommunityOutcomeSignalContext,
   ): CommunityRoutineStepSnapshot[] {
     const slot = this.toRoutineSafetySlot(context.routineSlot);
-    return [reviewedProduct, ...context.usedWithProducts].map(
-      (product, index) => ({
-        stepOrder: index + 1,
-        slot,
-        productId: null,
-        productBrand: product.productBrand,
-        productName: product.productName,
-        category: product.category,
-        frequency: null,
-        notes: null,
-      }),
-    );
+    return [
+      ...(reviewedProduct ? [reviewedProduct] : []),
+      ...context.usedWithProducts,
+    ].map((product, index) => ({
+      stepOrder: index + 1,
+      slot,
+      productId: null,
+      productBrand: product.productBrand,
+      productName: product.productName,
+      category: product.category,
+      frequency: null,
+      notes: null,
+    }));
   }
 
   private toRoutineSafetySlot(
