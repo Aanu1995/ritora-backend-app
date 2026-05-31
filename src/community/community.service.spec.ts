@@ -32,6 +32,7 @@ import { decodeCursor, encodeCursor } from '../common/utils/cursor-pagination';
 import { CommunityAiModerationService } from './community-ai-moderation.service';
 import { CommunitySafetyService } from './community-safety.service';
 import { CommunityService } from './community.service';
+import { CommunityBookmark } from './entities/community-bookmark.entity';
 import {
   CommunityContentType,
   CommunityDisclosureType,
@@ -76,8 +77,12 @@ type MockRepository<T extends object> = {
 };
 
 type DataSourceQueryRow = {
+  bookmark_id?: string;
+  content_id?: string;
   content_kind?: string;
+  content_type?: string;
   count?: number | string;
+  created_at?: Date | string;
   id?: string;
   match_score?: number | string;
   updated_at?: Date | string;
@@ -105,6 +110,7 @@ type CommunityRepositories = {
   reviewContext: Repository<CommunityReviewContextProduct> &
     MockRepository<CommunityReviewContextProduct>;
   reports: Repository<CommunityReport> & MockRepository<CommunityReport>;
+  bookmarks: Repository<CommunityBookmark> & MockRepository<CommunityBookmark>;
   decisions: Repository<CommunityModerationDecision> &
     MockRepository<CommunityModerationDecision>;
   votes: Repository<CommunityHelpfulnessVoteEntity> &
@@ -163,6 +169,7 @@ function createService() {
     reviews: repositoryMock<CommunityReview>(),
     reviewContext: repositoryMock<CommunityReviewContextProduct>(),
     reports: repositoryMock<CommunityReport>(),
+    bookmarks: repositoryMock<CommunityBookmark>(),
     decisions: repositoryMock<CommunityModerationDecision>(),
     votes: repositoryMock<CommunityHelpfulnessVoteEntity>(),
     outcomeVotes: repositoryMock<CommunityOutcomeSignalVote>(),
@@ -223,6 +230,7 @@ function createService() {
     repositories.reviews,
     repositories.reviewContext,
     repositories.reports,
+    repositories.bookmarks,
     repositories.decisions,
     repositories.votes,
     repositories.outcomeVotes,
@@ -426,6 +434,20 @@ function communityRoutineFixture(
     withdrawn_by_user_id: null,
     created_at: now,
     updated_at: now,
+    generateId: jest.fn(),
+    ...overrides,
+  };
+}
+
+function communityBookmarkFixture(
+  overrides: Partial<CommunityBookmark> = {},
+): CommunityBookmark {
+  return {
+    id: 'bookmark_1',
+    user_id: 'user_community_1',
+    content_type: CommunityContentType.Review,
+    content_id: 'review_1',
+    created_at: new Date('2026-05-20T12:00:00.000Z'),
     generateId: jest.fn(),
     ...overrides,
   };
@@ -989,6 +1011,39 @@ describe('CommunityService review evidence', () => {
 });
 
 describe('CommunityService content integrity policy', () => {
+  it('reuses one safe profile lookup across community home feed sections', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture({ email_verified: true });
+    const profile = completeSkinProfile(user);
+
+    repositories.users.findOne.mockResolvedValue(user);
+    repositories.skinProfiles.findOne.mockResolvedValue(profile);
+    repositories.inventory.count.mockResolvedValue(1);
+    repositories.consents.findOne.mockResolvedValue(consentFixture(user.id));
+    repositories.routines.find.mockResolvedValue([
+      communityRoutineFixture({ id: 'routine_home' }),
+    ]);
+    repositories.reviews.find.mockResolvedValue([
+      communityReviewFixture({ id: 'review_home' }),
+    ]);
+    repositories.routineSteps.find.mockResolvedValue([]);
+    repositories.reviewContext.find.mockResolvedValue([]);
+    repositories.bookmarks.find.mockResolvedValue([]);
+    repositories.warnings.find.mockResolvedValue([]);
+
+    const result = await service.getHome(user.id);
+
+    expect(result.routines).toHaveLength(1);
+    expect(result.reviews).toHaveLength(1);
+    expect(repositories.skinProfiles.findOne).toHaveBeenCalledTimes(2);
+    expect(repositories.skinProfiles.findOne).toHaveBeenCalledWith({
+      where: { user_id: user.id },
+    });
+    expect(repositories.skinProfiles.findOne).not.toHaveBeenCalledWith(
+      expect.objectContaining({ relations: ['user'] }),
+    );
+  });
+
   it('marks author-owned published reviews as unavailable for outcome confirmation', async () => {
     const { repositories, service } = createService();
     const user = userFixture();
@@ -1070,6 +1125,13 @@ describe('CommunityService content integrity policy', () => {
     ];
 
     repositories.reviews.find.mockResolvedValue(rows);
+    repositories.bookmarks.find.mockResolvedValue([
+      communityBookmarkFixture({
+        user_id: user.id,
+        content_type: CommunityContentType.Review,
+        content_id: 'review_2',
+      }),
+    ]);
     repositories.reviewContext.find.mockResolvedValue([]);
     repositories.skinProfiles.findOne.mockResolvedValue(
       completeSkinProfile(user),
@@ -1082,6 +1144,10 @@ describe('CommunityService content integrity policy', () => {
       'review_3',
       'review_2',
     ]);
+    expect(result.items.map((item) => item.bookmarkedByViewer)).toEqual([
+      false,
+      true,
+    ]);
     expect(result.nextCursor).toEqual(expect.any(String));
     expect(repositories.reviews.find).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1089,6 +1155,15 @@ describe('CommunityService content integrity policy', () => {
         take: 3,
         where: expect.objectContaining({
           moderation_status: CommunityModerationStatus.Published,
+        }),
+      }),
+    );
+    expect(repositories.bookmarks.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { content_id: true },
+        where: expect.objectContaining({
+          user_id: user.id,
+          content_type: CommunityContentType.Review,
         }),
       }),
     );
@@ -1115,6 +1190,13 @@ describe('CommunityService content integrity policy', () => {
     repositories.routines.createQueryBuilder.mockReturnValue(
       builder as unknown as SelectQueryBuilder<CommunityRoutine>,
     );
+    repositories.bookmarks.find.mockResolvedValue([
+      communityBookmarkFixture({
+        user_id: user.id,
+        content_type: CommunityContentType.Routine,
+        content_id: 'routine_2',
+      }),
+    ]);
     repositories.skinProfiles.findOne.mockResolvedValue(
       completeSkinProfile(user),
     );
@@ -1122,7 +1204,10 @@ describe('CommunityService content integrity policy', () => {
     const result = await service.listRoutines(user.id, { cursor, limit: 2 });
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0]).toMatchObject({ id: 'routine_2' });
+    expect(result.items[0]).toMatchObject({
+      id: 'routine_2',
+      bookmarkedByViewer: true,
+    });
     expect(result.nextCursor).toBeNull();
     expect(repositories.routines.createQueryBuilder).toHaveBeenCalledWith(
       'routine',
@@ -1415,6 +1500,155 @@ describe('CommunityService content integrity policy', () => {
         'routine_cursor',
       ]),
     );
+  });
+
+  it('bookmarks published reviews with one idempotent insert', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    const review = communityReviewFixture();
+
+    repositories.reviews.count.mockResolvedValue(1);
+
+    await expect(service.bookmarkReview(user.id, review.id)).resolves.toEqual({
+      bookmarked: true,
+    });
+
+    expect(repositories.reviews.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: review.id,
+        moderation_status: CommunityModerationStatus.Published,
+      }),
+    });
+    expect(repositories.bookmarks.findOne).not.toHaveBeenCalled();
+    expect(repositories.bookmarks.create).not.toHaveBeenCalled();
+    expect(repositories.bookmarks.save).not.toHaveBeenCalled();
+    expect(dataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO "community_bookmarks"'),
+      expect.arrayContaining([user.id, CommunityContentType.Review, review.id]),
+    );
+
+    await expect(service.bookmarkReview(user.id, review.id)).resolves.toEqual({
+      bookmarked: true,
+    });
+    expect(dataSource.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects bookmarks for content that is not publicly visible', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    repositories.routines.count.mockResolvedValue(0);
+
+    await expect(
+      service.bookmarkRoutine(user.id, 'routine_1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(repositories.bookmarks.save).not.toHaveBeenCalled();
+    expect(dataSource.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO "community_bookmarks"'),
+      expect.any(Array),
+    );
+  });
+
+  it('lists bookmarks newest first with cursor pagination', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    const routine = communityRoutineFixture({ id: 'routine_saved' });
+    const review = communityReviewFixture({ id: 'review_saved' });
+    dataSource.query.mockResolvedValue([
+      {
+        bookmark_id: 'bookmark_3',
+        content_type: CommunityContentType.Routine,
+        content_id: routine.id,
+        created_at: '2026-05-20T12:00:00.000Z',
+      },
+      {
+        bookmark_id: 'bookmark_2',
+        content_type: CommunityContentType.Review,
+        content_id: review.id,
+        created_at: '2026-05-20T11:00:00.000Z',
+      },
+      {
+        bookmark_id: 'bookmark_1',
+        content_type: CommunityContentType.Review,
+        content_id: 'review_next_page',
+        created_at: '2026-05-20T10:00:00.000Z',
+      },
+    ]);
+    repositories.routines.find.mockResolvedValue([routine]);
+    repositories.reviews.find.mockResolvedValue([review]);
+    repositories.routineSteps.find.mockResolvedValue([]);
+    repositories.reviewContext.find.mockResolvedValue([]);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+
+    const result = await service.listBookmarks(user.id, { limit: 2 });
+
+    expect(result.items.map((item) => item.id)).toEqual([
+      routine.id,
+      review.id,
+    ]);
+    expect(result.items.map((item) => item.bookmarkedByViewer)).toEqual([
+      true,
+      true,
+    ]);
+    expect(result.nextCursor).toEqual(expect.any(String));
+    expect(decodeCursor(result.nextCursor as string).tuple).toEqual([
+      '2026-05-20T11:00:00.000Z',
+      'bookmark_2',
+    ]);
+    expect(dataSource.query).toHaveBeenCalledWith(
+      expect.stringContaining('community_bookmarks'),
+      expect.arrayContaining([
+        user.id,
+        CommunityModerationStatus.Published,
+        CommunityContentType.Routine,
+        CommunityContentType.Review,
+      ]),
+    );
+  });
+
+  it('omits saved content if it is under moderation by the time bookmarks load', async () => {
+    const { dataSource, repositories, service } = createService();
+    const user = userFixture();
+    dataSource.query.mockResolvedValue([
+      {
+        bookmark_id: 'bookmark_hidden',
+        content_type: CommunityContentType.Routine,
+        content_id: 'routine_hidden',
+        created_at: '2026-05-20T12:00:00.000Z',
+      },
+    ]);
+    repositories.routines.find.mockResolvedValue([
+      communityRoutineFixture({
+        id: 'routine_hidden',
+        moderation_status: CommunityModerationStatus.PendingReview,
+      }),
+    ]);
+    repositories.reviews.find.mockResolvedValue([]);
+    repositories.routineSteps.find.mockResolvedValue([]);
+    repositories.skinProfiles.findOne.mockResolvedValue(
+      completeSkinProfile(user),
+    );
+
+    const result = await service.listBookmarks(user.id, { limit: 1 });
+
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('removes bookmarks for the current user only', async () => {
+    const { repositories, service } = createService();
+    const user = userFixture();
+
+    await expect(
+      service.unbookmarkReview(user.id, 'review_1'),
+    ).resolves.toEqual({ bookmarked: false });
+
+    expect(repositories.bookmarks.delete).toHaveBeenCalledWith({
+      user_id: user.id,
+      content_type: CommunityContentType.Review,
+      content_id: 'review_1',
+    });
   });
 
   it('returns structured editable snapshots for author submissions', async () => {
@@ -2202,6 +2436,28 @@ describe('CommunityService product evidence aggregation', () => {
     expect(result.similarOutcomeSignalCounts.worked_for_me_too).toBe(1);
     expect(result.topGoals).toEqual([{ value: 'barrier-repair', count: 1 }]);
     expect(result.topAvoids).toEqual([{ value: 'over-exfoliation', count: 1 }]);
+    expect(repositories.reviews.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          id: true,
+          outcome_signal_counts: true,
+          safe_facets: true,
+        }),
+      }),
+    );
+    expect(repositories.routineSteps.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { routine_id: true },
+      }),
+    );
+    expect(repositories.outcomeVotes.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: {
+          safe_facets: true,
+          signal: true,
+        },
+      }),
+    );
   });
 
   it('stores privacy-safe viewer context when confirming an outcome', async () => {

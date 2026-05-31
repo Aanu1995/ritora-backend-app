@@ -73,6 +73,14 @@ export class CommunityController {
     return this.communityService.listRoutines(userId, query);
   }
 
+  @Get('bookmarks')
+  listBookmarks(
+    @CurrentUser('id') userId: string,
+    @Query() query: CommunityCursorPageQueryDto,
+  ) {
+    return this.communityService.listBookmarks(userId, query);
+  }
+
   @Get('routines/:id')
   getRoutine(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.communityService.getRoutine(userId, id);
@@ -113,6 +121,21 @@ export class CommunityController {
     @Body() dto: CreateCommunityReportDto,
   ) {
     return this.communityService.reportRoutine(userId, id, dto);
+  }
+
+  @Post('routines/:id/bookmark')
+  @UseGuards(OriginCheckGuard)
+  bookmarkRoutine(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.communityService.bookmarkRoutine(userId, id);
+  }
+
+  @Delete('routines/:id/bookmark')
+  @UseGuards(OriginCheckGuard)
+  unbookmarkRoutine(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.communityService.unbookmarkRoutine(userId, id);
   }
 
   @Post('routines/:id/helpfulness')
@@ -195,6 +218,21 @@ export class CommunityController {
     @Body() dto: CreateCommunityReportDto,
   ) {
     return this.communityService.reportReview(userId, id, dto);
+  }
+
+  @Post('reviews/:id/bookmark')
+  @UseGuards(OriginCheckGuard)
+  bookmarkReview(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.communityService.bookmarkReview(userId, id);
+  }
+
+  @Delete('reviews/:id/bookmark')
+  @UseGuards(OriginCheckGuard)
+  unbookmarkReview(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.communityService.unbookmarkReview(userId, id);
   }
 
   @Post('reviews/:id/helpfulness')

@@ -106,6 +106,7 @@ import {
   buildCommunitySafeFacets,
   normalizeCommunityTags,
 } from './community-privacy';
+import { CommunityBookmark } from './entities/community-bookmark.entity';
 
 const DEFAULT_LIMIT = COMMUNITY_DISCOVERY_LIMIT;
 const COMMUNITY_RESULT_SUBMISSION_KIND = 'result' as const;
@@ -123,6 +124,10 @@ type CommunityListContentKind =
 type CommunityPublishedContentKind =
   | CommunityContentType.Review
   | CommunityContentType.Routine;
+
+type CommunitySafeProfileFacetsSource =
+  | CommunitySafeProfileFacets
+  | Promise<CommunitySafeProfileFacets>;
 
 type CommunitySubmissionContentKind =
   | CommunityPublishedContentKind
@@ -143,6 +148,20 @@ type CommunityScoredCursorEntity = CommunityCursorEntity & {
 };
 
 type CommunityResultCursorEntity = {
+  created_at: Date;
+  id: string;
+};
+
+type CommunityBookmarkCursorRow = {
+  bookmark_id: string;
+  content_type: string;
+  content_id: string;
+  created_at: Date | string;
+};
+
+type CommunityBookmarkCursorEntity = {
+  contentId: string;
+  contentType: CommunityPublishedContentKind;
   created_at: Date;
   id: string;
 };
@@ -319,6 +338,16 @@ function decodeCommunityResultCursor(cursor: string, fingerprint: string) {
 
 function communityResultCursorTuple(
   item: CommunityResultCursorEntity,
+): [string, string] {
+  return [item.created_at.toISOString(), item.id];
+}
+
+function communityBookmarkFingerprint(userId: string, limit: number): string {
+  return `community:bookmarks:v1:${userId}:${limit}`;
+}
+
+function communityBookmarkCursorTuple(
+  item: Pick<CommunityBookmark, 'created_at' | 'id'>,
 ): [string, string] {
   return [item.created_at.toISOString(), item.id];
 }
@@ -865,6 +894,8 @@ export class CommunityService {
     private readonly reviewContext: Repository<CommunityReviewContextProduct>,
     @InjectRepository(CommunityReport)
     private readonly reports: Repository<CommunityReport>,
+    @InjectRepository(CommunityBookmark)
+    private readonly bookmarks: Repository<CommunityBookmark>,
     @InjectRepository(CommunityModerationDecision)
     private readonly decisions: Repository<CommunityModerationDecision>,
     @InjectRepository(CommunityHelpfulnessVoteEntity)
@@ -896,15 +927,23 @@ export class CommunityService {
   ) {}
 
   async getHome(userId: string) {
-    const facets = await this.getSafeFacets(userId);
-    const [routines, reviews, warnings, postingEligibility] = await Promise.all(
-      [
-        this.listRoutines(userId, { limit: DEFAULT_LIMIT }),
-        this.listReviews(userId, { limit: DEFAULT_LIMIT }),
+    const facetsPromise = this.getSafeFacets(userId);
+    const [facets, routines, reviews, warnings, postingEligibility] =
+      await Promise.all([
+        facetsPromise,
+        this.listRoutinesForViewer(
+          userId,
+          { limit: DEFAULT_LIMIT },
+          facetsPromise,
+        ),
+        this.listReviewsForViewer(
+          userId,
+          { limit: DEFAULT_LIMIT },
+          facetsPromise,
+        ),
         this.listWarnings(),
         this.getPostingEligibility(userId),
-      ],
-    );
+      ]);
 
     return {
       profileFacets: facets,
@@ -926,10 +965,7 @@ export class CommunityService {
       settings,
     ] = await Promise.all([
       this.users.findOne({ where: { id: userId } }),
-      this.skinProfiles.findOne({
-        where: { user_id: userId },
-        relations: ['user'],
-      }),
+      this.skinProfiles.findOne({ where: { user_id: userId } }),
       this.inventory.count({ where: { user_id: userId } }),
       this.findActiveConsent(userId, UserConsentType.CommunityGuidelines),
       this.hasRecentModerationAbuse(userId),
@@ -950,7 +986,11 @@ export class CommunityService {
         message: 'Verify your email before posting to Community.',
       });
     }
-    const hasCompletedSkinProfile = hasCompletedEssentialSkinProfile(profile);
+    const profileWithUser = profile
+      ? ({ ...profile, user } as SkinProfile)
+      : null;
+    const hasCompletedSkinProfile =
+      hasCompletedEssentialSkinProfile(profileWithUser);
 
     if (!hasCompletedSkinProfile) {
       reasons.push({
@@ -1040,18 +1080,27 @@ export class CommunityService {
       limit,
       fingerprint,
     );
-    const [routineMap, reviewMap] = await Promise.all([
-      this.loadRoutinesById(
-        page.rows
-          .filter((row) => row.contentKind === CommunityContentType.Routine)
-          .map((row) => row.id),
-      ),
-      this.loadReviewsById(
-        page.rows
-          .filter((row) => row.contentKind === CommunityContentType.Review)
-          .map((row) => row.id),
-      ),
-    ]);
+    const routineIds = page.rows
+      .filter((row) => row.contentKind === CommunityContentType.Routine)
+      .map((row) => row.id);
+    const reviewIds = page.rows
+      .filter((row) => row.contentKind === CommunityContentType.Review)
+      .map((row) => row.id);
+    const [routineMap, reviewMap, bookmarkedRoutineIds, bookmarkedReviewIds] =
+      await Promise.all([
+        this.loadRoutinesById(routineIds),
+        this.loadReviewsById(reviewIds),
+        this.loadBookmarkedContentIds(
+          userId,
+          CommunityContentType.Routine,
+          routineIds,
+        ),
+        this.loadBookmarkedContentIds(
+          userId,
+          CommunityContentType.Review,
+          reviewIds,
+        ),
+      ]);
     const [stepsByRoutine, contextByReview] = await Promise.all([
       this.loadSteps(Array.from(routineMap.keys())),
       this.loadReviewContext(Array.from(reviewMap.keys())),
@@ -1066,6 +1115,7 @@ export class CommunityService {
                 stepsByRoutine.get(row.id) ?? [],
                 facets,
                 userId,
+                bookmarkedRoutineIds.has(row.id),
               )
             : null;
         }
@@ -1077,6 +1127,7 @@ export class CommunityService {
               contextByReview.get(row.id) ?? [],
               facets,
               userId,
+              bookmarkedReviewIds.has(row.id),
             )
           : null;
       })
@@ -1275,7 +1326,14 @@ export class CommunityService {
     userId: string,
     query: Partial<CommunityListQueryDto> = {},
   ) {
-    const facets = await this.getSafeFacets(userId);
+    return this.listRoutinesForViewer(userId, query);
+  }
+
+  private async listRoutinesForViewer(
+    userId: string,
+    query: Partial<CommunityListQueryDto>,
+    facetsSource?: CommunitySafeProfileFacetsSource,
+  ) {
     const limit = normalizeCommunityListLimit(query.limit);
     const fingerprint = communityListFingerprint(
       userId,
@@ -1283,12 +1341,21 @@ export class CommunityService {
       limit,
       query,
     );
-    const page = communityListPage(
-      await this.findPublishedRoutineRows(query, limit, fingerprint),
-      limit,
-      fingerprint,
-    );
-    const stepsByRoutine = await this.loadSteps(page.rows.map((row) => row.id));
+    const [facets, page] = await Promise.all([
+      facetsSource ?? this.getSafeFacets(userId),
+      this.findPublishedRoutineRows(query, limit, fingerprint).then((rows) =>
+        communityListPage(rows, limit, fingerprint),
+      ),
+    ]);
+    const routineIds = page.rows.map((row) => row.id);
+    const [stepsByRoutine, bookmarkedRoutineIds] = await Promise.all([
+      this.loadSteps(routineIds),
+      this.loadBookmarkedContentIds(
+        userId,
+        CommunityContentType.Routine,
+        routineIds,
+      ),
+    ]);
     return {
       items: page.rows.map((routine) =>
         this.toRoutineResponse(
@@ -1296,9 +1363,237 @@ export class CommunityService {
           stepsByRoutine.get(routine.id) ?? [],
           facets,
           userId,
+          bookmarkedRoutineIds.has(routine.id),
         ),
       ),
       nextCursor: page.nextCursor,
+    };
+  }
+
+  async bookmarkRoutine(userId: string, routineId: string) {
+    await this.bookmarkContent(userId, CommunityContentType.Routine, routineId);
+    return { bookmarked: true };
+  }
+
+  async bookmarkReview(userId: string, reviewId: string) {
+    await this.bookmarkContent(userId, CommunityContentType.Review, reviewId);
+    return { bookmarked: true };
+  }
+
+  async unbookmarkRoutine(userId: string, routineId: string) {
+    await this.unbookmarkContent(
+      userId,
+      CommunityContentType.Routine,
+      routineId,
+    );
+    return { bookmarked: false };
+  }
+
+  async unbookmarkReview(userId: string, reviewId: string) {
+    await this.unbookmarkContent(userId, CommunityContentType.Review, reviewId);
+    return { bookmarked: false };
+  }
+
+  async listBookmarks(
+    userId: string,
+    query: Partial<CommunityCursorPageQueryDto> = {},
+  ) {
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityBookmarkFingerprint(userId, limit);
+    const [facets, page] = await Promise.all([
+      this.getSafeFacets(userId),
+      this.findBookmarkCursorRows(userId, query.cursor, limit, fingerprint),
+    ]);
+    const routineIds = page.rows
+      .filter((row) => row.contentType === CommunityContentType.Routine)
+      .map((row) => row.contentId);
+    const reviewIds = page.rows
+      .filter((row) => row.contentType === CommunityContentType.Review)
+      .map((row) => row.contentId);
+    const [routinesById, reviewsById, stepsByRoutine, contextByReview] =
+      await Promise.all([
+        this.loadRoutinesById(routineIds),
+        this.loadReviewsById(reviewIds),
+        this.loadSteps(routineIds),
+        this.loadReviewContext(reviewIds),
+      ]);
+
+    const items = page.rows
+      .map((row) => {
+        if (row.contentType === CommunityContentType.Routine) {
+          const routine = routinesById.get(row.contentId);
+          return routine && this.isPubliclyVisibleContent(routine)
+            ? this.toRoutineResponse(
+                routine,
+                stepsByRoutine.get(routine.id) ?? [],
+                facets,
+                userId,
+                true,
+              )
+            : null;
+        }
+
+        const review = reviewsById.get(row.contentId);
+        return review && this.isPubliclyVisibleContent(review)
+          ? this.toReviewResponse(
+              review,
+              contextByReview.get(review.id) ?? [],
+              facets,
+              userId,
+              true,
+            )
+          : null;
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    return {
+      items,
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  private async bookmarkContent(
+    userId: string,
+    contentType: CommunityPublishedContentKind,
+    contentId: string,
+  ) {
+    await this.assertPublicContentExists(contentType, contentId);
+    await this.dataSource.query(
+      `
+        INSERT INTO "community_bookmarks" (
+          "id", "user_id", "content_type", "content_id", "created_at"
+        )
+        VALUES ($1, $2, $3, $4, now())
+        ON CONFLICT ("user_id", "content_type", "content_id") DO NOTHING
+      `,
+      [ulid(), userId, contentType, contentId],
+    );
+  }
+
+  private async unbookmarkContent(
+    userId: string,
+    contentType: CommunityPublishedContentKind,
+    contentId: string,
+  ) {
+    await this.bookmarks.delete({
+      user_id: userId,
+      content_type: contentType,
+      content_id: contentId,
+    });
+  }
+
+  private async assertPublicContentExists(
+    contentType: CommunityPublishedContentKind,
+    contentId: string,
+  ) {
+    const count =
+      contentType === CommunityContentType.Routine
+        ? await this.routines.count({
+            where: {
+              id: contentId,
+              moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          })
+        : await this.reviews.count({
+            where: {
+              id: contentId,
+              moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          });
+    if (count < 1) {
+      throw new NotFoundException('Community content not found');
+    }
+  }
+
+  private async findBookmarkCursorRows(
+    userId: string,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<{
+    rows: CommunityBookmarkCursorEntity[];
+    nextCursor: string | null;
+  }> {
+    const params: unknown[] = [
+      userId,
+      CommunityModerationStatus.Published,
+      CommunityContentType.Routine,
+      CommunityContentType.Review,
+    ];
+    let cursorFilter = '';
+    if (cursor) {
+      const decoded = decodeCommunityResultCursor(cursor, fingerprint);
+      const createdAtParam = `$${params.push(decoded.createdAt)}`;
+      const idParam = `$${params.push(decoded.id)}`;
+      cursorFilter = `
+        AND (
+          bookmark."created_at" < ${createdAtParam}
+          OR (
+            bookmark."created_at" = ${createdAtParam}
+            AND bookmark."id" < ${idParam}
+          )
+        )
+      `;
+    }
+    const limitParam = `$${params.push(limit + 1)}`;
+    const rows = await this.dataSource.query<CommunityBookmarkCursorRow[]>(
+      `
+        SELECT
+          bookmark."id" AS "bookmark_id",
+          bookmark."content_type" AS "content_type",
+          bookmark."content_id" AS "content_id",
+          bookmark."created_at" AS "created_at"
+        FROM "community_bookmarks" bookmark
+        LEFT JOIN "community_routines" routine
+          ON bookmark."content_type" = $3
+         AND bookmark."content_id" = routine."id"
+        LEFT JOIN "community_reviews" review
+          ON bookmark."content_type" = $4
+         AND bookmark."content_id" = review."id"
+        WHERE bookmark."user_id" = $1
+          ${cursorFilter}
+          AND (
+            (
+              bookmark."content_type" = $3
+              AND routine."moderation_status" = $2
+              AND routine."withdrawn_at" IS NULL
+            )
+            OR (
+              bookmark."content_type" = $4
+              AND review."moderation_status" = $2
+              AND review."withdrawn_at" IS NULL
+            )
+          )
+        ORDER BY bookmark."created_at" DESC, bookmark."id" DESC
+        LIMIT ${limitParam}
+      `,
+      params,
+    );
+    const parsed = rows.map((row): CommunityBookmarkCursorEntity => {
+      if (!isCommunityPublishedContentKind(row.content_type)) {
+        throw new BadRequestException('Invalid bookmark row');
+      }
+      return {
+        id: row.bookmark_id,
+        contentType: row.content_type,
+        contentId: row.content_id,
+        created_at: parseCursorRowDate(row.created_at),
+      };
+    });
+    const pageRows = parsed.slice(0, limit);
+    const lastRow = pageRows[pageRows.length - 1];
+
+    return {
+      rows: pageRows,
+      nextCursor:
+        parsed.length > limit && lastRow
+          ? encodeCursor({
+              fingerprint,
+              tuple: communityBookmarkCursorTuple(lastRow),
+            })
+          : null,
     };
   }
 
@@ -1527,12 +1822,18 @@ export class CommunityService {
     if (!routine || !this.canRead(routine, userId)) {
       throw new NotFoundException('Community routine not found');
     }
-    const facets = await this.getSafeFacets(userId);
-    const steps = await this.routineSteps.find({
-      where: { routine_id: id },
-      order: { step_order: 'ASC' },
-    });
-    return this.toRoutineResponse(routine, steps, facets, userId);
+    const [facets, stepsByRoutine, bookmarkedIds] = await Promise.all([
+      this.getSafeFacets(userId),
+      this.loadSteps([id]),
+      this.loadBookmarkedContentIds(userId, CommunityContentType.Routine, [id]),
+    ]);
+    return this.toRoutineResponse(
+      routine,
+      stepsByRoutine.get(id) ?? [],
+      facets,
+      userId,
+      bookmarkedIds.has(id),
+    );
   }
 
   async getProductEvidence(userId: string, productId: string) {
@@ -1546,22 +1847,34 @@ export class CommunityService {
 
     const [reviewRows, matchingSteps] = await Promise.all([
       this.reviews.find({
+        select: {
+          id: true,
+          overall_rating: true,
+          effectiveness_rating: true,
+          irritation_rating: true,
+          outcomes: true,
+          safe_facets: true,
+          outcome_signal_counts: true,
+        },
         where: [
           {
             product_id: product.id,
             moderation_status: CommunityModerationStatus.Published,
+            withdrawn_at: IsNull(),
           },
           {
             product_brand: ILike(product.brand),
             product_name: ILike(product.name),
             product_category: product.category,
             moderation_status: CommunityModerationStatus.Published,
+            withdrawn_at: IsNull(),
           },
         ],
         order: { updated_at: 'DESC' },
         take: DEFAULT_LIMIT,
       }),
       this.routineSteps.find({
+        select: { routine_id: true },
         where: [
           { product_id: product.id },
           {
@@ -1581,9 +1894,17 @@ export class CommunityService {
     const routines =
       routineIds.length > 0
         ? await this.routines.find({
+            select: {
+              id: true,
+              goal_tags: true,
+              avoid_tags: true,
+              safe_facets: true,
+              outcome_signal_counts: true,
+            },
             where: {
               id: In(routineIds),
               moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
             },
             take: DEFAULT_LIMIT,
           })
@@ -1594,6 +1915,8 @@ export class CommunityService {
             {
               content_type: CommunityContentType.Routine,
               content_id: In(routines.map((routine) => routine.id)),
+              note_moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
             },
           ]
         : []),
@@ -1602,13 +1925,21 @@ export class CommunityService {
             {
               content_type: CommunityContentType.Review,
               content_id: In(reviews.map((review) => review.id)),
+              note_moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
             },
           ]
         : []),
     ];
     const outcomeVotes =
       contentVoteWhere.length > 0
-        ? await this.outcomeVotes.find({ where: contentVoteWhere })
+        ? await this.outcomeVotes.find({
+            select: {
+              safe_facets: true,
+              signal: true,
+            },
+            where: contentVoteWhere,
+          })
         : [];
     const outcomeSignalCounts = this.defaultOutcomeSignalCounts({});
     for (const routine of routines) {
@@ -1957,7 +2288,14 @@ export class CommunityService {
     userId: string,
     query: Partial<CommunityListQueryDto> = {},
   ) {
-    const facets = await this.getSafeFacets(userId);
+    return this.listReviewsForViewer(userId, query);
+  }
+
+  private async listReviewsForViewer(
+    userId: string,
+    query: Partial<CommunityListQueryDto>,
+    facetsSource?: CommunitySafeProfileFacetsSource,
+  ) {
     const limit = normalizeCommunityListLimit(query.limit);
     const fingerprint = communityListFingerprint(
       userId,
@@ -1965,14 +2303,21 @@ export class CommunityService {
       limit,
       query,
     );
-    const page = communityListPage(
-      await this.findPublishedReviewRows(query, limit, fingerprint),
-      limit,
-      fingerprint,
-    );
-    const contextByReview = await this.loadReviewContext(
-      page.rows.map((row) => row.id),
-    );
+    const [facets, page] = await Promise.all([
+      facetsSource ?? this.getSafeFacets(userId),
+      this.findPublishedReviewRows(query, limit, fingerprint).then((rows) =>
+        communityListPage(rows, limit, fingerprint),
+      ),
+    ]);
+    const reviewIds = page.rows.map((row) => row.id);
+    const [contextByReview, bookmarkedReviewIds] = await Promise.all([
+      this.loadReviewContext(reviewIds),
+      this.loadBookmarkedContentIds(
+        userId,
+        CommunityContentType.Review,
+        reviewIds,
+      ),
+    ]);
     return {
       items: page.rows.map((review) =>
         this.toReviewResponse(
@@ -1980,6 +2325,7 @@ export class CommunityService {
           contextByReview.get(review.id) ?? [],
           facets,
           userId,
+          bookmarkedReviewIds.has(review.id),
         ),
       ),
       nextCursor: page.nextCursor,
@@ -2195,12 +2541,14 @@ export class CommunityService {
         'Review routine context requires product names or shelf products',
       );
     }
-    const profile = await this.ensureCommunityProfile(userId);
     const productIds = [
       ...(dto.productId ? [dto.productId] : []),
       ...routineContext.map((item) => item.productId).filter(Boolean),
     ] as string[];
-    const products = await this.loadOwnedProductMap(userId, productIds);
+    const [profile, products] = await Promise.all([
+      this.ensureCommunityProfile(userId),
+      this.loadOwnedProductMap(userId, productIds),
+    ]);
     if (dto.productId && !products.has(dto.productId)) {
       throw new BadRequestException('Reviewed product must be on your shelf');
     }
@@ -2804,19 +3152,17 @@ export class CommunityService {
       signal: signalFilter,
       userId,
     });
-    const viewer = await this.getSafeFacets(userId);
-    const page = communityResultListPage(
-      await this.findContentResultRows(
+    const [viewer, page] = await Promise.all([
+      this.getSafeFacets(userId),
+      this.findContentResultRows(
         contentType,
         contentId,
         signalFilter,
         query.cursor,
         limit,
         fingerprint,
-      ),
-      limit,
-      fingerprint,
-    );
+      ).then((rows) => communityResultListPage(rows, limit, fingerprint)),
+    ]);
     const items = page.rows
       .filter(
         (row) =>
@@ -2894,20 +3240,29 @@ export class CommunityService {
     if (!routine || !this.canRead(routine, userId)) {
       throw new NotFoundException('Community routine not found');
     }
-    const steps = await this.routineSteps.find({
-      where: { routine_id: routineId },
-      order: { step_order: 'ASC' },
-    });
-    const owned = await this.inventory.find({ where: { user_id: userId } });
-    const profile = await this.skinProfiles.findOne({
-      where: { user_id: userId },
-    });
+    const [steps, owned, profile] = await Promise.all([
+      this.routineSteps.find({
+        where: { routine_id: routineId },
+        order: { step_order: 'ASC' },
+      }),
+      this.inventory.find({ where: { user_id: userId } }),
+      this.skinProfiles.findOne({
+        where: { user_id: userId },
+      }),
+    ]);
     const reactionTriggers = (profile?.reaction_history?.entries ?? [])
       .map((entry) => entry.trigger.trim().toLowerCase())
       .filter(Boolean);
     const routinePreferences = profile?.routine_preferences ?? {};
     const activeTolerances = profile?.active_tolerances ?? {};
     const usedTargetIds = new Set<string>();
+    const ownedById = new Map(owned.map((product) => [product.id, product]));
+    const ownedByCategory = new Map<string, InventoryProduct[]>();
+    for (const product of owned) {
+      const products = ownedByCategory.get(product.category) ?? [];
+      products.push(product);
+      ownedByCategory.set(product.category, products);
+    }
     const changes: CommunityAdaptationChange[] = [];
 
     for (const step of steps) {
@@ -2931,10 +3286,8 @@ export class CommunityService {
         });
         continue;
       }
-      const exact = step.product_id
-        ? owned.find((product) => product.id === step.product_id)
-        : null;
-      const similar = owned.find(
+      const exact = step.product_id ? ownedById.get(step.product_id) : null;
+      const similar = (ownedByCategory.get(step.category) ?? []).find(
         (product) =>
           !usedTargetIds.has(product.id) &&
           this.productCompatibleForStep(product, step, routinePreferences) &&
@@ -3875,10 +4228,12 @@ export class CommunityService {
   private async ensureCommunityProfile(
     userId: string,
   ): Promise<CommunityProfile> {
-    const existing = await this.profiles.findOne({
-      where: { user_id: userId },
-    });
-    const safe_facets = await this.getSafeFacets(userId);
+    const [existing, safe_facets] = await Promise.all([
+      this.profiles.findOne({
+        where: { user_id: userId },
+      }),
+      this.getSafeFacets(userId),
+    ]);
     if (existing) {
       existing.safe_facets = safe_facets;
       return this.profiles.save(existing);
@@ -4035,12 +4390,28 @@ export class CommunityService {
   private async loadSteps(ids: string[]) {
     if (ids.length === 0) return new Map<string, CommunityRoutineStep[]>();
     const rows = await this.routineSteps.find({
+      select: {
+        routine_id: true,
+        step_order: true,
+        slot: true,
+        product_id: true,
+        product_brand: true,
+        product_name: true,
+        category: true,
+        frequency: true,
+        notes: true,
+      },
       where: { routine_id: In(ids) },
       order: { step_order: 'ASC' },
     });
     const map = new Map<string, CommunityRoutineStep[]>();
     for (const row of rows) {
-      map.set(row.routine_id, [...(map.get(row.routine_id) ?? []), row]);
+      const items = map.get(row.routine_id);
+      if (items) {
+        items.push(row);
+      } else {
+        map.set(row.routine_id, [row]);
+      }
     }
     return map;
   }
@@ -4049,13 +4420,45 @@ export class CommunityService {
     if (ids.length === 0)
       return new Map<string, CommunityReviewContextProduct[]>();
     const rows = await this.reviewContext.find({
+      select: {
+        review_id: true,
+        product_id: true,
+        product_brand: true,
+        product_name: true,
+        category: true,
+      },
       where: { review_id: In(ids) },
     });
     const map = new Map<string, CommunityReviewContextProduct[]>();
     for (const row of rows) {
-      map.set(row.review_id, [...(map.get(row.review_id) ?? []), row]);
+      const items = map.get(row.review_id);
+      if (items) {
+        items.push(row);
+      } else {
+        map.set(row.review_id, [row]);
+      }
     }
     return map;
+  }
+
+  private async loadBookmarkedContentIds(
+    userId: string,
+    contentType: CommunityPublishedContentKind,
+    contentIds: string[],
+  ): Promise<Set<string>> {
+    const uniqueContentIds = Array.from(new Set(contentIds));
+    if (uniqueContentIds.length === 0) return new Set<string>();
+
+    const rows = await this.bookmarks.find({
+      select: { content_id: true },
+      where: {
+        user_id: userId,
+        content_type: contentType,
+        content_id: In(uniqueContentIds),
+      },
+    });
+
+    return new Set(rows.map((row) => row.content_id));
   }
 
   private async loadRoutinesById(
@@ -4149,6 +4552,7 @@ export class CommunityService {
     steps: CommunityRoutineStep[],
     viewer: CommunitySafeProfileFacets,
     viewerUserId: string,
+    bookmarkedByViewer = false,
   ) {
     const tags = [
       ...routine.concern_tags,
@@ -4178,6 +4582,7 @@ export class CommunityService {
       outcomeSignalCounts: this.defaultOutcomeSignalCounts(
         routine.outcome_signal_counts,
       ),
+      bookmarkedByViewer,
       canSignalOutcome: routine.author_user_id !== viewerUserId,
       canReportContent: routine.author_user_id !== viewerUserId,
       matchScore: this.matchScore(
@@ -4202,6 +4607,7 @@ export class CommunityService {
     context: CommunityReviewContextProduct[],
     viewer: CommunitySafeProfileFacets,
     viewerUserId: string,
+    bookmarkedByViewer = false,
   ) {
     return {
       id: review.id,
@@ -4232,6 +4638,7 @@ export class CommunityService {
       outcomeSignalCounts: this.defaultOutcomeSignalCounts(
         review.outcome_signal_counts,
       ),
+      bookmarkedByViewer,
       canSignalOutcome: review.author_user_id !== viewerUserId,
       canReportContent: review.author_user_id !== viewerUserId,
       matchScore: this.matchScore(
@@ -4769,14 +5176,17 @@ export class CommunityService {
       reviewedProduct?: CommunityOutcomeSignalProductContext | null;
     } = {},
   ) {
+    const safeFacetsPromise = this.getSafeFacets(userId);
     const context = await this.toOutcomeSignalContext(userId, dto);
-    const safeFacets = await this.getSafeFacets(userId);
-    const noteModeration = await this.moderateOutcomeSignalNote({
-      contentType,
-      context,
-      dto,
-      reviewedProduct: options.reviewedProduct ?? null,
-    });
+    const [safeFacets, noteModeration] = await Promise.all([
+      safeFacetsPromise,
+      this.moderateOutcomeSignalNote({
+        contentType,
+        context,
+        dto,
+        reviewedProduct: options.reviewedProduct ?? null,
+      }),
+    ]);
     await this.dataSource.query(
       `
         INSERT INTO "community_outcome_signal_votes" (
@@ -5003,6 +5413,18 @@ export class CommunityService {
     return (
       item.moderation_status === CommunityModerationStatus.Published ||
       item.author_user_id === viewerUserId
+    );
+  }
+
+  private isPubliclyVisibleContent(
+    item: Pick<
+      CommunityRoutine | CommunityReview,
+      'moderation_status' | 'withdrawn_at'
+    >,
+  ) {
+    return (
+      item.moderation_status === CommunityModerationStatus.Published &&
+      !item.withdrawn_at
     );
   }
 

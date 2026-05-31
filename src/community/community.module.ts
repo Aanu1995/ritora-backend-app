@@ -17,6 +17,7 @@ import {
 import { CommunityAiModerationService } from './community-ai-moderation.service';
 import { CommunitySafetyService } from './community-safety.service';
 import { CommunityService } from './community.service';
+import { CommunityBookmark } from './entities/community-bookmark.entity';
 import { CommunityHelpfulnessVoteEntity } from './entities/community-helpfulness-vote.entity';
 import { CommunityModerationDecision } from './entities/community-moderation-decision.entity';
 import { CommunityOutcomeSignalVote } from './entities/community-outcome-signal-vote.entity';
@@ -51,6 +52,7 @@ import { CommunityWarning } from './entities/community-warning.entity';
       CommunityReviewContextProduct,
       CommunityReport,
       CommunityModerationDecision,
+      CommunityBookmark,
       CommunityHelpfulnessVoteEntity,
       CommunityOutcomeSignalVote,
       CommunityRoutineAdaptation,
