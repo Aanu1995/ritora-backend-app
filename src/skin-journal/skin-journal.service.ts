@@ -1952,6 +1952,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         severity: 'warning',
         payload: { entry_id: entryId, entry_date: current.entry_date },
         deepLink: `/journal/days/${current.entry_date}`,
+        dedupeKey: buildSkinJournalNotificationDedupeKey('analysis_failed', [
+          entryId,
+          expectedPhotoSignature,
+        ]),
       });
     }
   }
@@ -3325,6 +3329,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
             insight_count: createdCount,
           },
           deepLink: '/journal?tab=insights',
+          dedupeKey: buildSkinJournalNotificationDedupeKey('insight_ready', [
+            ...createdInsightIds.sort(),
+          ]),
         });
       }
       run.status = InsightGenerationStatusValue.Completed;
@@ -3679,6 +3686,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       bodyKey: NOTIFICATION_KEYS.exportReadyBody,
       payload: { job_id: job.id, from: dto.from, to: dto.to },
       deepLink: `/journal/export/${job.id}`,
+      dedupeKey: buildSkinJournalNotificationDedupeKey('export_ready', [
+        job.id,
+      ]),
     });
 
     return toExportResponse(job, (objectKey, options) =>
@@ -4266,6 +4276,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
           severity: event.severity === 'critical' ? 'critical' : 'warning',
           payload: { event_id: event.id, entry_id: entry.id },
           deepLink: `/journal/days/${entry.entry_date}`,
+          dedupeKey: buildSkinJournalNotificationDedupeKey(
+            'reaction_detected',
+            [event.id ?? entry.id],
+          ),
         });
       }
 
@@ -4295,6 +4309,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
               event_id: event.id,
             },
             deepLink: `/journal/simplification/${simplification.id}`,
+            dedupeKey: buildSkinJournalNotificationDedupeKey(
+              'simplification_started',
+              [simplification.id ?? event.id ?? entry.id],
+            ),
           });
         }
       }
@@ -4541,6 +4559,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       severity: 'critical',
       payload: { event_id: event.id },
       deepLink: '/journal?tab=insights',
+      dedupeKey: buildSkinJournalNotificationDedupeKey('doctor_referral', [
+        event.id ?? entry.id,
+      ]),
     });
   }
 
@@ -4690,6 +4711,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     severity?: NotificationSeverity;
     payload?: Record<string, unknown>;
     deepLink?: string;
+    dedupeKey?: string;
   }): Promise<void> {
     await this.notifications.dispatch(params);
   }
@@ -4705,6 +4727,17 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     };
     return rank[right] > rank[left] ? right : left;
   }
+}
+
+function buildSkinJournalNotificationDedupeKey(
+  kind: NotificationKind,
+  parts: readonly (string | number | boolean | null | undefined)[],
+): string {
+  const hash = createHash('sha256')
+    .update(JSON.stringify(parts.map((part) => part ?? null)))
+    .digest('hex')
+    .slice(0, 32);
+  return `${kind}:${hash}`;
 }
 
 function clampInteger(value: number, min: number, max: number): number {

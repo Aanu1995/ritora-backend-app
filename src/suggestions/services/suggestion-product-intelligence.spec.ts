@@ -238,7 +238,7 @@ describe('suggestion product intelligence', () => {
     );
   });
 
-  it('uses secondary goals, adherence, skips, substitutions, repeats, and expiry in ranking', () => {
+  it('uses current goals, skips, substitutions, recent suggestions, and expiry in ranking', () => {
     const product = productWithData({
       category: ProductCategory.Serum,
       inciIngredients: ['Niacinamide', 'Glycerin'],
@@ -253,7 +253,7 @@ describe('suggestion product intelligence', () => {
       secondaryGoals: ['barrier support'],
       sensitivityLevel: 'high',
       recentUseCount: 2,
-      adherenceCount: 3,
+      adherenceCount: 2,
       skipCount: 1,
       substitutionCount: 1,
       recentSameDaypartSuggestionCount: 1,
@@ -266,9 +266,9 @@ describe('suggestion product intelligence', () => {
     expect(score.suitabilityReasons).toEqual(
       expect.arrayContaining([
         SuggestionProductGoalFitReason.SecondarySelectedGoal,
-        'recently applied by user',
       ]),
     );
+    expect(score.suitabilityReasons).not.toContain('recently applied by user');
     expect(score.cautionReasons).toEqual(
       expect.arrayContaining([
         'recently skipped by user',
@@ -277,6 +277,29 @@ describe('suggestion product intelligence', () => {
         'product may be expired',
       ]),
     );
+  });
+
+  it('does not let prior adherence suppress the recent-suggestion caution', () => {
+    const product = productWithData({
+      category: ProductCategory.Moisturizer,
+      inciIngredients: ['Glycerin', 'Ceramide NP'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    });
+
+    const score = scoreProductForSuggestion(product, {
+      daypart: 'morning',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'medium',
+      recentUseCount: 3,
+      adherenceCount: 3,
+      recentSameDaypartSuggestionCount: 3,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(score.cautionReasons).toContain('recent same-daypart repeat');
   });
 
   it('treats the skin profile main goal as a strong product-fit signal beyond literal word overlap', () => {

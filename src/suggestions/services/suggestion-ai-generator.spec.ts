@@ -1331,7 +1331,7 @@ describe('SuggestionAiGenerator', () => {
     ]);
   });
 
-  it('falls back when OpenAI adds a novelty product without user-history indication', async () => {
+  it('allows OpenAI to add a product with current goal evidence', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -1378,11 +1378,91 @@ describe('SuggestionAiGenerator', () => {
     } as unknown as ConfigService);
     const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
     addStableSameDaypartRepeatMemory(inputs);
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
+        score.productId === 'serum-1'
+          ? {
+              ...score,
+              suitabilityReasons: [
+                ...score.suitabilityReasons,
+                'supports main skin profile goal',
+              ],
+            }
+          : score,
+      );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'serum-1',
+      'moisturizer-1',
+      'spf-1',
+    ]);
+  });
+
+  it('falls back when OpenAI adds a product without current selection evidence', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning plan',
+                    body: ['Keep SPF consistent and add tone support.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'mask-1', ProductCategory.Mask),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(3, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    addStableSameDaypartRepeatMemory(inputs);
+    inputs.shelfActiveProducts.push(
+      product('mask-1', 'Glow Mask', ProductCategory.Mask),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('mask-1', ProductCategory.Mask, 82, ['fragrance']),
+    );
 
     const result = await generator.generate(inputs);
 
     expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe('unjustified_history_novelty');
+    expect(result.metadata.fallbackReason).toBe(
+      'unsupported_product_selection',
+    );
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
       'moisturizer-1',
@@ -1390,7 +1470,83 @@ describe('SuggestionAiGenerator', () => {
     ]);
   });
 
-  it('allows a non-repeated product when applied history shows user use', async () => {
+  it('keeps fallback non-empty when cached context marked repeated basics as recent repeats', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning plan',
+                    body: ['Keep SPF consistent and add tone support.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'mask-1', ProductCategory.Mask),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(3, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    addStableSameDaypartRepeatMemory(inputs);
+    inputs.shelfActiveProducts.push(
+      product('mask-1', 'Glow Mask', ProductCategory.Mask),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('mask-1', ProductCategory.Mask, 82, ['fragrance']),
+    );
+    inputs.contextSummary.skippedCandidates = [
+      'cleanser-1',
+      'moisturizer-1',
+      'spf-1',
+    ].map((productId) => ({
+      productId,
+      reason: 'recent same-daypart repeat',
+      sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+    }));
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe(
+      'unsupported_product_selection',
+    );
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'moisturizer-1',
+      'spf-1',
+    ]);
+  });
+
+  it('does not use applied history alone as product selection evidence', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -1455,17 +1611,18 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('openai');
-    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe(
+      'unsupported_product_selection',
+    );
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
-      'serum-1',
       'moisturizer-1',
       'spf-1',
     ]);
   });
 
-  it('keeps deterministic fallback to history-backed repeat products only', async () => {
+  it('keeps deterministic fallback based on current selection evidence', async () => {
     const generator = new SuggestionAiGenerator({
       get: jest.fn().mockReturnValue(null),
     } as unknown as ConfigService);
@@ -1479,11 +1636,6 @@ describe('SuggestionAiGenerator', () => {
       'moisturizer-1',
       'spf-1',
     ]);
-    expect(result.steps).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ inventoryProductId: 'serum-1' }),
-      ]),
-    );
   });
 
   it('does not select products already marked as skipped candidates in baseline fallback', async () => {
@@ -2164,11 +2316,11 @@ describe('SuggestionAiGenerator', () => {
           stepLabel: ProductCategory.SunProtection,
           provenance: 'ai_added',
         }),
-        expect.objectContaining({
-          inventoryProductId: 'serum-1',
-          stepLabel: ProductCategory.Serum,
-          provenance: 'ai_added',
-        }),
+      ]),
+    );
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'serum-1' }),
       ]),
     );
     expect(result.explanation.inputs).toEqual(

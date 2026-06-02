@@ -541,6 +541,7 @@ async function maybeDispatchPhotoReminder(
       bodyKey: 'skinJournal.notifications.photoReminder.body',
       payload: { entry_date: localDate },
       deepLink: '/journal/upload',
+      dedupeKey: `photo_reminder:${localDate}`,
     },
     pref,
     user,

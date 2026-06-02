@@ -1,5 +1,8 @@
 import { createHash } from 'crypto';
-import { SuggestionRequestSource } from '../suggestions.constants';
+import {
+  SUGGESTION_SAFETY_POLICY_VERSION,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
 import { routineBreakCacheParts } from './suggestion-routine-break-context';
 import type { SuggestionContextBuilderInput } from './suggestion-context-builder.service';
 
@@ -14,6 +17,7 @@ export function buildSuggestionContextCacheKey(
 
 function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
   return {
+    safetyPolicyVersion: SUGGESTION_SAFETY_POLICY_VERSION,
     targetDate: inputs.targetDate,
     targetTime: inputs.targetTime,
     requestSource: inputs.requestSource ?? SuggestionRequestSource.Scheduled,

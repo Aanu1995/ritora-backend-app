@@ -12,7 +12,10 @@ import {
   SuggestionAiGenerator,
   type SuggestionGenerationOutput,
 } from '../services/suggestion-ai-generator';
-import { SuggestionRequestSource } from '../suggestions.constants';
+import {
+  SUGGESTION_PROMPT_VERSION,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
 import {
   extractOutputText,
   type OpenAiResponsePayload,
@@ -248,11 +251,15 @@ export class OpenAiQuickSuggestionEvaluationJudge implements QuickSuggestionEval
               {
                 type: 'input_text',
                 text: [
-                  'You are a strict evaluator for Ritora Quick Suggestion.',
-                  'Score only the supplied synthetic on-demand case and output.',
-                  'Passing requires practical right-now advice, safe product ownership handling, and clear wording when no product step is needed.',
-                  'A zero-step output can pass when it clearly says no extra product is needed now and avoids shopping pressure.',
-                  'Never require invented products or a routine step when no owned product fits the request.',
+                  'You are a strict evaluator for Ritora Quick Suggestion, an on-demand right-now skincare answer.',
+                  'Score only the supplied synthetic on-demand case and output; do not judge it as a full daily routine.',
+                  'Passing requires practical immediate advice, exact active-shelf product ownership, product preferredTime/daypart compliance, safety handling, and clear wording.',
+                  'Use ownedProducts productId, brand, name, and fullName fields as the only source of truth for whether a product name is owned.',
+                  'PreferredTime policy: preferredTime=morning is valid in morning or noon dayparts, preferredTime=evening is valid only in evening, and preferredTime=either is valid in any daypart.',
+                  'Skipped/explanation copy may reference owned products from the supplied case by brand/name; fail only when the named product is not in the supplied ownedProducts or output steps.',
+                  'A zero-step output can pass when it clearly says no extra product is needed now, the user is already covered or comfortable, or no owned product fits the current timing/safety constraints.',
+                  'Fail outputs that invent products, use off-shelf products, apply a product outside preferredTime, add optional shopping pressure, or add a routine step merely to avoid an empty result.',
+                  'Never require invented products, optional gaps, or an application step when no owned product fits the request.',
                   'Return JSON only.',
                 ].join(' '),
               },
@@ -324,6 +331,7 @@ export function createLiveQuickSuggestionEvaluationRunner(
     ) ?? 'gpt-4.1-mini';
   return {
     model,
+    promptVersion: SUGGESTION_PROMPT_VERSION,
     generator: new SuggestionAiGenerator(config),
     judge: new OpenAiQuickSuggestionEvaluationJudge(config),
   };
@@ -521,6 +529,16 @@ function normalizeScore(value: unknown): number {
 function quickCaseSummary(
   evaluationCase: TodaysSuggestionEvaluationCase,
 ): unknown {
+  const shelfProductsById = new Map(
+    evaluationCase.inputs.shelfActiveProducts.map((product) => [
+      product.id,
+      {
+        brand: product.brand,
+        name: product.name,
+        fullName: [product.brand, product.name].filter(Boolean).join(' '),
+      },
+    ]),
+  );
   return sanitizeForReport({
     id: evaluationCase.id,
     title: evaluationCase.title,
@@ -536,15 +554,21 @@ function quickCaseSummary(
     },
     expectations: evaluationCase.expected,
     ownedProducts: evaluationCase.inputs.contextSummary.productScores.map(
-      (score) => ({
-        productId: score.productId,
-        category: score.category,
-        preferredTimeOfDay: score.preferredTimeOfDay,
-        activeTags: score.activeTags,
-        suitabilityScore: score.suitabilityScore,
-        cautionReasons: score.cautionReasons,
-        dataQuality: score.dataQuality,
-      }),
+      (score) => {
+        const shelfProduct = shelfProductsById.get(score.productId);
+        return {
+          productId: score.productId,
+          brand: shelfProduct?.brand ?? null,
+          name: shelfProduct?.name ?? null,
+          fullName: shelfProduct?.fullName ?? null,
+          category: score.category,
+          preferredTimeOfDay: score.preferredTimeOfDay,
+          activeTags: score.activeTags,
+          suitabilityScore: score.suitabilityScore,
+          cautionReasons: score.cautionReasons,
+          dataQuality: score.dataQuality,
+        };
+      },
     ),
     skinProfile: evaluationCase.inputs.contextSummary.skinProfile,
     safetyConstraints: evaluationCase.inputs.contextSummary.safetyConstraints,

@@ -592,7 +592,7 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
     buildCase({
       id: 'repeated_morning_routine_history',
       title:
-        'Repeated morning basics are allowed only when history supports them',
+        'Repeated morning history informs but does not force product selection',
       riskFocus: ['repeat_memory', 'adherence', 'spf_consistency'],
       profile: profile({
         primaryGoal: 'maintain pigment protection',
@@ -614,8 +614,8 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
         maxStepCount: 4,
       },
       manualReviewChecklist: [
-        'If it repeats cleanser, moisturizer, and SPF, is the repeat justified by adherence and SPF?',
-        'Does it avoid adding niacinamide just for variety?',
+        'If it repeats cleanser, moisturizer, or SPF, is the repeat justified by today data?',
+        'If it adds niacinamide, is it justified by pigment goal fit rather than variety?',
       ],
     }),
     buildCase({

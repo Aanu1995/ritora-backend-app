@@ -7,6 +7,7 @@ import {
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import { SuggestionContextSummary } from '../suggestion-context.types';
+import { SuggestionEvidenceSourceId } from '../suggestions.constants';
 import {
   buildAssemblyContext,
   isAllSpecialistLocked,
@@ -15,6 +16,7 @@ import {
   routineStepToOutput,
   sanitizeExplanation,
   sanitizeGapRecommendations,
+  sanitizeSafetyFlags,
 } from './suggestion-ai-assembly';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 
@@ -173,6 +175,32 @@ describe('suggestion AI assembly validation', () => {
         },
       ]),
     ).toEqual([]);
+  });
+
+  it('drops uncited safety flags instead of showing unsupported warnings', () => {
+    expect(
+      sanitizeSafetyFlags([
+        {
+          severity: 'warning',
+          message: 'Stronger actives are skipped today.',
+          ingredientSlugs: [],
+          sourceIds: [],
+        },
+        {
+          severity: 'info',
+          message: 'Keep this routine gentle today.',
+          ingredientSlugs: [],
+          sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+        },
+      ]),
+    ).toEqual([
+      {
+        severity: 'info',
+        message: 'Keep this routine gentle today.',
+        ingredientSlugs: [],
+        sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+      },
+    ]);
   });
 
   it('keeps specialist-locked steps at their original routine order', () => {

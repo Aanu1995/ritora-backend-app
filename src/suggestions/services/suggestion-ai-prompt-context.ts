@@ -197,20 +197,18 @@ export function formatRoutineMemoryForPrompt(
     recordsConsidered: memory.recordsConsidered,
     previousSuggestionCount: memory.previousSuggestionCount,
     sameDaypartSuggestionCount: memory.sameDaypartSuggestionCount,
-    recentSameDaypartFingerprints: memory.recentSameDaypartFingerprints
+    recentSameDaypartSuggestions: memory.recentSameDaypartFingerprints
       .slice(0, 10)
       .map((fingerprint) => ({
         targetDate: fingerprint.targetDate,
         targetTime: fingerprint.targetTime,
         productIds: fingerprint.productIds,
         productNames: fingerprint.productNames,
-        fingerprint: fingerprint.fingerprint,
       })),
     recentlySuggestedProductIds: memory.recentlySuggestedProductIds.slice(
       0,
       50,
     ),
-    exactRepeatCountByFingerprint: memory.exactRepeatCountByFingerprint,
     skippedProducts: memory.skippedProducts,
     substitutedProducts: memory.substitutedProducts,
     adheredProducts: memory.adheredProducts,

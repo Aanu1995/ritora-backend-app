@@ -10,6 +10,7 @@ import {
   runQuickSuggestionHardChecks,
 } from './quick-suggestion-evaluation.runner';
 import {
+  SUGGESTION_PROMPT_VERSION,
   SuggestionMode,
   SuggestionEvidenceSourceId,
   SuggestionRequestSource,
@@ -100,6 +101,18 @@ describe('Quick Suggestion evaluation runner', () => {
     expect(report.passedCases).toBe(1);
     expect(report.failedCases).toBe(0);
     expect(report.cases[0]?.hardCheckFailures).toEqual([]);
+    expect(report.cases[0]?.sanitizedCaseSummary).toEqual(
+      expect.objectContaining({
+        ownedProducts: expect.arrayContaining([
+          expect.objectContaining({
+            productId: 'morning-spf-only',
+            brand: 'Ava Lab',
+            name: 'Morning SPF 50',
+            fullName: 'Ava Lab Morning SPF 50',
+          }),
+        ]),
+      }),
+    );
   });
 
   it('records generation failures as failed cases', async () => {
@@ -206,6 +219,7 @@ describe('Quick Suggestion evaluation runner', () => {
     );
 
     expect(runner.model).toBe('gpt-test');
+    expect(runner.promptVersion).toBe(SUGGESTION_PROMPT_VERSION);
     expect(runner.generator).toBeDefined();
     expect(runner.judge).toBeInstanceOf(OpenAiQuickSuggestionEvaluationJudge);
   });
@@ -261,6 +275,28 @@ describe('Quick Suggestion evaluation runner', () => {
     });
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const requestBody = parseOpenAiRequestBody(fetchSpy.mock.calls[1]?.[1]);
+    const systemPrompt =
+      requestBody.input?.find((message) => message.role === 'system')
+        ?.content?.[0]?.text ?? '';
+    expect(systemPrompt).toContain('on-demand right-now skincare answer');
+    expect(systemPrompt).toContain('do not judge it as a full daily routine');
+    expect(systemPrompt).toContain(
+      'A zero-step output can pass when it clearly says no extra product is needed now',
+    );
+    expect(systemPrompt).toContain('product preferredTime/daypart compliance');
+    expect(systemPrompt).toContain(
+      'Use ownedProducts productId, brand, name, and fullName fields',
+    );
+    expect(systemPrompt).toContain(
+      'preferredTime=morning is valid in morning or noon dayparts',
+    );
+    expect(systemPrompt).toContain(
+      'Skipped/explanation copy may reference owned products',
+    );
+    expect(systemPrompt).toContain(
+      'add a routine step merely to avoid an empty result',
+    );
     expect(result).toEqual({
       answersQuestion: 5,
       beginnerClarity: 0,
@@ -307,6 +343,29 @@ function passingJudge() {
       explanations: ['Clear no-step outcome.'],
     }),
   };
+}
+
+interface OpenAiRequestBodyForTest {
+  input?: {
+    role?: string;
+    content?: { text?: string }[];
+  }[];
+}
+
+function parseOpenAiRequestBody(init: unknown): OpenAiRequestBodyForTest {
+  if (!isRequestInitWithStringBody(init)) return {};
+  return JSON.parse(init.body) as OpenAiRequestBodyForTest;
+}
+
+function isRequestInitWithStringBody(
+  value: unknown,
+): value is RequestInit & { body: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'body' in value &&
+    typeof (value as { body?: unknown }).body === 'string'
+  );
 }
 
 function configService(values: Record<string, string>): ConfigService {

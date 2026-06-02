@@ -246,6 +246,10 @@ function insightInputSignature(entries: SkinJournalEntry[]): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
+function expectNotificationDedupeKey(kind: string) {
+  return expect.stringMatching(new RegExp(`^${kind}:[a-f0-9]{32}$`));
+}
+
 const COMPLETE_CHECK_IN_BODY = {
   overall_feel: 'good',
   ratings: {
@@ -1515,6 +1519,12 @@ describe('SkinJournalService', () => {
     });
 
     expect(result.status).toBe('ready');
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'export_ready',
+        dedupeKey: expectNotificationDedupeKey('export_ready'),
+      }),
+    );
     expect(result.payload?.entries[0].photo_url).toContain(
       `https://signed.example.com/${SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS}/`,
     );
@@ -3021,7 +3031,85 @@ describe('SkinJournalService', () => {
       'Schema validation failed',
     );
     expect(notifications.dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'analysis_failed' }),
+      expect.objectContaining({
+        kind: 'analysis_failed',
+        dedupeKey: expectNotificationDedupeKey('analysis_failed'),
+      }),
+    );
+  });
+
+  it('deduplicates reaction and simplification notifications by their source event', async () => {
+    const current = entry({
+      id: 'entry-reaction',
+      entry_date: '2026-04-10',
+      photo_object_key: 'skin-journal/user-1/entry-reaction/photo.webp',
+      analysis_status: 'pending',
+    });
+    entries.findOne.mockResolvedValue(current);
+    entries.find.mockResolvedValue([current]);
+    events.findOne.mockResolvedValue(null);
+    analysis.analyze.mockResolvedValueOnce(
+      analysisRunResult(
+        analyzedObservations({
+          reaction_signals: {
+            reaction_detected: true,
+            reaction_severity: 'moderate',
+            indicators: ['redness_spike'],
+            confidence: 0.8,
+          },
+          barrier_signs: { barrier_compromise: true, indicators: [] },
+          should_flag_for_doctor: false,
+        }),
+      ),
+    );
+
+    await service.runAnalysis('entry-reaction', 'user-1');
+
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'reaction_detected',
+        dedupeKey: expectNotificationDedupeKey('reaction_detected'),
+      }),
+    );
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'simplification_started',
+        dedupeKey: expectNotificationDedupeKey('simplification_started'),
+      }),
+    );
+  });
+
+  it('deduplicates insight-ready notifications by the created insight batch', async () => {
+    const current = entry({
+      id: 'entry-current',
+      entry_date: '2026-04-10',
+      analysis_status: 'completed',
+      analysis_summary: 'Looks stable.',
+    });
+    entries.find.mockResolvedValue([current]);
+    insights.findOne.mockResolvedValue(null);
+    insights.save.mockImplementation(async (data) => ({
+      id: 'insight-created',
+      generated_at: new Date('2026-04-10T09:00:00.000Z'),
+      seen_at: null,
+      dismissed_at: null,
+      ...data,
+    }));
+
+    await service.processInsightJob({
+      user_id: 'user-1',
+      trigger: 'scheduled_refresh',
+      locale: 'en',
+      input_signature: insightInputSignature([current]),
+      attempt_count: 1,
+      max_attempts: 5,
+    } as SkinJournalInsightJob);
+
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'insight_ready',
+        dedupeKey: expectNotificationDedupeKey('insight_ready'),
+      }),
     );
   });
 

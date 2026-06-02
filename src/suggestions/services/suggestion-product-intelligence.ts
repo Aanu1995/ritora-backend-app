@@ -69,7 +69,6 @@ const ACTIVE_TAG_PATTERNS: Array<{ tag: string; pattern: RegExp }> = [
       /\bspf\b|sunscreen|uv filter|avobenzone|zinc oxide|titanium dioxide|uvinul|tinosorb|octocrylene/i,
   },
 ];
-
 export function scoreProductForSuggestion(
   product: InventoryProduct,
   options: {
@@ -136,10 +135,6 @@ export function scoreProductForSuggestion(
     score += 8;
     reasons.push(SuggestionProductGoalFitReason.SecondarySelectedGoal);
   }
-  if ((options.adherenceCount ?? 0) > 0) {
-    score += Math.min(8, (options.adherenceCount ?? 0) * 2);
-    reasons.push('recently applied by user');
-  }
   if ((options.skipCount ?? 0) > 0) {
     score -= Math.min(16, (options.skipCount ?? 0) * 8);
     cautions.push('recently skipped by user');
@@ -150,7 +145,7 @@ export function scoreProductForSuggestion(
   }
   if (
     (options.recentSameDaypartSuggestionCount ?? 0) > 0 &&
-    !isRepeatProtectedProduct(product, activeTags, options)
+    !isEssentialCurrentContextProduct(product, activeTags, options)
   ) {
     score -= Math.min(16, (options.recentSameDaypartSuggestionCount ?? 0) * 8);
     cautions.push('recent same-daypart repeat');
@@ -339,14 +334,13 @@ export function isPreferredTimeCompatibleWithDaypart(
   return daypart === SuggestionDaypart.Evening;
 }
 
-function isRepeatProtectedProduct(
+function isEssentialCurrentContextProduct(
   product: InventoryProduct,
   activeTags: string[],
   options: {
     daypart: SuggestionDaypart;
     lockedProductIds: Set<string>;
     hasReactionSignal: boolean;
-    recentUseCount: number;
   },
 ): boolean {
   return (
@@ -356,8 +350,7 @@ function isRepeatProtectedProduct(
       (product.category === ProductCategory.Moisturizer ||
         activeTags.some(
           (tag) => tag === 'barrier_support' || tag === 'ceramide',
-        ))) ||
-    options.recentUseCount >= 6
+        )))
   );
 }
 

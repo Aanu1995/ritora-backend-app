@@ -61,7 +61,7 @@ import {
 } from './suggestion-baseline-generator';
 import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
 import {
-  hasUnjustifiedHistoryNoveltyStep,
+  hasUnsupportedAiProductSelectionStep,
   requiresOwnedDaytimeSpf,
 } from './suggestion-routine-repeat-policy';
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
@@ -1190,8 +1190,8 @@ function resolveHardSafetyFallbackReason(
   ) {
     return 'overlayered_minimal_routine';
   }
-  if (hasUnjustifiedHistoryNoveltyStep(inputs, steps)) {
-    return 'unjustified_history_novelty';
+  if (hasUnsupportedAiProductSelectionStep(inputs, steps)) {
+    return 'unsupported_product_selection';
   }
   return null;
 }

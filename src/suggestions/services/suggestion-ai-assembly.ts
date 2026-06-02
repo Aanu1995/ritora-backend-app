@@ -372,16 +372,18 @@ export function sanitizeGapRecommendations(
 export function sanitizeSafetyFlags(
   flags: SuggestionSafetyFlagJson[],
 ): SuggestionSafetyFlagJson[] {
-  return flags.map((flag) => ({
-    severity: flag.severity,
-    message:
-      sanitizeSuggestionText(flag.message, {
-        maxLength: 160,
-        maxSentences: 1,
-      }) ?? '',
-    ingredientSlugs: flag.ingredientSlugs ?? [],
-    sourceIds: mergeEvidenceSourceIds(flag.sourceIds ?? []),
-  }));
+  return flags
+    .map((flag) => ({
+      severity: flag.severity,
+      message:
+        sanitizeSuggestionText(flag.message, {
+          maxLength: 160,
+          maxSentences: 1,
+        }) ?? '',
+      ingredientSlugs: flag.ingredientSlugs ?? [],
+      sourceIds: mergeEvidenceSourceIds(flag.sourceIds ?? []),
+    }))
+    .filter((flag) => flag.message.length > 0 && flag.sourceIds.length > 0);
 }
 
 function resolveActiveProduct(

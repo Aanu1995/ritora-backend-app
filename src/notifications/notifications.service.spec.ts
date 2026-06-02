@@ -1199,6 +1199,7 @@ describe('NotificationsService', () => {
       expect.objectContaining({
         kind: 'photo_reminder',
         user_id: 'user-1',
+        dedupe_key: 'photo_reminder:2026-04-29',
       }),
     );
     expect(users.find).toHaveBeenCalledTimes(1);
@@ -1266,6 +1267,7 @@ describe('NotificationsService', () => {
       expect.objectContaining({
         kind: 'photo_reminder',
         user_id: 'user-1',
+        dedupe_key: 'photo_reminder:2026-04-29',
       }),
     );
   });

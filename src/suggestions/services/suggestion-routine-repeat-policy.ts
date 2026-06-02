@@ -1,111 +1,145 @@
 import { ProductCategory } from '../../shelf/shelf.types';
-import type { SuggestionContextSummary } from '../suggestion-context.types';
 import {
   SuggestionDaypart,
-  SuggestionRequestSource,
   SuggestionStepProvenance,
 } from '../suggestions.constants';
+import {
+  isPreferredTimeCompatibleWithDaypart,
+  SuggestionProductGoalFitReason,
+} from './suggestion-product-intelligence';
 import type {
   SuggestionGenerationInputs,
   SuggestionGenerationStepOutput,
 } from './suggestion-ai-generator';
+import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
 
-const STABLE_REPEAT_MIN_EXACT_COUNT = 3;
-const STABLE_REPEAT_MIN_ADHERENCE_COUNT = 3;
-
-export function stableSameDaypartRepeatProductIds(
-  summary: SuggestionContextSummary,
-): string[] {
-  const memory = summary.routineMemory;
-  if (!memory || memory.sameDaypartSuggestionCount < 3) {
-    return [];
-  }
-
-  const fingerprints = [...memory.recentSameDaypartFingerprints]
-    .filter((fingerprint) => fingerprint.productIds.length >= 2)
-    .filter(
-      (fingerprint) =>
-        (memory.exactRepeatCountByFingerprint[fingerprint.fingerprint] ?? 0) >=
-        STABLE_REPEAT_MIN_EXACT_COUNT,
-    )
-    .filter((fingerprint) =>
-      uniqueProductIds(fingerprint.productIds).every(
-        (productId) =>
-          (memory.adheredProducts[productId] ?? 0) >=
-          STABLE_REPEAT_MIN_ADHERENCE_COUNT,
-      ),
-    )
-    .sort((left, right) => {
-      const repeatDelta =
-        (memory.exactRepeatCountByFingerprint[right.fingerprint] ?? 0) -
-        (memory.exactRepeatCountByFingerprint[left.fingerprint] ?? 0);
-      if (repeatDelta !== 0) return repeatDelta;
-      const dateDelta = right.targetDate.localeCompare(left.targetDate);
-      return dateDelta || right.targetTime.localeCompare(left.targetTime);
-    });
-
-  return uniqueProductIds(fingerprints[0]?.productIds ?? []);
-}
-
-export function shouldApplyStableRepeatPolicy(
-  inputs: SuggestionGenerationInputs,
-): boolean {
-  return (
-    inputs.requestSource === SuggestionRequestSource.Scheduled &&
-    inputs.requestContext === null &&
-    !inputs.contextSummary.reaction.hasSignal &&
-    !inputs.contextSummary.reaction.barrierCompromised &&
-    !inputs.contextSummary.routineBreak.recentlyResumed &&
-    stableSameDaypartRepeatProductIds(inputs.contextSummary).length > 0
-  );
-}
-
-export function hasUnjustifiedHistoryNoveltyStep(
+export function hasUnsupportedAiProductSelectionStep(
   inputs: SuggestionGenerationInputs,
   steps: readonly SuggestionGenerationStepOutput[],
 ): boolean {
-  if (!shouldApplyStableRepeatPolicy(inputs)) {
-    return false;
-  }
-  const stableProductIds = new Set(
-    stableSameDaypartRepeatProductIds(inputs.contextSummary),
-  );
   return steps.some((step) => {
     if (!step.inventoryProductId) return false;
     if (step.provenance !== SuggestionStepProvenance.AiAdded) return false;
-    if (stableProductIds.has(step.inventoryProductId)) return false;
-    return !hasUserHistoryIndication(inputs, step.inventoryProductId);
+    return !hasCurrentSelectionEvidence(inputs, step.inventoryProductId);
   });
 }
 
-export function hasUserHistoryIndication(
+export function hasCurrentSelectionEvidence(
   inputs: SuggestionGenerationInputs,
   productId: string,
 ): boolean {
-  const memory = inputs.contextSummary.routineMemory;
-  if (
-    (memory?.adheredProducts[productId] ?? 0) >=
-    STABLE_REPEAT_MIN_ADHERENCE_COUNT
-  ) {
-    return true;
-  }
-  const appliedProduct =
-    inputs.contextSummary.appliedProductHistory?.products.find(
-      (product) => product.productId === productId,
-    );
-  if ((appliedProduct?.useCount ?? 0) >= STABLE_REPEAT_MIN_ADHERENCE_COUNT) {
-    return true;
-  }
-  const score = inputs.contextSummary.productScores.find(
+  const score = resolveSuggestionProductScores(inputs).find(
     (productScore) => productScore.productId === productId,
   );
   const shelfProduct = inputs.shelfActiveProducts.find(
     (product) => product.id === productId,
   );
-  return Boolean(
-    (score?.category === ProductCategory.SunProtection ||
-      shelfProduct?.category === ProductCategory.SunProtection) &&
-    requiresOwnedDaytimeSpf(inputs),
+  return (
+    Boolean(
+      (score?.category === ProductCategory.SunProtection ||
+        shelfProduct?.category === ProductCategory.SunProtection) &&
+      requiresOwnedDaytimeSpf(inputs),
+    ) || hasCurrentContextJustification(inputs, productId)
+  );
+}
+
+function hasCurrentContextJustification(
+  inputs: SuggestionGenerationInputs,
+  productId: string,
+): boolean {
+  const score = resolveSuggestionProductScores(inputs).find(
+    (productScore) => productScore.productId === productId,
+  );
+  if (!score) return false;
+  if (
+    !isPreferredTimeCompatibleWithDaypart(
+      score.preferredTimeOfDay,
+      inputs.daypart,
+    )
+  ) {
+    return false;
+  }
+  if (
+    score.cautionReasons.some((reason) =>
+      /recently skipped|recently substituted|preferred time of day does not match|product may be expired/i.test(
+        reason,
+      ),
+    )
+  ) {
+    return false;
+  }
+  if (
+    score.category === ProductCategory.Cleanser ||
+    score.category === ProductCategory.Moisturizer
+  ) {
+    return true;
+  }
+  if (score.dataQuality === 'insufficient') return false;
+  if (supportsCurrentGoal(inputs, score.activeTags, score.suitabilityReasons)) {
+    return true;
+  }
+  return score.suitabilityReasons.some(
+    (reason) =>
+      [
+        SuggestionProductGoalFitReason.PrimarySelectedGoal,
+        SuggestionProductGoalFitReason.SecondarySelectedGoal,
+        'daytime sun protection fit',
+        'high UV fit',
+        'dry air barrier support',
+      ].includes(reason) ||
+      /primary selected goal|secondary selected goal/i.test(reason),
+  );
+}
+
+function supportsCurrentGoal(
+  inputs: SuggestionGenerationInputs,
+  activeTags: readonly string[],
+  suitabilityReasons: readonly string[],
+): boolean {
+  if (
+    suitabilityReasons.some((reason) =>
+      /primary selected goal|secondary selected goal|supports main skin profile goal|supports selected skin profile goal/i.test(
+        reason,
+      ),
+    )
+  ) {
+    return true;
+  }
+  const goalText = JSON.stringify([
+    inputs.skinProfile?.primary_goal ?? '',
+    inputs.skinProfile?.current_concerns ?? [],
+    inputs.contextSummary.skinProfile.primaryGoal ?? '',
+    inputs.contextSummary.skinProfile.activeConcerns,
+    inputs.contextSummary.goalSignals?.mainGoal ?? '',
+    inputs.contextSummary.goalSignals?.primaryGoal ?? '',
+    inputs.contextSummary.goalSignals?.selectedGoals ?? [],
+    inputs.contextSummary.goalSignals?.secondaryGoals.map(
+      (goal) => goal.concern,
+    ) ?? [],
+    inputs.contextSummary.journalSignals?.detectedConcerns.map(
+      (concern) => concern.concern,
+    ) ?? [],
+  ]);
+  const tags = activeTags.map((tag) => tag.toLowerCase());
+  if (
+    /(acne|breakout|clogged)/i.test(goalText) &&
+    tags.some((tag) => /niacinamide|azelaic|azelaic_acid|acne|zinc/.test(tag))
+  ) {
+    return true;
+  }
+  if (
+    /(dark mark|hyperpigmentation|uneven tone|pigment|spot)/i.test(goalText) &&
+    tags.some((tag) =>
+      /niacinamide|azelaic|azelaic_acid|vitamin_c|pigment/.test(tag),
+    )
+  ) {
+    return true;
+  }
+  return (
+    /(texture|pores?)/i.test(goalText) &&
+    tags.some((tag) =>
+      /niacinamide|azelaic|azelaic_acid|pha|humectant|hydrating/.test(tag),
+    )
   );
 }
 
@@ -133,8 +167,4 @@ export function requiresOwnedDaytimeSpf(
       (product) => product.category === ProductCategory.SunProtection,
     )
   );
-}
-
-function uniqueProductIds(productIds: readonly string[]): string[] {
-  return [...new Set(productIds.filter((productId) => productId.trim()))];
 }

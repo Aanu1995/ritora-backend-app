@@ -29,9 +29,8 @@ import {
   toHumanQuantity,
 } from './suggestion-language';
 import {
+  hasCurrentSelectionEvidence,
   requiresOwnedDaytimeSpf,
-  shouldApplyStableRepeatPolicy,
-  stableSameDaypartRepeatProductIds,
 } from './suggestion-routine-repeat-policy';
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
 import {
@@ -573,11 +572,6 @@ function selectBaselineProducts(
   const preferredOrder = preferredCategoryOrder(inputs);
   const selected: SuggestionProductScore[] = [];
   const usedCategories = new Set<ProductCategory>();
-  const skippedProductIds = new Set(
-    inputs.contextSummary.skippedCandidates.map(
-      (candidate) => candidate.productId,
-    ),
-  );
   const candidates = resolveSuggestionProductScores(inputs)
     .filter((score) => score.suitabilityScore >= 40)
     .filter((score) =>
@@ -586,7 +580,8 @@ function selectBaselineProducts(
         inputs.daypart,
       ),
     )
-    .filter((score) => !skippedProductIds.has(score.productId))
+    .filter((score) => hasCurrentSelectionEvidence(inputs, score.productId))
+    .filter((score) => isUsableBaselineCandidate(inputs, score))
     .filter((score) =>
       shouldAvoidStrongActives(inputs)
         ? !score.activeTags.some((tag) =>
@@ -594,15 +589,6 @@ function selectBaselineProducts(
           )
         : true,
     );
-
-  const stableRepeatProducts = selectStableRepeatProducts(
-    inputs,
-    candidates,
-    preferredOrder,
-  );
-  if (stableRepeatProducts.length > 0) {
-    return stableRepeatProducts;
-  }
 
   for (const category of preferredOrder) {
     const match = candidates.find(
@@ -623,37 +609,17 @@ function selectBaselineProducts(
   return selected.slice(0, limit);
 }
 
-function selectStableRepeatProducts(
+function isUsableBaselineCandidate(
   inputs: SuggestionGenerationInputs,
-  candidates: SuggestionProductScore[],
-  preferredOrder: ProductCategory[],
-): SuggestionProductScore[] {
-  if (!shouldApplyStableRepeatPolicy(inputs)) {
-    return [];
-  }
-  const stableProductIds = new Set(
-    stableSameDaypartRepeatProductIds(inputs.contextSummary),
+  score: SuggestionProductScore,
+): boolean {
+  const skipped = inputs.contextSummary.skippedCandidates.filter(
+    (candidate) => candidate.productId === score.productId,
   );
-  const stableCandidates = preferredOrder.flatMap((category) =>
-    candidates.filter(
-      (score) =>
-        score.category === category && stableProductIds.has(score.productId),
-    ),
+  if (skipped.length === 0) return true;
+  return skipped.every((candidate) =>
+    /recent same-daypart repeat/i.test(candidate.reason),
   );
-  if (
-    requiresOwnedDaytimeSpf(inputs) &&
-    !stableCandidates.some(
-      (score) => score.category === ProductCategory.SunProtection,
-    )
-  ) {
-    const spfCandidate = candidates.find(
-      (score) => score.category === ProductCategory.SunProtection,
-    );
-    if (spfCandidate) {
-      stableCandidates.push(spfCandidate);
-    }
-  }
-  return stableCandidates;
 }
 
 function preferredCategoryOrder(

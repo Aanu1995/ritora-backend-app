@@ -1,0 +1,395 @@
+{
+  "reportType": "todays_suggestion_live_ai_evaluation",
+  "generatedAt": "2026-06-02T18:30:07.086Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "2026-06-02.v1",
+  "totalCases": 1,
+  "passedCases": 1,
+  "failedCases": 0,
+  "repeatabilityRuns": 1,
+  "repeatabilityFailures": 0,
+  "strict": true,
+  "cases": [
+    {
+      "caseId": "repeated_morning_routine_history",
+      "title": "Repeated morning history informs but does not force product selection",
+      "status": "passed",
+      "hardChecksPassed": 21,
+      "hardChecksTotal": 21,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 4,
+        "personalization": 4,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Gives a complete right-now morning routine with owned cleanser, moisturizer, and required SPF.",
+          "Niacinamide is plausibly justified by the dark marks/pigment-protection goal, though the explanation is a bit generic.",
+          "No shopping gap is needed here because SPF is owned and correctly included."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-02.v1",
+      "provider": "deterministic_baseline",
+      "fallbackUsed": true,
+      "fallbackReason": "unjustified_history_novelty",
+      "driftHash": "6d52064fd205279c3946e95c86a049734efbfbadceca6fc3fd1121e73bd7b23b",
+      "repeatability": {
+        "runs": 1,
+        "passed": true,
+        "baselineSignature": "813c09dd28021c885a19f9870e29f3b841a0d191d37ed7d8897ab9213cd24280",
+        "variations": [],
+        "mismatches": []
+      },
+      "generatedAt": "2026-06-02T18:30:07.086Z",
+      "sanitizedCaseSummary": {
+        "id": "repeated_morning_routine_history",
+        "title": "Repeated morning history informs but does not force product selection",
+        "riskFocus": [
+          "repeat_memory",
+          "adherence",
+          "spf_consistency"
+        ],
+        "manualReviewChecklist": [
+          "If it repeats cleanser, moisturizer, or SPF, is the repeat justified by today data?",
+          "If it adds niacinamide, is it justified by pigment goal fit rather than variety?"
+        ],
+        "request": {
+          "source": "scheduled",
+          "intent": null,
+          "intensity": null,
+          "daypart": "morning",
+          "targetTime": "07:50"
+        },
+        "skinProfile": {
+          "skinType": "combination",
+          "skinTone": "medium",
+          "sensitivityLevel": "medium",
+          "primaryGoal": "maintain pigment protection",
+          "currentConcerns": [
+            "dark marks",
+            "dryness"
+          ],
+          "pregnancyStatus": null,
+          "dermatologistCare": null,
+          "safetyContext": {
+            "conditions": [],
+            "medications": [],
+            "photosensitizingOther": false
+          },
+          "activeTolerances": {},
+          "routinePreferences": {}
+        },
+        "contextSignals": {
+          "reaction": {
+            "hasSignal": false,
+            "severity": null,
+            "confidence": null,
+            "indicators": [],
+            "affectedZones": [],
+            "concernKeys": [],
+            "daysSinceLatestSignal": null,
+            "barrierCompromised": false,
+            "photoInputImages": 0,
+            "multiAnglePhotoEntries": 0
+          },
+          "routineBreak": {
+            "recentlyResumed": false,
+            "lastPausedFrom": null,
+            "lastPausedUntil": null
+          },
+          "applicationPatterns": {
+            "days": 30,
+            "daysSinceLastApplication": 1,
+            "conservativeRestart": false,
+            "skippedByCategory": {},
+            "substitutedByCategory": {},
+            "addedOffShelfCount": 0,
+            "editedLogCount": 0,
+            "adherenceByCategory": {
+              "cleanser": 30,
+              "moisturizer": 30,
+              "sun-protection": 30
+            }
+          },
+          "appliedProductHistory": {
+            "windowStartDate": "2026-04-19",
+            "windowEndDate": "2026-05-18",
+            "recordsConsidered": 30,
+            "products": [
+              {
+                "productId": "cleanser-1",
+                "brand": "Ava Lab",
+                "name": "Soft Cream Cleanser",
+                "category": "cleanser",
+                "dayparts": [
+                  "morning"
+                ],
+                "statuses": [
+                  "applied"
+                ],
+                "useCount": 30,
+                "lastAppliedDate": "2026-05-18",
+                "isOffShelf": false,
+                "isSubstitution": false
+              },
+              {
+                "productId": "moisturizer-1",
+                "brand": "Ava Lab",
+                "name": "Barrier Cream",
+                "category": "moisturizer",
+                "dayparts": [
+                  "morning"
+                ],
+                "statuses": [
+                  "applied"
+                ],
+                "useCount": 30,
+                "lastAppliedDate": "2026-05-18",
+                "isOffShelf": false,
+                "isSubstitution": false
+              },
+              {
+                "productId": "spf-1",
+                "brand": "Ava Lab",
+                "name": "Daily SPF 50",
+                "category": "sun-protection",
+                "dayparts": [
+                  "morning"
+                ],
+                "statuses": [
+                  "applied"
+                ],
+                "useCount": 30,
+                "lastAppliedDate": "2026-05-18",
+                "isOffShelf": false,
+                "isSubstitution": false
+              }
+            ]
+          },
+          "routineMemory": {
+            "sameDaypartSuggestionCount": 30,
+            "recentlySuggestedProductIds": [
+              "cleanser-1",
+              "moisturizer-1",
+              "spf-1"
+            ],
+            "exactRepeatCountByFingerprint": {
+              "cleanser-1|moisturizer-1|spf-1": 30
+            }
+          },
+          "environment": null,
+          "safetyConstraints": [
+            "daytime_spf_available"
+          ]
+        },
+        "spfExpectation": {
+          "required": true,
+          "ownedSunscreen": true,
+          "correctHandling": "Owned sunscreen should appear as a direct application step."
+        },
+        "ownedProducts": [
+          {
+            "productId": "cleanser-1",
+            "brand": "Ava Lab",
+            "name": "Soft Cream Cleanser",
+            "category": "cleanser",
+            "activeTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "moisturizer-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Cream",
+            "category": "moisturizer",
+            "activeTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "spf-1",
+            "brand": "Ava Lab",
+            "name": "Daily SPF 50",
+            "category": "sun-protection",
+            "activeTags": [
+              "spf",
+              "sunscreen"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "niacinamide-1",
+            "brand": "Plain Lab",
+            "name": "Niacinamide Serum",
+            "category": "serum",
+            "activeTags": [
+              "niacinamide"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          }
+        ],
+        "routineSteps": [],
+        "expectations": {
+          "requiresSpfProtection": true,
+          "requiredProductIds": [
+            "cleanser-1",
+            "moisturizer-1",
+            "spf-1"
+          ],
+          "forbiddenProductIds": [
+            "bha-1",
+            "retinoid-1"
+          ],
+          "maxStepCount": 4
+        }
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "hasReactionSignal": false,
+        "simplifiedForReaction": false,
+        "provider": "deterministic_baseline",
+        "fallbackReason": "unjustified_history_novelty",
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-02.v1",
+          "inputTokens": null,
+          "outputTokens": null,
+          "totalTokens": null,
+          "estimatedCostUsd": null,
+          "durationMs": 34616
+        },
+        "spfHandling": {
+          "required": true,
+          "ownedSunscreen": true,
+          "hasSunscreenStep": true,
+          "hasSunscreenGap": false
+        },
+        "explanation": {
+          "headline": "Using your shelf today",
+          "body": [
+            "Ritora used your shelf and safety rules for this slot."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Gentle cleanse fits this slot."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Good fit for this slot."
+            },
+            {
+              "stepOrder": 2,
+              "reason": "Barrier support fits this slot."
+            },
+            {
+              "stepOrder": 3,
+              "reason": "Daytime sun protection fits this slot."
+            }
+          ],
+          "skipped": [],
+          "inputs": [
+            {
+              "label": "Evidence",
+              "detail": "8 trusted sources informed the safety check."
+            }
+          ]
+        },
+        "steps": [
+          {
+            "resolvedCategory": "cleanser",
+            "resolvedActiveTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "stepOrder": 0,
+            "routineStepId": null,
+            "inventoryProductId": "cleanser-1",
+            "productBrand": "Ava Lab",
+            "productName": "Soft Cream Cleanser",
+            "stepLabel": "cleanser",
+            "provenance": "ai_added",
+            "explanation": "Gentle cleanse fits this slot.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "serum",
+            "resolvedActiveTags": [
+              "niacinamide"
+            ],
+            "stepOrder": 1,
+            "routineStepId": null,
+            "inventoryProductId": "niacinamide-1",
+            "productBrand": "Plain Lab",
+            "productName": "Niacinamide Serum",
+            "stepLabel": "serum",
+            "provenance": "ai_added",
+            "explanation": "Good fit for this slot.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "moisturizer",
+            "resolvedActiveTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "stepOrder": 2,
+            "routineStepId": null,
+            "inventoryProductId": "moisturizer-1",
+            "productBrand": "Ava Lab",
+            "productName": "Barrier Cream",
+            "stepLabel": "moisturizer",
+            "provenance": "ai_added",
+            "explanation": "Barrier support fits this slot.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "sun-protection",
+            "resolvedActiveTags": [
+              "spf",
+              "sunscreen"
+            ],
+            "stepOrder": 3,
+            "routineStepId": null,
+            "inventoryProductId": "spf-1",
+            "productBrand": "Ava Lab",
+            "productName": "Daily SPF 50",
+            "stepLabel": "sun-protection",
+            "provenance": "ai_added",
+            "explanation": "Daytime sun protection fits this slot.",
+            "routineNote": null,
+            "safetyWarnings": []
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": [
+          {
+            "severity": "info",
+            "message": "Sunscreen is central when dark marks or uneven tone are priority concerns.",
+            "ingredientSlugs": [
+              "spf"
+            ],
+            "sourceIds": [
+              "aad_sunscreen_selection",
+              "dermnet_post_inflammatory_hyperpigmentation"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
