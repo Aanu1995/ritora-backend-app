@@ -910,6 +910,7 @@ describe('AuthService', () => {
       );
 
       expect(result.accessToken).toBe('access-token-123');
+      expect(result.refreshToken).toMatch(/^01SESSION\.[a-f0-9]{64}$/);
       expect(result.preferredLanguage).toBe('en');
       expect(sessionsRepo.save).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalled();

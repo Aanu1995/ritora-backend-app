@@ -356,9 +356,18 @@ export class AuthService {
 
     await this.cancelAccountDeletionOnAccess(user);
 
-    const { accessToken } = await this.createSession(user, res, ip, userAgent);
+    const { accessToken, refreshToken } = await this.createSession(
+      user,
+      res,
+      ip,
+      userAgent,
+    );
 
-    return new AuthResponseDto(accessToken, await this.toUserResponse(user));
+    return new AuthResponseDto(
+      accessToken,
+      await this.toUserResponse(user),
+      refreshToken,
+    );
   }
 
   async loginWithGoogle(
@@ -463,7 +472,7 @@ export class AuthService {
       const authUser =
         (await this.usersService.findByIdForAuth(existingProviderUser.id)) ??
         existingProviderUser;
-      const { accessToken } = await this.createSession(
+      const { accessToken, refreshToken } = await this.createSession(
         existingProviderUser,
         res,
         ip,
@@ -475,6 +484,7 @@ export class AuthService {
           existingProviderUser,
           Boolean(authUser.password_hash),
         ),
+        refreshToken,
       );
     }
 
@@ -505,7 +515,7 @@ export class AuthService {
       await this.cancelAccountDeletionOnAccess(linkedUser);
       const authUser =
         (await this.usersService.findByIdForAuth(linkedUser.id)) ?? linkedUser;
-      const { accessToken } = await this.createSession(
+      const { accessToken, refreshToken } = await this.createSession(
         linkedUser,
         res,
         ip,
@@ -515,6 +525,7 @@ export class AuthService {
       return new AuthResponseDto(
         accessToken,
         await this.toUserResponse(linkedUser, Boolean(authUser.password_hash)),
+        refreshToken,
       );
     }
 
@@ -539,7 +550,7 @@ export class AuthService {
       { type: UserConsentType.PrivacyPolicy, version: this.privacyVersion },
     ]);
 
-    const { accessToken } = await this.createSession(
+    const { accessToken, refreshToken } = await this.createSession(
       createdUser,
       res,
       ip,
@@ -549,6 +560,7 @@ export class AuthService {
     return new AuthResponseDto(
       accessToken,
       await this.toUserResponse(createdUser),
+      refreshToken,
     );
   }
 
@@ -557,7 +569,11 @@ export class AuthService {
     res: Response,
     ip?: string,
     userAgent?: string,
-  ): Promise<{ accessToken: string; preferredLanguage: string }> {
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    preferredLanguage: string;
+  }> {
     const dotIndex = refreshTokenRaw.indexOf('.');
     if (dotIndex === -1) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -613,6 +629,7 @@ export class AuthService {
 
     return {
       accessToken,
+      refreshToken: newRefreshToken,
       preferredLanguage: session.user.preferred_language,
     };
   }
@@ -1304,7 +1321,7 @@ export class AuthService {
     res: Response,
     ip?: string,
     userAgent?: string,
-  ): Promise<{ accessToken: string }> {
+  ): Promise<{ accessToken: string; refreshToken: string }> {
     const sessionId = ulid();
     const secret = randomBytes(32).toString('hex');
     const secretHash = this.sha256(secret);
@@ -1324,7 +1341,7 @@ export class AuthService {
     this.setRefreshCookie(res, refreshToken);
     const accessToken = this.generateAccessToken(user, sessionId);
 
-    return { accessToken };
+    return { accessToken, refreshToken };
   }
 
   private generateAccessToken(user: User, sessionId: string): string {

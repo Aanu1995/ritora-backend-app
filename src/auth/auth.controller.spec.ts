@@ -134,6 +134,7 @@ describe('AuthController', () => {
     const authResponse = {
       accessToken: 'tok',
       user: { id: '01', preferredLanguage: 'sv' },
+      refreshToken: '01SESSION.secret',
     };
     authService.login.mockResolvedValue(authResponse);
 
@@ -143,7 +144,11 @@ describe('AuthController', () => {
       asRequest(mockReq()),
     );
 
-    expect(result).toEqual(authResponse);
+    expect(result).toEqual({
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+    });
+    expect('refreshToken' in result).toBe(false);
     expect(res.cookie).toHaveBeenCalledWith(
       'NEXT_LOCALE',
       'sv',
@@ -152,6 +157,32 @@ describe('AuthController', () => {
         path: '/',
       }),
     );
+  });
+
+  it('mobile login returns a refresh token in the response body', async () => {
+    const res = mockRes();
+    const authResponse = {
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+      refreshToken: '01SESSION.secret',
+    };
+    authService.login.mockResolvedValue(authResponse);
+
+    const result = await controller.loginMobile(
+      { email: 'test@example.com', password: 'Password1' },
+      asResponse(res),
+      asRequest(mockReq()),
+    );
+
+    expect(result).toEqual(authResponse);
+    expect(authService.login).toHaveBeenCalledWith(
+      'test@example.com',
+      'Password1',
+      res,
+      '127.0.0.1',
+      'TestAgent',
+    );
+    expect(result.refreshToken).toBe('01SESSION.secret');
   });
 
   it('google callback creates a session and redirects to post-login', async () => {
@@ -218,11 +249,12 @@ describe('AuthController', () => {
     );
   });
 
-  it('mobile google sign-in verifies the id token and returns a session', async () => {
+  it('mobile google sign-in verifies the id token and returns a mobile session', async () => {
     const res = mockRes();
     const authResponse = {
       accessToken: 'tok',
       user: { id: '01', preferredLanguage: 'sv' },
+      refreshToken: '01SESSION.secret',
     };
     const profile = {
       provider: 'google',
@@ -270,6 +302,7 @@ describe('AuthController', () => {
       }),
     );
     expect(result).toEqual(authResponse);
+    expect(result.refreshToken).toBe('01SESSION.secret');
   });
 
   it('mobile google sign-in records invalid token failures for monitoring', async () => {
@@ -479,6 +512,32 @@ describe('AuthController', () => {
         httpOnly: false,
         path: '/',
       }),
+    );
+  });
+
+  it('refresh accepts the mobile refresh token body and returns the rotated token', async () => {
+    const res = mockRes();
+    authService.refreshTokens.mockResolvedValue({
+      accessToken: 'refreshed',
+      refreshToken: '01SESSION.rotated',
+      preferredLanguage: 'sv',
+    });
+
+    const result = await controller.refresh(
+      asRequest(mockReq()),
+      asResponse(res),
+      { refreshToken: '01SESSION.secret' },
+    );
+
+    expect(result).toEqual({
+      accessToken: 'refreshed',
+      refreshToken: '01SESSION.rotated',
+    });
+    expect(authService.refreshTokens).toHaveBeenCalledWith(
+      '01SESSION.secret',
+      res,
+      '127.0.0.1',
+      'TestAgent',
     );
   });
 

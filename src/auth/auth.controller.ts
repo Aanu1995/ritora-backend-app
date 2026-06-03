@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  InternalServerErrorException,
   Post,
   Req,
   Res,
@@ -30,6 +31,8 @@ import { ConfirmPasswordDto } from './dto/confirm-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { GoogleMobileAuthDto } from './dto/google-mobile-auth.dto';
 import { LoginDto } from './dto/login.dto';
+import { MobileAuthResponseDto } from './dto/mobile-auth-response.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -138,7 +141,32 @@ export class AuthController {
     const language = normalizeLanguage(authResponse.user.preferredLanguage);
     setLocaleCookie(res, this.configService, language);
 
-    return authResponse;
+    return new AuthResponseDto(authResponse.accessToken, authResponse.user);
+  }
+
+  @Post('login/mobile')
+  @Public()
+  @UseGuards(OriginCheckGuard)
+  @HttpCode(HttpStatus.OK)
+  @Throttle(authThrottle(5))
+  @ApiOkResponse({ type: MobileAuthResponseDto })
+  async loginMobile(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
+  ): Promise<MobileAuthResponseDto> {
+    const authResponse = await this.authService.login(
+      dto.email,
+      dto.password,
+      res,
+      req.ip,
+      getHeaderValue(req.headers, 'user-agent'),
+    );
+
+    const language = normalizeLanguage(authResponse.user.preferredLanguage);
+    setLocaleCookie(res, this.configService, language);
+
+    return this.toMobileAuthResponse(authResponse);
   }
 
   @Get('google')
@@ -188,12 +216,12 @@ export class AuthController {
   @UseGuards(OriginCheckGuard)
   @HttpCode(HttpStatus.OK)
   @Throttle(authThrottle(5))
-  @ApiOkResponse({ type: AuthResponseDto })
+  @ApiOkResponse({ type: MobileAuthResponseDto })
   async loginWithGoogleMobile(
     @Body() dto: GoogleMobileAuthDto,
     @Res({ passthrough: true }) res: Response,
     @Req() req: Request,
-  ): Promise<AuthResponseDto> {
+  ): Promise<MobileAuthResponseDto> {
     let profile: OAuthIdentityProfile;
     try {
       profile = await this.googleIdTokenVerifier.verify(dto.idToken);
@@ -223,7 +251,7 @@ export class AuthController {
     const language = normalizeLanguage(authResponse.user.preferredLanguage);
     setLocaleCookie(res, this.configService, language);
 
-    return authResponse;
+    return this.toMobileAuthResponse(authResponse);
   }
 
   @Get('apple')
@@ -279,13 +307,22 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Throttle(authThrottle(20))
   @ApiOkResponse({
-    schema: { properties: { accessToken: { type: 'string' } } },
+    schema: {
+      required: ['accessToken'],
+      properties: {
+        accessToken: { type: 'string' },
+        refreshToken: { type: 'string' },
+      },
+    },
   })
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ accessToken: string }> {
-    const refreshToken = getCookieValue(req, this.cookieRefreshName);
+    @Body() dto?: RefreshTokenDto,
+  ): Promise<{ accessToken: string; refreshToken?: string }> {
+    const mobileRefreshToken = dto?.refreshToken?.trim();
+    const refreshToken =
+      mobileRefreshToken || getCookieValue(req, this.cookieRefreshName);
 
     if (!refreshToken) {
       throw new UnauthorizedException('No refresh token');
@@ -303,6 +340,13 @@ export class AuthController {
       this.configService,
       normalizeLanguage(refreshResponse.preferredLanguage),
     );
+
+    if (mobileRefreshToken) {
+      return {
+        accessToken: refreshResponse.accessToken,
+        refreshToken: refreshResponse.refreshToken,
+      };
+    }
 
     return { accessToken: refreshResponse.accessToken };
   }
@@ -484,6 +528,20 @@ export class AuthController {
     return {
       message: translate(language, 'messages.auth.deleteAccount.cancelled'),
     };
+  }
+
+  private toMobileAuthResponse(
+    authResponse: AuthResponseDto,
+  ): MobileAuthResponseDto {
+    const refreshToken = authResponse.refreshToken;
+    if (!refreshToken) {
+      throw new InternalServerErrorException('Mobile refresh token missing');
+    }
+    return new MobileAuthResponseDto(
+      authResponse.accessToken,
+      authResponse.user,
+      refreshToken,
+    );
   }
 
   private getOAuthStartContext(
