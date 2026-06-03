@@ -99,15 +99,53 @@ describe('CommunityAiModerationService', () => {
       }>;
       max_output_tokens: number;
       reasoning: { effort: string };
+      text: {
+        format: {
+          schema?: {
+            required?: string[];
+            properties?: {
+              reason?: {
+                maxLength?: number;
+              };
+            };
+          };
+        };
+      };
     };
     expect(requestBody.max_output_tokens).toBe(2_000);
     expect(requestBody.reasoning).toEqual({
       effort: OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT,
     });
-    expect(requestBody.input[0]?.content[0]?.text).toContain(
-      'review result notes',
+    const systemPrompt = requestBody.input[0]?.content[0]?.text ?? '';
+    expect(systemPrompt).toContain('Role: moderate signed-in Ritora');
+    expect(systemPrompt).toContain('Decision inputs:');
+    expect(systemPrompt).toContain('contentType, disclosureType');
+    expect(systemPrompt).toContain('Do not infer skin profile');
+    expect(systemPrompt).toContain('Content types:');
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain('Action meaning');
+    expect(systemPrompt).toContain('Deterministic safety flags');
+    expect(systemPrompt).toContain('retinoid plus acid stacking');
+    expect(systemPrompt).toContain('bleach/hydroquinone/steroid/antibiotic');
+    expect(systemPrompt).toContain('daily/twice-daily retinoid');
+    expect(systemPrompt).toContain('Notes authority');
+    expect(systemPrompt).toContain('Disclosure integrity');
+    expect(systemPrompt).toContain('Medical language');
+    expect(systemPrompt).toContain('Reviews:');
+    expect(systemPrompt).toContain('Playbooks and routines:');
+    expect(systemPrompt).toContain('Result notes and outcome confirmations');
+    expect(systemPrompt).toContain('Decision priority order');
+    expect(systemPrompt).toContain('confidence is below 0.65');
+    expect(systemPrompt).toContain('Reason copy');
+    expect(systemPrompt).toContain('do not mention prompts');
+    expect(requestBody.text.format.schema?.required).toEqual([
+      'action',
+      'confidence',
+      'reason',
+    ]);
+    expect(requestBody.text.format.schema?.properties?.reason?.maxLength).toBe(
+      160,
     );
-    expect(requestBody.input[0]?.content[0]?.text).toContain('playbook steps');
     const promptPayload = JSON.parse(
       requestBody.input[1]?.content[0]?.text ?? '{}',
     ) as { policy?: Record<string, unknown> };
@@ -163,6 +201,66 @@ describe('CommunityAiModerationService', () => {
     expect(result.automation.provider).toBe('openai');
     expect(result.automation.fallbackReason).toBeNull();
     expect(result.automation.reason).toBe('Disclosure needs a matching label.');
+  });
+
+  it('keeps LLM moderation reasons within the public response limit', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      openAiResponse({
+        output_text: JSON.stringify({
+          action: 'publish',
+          confidence: 0.93,
+          reason: 'Safe community content. '.repeat(20),
+        }),
+      }),
+    );
+    const service = new CommunityAiModerationService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        COMMUNITY_MODERATION_AI_MODEL: 'gpt-5-mini',
+      }),
+    );
+
+    const result = await service.triage({
+      contentType: CommunityContentType.Review,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      flags: [],
+      text: 'I bought this cleanser myself and it felt gentle for my skin.',
+    });
+
+    expect(result.status).toBe(CommunityModerationStatus.Published);
+    expect(result.automation.reason).toHaveLength(160);
+  });
+
+  it('sends low-confidence LLM decisions to admin review', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      openAiResponse({
+        output_text: JSON.stringify({
+          action: 'publish',
+          confidence: 0.42,
+          reason: 'Probably safe.',
+        }),
+      }),
+    );
+    const service = new CommunityAiModerationService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+        COMMUNITY_MODERATION_AI_MODEL: 'gpt-5-mini',
+      }),
+    );
+
+    const result = await service.triage({
+      contentType: CommunityContentType.Review,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      flags: [],
+      text: 'This moisturizer felt fine, but I am not sure how to describe it.',
+    });
+
+    expect(result.status).toBe(CommunityModerationStatus.PendingReview);
+    expect(result.automation.action).toBe('admin_review');
+    expect(result.automation.handledBy).toBe('admin');
+    expect(result.automation.reason).toBe(
+      'Low-confidence AI moderation decision requires admin review.',
+    );
   });
 
   it('does not let the LLM publish against deterministic guardrails', async () => {

@@ -39,6 +39,39 @@ export const OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS =
 const DEFAULT_MODEL = 'gpt-5-mini';
 const EXPLANATION_JSON_CONTRACT =
   'Keep JSON keys exactly as schema keys: conflicts, overlaps, id, explanation. Keep ids exactly as provided. Translate only explanation string values.';
+const EXPLANATION_LANGUAGE_LABELS: Record<
+  ExplanationInput['language'],
+  string
+> = {
+  en: 'English',
+  sv: 'Swedish',
+  es: 'Spanish',
+};
+const CANONICAL_INGREDIENT_EXPLANATION_PROMPT = [
+  'Role: act as a non-diagnostic skincare ingredient explanation specialist for Ritora ingredient analysis.',
+  'Task: write short user-facing explanations for supplied structured ingredient conflicts and overlaps.',
+  'Decision inputs:',
+  '- language: output language for explanation values.',
+  '- schema: exact JSON response shape.',
+  '- findings.conflicts: structured conflict records with ids, codes, severity, ingredient names, descriptions, and optional mitigation.',
+  '- findings.overlaps: structured overlap records with ids, severity, ingredient name, product count, and description.',
+  'Hard rules:',
+  '- Use only supplied conflicts and overlaps. Do not add new ingredient pairings, new products, new risks, or new instructions.',
+  '- Do not create new advice such as patch testing, stopping a product, adding sunscreen, or seeing a doctor unless supplied in the finding.',
+  '- Do not diagnose, treat, cure, prescribe, or claim certainty about skin outcomes.',
+  '- Do not contradict supplied severity, description, mitigation, ingredient names, ids, or product counts.',
+  '- Do not mention prompts, schemas, internal rules, JSON, model behavior, deterministic engines, or unsupported certainty.',
+  '- Keep explanations practical and non-alarmist. If the finding is mild or informational, do not make it sound severe.',
+  'Writing policy:',
+  '- Write one concise sentence per supplied finding.',
+  '- Sentence structure: mention the supplied ingredient or pair, the supplied routine concern, and the supplied mitigation only when present.',
+  '- Explain why the finding matters for routine use, spacing, duplication, irritation risk, or sunscreen support only when supplied data supports it.',
+  '- Mention only supplied ingredient names or concise ingredient groups already present in the finding.',
+  '- Prefer cautious wording such as may, can, could, or consider when the source finding is not definitive.',
+  'Output format:',
+  EXPLANATION_JSON_CONTRACT,
+  'Return JSON only.',
+];
 const EXPLANATION_RESPONSE_FORMAT = {
   type: 'json_schema',
   name: 'ingredient_explanations',
@@ -156,7 +189,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
               content: [
                 {
                   type: 'input_text',
-                  text: this.systemPrompt(input.language),
+                  text: ingredientExplanationSystemPrompt(input.language),
                 },
               ],
             },
@@ -317,27 +350,6 @@ export class OpenAiExplanationProvider implements ExplanationPort {
     );
   }
 
-  private systemPrompt(language: ExplanationInput['language']): string {
-    if (language === 'sv') {
-      return [
-        'Du skriver korta, tydliga hudvårdsförklaringar på svenska. Håll dig strikt till de strukturerade fynden. Hitta inte på nya risker eller instruktioner. Svara endast med JSON.',
-        EXPLANATION_JSON_CONTRACT,
-      ].join(' ');
-    }
-
-    if (language === 'es') {
-      return [
-        'Escribes explicaciones breves y claras de cuidado de la piel en español. Mantente estrictamente dentro de los hallazgos estructurados. No inventes nuevos riesgos ni instrucciones. Responde solo con JSON.',
-        EXPLANATION_JSON_CONTRACT,
-      ].join(' ');
-    }
-
-    return [
-      'You write short, clear skincare explanations in English. Stay strictly within the structured findings. Do not invent any new risk or instruction. Return JSON only.',
-      EXPLANATION_JSON_CONTRACT,
-    ].join(' ');
-  }
-
   private logStructured(
     level: 'warn' | 'error',
     payload: Record<string, unknown>,
@@ -370,6 +382,16 @@ export class OpenAiExplanationProvider implements ExplanationPort {
 
     return lookup;
   }
+}
+
+export function ingredientExplanationSystemPrompt(
+  language: ExplanationInput['language'],
+): string {
+  const outputLanguage = EXPLANATION_LANGUAGE_LABELS[language];
+  return [
+    ...CANONICAL_INGREDIENT_EXPLANATION_PROMPT,
+    `Output language: ${outputLanguage}. Write explanation values in ${outputLanguage}.`,
+  ].join(' ');
 }
 
 function explanationRequestTimeoutMs(

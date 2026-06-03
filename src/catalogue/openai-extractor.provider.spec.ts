@@ -9,6 +9,7 @@ import {
 import {
   OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS,
   OPENAI_OFFICIAL_DISCOVERY_MAX_OUTPUT_TOKENS,
+  OPENAI_PHOTO_INGREDIENT_RECOVERY_MAX_OUTPUT_TOKENS,
   OPENAI_PRODUCT_DISCOVERY_MAX_OUTPUT_TOKENS,
   OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
   OpenAiExtractorProvider,
@@ -45,11 +46,29 @@ function mockFetchJson(output: unknown): void {
 }
 
 function lastRequestBody(): Record<string, unknown> {
-  const [, init] = (global.fetch as jest.Mock).mock.calls.at(-1);
-  return JSON.parse(String(init.body)) as Record<string, unknown>;
+  return requestBodyAt(-1);
 }
 
-function buildProductOutput(name = 'Glycolic Acid Daily Toner') {
+function requestBodyAt(index: number): Record<string, unknown> {
+  const call =
+    index < 0
+      ? (global.fetch as jest.Mock).mock.calls.at(index)
+      : (global.fetch as jest.Mock).mock.calls[index];
+  if (!call) {
+    throw new Error(`Missing fetch call at index ${index}`);
+  }
+  const [, init] = call;
+  const body = (init as RequestInit | undefined)?.body;
+  if (typeof body !== 'string') {
+    throw new Error(`Fetch call at index ${index} has no JSON body`);
+  }
+  return JSON.parse(body) as Record<string, unknown>;
+}
+
+function buildProductOutput(
+  name = 'Glycolic Acid Daily Toner',
+  inciIngredients: string[] = ['Aqua'],
+) {
   return {
     identity: {
       brand: 'Q+A',
@@ -59,7 +78,7 @@ function buildProductOutput(name = 'Glycolic Acid Daily Toner') {
       description: 'A daily exfoliating toner.',
       benefits: ['exfoliating'],
       suitedFor: ['oily skin'],
-      inciIngredients: ['Aqua'],
+      inciIngredients,
     },
     guidance: {
       applicationMethod: null,
@@ -240,6 +259,99 @@ describe('OpenAiExtractorProvider', () => {
     expect(lastRequestBody().max_output_tokens).toBe(
       OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
     );
+  });
+
+  it('runs targeted ingredient recovery when photo extraction has identity but no ingredients', async () => {
+    const provider = buildProvider();
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify(buildProductOutput('Daily SPF', [])),
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify({
+            inciIngredients: [
+              'Aqua',
+              'Ethylhexyl Triazone',
+              'Glycerin',
+              'Niacinamide',
+            ],
+          }),
+        }),
+      });
+    const input = {
+      images: [
+        {
+          buffer: Buffer.from('hero-image'),
+          mimetype: 'image/webp',
+          sourceIndex: 0,
+          isHero: true,
+          variant: 'overview' as const,
+        },
+        {
+          buffer: Buffer.from('label-image'),
+          mimetype: 'image/webp',
+          sourceIndex: 1,
+          isHero: false,
+          variant: 'text-enhanced' as const,
+        },
+      ],
+      heroImageIndex: 0,
+      sourceImageCount: 2,
+    };
+
+    const result = await provider.extractFromImages(input);
+
+    expect(result?.data.identity?.inciIngredients).toEqual([
+      'Aqua',
+      'Ethylhexyl Triazone',
+      'Glycerin',
+      'Niacinamide',
+    ]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(requestBodyAt(1).max_output_tokens).toBe(
+      OPENAI_PHOTO_INGREDIENT_RECOVERY_MAX_OUTPUT_TOKENS,
+    );
+    expect(requestBodyAt(1).text).toMatchObject({
+      format: {
+        type: 'json_schema',
+        name: 'ritora_photo_ingredient_recovery',
+        strict: true,
+      },
+    });
+    expect(JSON.stringify(requestBodyAt(1).input)).toContain(
+      'ingredient-block recovery specialist',
+    );
+  });
+
+  it('does not run ingredient recovery when photo extraction already has ingredients', async () => {
+    const provider = buildProvider();
+    mockFetchJson(buildProductOutput('Complete SPF', ['Aqua', 'Glycerin']));
+
+    const result = await provider.extractFromImages({
+      images: [
+        {
+          buffer: Buffer.from('complete-label'),
+          mimetype: 'image/webp',
+          sourceIndex: 0,
+          isHero: true,
+          variant: 'overview' as const,
+        },
+      ],
+      heroImageIndex: 0,
+      sourceImageCount: 1,
+    });
+
+    expect(result?.data.identity?.inciIngredients).toEqual([
+      'Aqua',
+      'Glycerin',
+    ]);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('does not cache failed photo extraction requests', async () => {

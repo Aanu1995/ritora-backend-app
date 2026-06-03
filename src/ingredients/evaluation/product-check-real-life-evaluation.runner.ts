@@ -1,4 +1,9 @@
 import { ConfigService } from '@nestjs/config';
+import {
+  DEFAULT_LANGUAGE,
+  SUPPORTED_LANGUAGES,
+  type AppLanguage,
+} from '../../common/i18n/i18n';
 import { OPENAI_PRODUCT_CHECK_REASONING_EFFORT } from '../../common/utils/openai-request-options';
 import {
   ingredientAnalysisAssertions,
@@ -32,27 +37,54 @@ import {
 
 export type { ProductCheckRealLifeEvaluationReport } from './product-check-evaluation.types';
 
+export const DEFAULT_PRODUCT_CHECK_EVALUATION_LANGUAGES = [
+  DEFAULT_LANGUAGE,
+] as const satisfies readonly AppLanguage[];
+
 export async function evaluateProductCheckRealLifeCases(
   input: {
     configService?: ConfigService;
     productCases?: readonly ProductCheckRealLifeCase[];
     photoCases?: readonly PhotoQuickCheckRealLifeCase[];
     ingredientCases?: readonly IngredientAnalysisRealLifeCase[];
+    languages?: readonly string[];
     generatedAt?: Date;
   } = {},
 ): Promise<ProductCheckRealLifeEvaluationReport> {
   const configService = input.configService ?? new ConfigService();
   const runtime = createEvaluationRuntime(configService);
   const cases: ProductCheckRealLifeEvaluationCaseResult[] = [];
+  const quickCheckLanguages = resolveProductCheckEvaluationLanguages(
+    input.languages,
+  );
+  const includeLanguageInCaseId = quickCheckLanguages.length > 1;
 
   for (const evaluationCase of input.productCases ??
     PRODUCT_CHECK_REAL_LIFE_CASES) {
-    cases.push(await evaluateProductCase(runtime, evaluationCase));
+    for (const language of quickCheckLanguages) {
+      cases.push(
+        await evaluateProductCase(
+          runtime,
+          evaluationCase,
+          language,
+          includeLanguageInCaseId,
+        ),
+      );
+    }
   }
 
   for (const evaluationCase of input.photoCases ??
     PHOTO_QUICK_CHECK_REAL_LIFE_CASES) {
-    cases.push(await evaluatePhotoQuickCheckCase(runtime, evaluationCase));
+    for (const language of quickCheckLanguages) {
+      cases.push(
+        await evaluatePhotoQuickCheckCase(
+          runtime,
+          evaluationCase,
+          language,
+          includeLanguageInCaseId,
+        ),
+      );
+    }
   }
 
   for (const evaluationCase of input.ingredientCases ??
@@ -68,6 +100,7 @@ export async function evaluateProductCheckRealLifeCases(
     reportType: 'product_check_real_life_evaluation',
     generatedAt: (input.generatedAt ?? new Date()).toISOString(),
     model: readEvaluationModel(configService),
+    quickCheckLanguages,
     runtime: {
       aiReviewMaxOutputTokens: OPENAI_PRODUCT_CHECK_REVIEW_MAX_OUTPUT_TOKENS,
       aiReviewStructuredOutputAttempts:
@@ -85,21 +118,57 @@ export async function evaluateProductCheckRealLifeCases(
 async function evaluateProductCase(
   runtime: ProductCheckEvaluationRuntime,
   evaluationCase: ProductCheckRealLifeCase,
+  language: AppLanguage,
+  includeLanguageInCaseId: boolean,
 ): Promise<ProductCheckEvaluationCaseResult> {
   const response = await buildProductCheckService(
     runtime,
     evaluationCase,
-  ).checkForUser('eval-user', { product: evaluationCase.product }, 'en');
+  ).checkForUser('eval-user', { product: evaluationCase.product }, language);
   const checks = productCheckAssertions(evaluationCase.expected, response);
 
   return {
     kind: 'product_check',
-    id: evaluationCase.id,
-    title: evaluationCase.title,
+    id: localizedEvaluationId(
+      evaluationCase.id,
+      language,
+      includeLanguageInCaseId,
+    ),
+    title: localizedEvaluationTitle(
+      evaluationCase.title,
+      language,
+      includeLanguageInCaseId,
+    ),
+    language,
     status: checks.every((item) => item.passed) ? 'passed' : 'failed',
     checks,
     output: response,
   };
+}
+
+export function resolveProductCheckEvaluationLanguages(
+  languages?: readonly string[] | null,
+): AppLanguage[] {
+  if (!languages || languages.length === 0) {
+    return [...DEFAULT_PRODUCT_CHECK_EVALUATION_LANGUAGES];
+  }
+
+  const resolved: AppLanguage[] = [];
+  for (const language of languages) {
+    const normalizedLanguage = language.trim().toLowerCase();
+    if (!isSupportedEvaluationLanguage(normalizedLanguage)) {
+      throw new Error(
+        `Unsupported Quick Check evaluation language: ${language}`,
+      );
+    }
+    if (!resolved.includes(normalizedLanguage)) {
+      resolved.push(normalizedLanguage);
+    }
+  }
+
+  return resolved.length > 0
+    ? resolved
+    : [...DEFAULT_PRODUCT_CHECK_EVALUATION_LANGUAGES];
 }
 
 async function evaluateIngredientCase(
@@ -133,6 +202,26 @@ function readEvaluationModel(configService: ConfigService): string {
     configService.get<string>('OPENAI_MODEL')?.trim() ||
     'unknown'
   );
+}
+
+function isSupportedEvaluationLanguage(value: string): value is AppLanguage {
+  return (SUPPORTED_LANGUAGES as readonly string[]).includes(value);
+}
+
+function localizedEvaluationId(
+  id: string,
+  language: AppLanguage,
+  includeLanguageInCaseId: boolean,
+): string {
+  return includeLanguageInCaseId ? `${id}__${language}` : id;
+}
+
+function localizedEvaluationTitle(
+  title: string,
+  language: AppLanguage,
+  includeLanguageInCaseId: boolean,
+): string {
+  return includeLanguageInCaseId ? `${title} [${language}]` : title;
 }
 
 function sanitizeForReport<T>(value: T): T {

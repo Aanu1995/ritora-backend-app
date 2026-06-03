@@ -6,6 +6,9 @@ import type {
   AnalysisSafetyReason,
   AnalysisSkinContext,
   EventSeverity,
+  PhotoAnalysisGuidanceActionCode,
+  PhotoAnalysisGuidanceAvoidCode,
+  PhotoAnalysisGuidanceFactorCode,
   PhotoAnalysisConcernGuidance,
   PhotoAnalysisInterpretation,
   PhotoAnalysisInterpretationCode,
@@ -17,6 +20,9 @@ import type {
 
 const PHOTO_INTERPRETATION_VERSION = '1.1' as const;
 const LAST_VERIFIED = '2026-05-01';
+const FORBIDDEN_GENERATED_GUIDANCE_LANGUAGE =
+  /\b(diagnose|diagnosis|treat|treatment|cure|prescribe|stop all|stop every|immediately stop|discontinue|prescribed|prescription|medicine|medication|proves?|confirmed cause|must avoid|never eat|eliminate all|guaranteed|guarantee)\b/i;
+const AI_STYLE_PUNCTUATION = /[-—–]/;
 const RETINOID_KEYWORDS = [
   'retinol',
   'retinoid',
@@ -173,6 +179,96 @@ interface PhotoAnalysisInterpretationContext {
   recentChange?: RecentChangePayload | null;
   routineContext?: AnalysisRoutineContext | null;
 }
+
+type ContextSignals = {
+  factorKeys: PhotoAnalysisTextRef[];
+  sourceIds: string[];
+};
+
+const FACTOR_CODE_KEY_CANDIDATES: Record<
+  PhotoAnalysisGuidanceFactorCode,
+  readonly string[]
+> = {
+  check_in_oiliness: ['journal.analysis.guidance.factors.checkInOiliness'],
+  check_in_irritation: ['journal.analysis.guidance.factors.checkInIrritation'],
+  check_in_sun: ['journal.analysis.guidance.factors.checkInSun'],
+  check_in_sweat: ['journal.analysis.guidance.factors.checkInSweat'],
+  check_in_stress: ['journal.analysis.guidance.factors.checkInStress'],
+  check_in_sleep: ['journal.analysis.guidance.factors.checkInSleep'],
+  check_in_feel: ['journal.analysis.guidance.factors.checkInFeel'],
+  note_diet_acne: ['journal.analysis.guidance.factors.noteDietAcne'],
+  recent_product_change: [
+    'journal.analysis.guidance.factors.recentProductChangeNamed',
+  ],
+  recent_routine_change: [
+    'journal.analysis.guidance.factors.recentRoutineChange',
+  ],
+  routine_product_timing: [
+    'journal.analysis.guidance.factors.routineProductTiming',
+  ],
+  active_ingredient_timing: [
+    'journal.analysis.guidance.factors.activeIngredientTiming',
+  ],
+  sunscreen_context: ['journal.analysis.guidance.factors.sunscreenContext'],
+  recent_application_change: [
+    'journal.analysis.guidance.factors.recentApplicationChange',
+  ],
+  acne_common_contributors: [
+    'journal.analysis.guidance.factors.acneCommonContributors',
+  ],
+  pigment_common_contributors: [
+    'journal.analysis.guidance.factors.pigmentCommonContributors',
+  ],
+  oil_pore_common_contributors: [
+    'journal.analysis.guidance.factors.oilPoreCommonContributors',
+  ],
+  barrier_common_contributors: [
+    'journal.analysis.guidance.factors.barrierCommonContributors',
+  ],
+  appearance_common_contributors: [
+    'journal.analysis.guidance.factors.appearanceCommonContributors',
+  ],
+  general_common_contributors: [
+    'journal.analysis.guidance.factors.generalCommonContributors',
+  ],
+};
+
+const ACTION_CODE_TO_KEY: Record<PhotoAnalysisGuidanceActionCode, string> = {
+  acne_steady_routine: 'journal.analysis.guidance.actions.acneSteadyRoutine',
+  non_comedogenic: 'journal.analysis.guidance.actions.nonComedogenic',
+  log_clusters: 'journal.analysis.guidance.actions.logClusters',
+  spf_context: 'journal.analysis.guidance.actions.spfContext',
+  prevent_irritation: 'journal.analysis.guidance.actions.preventIrritation',
+  same_light: 'journal.analysis.guidance.actions.sameLight',
+  gentle_cleanse: 'journal.analysis.guidance.actions.gentleCleanse',
+  oil_free_when_possible:
+    'journal.analysis.guidance.actions.oilFreeWhenPossible',
+  watch_shine_pattern: 'journal.analysis.guidance.actions.watchShinePattern',
+  simplify_routine: 'journal.analysis.guidance.actions.simplifyRoutine',
+  moisturizer_support: 'journal.analysis.guidance.actions.moisturizerSupport',
+  watch_comfort: 'journal.analysis.guidance.actions.watchComfort',
+  watch_pattern: 'journal.analysis.guidance.actions.watchPattern',
+};
+
+const AVOID_CODE_TO_KEY: Record<PhotoAnalysisGuidanceAvoidCode, string> = {
+  multiple_new_actives: 'journal.analysis.guidance.avoid.multipleNewActives',
+  picking_or_squeezing: 'journal.analysis.guidance.avoid.picking',
+  logged_diet_pattern: 'journal.analysis.guidance.avoid.dietPatternIfLogged',
+  sweat_friction_after_exercise:
+    'journal.analysis.guidance.avoid.sweatFrictionAfterExercise',
+  pore_clogging_products:
+    'journal.analysis.guidance.avoid.poreCloggingProducts',
+  inconsistent_spf: 'journal.analysis.guidance.avoid.inconsistentSpf',
+  irritating_scrubs: 'journal.analysis.guidance.avoid.irritatingScrubs',
+  stripping_skin: 'journal.analysis.guidance.avoid.strippingSkin',
+  over_exfoliation_for_pores: 'journal.analysis.guidance.avoid.overExfoliation',
+  adding_actives_while_stressed:
+    'journal.analysis.guidance.avoid.addingActives',
+  fragrance_if_sensitive:
+    'journal.analysis.guidance.avoid.fragranceIfSensitive',
+  known_irritant_reexposure:
+    'journal.analysis.guidance.avoid.knownIrritantReexposure',
+};
 
 const SUMMARY_KEY_BY_CODE: Record<PhotoAnalysisInterpretationCode, string> = {
   retake_needed: 'journal.analysis.interpretation.retakeNeeded.summary',
@@ -559,6 +655,32 @@ export class SkinJournalPhotoInterpretationService {
   ): PhotoAnalysisConcernGuidance {
     const group = guidanceGroup(detected.concern);
     const contextSignals = this.contextSignals(detected.concern, context);
+    const guidanceDecision = guidanceDecisionForConcern(
+      observations,
+      detected.concern,
+    );
+    const possibleFactorKeys = factorKeysFromGuidanceDecision(
+      guidanceDecision,
+      contextSignals,
+      detected.concern,
+    );
+    const actionKeys = actionKeysFromGuidanceDecision(
+      guidanceDecision,
+      detected.concern,
+    );
+    const avoidKeys = avoidKeysFromGuidanceDecision(
+      guidanceDecision,
+      detected.concern,
+      contextSignals,
+      context,
+    );
+    const possibleCauseItems = generatedGuidanceItems(
+      guidanceDecision?.possible_cause_items,
+    );
+    const tryNextItems = generatedGuidanceItems(
+      guidanceDecision?.try_next_items,
+    );
+    const avoidItems = generatedGuidanceItems(guidanceDecision?.avoid_items);
     const sourceIds = [
       ...new Set([
         ...sourceIdsForConcern(detected.concern, context.skinContext),
@@ -580,12 +702,31 @@ export class SkinJournalPhotoInterpretationService {
         severity: detected.severity,
         locations: formatLocations(detected.locations),
       }),
-      possible_factor_keys: [
-        ...contextSignals.factorKeys,
-        ...defaultCauseKeysForConcern(detected.concern),
-      ].slice(0, 4),
-      action_keys: actionKeysForConcern(detected.concern),
-      avoid_keys: avoidKeysForConcern(detected.concern),
+      possible_factor_keys: (possibleFactorKeys.length > 0
+        ? possibleFactorKeys
+        : [
+            ...contextSignals.factorKeys,
+            ...defaultCauseKeysForConcern(detected.concern),
+          ]
+      ).slice(0, 4),
+      possible_cause_items:
+        possibleFactorKeys.length > 0 && possibleCauseItems.length > 0
+          ? possibleCauseItems
+          : undefined,
+      action_keys:
+        actionKeys.length > 0
+          ? actionKeys
+          : actionKeysForConcern(detected.concern),
+      try_next_items:
+        actionKeys.length > 0 && tryNextItems.length > 0
+          ? tryNextItems
+          : undefined,
+      avoid_keys:
+        avoidKeys.length > 0
+          ? avoidKeys
+          : avoidKeysForConcern(detected.concern, contextSignals, context),
+      avoid_items:
+        avoidKeys.length > 0 && avoidItems.length > 0 ? avoidItems : undefined,
       track_key: textRef(`journal.analysis.guidance.${group}.track`),
       escalation_key: escalationKeyForConcern(detected),
       source_ids: sourceIds,
@@ -599,7 +740,7 @@ export class SkinJournalPhotoInterpretationService {
   private contextSignals(
     concern: AnalysisConcern,
     context: PhotoAnalysisInterpretationContext,
-  ): { factorKeys: PhotoAnalysisTextRef[]; sourceIds: string[] } {
+  ): ContextSignals {
     const routineContext = context.routineContext;
     const currentCheckIn = routineContext?.recent_check_ins[0] ?? null;
     const factorKeys: PhotoAnalysisTextRef[] = [];
@@ -1040,6 +1181,33 @@ function dedupeTextRefs(refs: PhotoAnalysisTextRef[]): PhotoAnalysisTextRef[] {
   });
 }
 
+function generatedGuidanceItems(
+  items: readonly string[] | null | undefined,
+): string[] {
+  if (!items) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return items
+    .map((item) => item.replace(/\s+/g, ' ').slice(0, 180).trim())
+    .filter((item) => {
+      if (
+        item.length < 12 ||
+        FORBIDDEN_GENERATED_GUIDANCE_LANGUAGE.test(item) ||
+        AI_STYLE_PUNCTUATION.test(item)
+      ) {
+        return false;
+      }
+      const normalized = item.toLowerCase();
+      if (seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    })
+    .slice(0, 3);
+}
+
 function severityScore(severity: 'mild' | 'moderate' | 'severe'): number {
   if (severity === 'severe') return 3;
   if (severity === 'moderate') return 2;
@@ -1108,6 +1276,227 @@ function sourceIdsForConcern(
     default:
       return ['aad_skin_photo_quality'];
   }
+}
+
+function guidanceDecisionForConcern(
+  observations: AnalysisObservations,
+  concern: AnalysisConcern,
+): NonNullable<AnalysisObservations['guidance_decisions']>[number] | null {
+  return (
+    observations.guidance_decisions?.find(
+      (decision) => decision.concern === concern,
+    ) ?? null
+  );
+}
+
+function factorKeysFromGuidanceDecision(
+  decision:
+    | NonNullable<AnalysisObservations['guidance_decisions']>[number]
+    | null,
+  contextSignals: ContextSignals,
+  concern: AnalysisConcern,
+): PhotoAnalysisTextRef[] {
+  if (!decision) {
+    return [];
+  }
+  const availableFactors = [
+    ...contextSignals.factorKeys,
+    ...defaultCauseKeysForConcern(concern),
+  ];
+  return dedupeTextRefs(
+    decision.possible_factor_codes.flatMap((code) => {
+      const candidateKeys = FACTOR_CODE_KEY_CANDIDATES[code];
+      const available = availableFactors.find((factor) =>
+        candidateKeys.includes(factor.key),
+      );
+      return available ? [available] : [];
+    }),
+  );
+}
+
+function actionKeysFromGuidanceDecision(
+  decision:
+    | NonNullable<AnalysisObservations['guidance_decisions']>[number]
+    | null,
+  concern: AnalysisConcern,
+): PhotoAnalysisTextRef[] {
+  if (!decision) {
+    return [];
+  }
+  const allowed = allowedActionCodesForConcern(concern);
+  return dedupeTextRefs(
+    decision.action_codes.flatMap((code) =>
+      allowed.includes(code) ? [textRef(ACTION_CODE_TO_KEY[code])] : [],
+    ),
+  );
+}
+
+function avoidKeysFromGuidanceDecision(
+  decision:
+    | NonNullable<AnalysisObservations['guidance_decisions']>[number]
+    | null,
+  concern: AnalysisConcern,
+  contextSignals: ContextSignals,
+  context: PhotoAnalysisInterpretationContext,
+): PhotoAnalysisTextRef[] {
+  if (!decision) {
+    return [];
+  }
+  const allowed = allowedAvoidCodesForConcern(concern);
+  return dedupeTextRefs(
+    decision.avoid_codes.flatMap((code) =>
+      allowed.includes(code) &&
+      avoidCodeSupportedByContext(code, concern, contextSignals, context)
+        ? [textRef(AVOID_CODE_TO_KEY[code])]
+        : [],
+    ),
+  );
+}
+
+function allowedActionCodesForConcern(
+  concern: AnalysisConcern,
+): readonly PhotoAnalysisGuidanceActionCode[] {
+  switch (concern) {
+    case 'acne':
+      return [
+        'acne_steady_routine',
+        'non_comedogenic',
+        'log_clusters',
+        'same_light',
+        'watch_pattern',
+      ];
+    case 'hyperpigmentation':
+    case 'uneven_tone':
+      return [
+        'spf_context',
+        'prevent_irritation',
+        'same_light',
+        'watch_pattern',
+      ];
+    case 'large_pores':
+    case 'oiliness':
+      return [
+        'gentle_cleanse',
+        'oil_free_when_possible',
+        'watch_shine_pattern',
+        'watch_pattern',
+      ];
+    case 'dryness':
+    case 'skin_barrier_damage':
+    case 'redness_inflammation':
+    case 'eczema_indicator':
+      return [
+        'simplify_routine',
+        'moisturizer_support',
+        'watch_comfort',
+        'prevent_irritation',
+        'same_light',
+      ];
+    default:
+      return ['same_light', 'watch_pattern'];
+  }
+}
+
+function allowedAvoidCodesForConcern(
+  concern: AnalysisConcern,
+): readonly PhotoAnalysisGuidanceAvoidCode[] {
+  switch (concern) {
+    case 'acne':
+      return [
+        'logged_diet_pattern',
+        'pore_clogging_products',
+        'sweat_friction_after_exercise',
+        'multiple_new_actives',
+        'picking_or_squeezing',
+      ];
+    case 'hyperpigmentation':
+    case 'uneven_tone':
+      return ['inconsistent_spf', 'irritating_scrubs', 'picking_or_squeezing'];
+    case 'large_pores':
+    case 'oiliness':
+      return [
+        'pore_clogging_products',
+        'sweat_friction_after_exercise',
+        'stripping_skin',
+        'over_exfoliation_for_pores',
+      ];
+    case 'dryness':
+    case 'skin_barrier_damage':
+    case 'redness_inflammation':
+    case 'eczema_indicator':
+      return [
+        'adding_actives_while_stressed',
+        'known_irritant_reexposure',
+        'fragrance_if_sensitive',
+        'irritating_scrubs',
+        'multiple_new_actives',
+      ];
+    default:
+      return [
+        'irritating_scrubs',
+        'adding_actives_while_stressed',
+        'known_irritant_reexposure',
+      ];
+  }
+}
+
+function avoidCodeSupportedByContext(
+  code: PhotoAnalysisGuidanceAvoidCode,
+  concern: AnalysisConcern,
+  contextSignals: ContextSignals,
+  context: PhotoAnalysisInterpretationContext,
+): boolean {
+  switch (code) {
+    case 'logged_diet_pattern':
+      return hasFactorKey(
+        contextSignals,
+        'journal.analysis.guidance.factors.noteDietAcne',
+      );
+    case 'sweat_friction_after_exercise':
+      return hasFactorKey(
+        contextSignals,
+        'journal.analysis.guidance.factors.checkInSweat',
+      );
+    case 'multiple_new_actives':
+      return (
+        hasAnyFactorKey(contextSignals, [
+          'journal.analysis.guidance.factors.recentProductChangeNamed',
+          'journal.analysis.guidance.factors.recentRoutineChange',
+          'journal.analysis.guidance.factors.routineProductTiming',
+          'journal.analysis.guidance.factors.activeIngredientTiming',
+        ]) ||
+        context.recentChange?.kind === 'started_new_product' ||
+        context.recentChange?.kind === 'changed_frequency'
+      );
+    case 'fragrance_if_sensitive':
+      return (
+        context.skinContext?.sensitivity_level === 'high' ||
+        isBarrierLikeConcern(concern)
+      );
+    case 'known_irritant_reexposure':
+      return (
+        isBarrierLikeConcern(concern) &&
+        hasAnyFactorKey(contextSignals, [
+          'journal.analysis.guidance.factors.checkInIrritation',
+          'journal.analysis.guidance.factors.recentProductChangeNamed',
+          'journal.analysis.guidance.factors.recentRoutineChange',
+          'journal.analysis.guidance.factors.activeIngredientTiming',
+        ])
+      );
+    default:
+      return true;
+  }
+}
+
+function hasFactorKey(contextSignals: ContextSignals, key: string): boolean {
+  return contextSignals.factorKeys.some((factor) => factor.key === key);
+}
+
+function hasAnyFactorKey(
+  contextSignals: ContextSignals,
+  keys: readonly string[],
+): boolean {
+  return contextSignals.factorKeys.some((factor) => keys.includes(factor.key));
 }
 
 function defaultCauseKeysForConcern(concern: string): PhotoAnalysisTextRef[] {
@@ -1194,35 +1583,55 @@ function actionKeysForConcern(concern: string): PhotoAnalysisTextRef[] {
   }
 }
 
-function avoidKeysForConcern(concern: string): PhotoAnalysisTextRef[] {
+function avoidKeysForConcern(
+  concern: AnalysisConcern,
+  contextSignals: ContextSignals,
+  context: PhotoAnalysisInterpretationContext,
+): PhotoAnalysisTextRef[] {
+  const fallbackCodes = fallbackAvoidCodesForConcern(concern);
+  return dedupeTextRefs(
+    fallbackCodes.flatMap((code) =>
+      avoidCodeSupportedByContext(code, concern, contextSignals, context)
+        ? [textRef(AVOID_CODE_TO_KEY[code])]
+        : [],
+    ),
+  ).slice(0, 3);
+}
+
+function fallbackAvoidCodesForConcern(
+  concern: AnalysisConcern,
+): PhotoAnalysisGuidanceAvoidCode[] {
   switch (concern) {
     case 'acne':
       return [
-        textRef('journal.analysis.guidance.avoid.multipleNewActives'),
-        textRef('journal.analysis.guidance.avoid.picking'),
+        'logged_diet_pattern',
+        'sweat_friction_after_exercise',
+        'multiple_new_actives',
+        'pore_clogging_products',
+        'picking_or_squeezing',
       ];
     case 'hyperpigmentation':
     case 'uneven_tone':
-      return [
-        textRef('journal.analysis.guidance.avoid.dailyJudgement'),
-        textRef('journal.analysis.guidance.avoid.irritatingScrubs'),
-      ];
+      return ['inconsistent_spf', 'irritating_scrubs', 'picking_or_squeezing'];
     case 'large_pores':
     case 'oiliness':
       return [
-        textRef('journal.analysis.guidance.avoid.strippingSkin'),
-        textRef('journal.analysis.guidance.avoid.overExfoliation'),
+        'pore_clogging_products',
+        'stripping_skin',
+        'over_exfoliation_for_pores',
       ];
     case 'dryness':
     case 'skin_barrier_damage':
     case 'redness_inflammation':
     case 'eczema_indicator':
       return [
-        textRef('journal.analysis.guidance.avoid.addingActives'),
-        textRef('journal.analysis.guidance.avoid.fragranceIfSensitive'),
+        'adding_actives_while_stressed',
+        'known_irritant_reexposure',
+        'fragrance_if_sensitive',
+        'irritating_scrubs',
       ];
     default:
-      return [textRef('journal.analysis.guidance.avoid.overReadingOnePhoto')];
+      return ['irritating_scrubs'];
   }
 }
 

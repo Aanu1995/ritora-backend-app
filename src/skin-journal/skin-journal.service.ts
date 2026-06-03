@@ -152,6 +152,7 @@ import {
   ANALYSIS_FEEDBACK_REASONS,
   AnalysisFeedbackVoteValue,
   AnalysisEntryContext,
+  AnalysisRoutineProductContext,
   AnalysisRoutineContext,
   AnalysisSkinContext,
   CompareDeltaBullet,
@@ -197,7 +198,9 @@ import type { InsightBlock, InsightCandidate } from './insights/insight-types';
 import type { InsightAction } from './insights/insight-types';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
+import { ShelfStatus } from '../shelf/shelf.types';
 import type { RoutineApplicationEvidence } from './skin-journal-insight-detectors';
 import {
   AccountMonitoringEvent,
@@ -399,6 +402,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly analysisFeedback: Repository<SkinJournalAnalysisFeedback>,
     @InjectRepository(ApplicationLog)
     private readonly applicationLogs: Repository<ApplicationLog>,
+    @InjectRepository(InventoryProduct)
+    private readonly inventoryProducts: Repository<InventoryProduct>,
     @InjectRepository(RoutineStep)
     private readonly routineSteps: Repository<RoutineStep>,
     @InjectRepository(SkinJournalInsightGenerationRun)
@@ -1779,10 +1784,12 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         UserDataAccessPurpose.SkinPhotoAnalysis,
         UserDataAccessActorType.System,
       );
-      const [previousEntry, skinProfile] = await Promise.all([
-        this.findPreviousPhotoEntry(userId, entry),
-        this.skinProfiles.findOne({ where: { user_id: userId } }),
-      ]);
+      const [previousEntry, skinProfile, preAnalysisRoutineContext] =
+        await Promise.all([
+          this.findPreviousPhotoEntry(userId, entry),
+          this.skinProfiles.findOne({ where: { user_id: userId } }),
+          this.buildAnalysisRoutineContext(userId, entry, null),
+        ]);
       const skinContext = this.buildAnalysisSkinContext(skinProfile);
       const comparisonReference = previousEntry
         ? buildAnalysisComparisonReference(previousEntry)
@@ -1799,6 +1806,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         priorAnalysis: previousEntry?.analysis_observations ?? null,
         skinContext,
         entryContext: this.buildAnalysisEntryContext(entry),
+        routineContext: preAnalysisRoutineContext,
       });
       const obs = withAnalysisComparisonReference(
         result.observations,
@@ -3791,42 +3799,49 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   private async buildAnalysisRoutineContext(
     userId: string,
     currentEntry: SkinJournalEntry,
-    currentObservations: AnalysisObservations,
+    currentObservations: AnalysisObservations | null,
   ): Promise<AnalysisRoutineContext> {
     const sinceDate = dateOnlyDaysBefore(currentEntry.entry_date, 14);
-    const [routineSteps, recentApplications, recentEntries] = await Promise.all(
-      [
-        this.routineSteps.find({
-          where: {
-            slot: { user_id: userId, deleted_at: IsNull() },
-          } as FindOptionsWhere<RoutineStep>,
-          relations: ['slot', 'product'],
-          order: { step_order: 'ASC' },
-          take: 60,
-        }),
-        this.applicationLogs.find({
-          where: {
-            user_id: userId,
-            target_date: MoreThanOrEqual(sinceDate),
-          } as FindOptionsWhere<ApplicationLog>,
-          relations: [
-            'items',
-            'items.product',
-            'items.substituted_with_product',
-          ],
-          order: { target_date: 'DESC', created_at: 'DESC' },
-          take: 14,
-        }),
-        this.entries.find({
-          where: {
-            user_id: userId,
-            entry_date: Between(sinceDate, currentEntry.entry_date),
-          } as FindOptionsWhere<SkinJournalEntry>,
-          order: { entry_date: 'DESC' },
-          take: 8,
-        }),
-      ],
-    );
+    const [
+      activeShelfProducts,
+      routineSteps,
+      recentApplications,
+      recentEntries,
+    ] = await Promise.all([
+      this.inventoryProducts.find({
+        where: {
+          user_id: userId,
+          status: ShelfStatus.Active,
+        } as FindOptionsWhere<InventoryProduct>,
+        order: { updated_at: 'DESC' },
+        take: ANALYSIS_CONTEXT_MAX_ITEMS * 2,
+      }),
+      this.routineSteps.find({
+        where: {
+          slot: { user_id: userId, deleted_at: IsNull() },
+        } as FindOptionsWhere<RoutineStep>,
+        relations: ['slot', 'product'],
+        order: { step_order: 'ASC' },
+        take: 60,
+      }),
+      this.applicationLogs.find({
+        where: {
+          user_id: userId,
+          target_date: MoreThanOrEqual(sinceDate),
+        } as FindOptionsWhere<ApplicationLog>,
+        relations: ['items', 'items.product', 'items.substituted_with_product'],
+        order: { target_date: 'DESC', created_at: 'DESC' },
+        take: 14,
+      }),
+      this.entries.find({
+        where: {
+          user_id: userId,
+          entry_date: Between(sinceDate, currentEntry.entry_date),
+        } as FindOptionsWhere<SkinJournalEntry>,
+        order: { entry_date: 'DESC' },
+        take: 8,
+      }),
+    ]);
 
     const checkIns = [currentEntry, ...recentEntries]
       .filter(uniqueEntryById())
@@ -3839,23 +3854,28 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       );
 
     return {
+      active_shelf_products: activeShelfProducts
+        .map((product) =>
+          analysisProductContextFromInventoryProduct(product, {
+            productId: product.id,
+            stepLabel: null,
+          }),
+        )
+        .filter(hasAnalysisProductContext)
+        .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS),
       routine_products: routineSteps
         .filter((step) => step.slot?.deleted_at === null)
-        .map((step) => ({
-          product_id: step.inventory_product_id,
-          brand: sanitizeContextText(step.product?.brand),
-          name: sanitizeContextText(step.product?.name),
-          category: sanitizeContextText(step.product?.category),
-          step_label: sanitizeContextText(step.step_label),
-          is_specialist_locked: step.is_specialist_locked,
-        }))
-        .filter(
-          (product) =>
-            product.brand !== null ||
-            product.name !== null ||
-            product.category !== null ||
-            product.step_label !== null,
+        .map((step) =>
+          analysisProductContextFromInventoryProduct(step.product, {
+            productId: step.inventory_product_id,
+            brand: step.product?.brand,
+            name: step.product?.name,
+            category: step.product?.category,
+            stepLabel: step.step_label,
+            isSpecialistLocked: step.is_specialist_locked,
+          }),
         )
+        .filter(hasAnalysisProductContext)
         .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS),
       recent_applications: recentApplications.map((application) => ({
         target_date: application.target_date,
@@ -4936,6 +4956,46 @@ function sanitizeStringArray(
     )
     .filter((value): value is string => value !== null)
     .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS);
+}
+
+function analysisProductContextFromInventoryProduct(
+  product: InventoryProduct | null | undefined,
+  fallback: {
+    productId: string | null;
+    brand?: string | null;
+    name?: string | null;
+    category?: string | null;
+    stepLabel: string | null;
+    isSpecialistLocked?: boolean;
+  },
+): AnalysisRoutineProductContext {
+  return {
+    product_id: fallback.productId,
+    brand: sanitizeContextText(product?.brand ?? fallback.brand),
+    name: sanitizeContextText(product?.name ?? fallback.name),
+    category: sanitizeContextText(product?.category ?? fallback.category),
+    step_label: sanitizeContextText(fallback.stepLabel),
+    preferred_time: sanitizeContextText(
+      product?.user_fields?.preferredTimeOfDay,
+    ),
+    opened_at: product?.opened_at?.toISOString() ?? null,
+    ingredient_preview: sanitizeStringArray(product?.identity?.inciIngredients),
+    guidance_cautions: sanitizeStringArray(product?.guidance?.cautions),
+    is_specialist_locked: fallback.isSpecialistLocked,
+  };
+}
+
+function hasAnalysisProductContext(
+  product: AnalysisRoutineProductContext,
+): boolean {
+  return (
+    product.product_id !== null ||
+    product.brand !== null ||
+    product.name !== null ||
+    product.category !== null ||
+    product.step_label !== null ||
+    (product.ingredient_preview?.length ?? 0) > 0
+  );
 }
 
 function sanitizeConcernDetails(

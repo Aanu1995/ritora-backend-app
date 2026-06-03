@@ -278,6 +278,15 @@ describe('SkinJournalPhotoInterpretationService', () => {
           note: 'Started retinol',
         },
         routineContext: {
+          active_shelf_products: [
+            {
+              product_id: 'retinoid-1',
+              brand: 'Test',
+              name: 'Retinol Serum',
+              category: 'serum',
+              step_label: 'treatment',
+            },
+          ],
           routine_products: [
             {
               product_id: 'retinoid-1',
@@ -344,6 +353,7 @@ describe('SkinJournalPhotoInterpretationService', () => {
       generatedAt,
       {
         routineContext: {
+          active_shelf_products: [],
           routine_products: [],
           recent_applications: [],
           recent_check_ins: [
@@ -446,6 +456,15 @@ describe('SkinJournalPhotoInterpretationService', () => {
           fitzpatrick_phototype: 'VI',
         },
         routineContext: {
+          active_shelf_products: [
+            {
+              product_id: 'spf-1',
+              brand: 'Test',
+              name: 'SPF 50 Sunscreen',
+              category: 'sunscreen',
+              step_label: 'morning SPF',
+            },
+          ],
           routine_products: [
             {
               product_id: 'spf-1',
@@ -641,6 +660,7 @@ describe('SkinJournalPhotoInterpretationService', () => {
       generatedAt,
       {
         routineContext: {
+          active_shelf_products: [],
           routine_products: [],
           recent_applications: [],
           recent_check_ins: [
@@ -680,6 +700,193 @@ describe('SkinJournalPhotoInterpretationService', () => {
         'journal.analysis.guidance.factors.photoQualityContext',
         'journal.analysis.guidance.factors.visualTracking',
       ]),
+    );
+  });
+
+  it('uses AI guidance decisions for possible causes, actions, and avoid items', () => {
+    const result = service.interpret(
+      observations({
+        detected_concerns: [
+          {
+            concern: 'acne',
+            severity: 'moderate',
+            locations: ['chin'],
+            confidence: 0.78,
+          },
+        ],
+        guidance_decisions: [
+          {
+            concern: 'acne',
+            possible_factor_codes: [
+              'note_diet_acne',
+              'acne_common_contributors',
+            ],
+            possible_cause_items: [
+              'The chin breakout pattern may line up with the late sugary snack you logged.',
+            ],
+            action_codes: ['non_comedogenic', 'log_clusters'],
+            try_next_items: [
+              'Keep the routine steady and log whether similar foods line up with new spots.',
+            ],
+            avoid_codes: ['logged_diet_pattern', 'pore_clogging_products'],
+            avoid_items: [
+              'Avoid repeating that logged late sugary snack pattern if it keeps matching breakout days.',
+            ],
+            reasoning_summary:
+              'Visible chin breakout pattern lines up with the supplied diet note.',
+          },
+        ],
+      }),
+      generatedAt,
+      {
+        routineContext: {
+          active_shelf_products: [],
+          routine_products: [],
+          recent_applications: [],
+          recent_check_ins: [
+            {
+              entry_date: '2026-05-01',
+              ratings: { breakouts: 4 },
+              overall_feel: 'ok',
+              sleep_band: '5to7h',
+              stress_today: 'low',
+              sun_exposure_today: 'none',
+              sweat_exercise_today: false,
+              cycle_marker: 'dont_track',
+              recent_change_kind: null,
+              complaint_note:
+                'Had milk and a late sugary snack before bed yesterday.',
+              is_pre_routine: true,
+            },
+          ],
+        },
+      },
+    );
+
+    const acne = result.concern_guidance?.[0];
+    expect(acne?.possible_factor_keys.map((item) => item.key)).toEqual([
+      'journal.analysis.guidance.factors.noteDietAcne',
+      'journal.analysis.guidance.factors.acneCommonContributors',
+    ]);
+    expect(acne?.action_keys.map((item) => item.key)).toEqual([
+      'journal.analysis.guidance.actions.nonComedogenic',
+      'journal.analysis.guidance.actions.logClusters',
+    ]);
+    expect(acne?.avoid_keys.map((item) => item.key)).toEqual([
+      'journal.analysis.guidance.avoid.dietPatternIfLogged',
+      'journal.analysis.guidance.avoid.poreCloggingProducts',
+    ]);
+    expect(acne?.possible_cause_items).toEqual([
+      'The chin breakout pattern may line up with the late sugary snack you logged.',
+    ]);
+    expect(acne?.try_next_items).toEqual([
+      'Keep the routine steady and log whether similar foods line up with new spots.',
+    ]);
+    expect(acne?.avoid_items).toEqual([
+      'Avoid repeating that logged late sugary snack pattern if it keeps matching breakout days.',
+    ]);
+    expect(acne?.avoid_keys.map((item) => item.key)).not.toContain(
+      'journal.analysis.guidance.avoid.multipleNewActives',
+    );
+  });
+
+  it('drops unsafe AI generated guidance text while preserving safe bullets', () => {
+    const result = service.interpret(
+      observations({
+        detected_concerns: [
+          {
+            concern: 'acne',
+            severity: 'mild',
+            locations: ['chin'],
+            confidence: 0.72,
+          },
+        ],
+        guidance_decisions: [
+          {
+            concern: 'acne',
+            possible_factor_codes: ['acne_common_contributors'],
+            possible_cause_items: [
+              'Pore clogging, sweat, stress, or a recent product change could be contributors to compare.',
+              'This diagnoses acne and proves milk caused it.',
+            ],
+            action_codes: ['log_clusters'],
+            try_next_items: [
+              'Log whether new spots cluster after sweat, food notes, or product changes.',
+            ],
+            avoid_codes: ['pore_clogging_products'],
+            avoid_items: [
+              'Avoid heavy products on the areas that are breaking out.',
+              'Stop all products immediately.',
+            ],
+            reasoning_summary: 'One safe line and one unsafe line per section.',
+          },
+        ],
+      }),
+      generatedAt,
+    );
+
+    const acne = result.concern_guidance?.[0];
+    expect(acne?.possible_cause_items).toEqual([
+      'Pore clogging, sweat, stress, or a recent product change could be contributors to compare.',
+    ]);
+    expect(acne?.try_next_items).toEqual([
+      'Log whether new spots cluster after sweat, food notes, or product changes.',
+    ]);
+    expect(acne?.avoid_items).toEqual([
+      'Avoid heavy products on the areas that are breaking out.',
+    ]);
+  });
+
+  it('filters AI avoid choices that do not fit the concern or supplied context', () => {
+    const result = service.interpret(
+      observations({
+        detected_concerns: [
+          {
+            concern: 'acne',
+            severity: 'mild',
+            locations: ['chin'],
+            confidence: 0.72,
+          },
+        ],
+        guidance_decisions: [
+          {
+            concern: 'acne',
+            possible_factor_codes: ['acne_common_contributors'],
+            possible_cause_items: [
+              'Pore clogging products could be a contributor to compare with future entries.',
+            ],
+            action_codes: ['spf_context', 'non_comedogenic'],
+            try_next_items: [
+              'Choose noncomedogenic textures when replacing products.',
+            ],
+            avoid_codes: [
+              'inconsistent_spf',
+              'logged_diet_pattern',
+              'pore_clogging_products',
+            ],
+            avoid_items: [
+              'Avoid heavy products on areas that are breaking out.',
+            ],
+            reasoning_summary:
+              'The model selected one valid acne avoid item and two unsupported ones.',
+          },
+        ],
+      }),
+      generatedAt,
+    );
+
+    const acne = result.concern_guidance?.[0];
+    expect(acne?.action_keys.map((item) => item.key)).toEqual([
+      'journal.analysis.guidance.actions.nonComedogenic',
+    ]);
+    expect(acne?.avoid_keys.map((item) => item.key)).toEqual([
+      'journal.analysis.guidance.avoid.poreCloggingProducts',
+    ]);
+    expect(acne?.avoid_keys.map((item) => item.key)).not.toContain(
+      'journal.analysis.guidance.avoid.dietPatternIfLogged',
+    );
+    expect(acne?.avoid_keys.map((item) => item.key)).not.toContain(
+      'journal.analysis.guidance.avoid.inconsistentSpf',
     );
   });
 

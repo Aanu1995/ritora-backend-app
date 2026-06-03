@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { LookupWarningCode } from '../shelf/shelf.types';
 import {
   CATALOGUE_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
@@ -22,6 +23,7 @@ import {
 } from './openai-extraction.utils';
 import {
   buildDiscoveryPrompt,
+  buildPhotoIngredientRecoveryPrompt,
   buildOfficialDiscoveryPrompt,
   buildOfficialPageExtractionPrompt,
   buildPhotoExtractionPrompt,
@@ -37,9 +39,11 @@ import {
 import { toPhotoImageContent } from './openai-photo-content.utils';
 import {
   OPENAI_OFFICIAL_DISCOVERY_FORMAT,
+  OPENAI_PHOTO_INGREDIENT_RECOVERY_FORMAT,
   OPENAI_PRODUCT_EXTRACTION_FORMAT,
   type OpenAiTextFormat,
 } from './openai-response-schemas';
+import { sanitizeIngredientList } from './openai-extraction-sanitizers';
 import type {
   OfficialPageExtraction,
   ResolvedProductDraft,
@@ -50,7 +54,10 @@ const REQUEST_TIMEOUT_MS = 15000;
 const PHOTO_REQUEST_TIMEOUT_MS = 45000;
 const WEB_SEARCH_REQUEST_TIMEOUT_MS = 20000;
 const OFFICIAL_DISCOVERY_REQUEST_TIMEOUT_MS = 15000;
+const PHOTO_EXTRACTION_CACHE_SCOPE = 'openai-photo-extraction:v3';
 export const OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS = 6_000;
+export const OPENAI_PHOTO_INGREDIENT_RECOVERY_MAX_OUTPUT_TOKENS = 2_000;
+export const OPENAI_PHOTO_INGREDIENT_RECOVERY_REQUEST_TIMEOUT_MS = 15_000;
 export const OPENAI_PRODUCT_DISCOVERY_MAX_OUTPUT_TOKENS = 4_000;
 export const OPENAI_OFFICIAL_DISCOVERY_MAX_OUTPUT_TOKENS = 2_000;
 export const OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS = 2;
@@ -118,32 +125,33 @@ export class OpenAiExtractorProvider {
   ): Promise<ExtractionResult | null> {
     const cacheKey = this.toPhotoRequestCacheKey(input);
     return this.photoExtractionCache.getOrCreate(cacheKey, () =>
-      this.runRequest(
-        [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: buildPhotoExtractionPrompt(
-                  input.sourceImageCount ?? input.images.length,
-                  input.images.length,
-                ),
-              },
-              ...toPhotoImageContent(input),
-            ],
-          },
-        ],
-        {
-          useWebSearch: false,
-          timeoutMs: PHOTO_REQUEST_TIMEOUT_MS,
-          failureLabel: 'OpenAI photo extraction',
-          model: this.getModel(),
-          maxOutputTokens: OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
-          responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
-        },
-      ),
+      this.extractFromImagesUncached(input),
     );
+  }
+
+  private async extractFromImagesUncached(
+    input: CataloguePhotoExtractionInput,
+  ): Promise<ExtractionResult | null> {
+    const extraction = await this.runRequest(
+      this.toPhotoExtractionInput(input),
+      {
+        useWebSearch: false,
+        timeoutMs: PHOTO_REQUEST_TIMEOUT_MS,
+        failureLabel: 'OpenAI photo extraction',
+        model: this.getModel(),
+        maxOutputTokens: OPENAI_PRODUCT_EXTRACTION_MAX_OUTPUT_TOKENS,
+        responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT,
+      },
+    );
+
+    if (!extraction || !shouldAttemptPhotoIngredientRecovery(extraction)) {
+      return extraction;
+    }
+
+    const recoveredIngredients = await this.recoverPhotoIngredients(input);
+    return recoveredIngredients.length > 0
+      ? withRecoveredPhotoIngredients(extraction, recoveredIngredients)
+      : extraction;
   }
 
   async completeMissingFields(
@@ -374,6 +382,66 @@ export class OpenAiExtractorProvider {
     }
   }
 
+  private async recoverPhotoIngredients(
+    input: CataloguePhotoExtractionInput,
+  ): Promise<string[]> {
+    const requestInput = this.toPhotoIngredientRecoveryInput(input);
+    const options = {
+      useWebSearch: false,
+      timeoutMs: OPENAI_PHOTO_INGREDIENT_RECOVERY_REQUEST_TIMEOUT_MS,
+      failureLabel: 'Optional OpenAI photo ingredient recovery',
+      optionalFallbackMessage: 'continuing with product extraction result',
+      model: this.getModel(),
+      maxOutputTokens: OPENAI_PHOTO_INGREDIENT_RECOVERY_MAX_OUTPUT_TOKENS,
+      responseFormat: OPENAI_PHOTO_INGREDIENT_RECOVERY_FORMAT,
+    };
+
+    for (
+      let attempt = 1;
+      attempt <= OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS;
+      attempt += 1
+    ) {
+      const response = await this.requestOutputTextOnce(requestInput, options);
+      if (!response.ok) {
+        if (
+          attempt < OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS &&
+          response.retryable
+        ) {
+          continue;
+        }
+        this.logRequestFailure(options, response);
+        return [];
+      }
+
+      if (!response.outputText) {
+        if (attempt < OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS) {
+          continue;
+        }
+        this.logger.warn(formatOpenAiFailure(options, 'empty output'));
+        return [];
+      }
+
+      try {
+        return readRecoveredIngredients(
+          JSON.parse(extractJsonObject(response.outputText)) as unknown,
+        );
+      } catch (error) {
+        if (attempt < OPENAI_EXTRACTION_STRUCTURED_OUTPUT_ATTEMPTS) {
+          continue;
+        }
+        this.logger.warn(
+          formatOpenAiFailure(
+            options,
+            error instanceof Error ? error.message : 'Invalid JSON output',
+          ),
+        );
+        return [];
+      }
+    }
+
+    return [];
+  }
+
   private logRequestFailure(
     options: {
       timeoutMs: number;
@@ -416,8 +484,46 @@ export class OpenAiExtractorProvider {
     });
   }
 
+  private toPhotoExtractionInput(input: CataloguePhotoExtractionInput) {
+    return this.toPhotoPromptInput(
+      input,
+      buildPhotoExtractionPrompt(
+        input.sourceImageCount ?? input.images.length,
+        input.images.length,
+      ),
+    );
+  }
+
+  private toPhotoIngredientRecoveryInput(input: CataloguePhotoExtractionInput) {
+    return this.toPhotoPromptInput(
+      input,
+      buildPhotoIngredientRecoveryPrompt(
+        input.sourceImageCount ?? input.images.length,
+        input.images.length,
+      ),
+    );
+  }
+
+  private toPhotoPromptInput(
+    input: CataloguePhotoExtractionInput,
+    prompt: string,
+  ) {
+    return [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: prompt,
+          },
+          ...toPhotoImageContent(input),
+        ],
+      },
+    ];
+  }
+
   private toPhotoRequestCacheKey(input: CataloguePhotoExtractionInput): string {
-    return hashStableValue('openai-photo-extraction:v1', {
+    return hashStableValue(PHOTO_EXTRACTION_CACHE_SCOPE, {
       model: this.getModel(),
       reasoningEffort: OPENAI_CATALOGUE_REASONING_EFFORT,
       responseFormat: OPENAI_PRODUCT_EXTRACTION_FORMAT.name,
@@ -465,4 +571,48 @@ export class OpenAiExtractorProvider {
       ),
     ).slice(0, 3);
   }
+}
+
+function shouldAttemptPhotoIngredientRecovery(
+  extraction: ExtractionResult,
+): boolean {
+  const identity = extraction.data.identity;
+  return Boolean(
+    identity?.brand &&
+    identity.name &&
+    identity.category &&
+    !identity.inciIngredients?.length,
+  );
+}
+
+function withRecoveredPhotoIngredients(
+  extraction: ExtractionResult,
+  inciIngredients: string[],
+): ExtractionResult {
+  return {
+    ...extraction,
+    data: {
+      ...extraction.data,
+      identity: {
+        ...(extraction.data.identity ?? {}),
+        inciIngredients,
+      },
+    },
+    warnings: Array.from(
+      new Set([
+        ...extraction.warnings,
+        LookupWarningCode.IngredientsUnverified,
+      ]),
+    ),
+  };
+}
+
+function readRecoveredIngredients(parsed: unknown): string[] {
+  if (!parsed || typeof parsed !== 'object') {
+    return [];
+  }
+
+  return sanitizeIngredientList(
+    (parsed as { inciIngredients?: unknown }).inciIngredients,
+  );
 }

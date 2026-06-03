@@ -390,7 +390,7 @@ export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT = 4;
 export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER = 2;
 export const SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD = 3;
 export const SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION =
-  'skin-journal-photo-v2026-05-16.1';
+  'skin-journal-photo-v2026-06-03.1';
 export const SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: AnalysisQueueDriver =
   'database';
 export const SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS = 10;
@@ -490,6 +490,10 @@ export interface AnalysisRoutineProductContext {
   name: string | null;
   category: string | null;
   step_label: string | null;
+  preferred_time?: string | null;
+  opened_at?: string | null;
+  ingredient_preview?: string[];
+  guidance_cautions?: string[];
   is_specialist_locked?: boolean;
 }
 
@@ -512,6 +516,7 @@ export interface AnalysisCheckInContext extends AnalysisEntryContext {
 }
 
 export interface AnalysisRoutineContext {
+  active_shelf_products: AnalysisRoutineProductContext[];
   routine_products: AnalysisRoutineProductContext[];
   recent_applications: AnalysisRecentApplicationContext[];
   recent_check_ins: AnalysisCheckInContext[];
@@ -532,6 +537,80 @@ export interface AnalysisRunResult {
   metadata: AnalysisRunMetadata;
 }
 
+export const PHOTO_ANALYSIS_GUIDANCE_FACTOR_CODES = [
+  'check_in_oiliness',
+  'check_in_irritation',
+  'check_in_sun',
+  'check_in_sweat',
+  'check_in_stress',
+  'check_in_sleep',
+  'check_in_feel',
+  'note_diet_acne',
+  'recent_product_change',
+  'recent_routine_change',
+  'routine_product_timing',
+  'active_ingredient_timing',
+  'sunscreen_context',
+  'recent_application_change',
+  'acne_common_contributors',
+  'pigment_common_contributors',
+  'oil_pore_common_contributors',
+  'barrier_common_contributors',
+  'appearance_common_contributors',
+  'general_common_contributors',
+] as const;
+
+export type PhotoAnalysisGuidanceFactorCode =
+  (typeof PHOTO_ANALYSIS_GUIDANCE_FACTOR_CODES)[number];
+
+export const PHOTO_ANALYSIS_GUIDANCE_ACTION_CODES = [
+  'acne_steady_routine',
+  'non_comedogenic',
+  'log_clusters',
+  'spf_context',
+  'prevent_irritation',
+  'same_light',
+  'gentle_cleanse',
+  'oil_free_when_possible',
+  'watch_shine_pattern',
+  'simplify_routine',
+  'moisturizer_support',
+  'watch_comfort',
+  'watch_pattern',
+] as const;
+
+export type PhotoAnalysisGuidanceActionCode =
+  (typeof PHOTO_ANALYSIS_GUIDANCE_ACTION_CODES)[number];
+
+export const PHOTO_ANALYSIS_GUIDANCE_AVOID_CODES = [
+  'multiple_new_actives',
+  'picking_or_squeezing',
+  'logged_diet_pattern',
+  'sweat_friction_after_exercise',
+  'pore_clogging_products',
+  'inconsistent_spf',
+  'irritating_scrubs',
+  'stripping_skin',
+  'over_exfoliation_for_pores',
+  'adding_actives_while_stressed',
+  'fragrance_if_sensitive',
+  'known_irritant_reexposure',
+] as const;
+
+export type PhotoAnalysisGuidanceAvoidCode =
+  (typeof PHOTO_ANALYSIS_GUIDANCE_AVOID_CODES)[number];
+
+export interface AnalysisGuidanceDecision {
+  concern: AnalysisConcern;
+  possible_factor_codes: PhotoAnalysisGuidanceFactorCode[];
+  possible_cause_items: string[];
+  action_codes: PhotoAnalysisGuidanceActionCode[];
+  try_next_items: string[];
+  avoid_codes: PhotoAnalysisGuidanceAvoidCode[];
+  avoid_items: string[];
+  reasoning_summary: string;
+}
+
 export interface AnalysisPhotoInput {
   angle: Angle;
   object_key: string;
@@ -550,7 +629,7 @@ export interface AnalysisAngleQuality {
 }
 
 export interface AnalysisObservations {
-  schema_version: '1.0' | '1.1' | '1.2';
+  schema_version: '1.0' | '1.1' | '1.2' | '1.3';
   model_version: string;
   comparison_reference?: AnalysisComparisonReference | null;
   image_quality: {
@@ -582,6 +661,7 @@ export interface AnalysisObservations {
     barrier_compromise: boolean;
     indicators: string[];
   };
+  guidance_decisions?: AnalysisGuidanceDecision[];
   overall_assessment: string;
   overall_change_from_previous?: AnalysisChangeDirection;
   user_visible_message?: string;
@@ -640,8 +720,11 @@ export interface PhotoAnalysisConcernGuidance {
   title_key: string;
   summary: PhotoAnalysisTextRef;
   possible_factor_keys: PhotoAnalysisTextRef[];
+  possible_cause_items?: string[];
   action_keys: PhotoAnalysisTextRef[];
+  try_next_items?: string[];
   avoid_keys: PhotoAnalysisTextRef[];
+  avoid_items?: string[];
   track_key: PhotoAnalysisTextRef;
   escalation_key?: PhotoAnalysisTextRef | null;
   source_ids: string[];

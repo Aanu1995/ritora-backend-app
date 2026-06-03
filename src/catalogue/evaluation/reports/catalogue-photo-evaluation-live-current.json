@@ -1,16 +1,18 @@
 {
   "reportType": "catalogue_photo_extraction_live_ai_evaluation",
-  "generatedAt": "2026-05-28T22:21:47.276Z",
+  "generatedAt": "2026-06-03T18:39:11.544Z",
   "model": "gpt-5.4-mini",
   "timeoutMs": {
-    "photoExtraction": 45000
+    "photoExtraction": 45000,
+    "photoIngredientRecovery": 15000
   },
   "maxOutputTokens": {
-    "photoExtraction": 6000
+    "photoExtraction": 6000,
+    "photoIngredientRecovery": 2000
   },
   "structuredOutputAttempts": 2,
-  "totalCases": 3,
-  "passedCases": 3,
+  "totalCases": 9,
+  "passedCases": 9,
   "failedCases": 0,
   "gate": {
     "passed": true,
@@ -26,7 +28,7 @@
       "hardCheckFailures": [],
       "extraction": {
         "brand": "RITORA LAB",
-        "name": "Calm Barrier Cleanser Gentle Cream Cleanser",
+        "name": "Calm Barrier Cleanser",
         "category": "cleanser",
         "sizeMl": 150,
         "ingredients": [
@@ -72,7 +74,7 @@
             "barrier",
             "cleanser"
           ],
-          "actual": "Calm Barrier Cleanser Gentle Cream Cleanser"
+          "actual": "Calm Barrier Cleanser"
         },
         {
           "code": "category_matches_primary_role",
@@ -161,12 +163,12 @@
           "Phenoxyethanol"
         ],
         "steps": [
-          "Apply every morning as last skincare step",
+          "Apply every morning as the last skincare step",
           "Reapply every two hours during sun exposure"
         ],
         "cautions": [
           "Avoid contact with eyes",
-          "Reduce sun exposure while using sunscreen"
+          "Reduce sun exposure even while using sunscreen"
         ],
         "applicationMethod": null,
         "quantity": "generous"
@@ -231,7 +233,7 @@
             "reapply"
           ],
           "actual": [
-            "Apply every morning as last skincare step",
+            "Apply every morning as the last skincare step",
             "Reapply every two hours during sun exposure"
           ]
         },
@@ -252,7 +254,7 @@
       "hardCheckFailures": [],
       "extraction": {
         "brand": "AURORA DERM",
-        "name": "Retinal Night Renewal Serum 0.05% Retinal + Peptides",
+        "name": "Retinal Night Renewal Serum",
         "category": "serum",
         "sizeMl": 30,
         "ingredients": [
@@ -299,7 +301,7 @@
             "night",
             "serum"
           ],
-          "actual": "Retinal Night Renewal Serum 0.05% Retinal + Peptides"
+          "actual": "Retinal Night Renewal Serum"
         },
         {
           "code": "category_matches_primary_role",
@@ -362,6 +364,690 @@
           "passed": true,
           "expected": "two-to-three-drops",
           "actual": "two-to-three-drops"
+        }
+      ]
+    },
+    {
+      "caseId": "swedish_barrier_cream_label",
+      "title": "Swedish label extracts identity, translated guidance, and INCI list",
+      "status": "passed",
+      "hardChecksPassed": 9,
+      "hardChecksTotal": 9,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "LUMI HUD",
+        "name": "Barriärkräm",
+        "category": "moisturizer",
+        "sizeMl": 75,
+        "ingredients": [
+          "Aqua",
+          "Glycerin",
+          "Cetearyl Alcohol",
+          "Squalane",
+          "Panthenol",
+          "Ceramide NP",
+          "Sodium Hyaluronate",
+          "Tocopherol",
+          "Phenoxyethanol"
+        ],
+        "steps": [
+          "Apply to clean skin morning and evening with fingertips"
+        ],
+        "cautions": [
+          "Avoid contact with eyes",
+          "For external use only"
+        ],
+        "applicationMethod": "fingertips",
+        "quantity": null
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "lumi",
+          "actual": "LUMI HUD"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "barri"
+          ],
+          "actual": "Barriärkräm"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "moisturizer",
+          "actual": "moisturizer"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Ceramide NP",
+            "Sodium Hyaluronate"
+          ],
+          "actual": [
+            "Aqua",
+            "Glycerin",
+            "Cetearyl Alcohol",
+            "Squalane",
+            "Panthenol",
+            "Ceramide NP",
+            "Sodium Hyaluronate",
+            "Tocopherol",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 75,
+          "actual": 75
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "morning",
+            "evening"
+          ],
+          "actual": [
+            "Apply to clean skin morning and evening with fingertips"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "eye",
+            "external use"
+          ],
+          "actual": [
+            "Avoid contact with eyes",
+            "For external use only"
+          ]
+        },
+        {
+          "code": "application_method_matches_label",
+          "passed": true,
+          "expected": "fingertips",
+          "actual": "fingertips"
+        }
+      ]
+    },
+    {
+      "caseId": "mixed_language_moisturizer_label",
+      "title": "Mixed-language label keeps INCI names and translates usage",
+      "status": "passed",
+      "hardChecksPassed": 8,
+      "hardChecksTotal": 8,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "SOL CLARO",
+        "name": "Hydra Calm Gel Cream",
+        "category": "moisturizer",
+        "sizeMl": 60,
+        "ingredients": [
+          "Aqua",
+          "Glycerin",
+          "Propanediol",
+          "Betaine",
+          "Allantoin",
+          "Camellia Sinensis Leaf Extract",
+          "Sodium PCA",
+          "Phenoxyethanol"
+        ],
+        "steps": [
+          "Apply to face after serum",
+          "Use morning and night"
+        ],
+        "cautions": [
+          "Avoid contact with eyes"
+        ],
+        "applicationMethod": "fingertips",
+        "quantity": null
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "sol",
+          "actual": "SOL CLARO"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "hydra",
+            "calm",
+            "gel cream"
+          ],
+          "actual": "Hydra Calm Gel Cream"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "moisturizer",
+          "actual": "moisturizer"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Allantoin",
+            "Camellia Sinensis Leaf Extract"
+          ],
+          "actual": [
+            "Aqua",
+            "Glycerin",
+            "Propanediol",
+            "Betaine",
+            "Allantoin",
+            "Camellia Sinensis Leaf Extract",
+            "Sodium PCA",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 60,
+          "actual": 60
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "serum",
+            "morning"
+          ],
+          "actual": [
+            "Apply to face after serum",
+            "Use morning and night"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "eyes"
+          ],
+          "actual": [
+            "Avoid contact with eyes"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "wrapped_curved_sunscreen_label",
+      "title": "Wrapped sunscreen label handles long filters without dropping INCI",
+      "status": "passed",
+      "hardChecksPassed": 9,
+      "hardChecksTotal": 9,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "KUST SPF",
+        "name": "Marine Fluid SPF 50+",
+        "category": "sun-protection",
+        "sizeMl": 40,
+        "ingredients": [
+          "Aqua",
+          "Dibutyl Adipate",
+          "Diethylamino Hydroxybenzoyl Hexyl Benzoate",
+          "Ethylhexyl Triazone",
+          "Bis-Ethylhexyloxyphenol Methoxyphenyl Triazine",
+          "Glycerin",
+          "Panthenol",
+          "Tocopherol",
+          "Phenoxyethanol"
+        ],
+        "steps": [
+          "Apply as the last skincare step each morning"
+        ],
+        "cautions": [
+          "Avoid contact with eyes",
+          "Reapply after swimming or sweating"
+        ],
+        "applicationMethod": "fingertips",
+        "quantity": "generous"
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "kust",
+          "actual": "KUST SPF"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "marine",
+            "spf 50"
+          ],
+          "actual": "Marine Fluid SPF 50+"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "sun-protection",
+          "actual": "sun-protection"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Diethylamino Hydroxybenzoyl Hexyl Benzoate",
+            "Bis-Ethylhexyloxyphenol Methoxyphenyl Triazine"
+          ],
+          "actual": [
+            "Aqua",
+            "Dibutyl Adipate",
+            "Diethylamino Hydroxybenzoyl Hexyl Benzoate",
+            "Ethylhexyl Triazone",
+            "Bis-Ethylhexyloxyphenol Methoxyphenyl Triazine",
+            "Glycerin",
+            "Panthenol",
+            "Tocopherol",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 40,
+          "actual": 40
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "morning"
+          ],
+          "actual": [
+            "Apply as the last skincare step each morning"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "eyes"
+          ],
+          "actual": [
+            "Avoid contact with eyes",
+            "Reapply after swimming or sweating"
+          ]
+        },
+        {
+          "code": "quantity_matches_label",
+          "passed": true,
+          "expected": "generous",
+          "actual": "generous"
+        }
+      ]
+    },
+    {
+      "caseId": "blurry_cleanser_ingredient_list",
+      "title": "Mildly blurry label still extracts a complete readable ingredient list",
+      "status": "passed",
+      "hardChecksPassed": 8,
+      "hardChecksTotal": 8,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "Moss & Milk",
+        "name": "Cloud Milk Cleanser",
+        "category": "cleanser",
+        "sizeMl": 120,
+        "ingredients": [
+          "Aqua",
+          "Caprylic/Capric Triglyceride",
+          "Glycerin",
+          "Coco-Glucoside",
+          "Avena Sativa Kernel Extract",
+          "Panthenol",
+          "Sodium Benzoate",
+          "Citric Acid",
+          "Water"
+        ],
+        "steps": [
+          "Massage onto damp skin",
+          "Rinse with water"
+        ],
+        "cautions": [
+          "Avoid direct contact with eyes"
+        ],
+        "applicationMethod": "fingertips",
+        "quantity": null
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "moss",
+          "actual": "Moss & Milk"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "cloud",
+            "milk",
+            "cleanser"
+          ],
+          "actual": "Cloud Milk Cleanser"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "cleanser",
+          "actual": "cleanser"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Avena Sativa Kernel Extract",
+            "Panthenol"
+          ],
+          "actual": [
+            "Aqua",
+            "Caprylic/Capric Triglyceride",
+            "Glycerin",
+            "Coco-Glucoside",
+            "Avena Sativa Kernel Extract",
+            "Panthenol",
+            "Sodium Benzoate",
+            "Citric Acid",
+            "Water"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 120,
+          "actual": 120
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "damp skin",
+            "rinse"
+          ],
+          "actual": [
+            "Massage onto damp skin",
+            "Rinse with water"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "eyes"
+          ],
+          "actual": [
+            "Avoid direct contact with eyes"
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "multiple_products_in_hero_photo",
+      "title": "Multiple products in one photo should keep the selected product identity",
+      "status": "passed",
+      "hardChecksPassed": 11,
+      "hardChecksTotal": 11,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "SELECTED LAB",
+        "name": "Barrier Rescue Serum Ceramide + Panthenol",
+        "category": "serum",
+        "sizeMl": 30,
+        "ingredients": [
+          "Aqua",
+          "Glycerin",
+          "Panthenol",
+          "Ceramide NP",
+          "Beta-Glucan",
+          "Sodium Hyaluronate",
+          "Phenoxyethanol"
+        ],
+        "steps": [
+          "Apply two to three drops after cleansing"
+        ],
+        "cautions": [
+          "Patch test first"
+        ],
+        "applicationMethod": null,
+        "quantity": "two-to-three-drops"
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "selected",
+          "actual": "SELECTED LAB"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "barrier",
+            "rescue",
+            "serum"
+          ],
+          "actual": "Barrier Rescue Serum Ceramide + Panthenol"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "serum",
+          "actual": "serum"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [
+            "Ceramide NP",
+            "Beta-Glucan"
+          ],
+          "actual": [
+            "Aqua",
+            "Glycerin",
+            "Panthenol",
+            "Ceramide NP",
+            "Beta-Glucan",
+            "Sodium Hyaluronate",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "name_excludes_other_product",
+          "passed": true,
+          "expected": [
+            "bright peel",
+            "toner"
+          ],
+          "actual": "Barrier Rescue Serum Ceramide + Panthenol"
+        },
+        {
+          "code": "ingredients_exclude_forbidden_items",
+          "passed": true,
+          "expected": [
+            "AHA"
+          ],
+          "actual": [
+            "Aqua",
+            "Glycerin",
+            "Panthenol",
+            "Ceramide NP",
+            "Beta-Glucan",
+            "Sodium Hyaluronate",
+            "Phenoxyethanol"
+          ]
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 30,
+          "actual": 30
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "cleansing"
+          ],
+          "actual": [
+            "Apply two to three drops after cleansing"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "patch test"
+          ],
+          "actual": [
+            "Patch test first"
+          ]
+        },
+        {
+          "code": "quantity_matches_label",
+          "passed": true,
+          "expected": "two-to-three-drops",
+          "actual": "two-to-three-drops"
+        }
+      ]
+    },
+    {
+      "caseId": "cropped_ingredient_list_stays_empty",
+      "title": "Cropped ingredient list must not be returned as a partial INCI list",
+      "status": "passed",
+      "hardChecksPassed": 10,
+      "hardChecksTotal": 10,
+      "hardCheckFailures": [],
+      "extraction": {
+        "brand": "CUT OFF CO",
+        "name": "Vitamin C Glow Serum",
+        "category": "serum",
+        "sizeMl": 30,
+        "ingredients": [],
+        "steps": [
+          "Apply in the morning before moisturizer"
+        ],
+        "cautions": [
+          "Use sunscreen during the day"
+        ],
+        "applicationMethod": null,
+        "quantity": null
+      },
+      "checks": [
+        {
+          "code": "extraction_returned",
+          "passed": true,
+          "expected": true,
+          "actual": true
+        },
+        {
+          "code": "brand_matches_label",
+          "passed": true,
+          "expected": "cut off",
+          "actual": "CUT OFF CO"
+        },
+        {
+          "code": "name_matches_label",
+          "passed": true,
+          "expected": [
+            "vitamin c",
+            "serum"
+          ],
+          "actual": "Vitamin C Glow Serum"
+        },
+        {
+          "code": "category_matches_primary_role",
+          "passed": true,
+          "expected": "serum",
+          "actual": "serum"
+        },
+        {
+          "code": "ingredients_include_required_items",
+          "passed": true,
+          "expected": [],
+          "actual": []
+        },
+        {
+          "code": "ingredients_empty_when_incomplete",
+          "passed": true,
+          "expected": [],
+          "actual": []
+        },
+        {
+          "code": "ingredients_exclude_forbidden_items",
+          "passed": true,
+          "expected": [
+            "Ascorbyl Glucoside"
+          ],
+          "actual": []
+        },
+        {
+          "code": "size_ml_matches_label",
+          "passed": true,
+          "expected": 30,
+          "actual": 30
+        },
+        {
+          "code": "guidance_steps_include_required_context",
+          "passed": true,
+          "expected": [
+            "morning"
+          ],
+          "actual": [
+            "Apply in the morning before moisturizer"
+          ]
+        },
+        {
+          "code": "cautions_include_required_context",
+          "passed": true,
+          "expected": [
+            "sunscreen"
+          ],
+          "actual": [
+            "Use sunscreen during the day"
+          ]
         }
       ]
     }

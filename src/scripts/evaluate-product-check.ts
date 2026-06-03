@@ -4,12 +4,15 @@ import { join, resolve } from 'path';
 import { ConfigService } from '@nestjs/config';
 import {
   evaluateProductCheckRealLifeCases,
+  resolveProductCheckEvaluationLanguages,
   type ProductCheckRealLifeEvaluationReport,
 } from '../ingredients/evaluation/product-check-real-life-evaluation.runner';
+import type { AppLanguage } from '../common/i18n/i18n';
 
 type EvaluationCliOptions = {
   envFile: string | null;
   out: string;
+  languages: AppLanguage[];
 };
 
 async function main(): Promise<number> {
@@ -28,13 +31,14 @@ async function main(): Promise<number> {
 
   const report = await evaluateProductCheckRealLifeCases({
     configService: new ConfigService(),
+    languages: options.languages,
   });
 
   await mkdir(resolve(options.out, '..'), { recursive: true });
   await writeFile(options.out, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
   console.log(
-    `Quick Check real-life evaluation saved to ${options.out}: ${report.passedCases}/${report.totalCases} passed, ${report.failedCases} failed.`,
+    `Quick Check real-life evaluation saved to ${options.out}: ${report.passedCases}/${report.totalCases} passed, ${report.failedCases} failed. Languages: ${report.quickCheckLanguages.join(', ')}.`,
   );
 
   if (report.failedCases > 0) {
@@ -49,6 +53,9 @@ function parseArgs(args: readonly string[]): EvaluationCliOptions {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   return {
     envFile: readFlag(args, '--env-file'),
+    languages: resolveProductCheckEvaluationLanguages(
+      readCsvFlag(args, '--languages'),
+    ),
     out: resolve(
       readFlag(args, '--out') ??
         join(
@@ -58,6 +65,16 @@ function parseArgs(args: readonly string[]): EvaluationCliOptions {
         ),
     ),
   };
+}
+
+function readCsvFlag(args: readonly string[], flag: string): string[] | null {
+  const value = readFlag(args, flag);
+  return value
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : null;
 }
 
 function readFlag(args: readonly string[], flag: string): string | null {

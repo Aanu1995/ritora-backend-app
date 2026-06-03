@@ -26,17 +26,7 @@ function buildDataSource(): DataSource {
 }
 
 function readRequestedSources(init: RequestInit | undefined): string[] {
-  const rawBody = init?.body;
-  if (typeof rawBody !== 'string') {
-    throw new Error('Translation request body was not a string');
-  }
-
-  const body = JSON.parse(rawBody) as {
-    input?: Array<{
-      role?: string;
-      content?: Array<{ type?: string; text?: string }>;
-    }>;
-  };
+  const body = readOpenAiRequestBody(init);
   const userText = body.input
     ?.find((item) => item.role === 'user')
     ?.content?.find((content) => content.type === 'input_text')?.text;
@@ -55,6 +45,91 @@ function readRequestedSources(init: RequestInit | undefined): string[] {
   }
 
   return typeof parsed.source === 'string' ? [parsed.source] : [];
+}
+
+function readOpenAiRequestBody(init: RequestInit | undefined): {
+  input?: Array<{
+    role?: string;
+    content?: Array<{ type?: string; text?: string }>;
+  }>;
+  model?: string;
+  store?: boolean;
+  temperature?: number;
+  max_output_tokens?: number;
+  reasoning?: { effort?: string };
+  text?: {
+    verbosity?: string;
+    format?: {
+      type?: string;
+      name?: string;
+      strict?: boolean;
+      schema?: {
+        required?: string[];
+        properties?: {
+          translations?: {
+            type?: string;
+            items?: { type?: string };
+          };
+        };
+      };
+    };
+  };
+} {
+  const rawBody = init?.body;
+  if (typeof rawBody !== 'string') {
+    throw new Error('Translation request body was not a string');
+  }
+
+  return JSON.parse(rawBody) as {
+    input?: Array<{
+      role?: string;
+      content?: Array<{ type?: string; text?: string }>;
+    }>;
+    model?: string;
+    store?: boolean;
+    temperature?: number;
+    max_output_tokens?: number;
+    reasoning?: { effort?: string };
+    text?: {
+      verbosity?: string;
+      format?: {
+        type?: string;
+        name?: string;
+        strict?: boolean;
+        schema?: {
+          required?: string[];
+          properties?: {
+            translations?: {
+              type?: string;
+              items?: { type?: string };
+            };
+          };
+        };
+      };
+    };
+  };
+}
+
+function readTranslationPromptPayload(init: RequestInit | undefined): {
+  sourceLanguage?: string;
+  targetLanguage?: string;
+  sourceCount?: number;
+  sources?: string[];
+} {
+  const body = readOpenAiRequestBody(init);
+  const userText = body.input
+    ?.find((item) => item.role === 'user')
+    ?.content?.find((content) => content.type === 'input_text')?.text;
+  if (!userText) {
+    throw new Error('Translation request did not include user text');
+  }
+
+  return JSON.parse(userText) as {
+    sourceLanguage?: string;
+    targetLanguage?: string;
+    sourceCount?: number;
+    sources?: string[];
+  };
 }
 
 function buildTranslationResponse(sources: string[]): Response {
@@ -122,14 +197,75 @@ describe('TranslationService', () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(3);
     const [, firstInit] = (global.fetch as jest.Mock).mock.calls[0];
-    const firstBody = JSON.parse(String(firstInit.body)) as {
-      model?: string;
-      store?: boolean;
-      temperature?: number;
-    };
+    const firstBody = readOpenAiRequestBody(firstInit as RequestInit);
     expect(firstBody.model).toBe('ingredient-translation-model');
     expect(firstBody.store).toBe(false);
     expect(firstBody.temperature).toBe(0);
+    expect(firstBody.text?.verbosity).toBe('low');
+    expect(firstBody.text?.format).toMatchObject({
+      type: 'json_schema',
+      name: 'ritora_ingredient_translation',
+      strict: true,
+    });
+    expect(firstBody.text?.format?.schema?.required).toEqual(['translations']);
+    expect(
+      firstBody.text?.format?.schema?.properties?.translations,
+    ).toMatchObject({
+      type: 'array',
+      items: { type: 'string' },
+    });
+    const systemPrompt =
+      firstBody.input
+        ?.find((item) => item.role === 'system')
+        ?.content?.find((content) => content.type === 'input_text')?.text ?? '';
+    expect(systemPrompt).toContain(
+      'Role: translate Ritora skincare and ingredient-intelligence reference copy',
+    );
+    expect(systemPrompt).toContain('Decision inputs:');
+    expect(systemPrompt).toContain('sourceLanguage, targetLanguage');
+    expect(systemPrompt).toContain('Do not infer extra product');
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain('Preserve order');
+    expect(systemPrompt).toContain('Do not merge, split, drop');
+    expect(systemPrompt).toContain(
+      'Copy brand names, product names, INCI names',
+    );
+    expect(systemPrompt).toContain(
+      'copy scientific ingredient wording exactly',
+    );
+    expect(systemPrompt).toContain('including casing and spacing');
+    expect(systemPrompt).toContain(
+      'Do not replace protected terms with localized forms',
+    );
+    expect(systemPrompt).toContain('Generic skincare nouns are not protected');
+    expect(systemPrompt).toContain(
+      'translate words like sunscreen, cleanser, moisturizer',
+    );
+    expect(systemPrompt).toContain('Safety and medical meaning');
+    expect(systemPrompt).toContain(
+      'Translate caution and uncertainty wording into the target language',
+    );
+    expect(systemPrompt).toContain('"may" and "can" should become "kan"');
+    expect(systemPrompt).toContain(
+      'Do not leave English caution words untranslated',
+    );
+    expect(systemPrompt).toContain('Keep the same sentence count');
+    expect(systemPrompt).toContain('Do not summarize or expand');
+    expect(systemPrompt).toContain('copy line breaks, bullet markers');
+    expect(systemPrompt).toContain('Notes authority');
+    expect(systemPrompt).toContain('JSON output');
+    expect(systemPrompt).not.toContain('common lay name');
+    expect(systemPrompt).not.toContain('small change');
+    expect(systemPrompt).not.toContain('where practical');
+    expect(systemPrompt).not.toContain('Preserve hedging words');
+    const promptPayload = readTranslationPromptPayload(
+      firstInit as RequestInit,
+    );
+    expect(promptPayload).toMatchObject({
+      sourceLanguage: 'en',
+      targetLanguage: 'sv',
+      sourceCount: 20,
+    });
     expect(maxActiveRequests).toBeLessThanOrEqual(2);
     expect(result[0]).toBe('sv:Text 0');
     expect(result[1]).toBe('sv:Text 1');
@@ -188,7 +324,72 @@ describe('TranslationService', () => {
     await service.translateMany(['Text 0'], 'sv');
 
     const [, init] = (global.fetch as jest.Mock).mock.calls[0];
-    const body = JSON.parse(String(init.body)) as { model?: string };
+    const body = readOpenAiRequestBody(init as RequestInit);
     expect(body.model).toBe('fallback-model');
+  });
+
+  it('falls back to source text when the LLM returns the wrong translation count', async () => {
+    const service = new TranslationService(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_TRANSLATION_AI_MODEL: 'ingredient-translation-model',
+        INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
+      }),
+      buildDataSource(),
+    );
+
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            translations: ['sv:Text 0'],
+          }),
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await service.translateMany(['Text 0', 'Text 1'], 'sv');
+
+    expect(result).toEqual(['Text 0', 'Text 1']);
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('restores protected ingredient terms when the translation localizes them', async () => {
+    const service = new TranslationService(
+      buildConfig({
+        OPENAI_API_KEY: 'sk-test',
+        INGREDIENT_TRANSLATION_AI_MODEL: 'ingredient-translation-model',
+        INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
+      }),
+      buildDataSource(),
+    );
+
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output_text: JSON.stringify({
+            translations: [
+              'Niacinamid kan stödja hudbarriären.',
+              'Salicylsyra kan kännas uttorkande.',
+            ],
+          }),
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await service.translateMany(
+      [
+        'Niacinamide can support the skin barrier.',
+        'Salicylic acid can feel drying.',
+      ],
+      'sv',
+    );
+
+    expect(result).toEqual([
+      'Niacinamide kan stödja hudbarriären.',
+      'Salicylic acid kan kännas uttorkande.',
+    ]);
   });
 });

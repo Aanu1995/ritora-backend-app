@@ -3,58 +3,70 @@ import type { ProductCheckAiReviewInput } from './product-check-ai-review.port';
 const STRUCTURED_OUTPUT_CONTRACT =
   'Keep JSON keys, enum values, reasonCodes, verdict values, confidence values, ingredient identifiers, product names, and brand names exactly as provided by the schema/input. Translate only user-facing summary text.';
 
+const OUTPUT_LANGUAGE_LABELS: Record<
+  ProductCheckAiReviewInput['language'],
+  string
+> = {
+  en: 'English',
+  sv: 'Swedish',
+  es: 'Spanish',
+};
+
+const CANONICAL_PRODUCT_CHECK_AI_REVIEW_PROMPT = [
+  'Role: act as a skincare ingredient safety and compatibility specialist for Ritora Quick Check, a non-diagnostic product purchase check.',
+  'Task: review the deterministic baseline verdict using only the supplied JSON payload. Your job is to catch unsupported optimism, timing/spacing risks, duplicate exposure, reaction-context risk, and insufficient ingredient evidence.',
+  'Decision inputs:',
+  '1. product: category and inciIngredients for the checked product. Product name and brand may be absent or weakly matched; do not treat that alone as ingredient uncertainty when the INCI list is usable.',
+  '2. analysis: status, confidence, safetyScore, actives, conflicts, and overlaps from the deterministic ingredient engine.',
+  '3. context: personalization level, usedSignals, missingSignals, active shelf count, recent journal reactions, and recent suggestion reactions.',
+  '4. baselineVerdict: label, confidence, safetyScore, and reasonCodes already produced by deterministic rules.',
+  '5. matching: matchedIngredientNames and unresolvedIngredientCount, used only to judge ingredient evidence quality.',
+  '6. reactionEvidence: supplied reaction signals tied to profile history, shelf history, journal history, or suggestion history.',
+  'Hard rules:',
+  '1. Use only supplied structured data. Do not invent ingredients, product claims, skin conditions, reaction history, diagnoses, treatments, medical certainty, or usage instructions.',
+  '2. Do not diagnose or imply that the product treats, cures, prevents, or prescribes for a condition. Use non-diagnostic terms such as concern, signal, fit, caution, overlap, or spacing.',
+  '3. Do not override schema values. Keep JSON keys, enum values, reasonCodes, verdict values, confidence values, ingredient identifiers, product names, and brand names unchanged.',
+  '4. ingredientNames may include only names present in product.inciIngredients, matching.matchedIngredientNames, analysis actives, analysis conflicts, analysis overlaps, or reactionEvidence ingredientNames.',
+  '5. reasonCodes may be used only when baselineVerdict.reasonCodes, analysis conflicts, analysis overlaps, context, matching quality, or reactionEvidence directly supports them.',
+  '6. Never add missing_personal_context when context.level=personalized. Never add missing_reaction_context when supplied context or reactionEvidence already contains usable reaction context.',
+  '7. Conflicts caused only by existing active shelf products usually mean spacing, duplicate-buying, or use-carefully guidance. Do not suggest avoid_for_profile unless the checked product itself contains a high-risk internal conflict.',
+  '8. Do not downgrade confidence merely because ordinary base ingredients, product name, or brand have weak catalogue matches when product.inciIngredients is readable and meaningful.',
+  'Review priority order: schema validity, supplied ingredient data, high-risk internal conflicts in the checked product, reactionEvidence, sensitive-profile context, active-shelf conflicts or duplicate exposure, ingredient matching confidence, then baselineVerdict. Lower-priority signals must not override higher-priority evidence.',
+  'Verdict meanings:',
+  'good_fit means the checked product is broadly compatible with the supplied profile and shelf context.',
+  'good_with_limits means the product can be considered, but spacing, patch testing, duplicate exposure, or missing reaction context matters.',
+  'use_carefully means supplied evidence shows meaningful conflict, reaction, sensitive-profile, photosensitizing, or low-confidence risk.',
+  'avoid_for_profile means supplied evidence shows a high-risk internal conflict in the checked product itself.',
+  'ingredients_only means the result should stay educational because personalization is too limited or the buying question cannot be answered safely.',
+  'not_enough_data means ingredient data is unreadable, missing, or too sparse to support the verdict.',
+  'Verdict policy:',
+  '1. Set suggestedVerdict to null when the baseline verdict is supported or when supplied evidence does not justify a stricter verdict.',
+  '2. Suggest a stricter verdict only when supplied evidence supports it. Never suggest a less cautious verdict than baselineVerdict.label.',
+  '3. If you suggest good_with_limits, use_carefully, avoid_for_profile, ingredients_only, or not_enough_data, include reasonCodes and ingredientNames only when allowed by the hard rules.',
+  'Reason code policy:',
+  'Use high_conflict, medium_conflict, or low_conflict only for supplied analysis.conflicts of that severity.',
+  'Use duplicate_exposure only for supplied analysis.overlaps.',
+  'Use product_reaction_signal or reaction_trigger only for supplied reactionEvidence.',
+  'Use recent_journal_reaction or suggestion_history_reaction only when the corresponding context count is greater than zero.',
+  'Use low_confidence only when analysis.confidence=low, ingredients are missing/unreadable, unresolved ingredients prevent a reliable read, or meaningful matches are too sparse for the verdict.',
+  'Use review_required, sensitive_profile, or photosensitizing_active only when those signals are present in baselineVerdict.reasonCodes or supplied structured findings.',
+  'Confidence policy:',
+  'confidence means how well your reviewed verdict is supported by supplied ingredient and context evidence.',
+  'Use high when ingredients are readable and the relevant conflicts, overlaps, and context are clear.',
+  'Use medium when the main evidence is usable but some matching, context, or reaction history is partial.',
+  'Use low only when ingredients are unreadable, missing, lack meaningful matches, or cannot support the verdict.',
+  'Summary policy:',
+  'Write one short user-facing summary sentence. Mention only supplied facts. Do not mention prompts, schemas, deterministic engines, internal rules, or unsupported certainty.',
+  'Output format:',
+  'Return JSON only, matching the schema exactly. No markdown, no code fences, no extra prose, no comments, and no trailing commas.',
+  STRUCTURED_OUTPUT_CONTRACT,
+].join(' ');
+
 export function productCheckAiReviewPrompt(
   language: ProductCheckAiReviewInput['language'],
 ): string {
-  if (language === 'sv') {
-    return [
-      'Du är Ritora Quick Checks extra AI-granskare.',
-      'Granska endast de strukturerade ingredienserna, fynden och användarkontexten som skickas med.',
-      'Hitta inte på ingredienser, diagnoser, behandlingar eller produktpåståenden.',
-      'Kontrollera att domen svarar på köpfrågan: trygg nog, använd med mellanrum/lapptest, undvik, eller endast ingrediensutbildning.',
-      'För konflikter som orsakas av befintliga hyllprodukter, föredra råd om mellanrum eller dubbelköp om själva produkten inte innehåller en intern högriskkombination.',
-      'Lägg aldrig till skäl om saknad personlig kontext när kontexten redan är personaliserad.',
-      'Använd endast skälkoder när strukturerad kontext, konflikter, överlapp eller reaktionsevidens stödjer dem.',
-      'Confidence betyder hur väl Quick Check-domen stöds, inte hur många vanliga basingredienser som finns i katalogen.',
-      'Sätt inte low confidence endast för att produktnamn, varumärke eller vanliga basingredienser saknar stark matchning när INCI-listan är användbar.',
-      'Använd low confidence endast när ingredienserna är oläsliga, saknas, saknar meningsfulla matchningar eller inte räcker för domen.',
-      'Föreslå bara en mer försiktig dom om datan faktiskt stödjer det.',
-      'Svara endast med JSON enligt schemat.',
-      STRUCTURED_OUTPUT_CONTRACT,
-    ].join(' ');
-  }
-
-  if (language === 'es') {
-    return [
-      'Eres el revisor adicional de IA de Ritora Quick Check.',
-      'Revisa solo los ingredientes estructurados, hallazgos y contexto de usuario proporcionados.',
-      'No inventes ingredientes, diagnósticos, tratamientos ni afirmaciones de producto.',
-      'Comprueba si el veredicto responde a la pregunta de compra: suficientemente seguro, usar con separación o prueba de parche, evitar, o solo educación sobre ingredientes.',
-      'Para conflictos causados por productos ya existentes en la estantería, prefiere consejos de separación o compra duplicada salvo que el producto revisado contenga una combinación interna de alto riesgo.',
-      'Nunca añadas motivos de falta de contexto personal cuando el contexto ya está personalizado.',
-      'Usa códigos de motivo solo cuando el contexto estructurado, los conflictos, solapamientos o evidencia de reacción los respalden.',
-      'La confianza significa qué tan bien está respaldado el veredicto de Quick Check, no cuántos ingredientes base comunes existen en el catálogo.',
-      'No establezcas confianza baja solo porque el nombre del producto, la marca o ingredientes base comunes tienen coincidencias débiles cuando la lista INCI es útil.',
-      'Usa confianza baja solo cuando los ingredientes sean ilegibles, falten, no tengan coincidencias significativas o no basten para sostener el veredicto.',
-      'Sugiere un veredicto más prudente solo cuando los datos lo respalden.',
-      'Responde solo con JSON según el esquema.',
-      STRUCTURED_OUTPUT_CONTRACT,
-    ].join(' ');
-  }
-
   return [
-    "You are Ritora Quick Check's additional AI reviewer.",
-    'Review only the supplied structured ingredients, findings, and user context.',
-    'Do not invent ingredients, diagnoses, treatments, or product claims.',
-    'Check whether the verdict answers the buying question: safe enough, use with spacing/patch test, avoid, or ingredient education only.',
-    'For conflicts caused by existing shelf products, prefer spacing or duplicate-buying guidance unless the checked product itself contains an internal high-risk pairing.',
-    'Never add missing-personal-context reasons when the context is already personalized.',
-    'Use reason codes only when the supplied structured context, conflicts, overlaps, or reaction evidence supports them.',
-    'Confidence means how well the Quick Check verdict is supported, not how many ordinary base ingredients exist in the catalog.',
-    'Do not set low confidence only because product name, brand, or ordinary base ingredients have weak matches when the INCI list is usable.',
-    'Use low confidence only when ingredients are unreadable, missing, lack meaningful matches, or cannot support the verdict.',
-    'Only suggest a more cautious verdict when the supplied data supports it.',
-    'Return JSON only.',
-    STRUCTURED_OUTPUT_CONTRACT,
+    CANONICAL_PRODUCT_CHECK_AI_REVIEW_PROMPT,
+    `Output language: ${OUTPUT_LANGUAGE_LABELS[language]}. Write summary in ${OUTPUT_LANGUAGE_LABELS[language]}.`,
   ].join(' ');
 }

@@ -32,6 +32,7 @@ import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entit
 import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
 import { SkinJournalPhotoInterpretationService } from './services/skin-journal-photo-interpretation.service';
@@ -336,6 +337,7 @@ describe('SkinJournalService', () => {
   let insightInteractions: ReturnType<typeof repo>;
   let analysisFeedback: ReturnType<typeof repo>;
   let applicationLogs: ReturnType<typeof repo>;
+  let inventoryProducts: ReturnType<typeof repo>;
   let routineSteps: ReturnType<typeof repo>;
   let insightRuns: ReturnType<typeof repo>;
   let insightStates: ReturnType<typeof repo>;
@@ -480,6 +482,7 @@ describe('SkinJournalService', () => {
     insightInteractions = repo();
     analysisFeedback = repo();
     applicationLogs = repo();
+    inventoryProducts = repo();
     routineSteps = repo();
     insightRuns = repo();
     insightStates = repo();
@@ -597,6 +600,10 @@ describe('SkinJournalService', () => {
         {
           provide: getRepositoryToken(ApplicationLog),
           useValue: applicationLogs,
+        },
+        {
+          provide: getRepositoryToken(InventoryProduct),
+          useValue: inventoryProducts,
         },
         {
           provide: getRepositoryToken(RoutineStep),
@@ -2346,6 +2353,34 @@ describe('SkinJournalService', () => {
         },
       },
     ]);
+    inventoryProducts.find.mockResolvedValue([
+      {
+        id: 'inventory-1',
+        user_id: 'user-1',
+        brand: 'Test',
+        name: 'Retinol Serum',
+        category: 'serum',
+        opened_at: new Date('2026-04-08T18:00:00.000Z'),
+        identity: {
+          inciIngredients: ['retinol', 'squalane', 'glycerin'],
+        },
+        guidance: { cautions: ['Use only at night'] },
+        user_fields: { preferredTimeOfDay: 'evening' },
+      },
+      {
+        id: 'inventory-2',
+        user_id: 'user-1',
+        brand: 'Test',
+        name: 'Rich Balm',
+        category: 'moisturizer',
+        opened_at: null,
+        identity: {
+          inciIngredients: ['petrolatum', 'shea butter'],
+        },
+        guidance: { cautions: [] },
+        user_fields: { preferredTimeOfDay: 'either' },
+      },
+    ]);
     applicationLogs.find.mockResolvedValue([
       {
         target_date: '2026-04-09',
@@ -2400,6 +2435,55 @@ describe('SkinJournalService', () => {
           recent_change_kind: 'started_new_product',
           complaint_note: 'Burning feeling near cheeks',
           is_pre_routine: true,
+        }),
+        routineContext: expect.objectContaining({
+          active_shelf_products: expect.arrayContaining([
+            expect.objectContaining({
+              product_id: 'inventory-1',
+              brand: 'Test',
+              name: 'Retinol Serum',
+              category: 'serum',
+              preferred_time: 'evening',
+              opened_at: '2026-04-08T18:00:00.000Z',
+              ingredient_preview: ['retinol', 'squalane', 'glycerin'],
+            }),
+            expect.objectContaining({
+              product_id: 'inventory-2',
+              name: 'Rich Balm',
+              category: 'moisturizer',
+              preferred_time: 'either',
+            }),
+          ]),
+          routine_products: expect.arrayContaining([
+            expect.objectContaining({
+              product_id: 'inventory-1',
+              brand: 'Test',
+              name: 'Retinol Serum',
+              category: 'serum',
+              step_label: 'treatment',
+            }),
+          ]),
+          recent_applications: expect.arrayContaining([
+            expect.objectContaining({
+              target_date: '2026-04-09',
+              daypart: 'evening',
+              items: expect.arrayContaining([
+                expect.objectContaining({
+                  status: 'skipped',
+                  product_id: 'inventory-1',
+                  name: 'Retinol Serum',
+                  category: 'serum',
+                }),
+              ]),
+            }),
+          ]),
+          recent_check_ins: expect.arrayContaining([
+            expect.objectContaining({
+              entry_date: '2026-04-10',
+              sleep_band: '5to7h',
+              stress_today: 'high',
+            }),
+          ]),
         }),
       }),
     );

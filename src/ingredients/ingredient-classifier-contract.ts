@@ -8,7 +8,7 @@ import { AnalysisSeverity, IngredientCategory } from './ingredients.types';
 
 const MAX_TOKEN_CHARS = 100;
 const MIN_ACCEPTED_CONFIDENCE = 0.5;
-export const INGREDIENT_CLASSIFICATION_CONTRACT_VERSION = 'v1';
+export const INGREDIENT_CLASSIFICATION_CONTRACT_VERSION = 'v2';
 export const INGREDIENT_CLASSIFICATION_UNKNOWN_CATEGORY = 'unknown';
 
 export const INGREDIENT_CLASSIFICATION_REQUEST_CATEGORY_VALUES =
@@ -88,15 +88,36 @@ export const INGREDIENT_CLASSIFICATION_RESPONSE_FORMAT = {
 
 export function ingredientClassificationSystemPrompt(): string {
   return [
-    'You classify cosmetic INCI tokens for Ritora routine-safety analysis.',
-    'Return one classification per token when possible.',
-    `Use only the allowed category enum, or "${INGREDIENT_CLASSIFICATION_UNKNOWN_CATEGORY}" when the token is not useful for skincare safety analysis.`,
-    'Do not diagnose, prescribe, or invent ingredients that are not present.',
-    'Classify by cosmetic ingredient role, not by marketing claims.',
-    'For low-pH acids, retinoid-like actives, exfoliating acids, acne actives, brighteners, peptides, barrier ingredients, humectants, antioxidants, and sunscreen filters, choose the closest allowed safety category.',
-    'For generic bases, solvents, fragrance, emulsifiers, preservatives, colorants, texture agents, or ambiguous blends, use unknown unless a safety category is clearly supported by the token.',
-    'Use conservative safety flags; when unsure, prefer irritationRisk true for strong actives and unknown for unclear tokens.',
+    'Role: act as a cosmetic INCI token safety classifier for Ritora ingredient analysis.',
+    'Task: classify each supplied token by its cosmetic ingredient role and routine-safety relevance.',
+    'Decision inputs:',
+    '- tokens: the exact ingredient tokens to classify.',
+    '- allowedCategories: the only category enum values you may use.',
+    `- unknownCategory: use "${INGREDIENT_CLASSIFICATION_UNKNOWN_CATEGORY}" for tokens that do not name an allowed category, a common synonym of an allowed category, or an ingredient role covered by allowedCategories.`,
+    '- severityValues: the only overlapSeverity enum values you may use.',
+    'Hard rules:',
+    '- Return exactly one classification object for every token in tokens.',
+    '- Preserve rawToken exactly as supplied. Do not rewrite, merge, split, translate, or add tokens.',
+    '- Do not invent ingredients, related ingredients, product claims, usage instructions, diagnoses, treatments, or prescriptions.',
+    '- Classify by cosmetic ingredient role and the token text only. Do not classify from marketing claims. Never use user profile, product category, product marketing, routine goals, or assumed product type.',
+    '- Use only allowed category, severity, and boolean fields from the schema.',
+    'Category selection policy:',
+    '- Map only to allowedCategories. High-overlap active categories are retinoid, aha, bha, benzoyl-peroxide, and hydroquinone.',
+    '- Medium-overlap active categories are pha, vitamin-c, azelaic-acid, and tyrosinase-inhibitor.',
+    '- Supportive categories are niacinamide, bakuchiol, sulphur, peptide, barrier, humectant, antioxidant, mineral-spf, and chemical-spf only when the token is an INCI name, common synonym, or unambiguous filter/active name for that role.',
+    '- For ambiguous botanical blends, extract names, unclear trade names, or generic complexes, classify only when the token text itself names an allowed category or common synonym; otherwise use unknown.',
+    '- For generic bases, solvents, fragrance, emulsifiers, preservatives, colorants, texture agents, or pH adjusters, use unknown unless the token explicitly matches an allowed safety category.',
+    'Safety flag policy:',
+    '- Set irritationRisk=true for retinoid, aha, bha, pha, benzoyl-peroxide, hydroquinone, sulphur, or a token that explicitly indicates an irritating active.',
+    '- Photosensitizing or SPF-support categories are retinoid, aha, bha, pha, and hydroquinone; set photosensitizing=true and requiresSpf=true for those categories.',
+    '- Set phSensitive=true for aha and for vitamin-c only when the token indicates low-pH ascorbic acid style vitamin C.',
+    '- Choose overlapSeverity from severityValues by category: high for high-overlap active categories, medium for medium-overlap active categories, low for supportive categories and unknown.',
+    'Unknown policy:',
+    `- Use category "${INGREDIENT_CLASSIFICATION_UNKNOWN_CATEGORY}" when the token does not name an allowed safety category, active class, sunscreen filter, barrier ingredient, humectant, antioxidant, or support ingredient covered by allowedCategories, or when the category is uncertain.`,
+    '- Unknown classifications must still keep the original rawToken and conservative false safety flags unless the token directly supports a flag.',
+    'Output format:',
     'Keep JSON keys, enum values, severity values, category values, and original token strings exactly as provided by the schema/input.',
+    'summaryEn must be a short English ingredient-role summary based only on the token, not product marketing.',
     'Return JSON only.',
   ].join(' ');
 }

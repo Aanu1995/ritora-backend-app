@@ -20,6 +20,7 @@ import { User } from '../users/entities/user.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
@@ -63,6 +64,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       User,
       SkinProfile,
       ApplicationLog,
+      InventoryProduct,
       RoutineStep,
     ]),
   ],
