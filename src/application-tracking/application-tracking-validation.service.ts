@@ -26,6 +26,8 @@ import {
 import { ApplicationDaypart } from './application-tracking.constants';
 import { ApplicationLogItem } from './entities/application-log-item.entity';
 
+const HISTORICAL_SUGGESTION_RECORD_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class ApplicationTrackingValidationService {
   constructor(
@@ -46,15 +48,18 @@ export class ApplicationTrackingValidationService {
       user,
       suggestionInstanceId,
     );
-    if (
-      suggestion.generation_status === SuggestionGenerationStatus.Superseded
-    ) {
-      throw new ConflictException(
-        'This suggestion has been superseded. Record the current suggestion instead.',
-      );
+    if (suggestion.generation_status === SuggestionGenerationStatus.Ready) {
+      return suggestion;
     }
-    if (suggestion.generation_status !== SuggestionGenerationStatus.Ready) {
+    if (
+      suggestion.generation_status !== SuggestionGenerationStatus.Superseded
+    ) {
       throw new ConflictException('This suggestion is not ready to record.');
+    }
+    if (!isWithinHistoricalSuggestionRecordWindow(suggestion)) {
+      throw new ConflictException(
+        'This suggestion is outside the 24-hour recording window. Record the current suggestion instead.',
+      );
     }
     return suggestion;
   }
@@ -166,3 +171,26 @@ export type ApplicationTarget = {
   targetTime: string | null;
   daypart: ApplicationDaypart | null;
 };
+
+function isWithinHistoricalSuggestionRecordWindow(
+  suggestion: SuggestionInstance,
+): boolean {
+  const targetMs = getSuggestionTargetMs(suggestion);
+  if (targetMs === null) return false;
+  const nowMs = Date.now();
+  return (
+    nowMs >= targetMs &&
+    nowMs <= targetMs + HISTORICAL_SUGGESTION_RECORD_WINDOW_MS
+  );
+}
+
+function getSuggestionTargetMs(suggestion: SuggestionInstance): number | null {
+  try {
+    const date = toDateOnlyString(suggestion.target_date);
+    const time = toTimeOnlyString(suggestion.target_time);
+    const targetMs = Date.parse(`${date}T${time}`);
+    return Number.isFinite(targetMs) ? targetMs : null;
+  } catch {
+    return null;
+  }
+}
