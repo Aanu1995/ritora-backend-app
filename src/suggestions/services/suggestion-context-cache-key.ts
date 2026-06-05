@@ -1,9 +1,12 @@
 import { createHash } from 'crypto';
+import { ApplicationItemStatus } from '../../application-tracking/application-tracking.constants';
 import {
   SUGGESTION_SAFETY_POLICY_VERSION,
   SuggestionRequestSource,
 } from '../suggestions.constants';
+import { SUGGESTION_PRODUCT_SCORING_VERSION } from './suggestion-product-intelligence';
 import { routineBreakCacheParts } from './suggestion-routine-break-context';
+import { isReactionRelatedSkipReason } from './suggestion-application-history';
 import type { SuggestionContextBuilderInput } from './suggestion-context-builder.service';
 
 export function buildSuggestionContextCacheKey(
@@ -18,6 +21,7 @@ export function buildSuggestionContextCacheKey(
 function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
   return {
     safetyPolicyVersion: SUGGESTION_SAFETY_POLICY_VERSION,
+    productScoringVersion: SUGGESTION_PRODUCT_SCORING_VERSION,
     targetDate: inputs.targetDate,
     targetTime: inputs.targetTime,
     requestSource: inputs.requestSource ?? SuggestionRequestSource.Scheduled,
@@ -173,6 +177,7 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
         log.updated_at?.toISOString() ?? null,
         log.edit_count,
         log.has_been_edited,
+        hasSingleSkippedItemWithReactionReason(log),
         (log.items ?? [])
           .slice()
           .sort(
@@ -187,6 +192,8 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
             item.inventory_product_id,
             item.substituted_with_product_id,
             item.step_label,
+            item.status === ApplicationItemStatus.Skipped &&
+              isReactionRelatedSkipReason(item.notes),
             item.suggestion_step_id,
             item.is_ad_hoc,
             item.updated_at?.toISOString() ?? null,
@@ -262,4 +269,15 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
     aiPersonalizationBlockedReason:
       inputs.aiPersonalizationBlockedReason ?? null,
   };
+}
+
+function hasSingleSkippedItemWithReactionReason(
+  log: SuggestionContextBuilderInput['recentApplications'][number],
+): boolean {
+  const skippedItems = (log.items ?? []).filter(
+    (item) => item.status === ApplicationItemStatus.Skipped,
+  );
+  return (
+    skippedItems.length === 1 && isReactionRelatedSkipReason(log.general_notes)
+  );
 }

@@ -61,6 +61,7 @@ import {
 } from './suggestion-baseline-generator';
 import { hasUsableJournalReactionSignal } from './suggestion-journal-context';
 import {
+  hasCurrentSelectionEvidence,
   hasUnsupportedAiProductSelectionStep,
   requiresOwnedDaytimeSpf,
 } from './suggestion-routine-repeat-policy';
@@ -252,20 +253,34 @@ export class SuggestionAiGenerator {
       const resolved = resolveRawStep(rawStep, index, context);
       if (!resolved) {
         this.logger.warn('AI returned an invalid product or step reference.');
-        return this.buildBaseline(
-          inputs,
-          Date.now() - metadata.durationMs,
-          metadata.model,
-          'invalid_product_or_step_reference',
-        );
+        continue;
       }
       steps.push(resolved);
     }
-    const repairedSteps = repairRecoverableMissingSteps(inputs, steps);
-    const hardSafetyFallbackReason = resolveHardSafetyFallbackReason(
+    if (steps.length === 0 && (raw.steps ?? []).length > 0) {
+      return this.buildBaseline(
+        inputs,
+        Date.now() - metadata.durationMs,
+        metadata.model,
+        'invalid_product_or_step_reference',
+      );
+    }
+    let repairedSteps = repairRecoverableMissingSteps(inputs, steps);
+    let hardSafetyFallbackReason = resolveHardSafetyFallbackReason(
       inputs,
       repairedSteps,
     );
+    if (hardSafetyFallbackReason) {
+      const recoveredSteps = recoverHardSafetyViolation(
+        inputs,
+        repairedSteps,
+        hardSafetyFallbackReason,
+      );
+      if (recoveredSteps) {
+        repairedSteps = recoveredSteps;
+        hardSafetyFallbackReason = null;
+      }
+    }
     if (hardSafetyFallbackReason) {
       this.logger.warn(
         `AI suggestion violated a hard safety constraint: ${hardSafetyFallbackReason}. Falling back.`,
@@ -477,6 +492,32 @@ function buildManualBaselineSteps(
   const routineOutputs = orderedSteps.map((step, index) =>
     routineStepToOutput(step, index, { language }),
   );
+  const productBackedRoutineOutputs = routineOutputs.filter(
+    (step) => step.inventoryProductId,
+  );
+  const hasProductlessRoutineOutput =
+    productBackedRoutineOutputs.length !== routineOutputs.length;
+  if (
+    hasProductlessRoutineOutput &&
+    !orderedSteps.some((step) => step.is_specialist_locked)
+  ) {
+    const existingProductIds = new Set(
+      productBackedRoutineOutputs
+        .map((step) => step.inventoryProductId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const shelfSteps = buildDeterministicAiSteps(inputs).filter(
+      (step) =>
+        step.inventoryProductId &&
+        !existingProductIds.has(step.inventoryProductId),
+    );
+    if (shelfSteps.length > 0) {
+      return orderBaselineSteps([
+        ...productBackedRoutineOutputs,
+        ...shelfSteps,
+      ]);
+    }
+  }
   if (
     fallbackReason !== 'missing_barrier_moisturizer' ||
     orderedSteps.some((step) => step.is_specialist_locked)
@@ -543,6 +584,142 @@ function repairRecoverableMissingSteps(
       repairMissingOwnedDaytimeSpf(inputs, steps),
     ),
   );
+}
+
+function recoverHardSafetyViolation(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+  reason: string,
+): SuggestionGenerationStepOutput[] | null {
+  const filtered = steps.filter(
+    (step) => !shouldRemoveStepForHardSafetyRecovery(inputs, step, reason),
+  );
+  if (filtered.length === steps.length) return null;
+  const baseSteps =
+    filtered.length > 0
+      ? filtered
+      : buildConservativeSafetyRecoverySteps(inputs);
+  if (baseSteps.length === 0) return null;
+  const repaired = repairRecoverableMissingSteps(inputs, baseSteps);
+  return resolveHardSafetyFallbackReason(inputs, repaired) ? null : repaired;
+}
+
+function buildConservativeSafetyRecoverySteps(
+  inputs: SuggestionGenerationInputs,
+): SuggestionGenerationStepOutput[] {
+  const context = buildAssemblyContext(inputs);
+  const preferredCategories =
+    inputs.daypart === SuggestionDaypart.Evening
+      ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
+      : [
+          ProductCategory.Cleanser,
+          ProductCategory.Moisturizer,
+          ProductCategory.SunProtection,
+        ];
+  const selectedProductIds = new Set<string>();
+  const steps: SuggestionGenerationStepOutput[] = [];
+  const scores = resolveSuggestionProductScores(inputs)
+    .filter((score) => hasCurrentSelectionEvidence(inputs, score.productId))
+    .filter((score) =>
+      isPreferredTimeCompatibleWithDaypart(
+        score.preferredTimeOfDay,
+        inputs.daypart,
+      ),
+    )
+    .filter((score) => !hasStrongActive(score))
+    .filter((score) => !hasDisqualifyingRecoveryCaution(score));
+
+  for (const category of preferredCategories) {
+    const candidate = scores
+      .filter((score) => score.category === category)
+      .sort((left, right) => right.suitabilityScore - left.suitabilityScore)[0];
+    if (!candidate || selectedProductIds.has(candidate.productId)) continue;
+    const step = resolveRawStep(
+      {
+        stepOrder: steps.length,
+        routineStepId: null,
+        inventoryProductId: candidate.productId,
+        stepLabel: candidate.category,
+        explanation: conservativeRecoveryExplanation(candidate.category),
+        provenance: SuggestionStepProvenance.AiAdded,
+      },
+      steps.length,
+      context,
+    );
+    if (!step) continue;
+    selectedProductIds.add(candidate.productId);
+    steps.push(step);
+  }
+
+  return orderBaselineSteps(steps);
+}
+
+function hasDisqualifyingRecoveryCaution(
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  return score.cautionReasons.some((reason) =>
+    /preferred time of day does not match|product may be expired|recently substituted/i.test(
+      reason,
+    ),
+  );
+}
+
+function conservativeRecoveryExplanation(category: ProductCategory): string {
+  switch (category) {
+    case ProductCategory.Cleanser:
+      return 'Keeps the routine gentle after removing an unsafe active.';
+    case ProductCategory.Moisturizer:
+      return 'Supports the barrier after removing an unsafe active.';
+    case ProductCategory.SunProtection:
+      return 'Keeps daytime UV protection covered.';
+    default:
+      return 'Fits the safer routine for this slot.';
+  }
+}
+
+function shouldRemoveStepForHardSafetyRecovery(
+  inputs: SuggestionGenerationInputs,
+  step: SuggestionGenerationStepOutput,
+  reason: string,
+): boolean {
+  if (
+    step.provenance !== SuggestionStepProvenance.AiAdded ||
+    !step.inventoryProductId
+  ) {
+    return false;
+  }
+  const score = resolveSuggestionProductScores(inputs).find(
+    (productScore) => productScore.productId === step.inventoryProductId,
+  );
+  switch (reason) {
+    case 'unsupported_product_selection':
+      return !hasCurrentSelectionEvidence(inputs, step.inventoryProductId);
+    case 'unsafe_daytime_strong_active':
+      return score ? hasDaytimeStrongActiveConflict(inputs, score) : false;
+    case 'unsafe_recent_strong_active_spacing':
+    case 'unsafe_reaction_active':
+    case 'unsafe_restart_active':
+      return score ? hasStrongActive(score) : false;
+    case 'unsafe_pregnancy_active':
+      return score ? hasPregnancyCautionActive(score) : false;
+    case 'preferred_time_of_day_mismatch':
+      return !isPreferredTimeCompatibleWithDaypart(
+        score?.preferredTimeOfDay,
+        inputs.daypart,
+      );
+    case 'overlayered_minimal_routine':
+      return score
+        ? [
+            ProductCategory.Serum,
+            ProductCategory.Treatment,
+            ProductCategory.Exfoliant,
+          ].includes(score.category)
+        : false;
+    case 'skipped_product_returned_as_step':
+      return isSkippedProductReturnedAsStep(step);
+    default:
+      return false;
+  }
 }
 
 function repairMissingOwnedDaytimeSpf(
@@ -620,6 +797,7 @@ function repairMissingGoalSupportStep(
   );
   const candidate = resolveSuggestionProductScores(inputs)
     .filter((score) => !existingProductIds.has(score.productId))
+    .filter((score) => hasCurrentSelectionEvidence(inputs, score.productId))
     .filter((score) =>
       isPreferredTimeCompatibleWithDaypart(
         score.preferredTimeOfDay,

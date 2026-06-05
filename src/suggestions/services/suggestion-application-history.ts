@@ -6,13 +6,16 @@ import {
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { ApplicationLogItem } from '../../application-tracking/entities/application-log-item.entity';
 import { SuggestionContextSummary } from '../suggestion-context.types';
-import { SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS } from '../suggestions.constants';
+import {
+  SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS,
+  SUGGESTION_REACTION_SKIP_PAUSE_DAYS,
+} from '../suggestions.constants';
 import { suggestionHistoryWindow } from './suggestion-historical-window';
 import { daysBetween, increment, unique } from './suggestion-context-common';
 
 export type ApplicationProductSignal = {
   adheredCount: number;
-  skipCount: number;
+  reactionSkipCount: number;
   substitutedAwayCount: number;
   substitutedInCount: number;
 };
@@ -130,17 +133,22 @@ export function buildAppliedProductHistory(
 
 export function buildApplicationProductSignals(
   logs: ApplicationLog[],
+  targetDate: string,
 ): Map<string, ApplicationProductSignal> {
   const map = new Map<string, ApplicationProductSignal>();
   for (const log of logs) {
+    const skippedItems = (log.items ?? []).filter(
+      (item) => item.status === ApplicationItemStatus.Skipped,
+    );
     for (const item of log.items ?? []) {
       const applied = resolveAppliedProduct(item);
       const recommended = resolveRecommendedProduct(item);
       if (
         item.status === ApplicationItemStatus.Skipped &&
-        recommended?.productId
+        recommended?.productId &&
+        isReactionRelatedSkip(log, item, targetDate, skippedItems.length)
       ) {
-        productSignal(map, recommended.productId).skipCount += 1;
+        productSignal(map, recommended.productId).reactionSkipCount += 1;
       }
       if (
         item.status === ApplicationItemStatus.Substituted &&
@@ -161,6 +169,13 @@ export function buildApplicationProductSignals(
     }
   }
   return map;
+}
+
+export function isReactionRelatedSkipReason(
+  value: string | null | undefined,
+): boolean {
+  if (!value) return false;
+  return REACTION_SKIP_REASON_PATTERN.test(value);
 }
 
 export function buildApplicationPatterns(
@@ -290,12 +305,40 @@ function productSignal(
   if (existing) return existing;
   const created = {
     adheredCount: 0,
-    skipCount: 0,
+    reactionSkipCount: 0,
     substitutedAwayCount: 0,
     substitutedInCount: 0,
   };
   map.set(productId, created);
   return created;
+}
+
+const REACTION_SKIP_REASON_PATTERN =
+  /\b(reaction|reacted|irritat(?:e|ed|ing|ion)|sting(?:ing)?|burn(?:ing|ed)?|redness|r(?:o|\u00f6)d|rash|itch(?:y|ing)?|swelling|allerg(?:y|ic)|hives|sensiti[sz](?:ed|ation)|peel(?:ing|ed)?|flak(?:ing|ed)?|break(?:out|ing out)|broke me out|pimple|acne flare|blemish|sore|painful|sveda|br(?:a|\u00e4)nn(?:er|ande|t)?|rodnad|irritation|kl(?:a|\u00e5)da|utslag|svullnad|allergi|finnar|akneutbrott|stickningar)\b/i;
+
+function isReactionRelatedSkip(
+  log: ApplicationLog,
+  item: ApplicationLogItem,
+  targetDate: string,
+  skippedItemCount: number,
+): boolean {
+  const logDate = toDateOnlyString(log.target_date);
+  const normalizedTargetDate = toDateOnlyString(targetDate);
+  if (logDate > normalizedTargetDate) return false;
+  if (
+    daysBetween(logDate, normalizedTargetDate) >
+    SUGGESTION_REACTION_SKIP_PAUSE_DAYS
+  ) {
+    return false;
+  }
+  if (isReactionRelatedSkipReason(item.notes)) return true;
+  if (
+    skippedItemCount === 1 &&
+    isReactionRelatedSkipReason(log.general_notes)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function compareAppliedProductHistory(

@@ -238,7 +238,7 @@ describe('suggestion product intelligence', () => {
     );
   });
 
-  it('uses current goals, skips, substitutions, recent suggestions, and expiry in ranking', () => {
+  it('uses current goals, reaction skips, substitutions, recent suggestions, and expiry in ranking', () => {
     const product = productWithData({
       category: ProductCategory.Serum,
       inciIngredients: ['Niacinamide', 'Glycerin'],
@@ -254,7 +254,7 @@ describe('suggestion product intelligence', () => {
       sensitivityLevel: 'high',
       recentUseCount: 2,
       adherenceCount: 2,
-      skipCount: 1,
+      reactionSkipCount: 1,
       substitutionCount: 1,
       recentSameDaypartSuggestionCount: 1,
       hasReactionSignal: false,
@@ -271,8 +271,8 @@ describe('suggestion product intelligence', () => {
     expect(score.suitabilityReasons).not.toContain('recently applied by user');
     expect(score.cautionReasons).toEqual(
       expect.arrayContaining([
-        'recently skipped by user',
         'recently substituted by user',
+        'recent reaction-related skip by user',
         'recent same-daypart repeat',
         'product may be expired',
       ]),

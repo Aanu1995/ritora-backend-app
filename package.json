@@ -38,6 +38,7 @@
     "account-monitoring-worker:dev": "ts-node -r tsconfig-paths/register src/scripts/start-account-monitoring-worker.ts",
     "smart-picks:evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-smart-picks.ts",
     "suggestions:evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-todays-suggestion.ts",
+    "suggestions:evaluate-account:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-todays-suggestion-account.ts",
     "quick-suggestions:evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-quick-suggestion.ts",
     "suggestions:evaluate:gate": "ts-node -r tsconfig-paths/register src/scripts/check-todays-suggestion-evaluation-report.ts --report src/suggestions/evaluation/reports/todays-suggestion-evaluation-live-current.json --report src/suggestions/evaluation/reports/todays-suggestion-evaluation-live-repeatability-current.json --min-pass-rate 1 --max-failed 0 --max-repeatability-failures 0",
     "product-check:evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-product-check.ts",

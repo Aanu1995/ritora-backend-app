@@ -188,6 +188,21 @@ describe("Today's Suggestion evaluation hard checks", () => {
       'preferred_time_compatibility',
     );
   });
+
+  it('fails deterministic fallback output even when the final steps are safe', () => {
+    const evaluationCase = goldenCase('low_need_maintenance_morning_not_empty');
+    const output = baseOutput({
+      metadata: {
+        ...baseOutput({}).metadata,
+        provider: 'deterministic_baseline',
+        fallbackReason: 'unsupported_product_selection',
+      },
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'no_deterministic_fallback',
+    );
+  });
 });
 
 describe("Today's Suggestion evaluation reporting", () => {

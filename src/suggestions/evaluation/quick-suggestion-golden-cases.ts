@@ -6,6 +6,12 @@ import {
   Quantity,
   ShelfStatus,
 } from '../../shelf/shelf.types';
+import {
+  ApplicationItemSource,
+  ApplicationItemStatus,
+} from '../../application-tracking/application-tracking.constants';
+import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
+import { ApplicationLogItem } from '../../application-tracking/entities/application-log-item.entity';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import type { SuggestionContextSummary } from '../suggestion-context.types';
@@ -22,6 +28,8 @@ import {
 } from './todays-suggestion-golden-cases';
 
 export const QUICK_SUGGESTION_NO_STEP_CASE_ID = 'quick_no_extra_step_needed';
+export const QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID =
+  'quick_plain_skip_does_not_suppress_spf';
 
 const TARGET_DATE = '2026-05-29';
 
@@ -32,8 +40,90 @@ export const QUICK_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluationC
         evaluationCase.inputs.requestSource ===
         SuggestionRequestSource.OnDemand,
     ),
+    buildPlainSkipDoesNotSuppressSpfCase(),
     buildNoExtraStepNeededCase(),
   ];
+
+function buildPlainSkipDoesNotSuppressSpfCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'post_sun',
+    intensity: 'minimal',
+    note: 'I was outside at lunch and need the quickest useful step before more daylight.',
+    activityAt: '2026-05-29T11:35:00.000Z',
+    requestedAt: '2026-05-29T12:05:00.000Z',
+  };
+  const product = productWithPreferredTime({
+    id: 'plain-skip-spf-1',
+    name: 'Morning SPF 50',
+    category: ProductCategory.SunProtection,
+    preferredTimeOfDay: PreferredTimeOfDay.Morning,
+  });
+  const profile = skinProfile();
+  const recentApplications = [
+    applicationLog({
+      targetDate: '2026-05-28',
+      daypart: SuggestionDaypart.Noon,
+      items: [
+        applicationItem({
+          product,
+          status: ApplicationItemStatus.Skipped,
+          notes: 'Stayed indoors and did not need SPF.',
+        }),
+      ],
+    }),
+  ];
+  const contextSummary = buildContextSummary({
+    cacheKey: QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
+    requestContext,
+    profile,
+    product,
+    targetTime: '12:05',
+    daypart: SuggestionDaypart.Noon,
+    recentApplications,
+    skippedByCategory: { [ProductCategory.SunProtection]: 1 },
+    suitabilityReasons: [
+      'Owned SPF fits the current noon daylight request.',
+      'Plain prior skip had no reaction or intolerance evidence.',
+    ],
+  });
+
+  return {
+    id: QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
+    title: 'Plain skipped SPF remains eligible for daytime quick suggestion',
+    riskFocus: ['on_demand', 'plain_skip_history', 'spf'],
+    manualReviewChecklist: [
+      'Does it recommend the owned SPF for the current daytime request?',
+      'Does it avoid treating a non-reaction skip as a safety reason?',
+      'Does it keep the quick suggestion minimal and right-now focused?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      requiresSpfProtection: true,
+      requiredProductIds: [product.id],
+      maxStepCount: 2,
+    },
+    inputs: {
+      language: 'en',
+      slotId: null,
+      requestSource: SuggestionRequestSource.OnDemand,
+      requestContext,
+      scheduledSlotContext: null,
+      targetDate: TARGET_DATE,
+      targetTime: '12:05',
+      daypart: SuggestionDaypart.Noon,
+      skinProfile: profile,
+      shelfActiveProducts: [product],
+      shelfFinishedProductIds: [],
+      routineSteps: [],
+      recentJournalEntries: [],
+      recentApplications,
+      contextSummary,
+      environmentSnapshotId: null,
+      aiPersonalizationAllowed: true,
+      aiPersonalizationBlockedReason: null,
+    },
+  };
+}
 
 function buildNoExtraStepNeededCase(): TodaysSuggestionEvaluationCase {
   const requestContext: SuggestionRequestContextJson = {
@@ -200,16 +290,24 @@ function skinProfile(): SkinProfile {
 }
 
 function buildContextSummary(input: {
+  cacheKey?: string;
   requestContext: SuggestionRequestContextJson;
   profile: SkinProfile;
   product: InventoryProduct;
+  targetTime?: string;
+  daypart?: SuggestionDaypart;
+  recentApplications?: ApplicationLog[];
+  skippedByCategory?: Record<string, number>;
+  suitabilityReasons?: string[];
 }): SuggestionContextSummary {
+  const targetTime = input.targetTime ?? '20:30';
+  const daypart = input.daypart ?? SuggestionDaypart.Evening;
   return {
-    cacheKey: 'quick-eval-no-extra-step',
-    builtAt: '2026-05-29T20:30:00.000Z',
+    cacheKey: input.cacheKey ?? 'quick-eval-no-extra-step',
+    builtAt: `2026-05-29T${targetTime}:00.000Z`,
     targetDate: TARGET_DATE,
-    targetTime: '20:30',
-    daypart: SuggestionDaypart.Evening,
+    targetTime,
+    daypart,
     requestSource: SuggestionRequestSource.OnDemand,
     onDemand: input.requestContext,
     skinProfile: {
@@ -278,10 +376,12 @@ function buildContextSummary(input: {
         brand: input.product.brand,
         name: input.product.name,
         category: input.product.category,
-        preferredTimeOfDay: PreferredTimeOfDay.Morning,
+        preferredTimeOfDay:
+          input.product.user_fields?.preferredTimeOfDay ??
+          PreferredTimeOfDay.Either,
         activeTags: ['spf'],
         suitabilityScore: 92,
-        suitabilityReasons: [
+        suitabilityReasons: input.suitabilityReasons ?? [
           'Good daytime sunscreen, but not needed indoors tonight.',
         ],
         cautionReasons: [],
@@ -296,7 +396,7 @@ function buildContextSummary(input: {
       days: 0,
       daysSinceLastApplication: null,
       conservativeRestart: false,
-      skippedByCategory: {},
+      skippedByCategory: input.skippedByCategory ?? {},
       substitutedByCategory: {},
       addedOffShelfCount: 0,
       editedLogCount: 0,
@@ -314,5 +414,58 @@ function buildContextSummary(input: {
       SuggestionEvidenceSourceId.MayoDrySkinCare,
     ]),
     skippedCandidates: [],
+    routineMemory: {
+      recordsConsidered: (input.recentApplications ?? []).length,
+      previousSuggestionCount: 0,
+      sameDaypartSuggestionCount: 0,
+      recentSameDaypartFingerprints: [],
+      recentlySuggestedProductIds: [],
+      exactRepeatCountByFingerprint: {},
+      skippedProducts: input.skippedByCategory ? { [input.product.id]: 1 } : {},
+      substitutedProducts: {},
+      adheredProducts: {},
+      editedLogCount: 0,
+      offShelfUseCount: 0,
+    },
   };
+}
+
+function applicationLog(input: {
+  targetDate: string;
+  daypart: SuggestionDaypart;
+  items: ApplicationLogItem[];
+}): ApplicationLog {
+  return {
+    id: `quick-log-${input.targetDate}`,
+    target_date: input.targetDate,
+    daypart: input.daypart,
+    target_time: '12:00',
+    has_been_edited: false,
+    general_notes: null,
+    updated_at: new Date(`${input.targetDate}T12:05:00.000Z`),
+    items: input.items,
+  } as unknown as ApplicationLog;
+}
+
+function applicationItem(input: {
+  product: InventoryProduct;
+  status: ApplicationItemStatus;
+  notes: string | null;
+}): ApplicationLogItem {
+  return {
+    id: `quick-item-${input.product.id}`,
+    status: input.status,
+    item_source: ApplicationItemSource.Recommended,
+    inventory_product_id: input.product.id,
+    product_brand_snapshot: input.product.brand,
+    product_name_snapshot: input.product.name,
+    step_label: input.product.category,
+    notes: input.notes,
+    recommended_snapshot: {
+      product_id: input.product.id,
+      brand: input.product.brand,
+      name: input.product.name,
+      step_label: input.product.category,
+    },
+  } as unknown as ApplicationLogItem;
 }

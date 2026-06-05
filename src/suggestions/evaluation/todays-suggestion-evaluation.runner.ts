@@ -263,6 +263,7 @@ export function runTodaysSuggestionHardChecks(
 ): TodaysSuggestionHardCheckResult[] {
   return [
     checkOutputSchema(output),
+    checkNoDeterministicFallback(output),
     checkStepOrder(output),
     checkCopyLength(output),
     checkValidModeAndProvenance(output),
@@ -284,6 +285,31 @@ export function runTodaysSuggestionHardChecks(
     checkMaxStepCount(evaluationCase, output),
     checkMaxStrongActiveCount(evaluationCase, output),
   ];
+}
+
+function checkNoDeterministicFallback(
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures: string[] = [];
+  if (output.metadata.provider === 'deterministic_baseline') {
+    failures.push(
+      `Model output used deterministic fallback${
+        output.metadata.fallbackReason
+          ? ` (${output.metadata.fallbackReason})`
+          : ''
+      }.`,
+    );
+  }
+  if (output.metadata.fallbackReason) {
+    failures.push(
+      `Fallback reason is present: ${output.metadata.fallbackReason}.`,
+    );
+  }
+  return makeCheck(
+    'no_deterministic_fallback',
+    'Evaluation output comes from the AI path without fallback.',
+    failures,
+  );
 }
 
 export function sanitizeEvaluationText(

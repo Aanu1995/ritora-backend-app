@@ -2,6 +2,7 @@ import { InventoryProduct } from '../../inventory/entities/inventory-product.ent
 import { ProductCategory } from '../../shelf/shelf.types';
 import { SuggestionProductScore } from '../suggestion-context.types';
 import { SuggestionDaypart } from '../suggestions.constants';
+import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
 import type { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import {
   isPreferredTimeCompatibleWithDaypart,
@@ -19,14 +20,31 @@ export function resolveSuggestionProductScores(
 ): SuggestionProductScore[] {
   const cached = resolvedScoreCache.get(inputs);
   if (cached) return cached;
-  const scoredProductIds = new Set(
-    inputs.contextSummary.productScores.map((score) => score.productId),
+  const refreshedScores = new Map(
+    inputs.shelfActiveProducts.map((product) => [
+      product.id,
+      buildFallbackScore(inputs, product),
+    ]),
   );
-  const fallbackScores = inputs.shelfActiveProducts
-    .filter((product) => !scoredProductIds.has(product.id))
-    .map((product) => buildFallbackScore(inputs, product));
+  const scoresByProductId = new Map<string, SuggestionProductScore>();
 
-  const scores = [...inputs.contextSummary.productScores, ...fallbackScores];
+  for (const contextScore of inputs.contextSummary.productScores) {
+    const refreshedScore = refreshedScores.get(contextScore.productId);
+    scoresByProductId.set(
+      contextScore.productId,
+      refreshedScore && shouldRefreshContextScore(contextScore)
+        ? mergeProductScores(contextScore, refreshedScore)
+        : contextScore,
+    );
+  }
+
+  for (const [productId, refreshedScore] of refreshedScores) {
+    if (!scoresByProductId.has(productId)) {
+      scoresByProductId.set(productId, refreshedScore);
+    }
+  }
+
+  const scores = [...scoresByProductId.values()];
   resolvedScoreCache.set(inputs, scores);
   return scores;
 }
@@ -55,11 +73,7 @@ function buildFallbackScore(
     recentUseCount: appliedProduct?.useCount ?? 0,
     adherenceCount:
       routineMemory?.adheredProducts[product.id] ?? appliedProduct?.useCount,
-    skipCount:
-      (routineMemory?.skippedProducts[product.id] ?? 0) +
-      inputs.contextSummary.skippedCandidates.filter(
-        (candidate) => candidate.productId === product.id,
-      ).length,
+    reactionSkipCount: 0,
     substitutionCount: routineMemory?.substitutedProducts[product.id] ?? 0,
     recentSameDaypartSuggestionCount:
       routineMemory?.recentlySuggestedProductIds.includes(product.id) === true
@@ -114,6 +128,82 @@ function secondaryGoals(inputs: SuggestionGenerationInputs): string[] {
   return [...goals].filter((goal) => goal.trim().length > 0);
 }
 
+function mergeProductScores(
+  contextScore: SuggestionProductScore,
+  refreshedScore: SuggestionProductScore,
+): SuggestionProductScore {
+  return {
+    ...contextScore,
+    brand: contextScore.brand || refreshedScore.brand,
+    name: contextScore.name || refreshedScore.name,
+    category: contextScore.category ?? refreshedScore.category,
+    preferredTimeOfDay:
+      contextScore.preferredTimeOfDay ?? refreshedScore.preferredTimeOfDay,
+    activeTags: unique([
+      ...contextScore.activeTags,
+      ...refreshedScore.activeTags,
+    ]),
+    suitabilityScore: Math.max(
+      contextScore.suitabilityScore,
+      refreshedScore.suitabilityScore,
+    ),
+    suitabilityReasons: unique([
+      ...contextScore.suitabilityReasons,
+      ...refreshedScore.suitabilityReasons,
+    ]),
+    cautionReasons: unique([
+      ...contextScore.cautionReasons,
+      ...refreshedScore.cautionReasons,
+    ]),
+    waitMinutes: contextScore.waitMinutes ?? refreshedScore.waitMinutes,
+    inciQuality:
+      contextScore.inciQuality === 'available' ||
+      refreshedScore.inciQuality === 'available'
+        ? 'available'
+        : 'missing',
+    dataQuality: strongerDataQuality(
+      contextScore.dataQuality,
+      refreshedScore.dataQuality,
+    ),
+    dataQualityWarnings: unique([
+      ...contextScore.dataQualityWarnings,
+      ...refreshedScore.dataQualityWarnings,
+    ]),
+    evidenceSourceIds: mergeEvidenceSourceIds(
+      contextScore.evidenceSourceIds,
+      refreshedScore.evidenceSourceIds,
+    ),
+  };
+}
+
+function shouldRefreshContextScore(score: SuggestionProductScore): boolean {
+  return (
+    (score.activeTags.length === 0 && categoryDependsOnActiveTags(score)) ||
+    score.suitabilityReasons.length === 0 ||
+    score.dataQuality !== 'verified'
+  );
+}
+
+function categoryDependsOnActiveTags(score: SuggestionProductScore): boolean {
+  return ![
+    ProductCategory.Cleanser,
+    ProductCategory.Moisturizer,
+    ProductCategory.SunProtection,
+  ].includes(score.category);
+}
+
+function strongerDataQuality(
+  left: SuggestionProductScore['dataQuality'],
+  right: SuggestionProductScore['dataQuality'],
+): SuggestionProductScore['dataQuality'] {
+  const rank: Record<SuggestionProductScore['dataQuality'], number> = {
+    insufficient: 0,
+    partial: 1,
+    verified: 2,
+  };
+  return rank[right] > rank[left] ? right : left;
+}
+
 function fallbackSuitabilityFloor(
   score: SuggestionProductScore,
   daypart: SuggestionDaypart,
@@ -144,4 +234,8 @@ function fallbackSuitabilityFloor(
 
 function appendUniqueReason(reasons: string[], reason: string): string[] {
   return reasons.includes(reason) ? reasons : [...reasons, reason];
+}
+
+function unique<T>(values: readonly T[]): T[] {
+  return Array.from(new Set(values));
 }

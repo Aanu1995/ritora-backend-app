@@ -26,6 +26,9 @@ import {
 
 export { SuggestionProductGoalFitReason } from './suggestion-goal-intelligence';
 
+export const SUGGESTION_PRODUCT_SCORING_VERSION =
+  'selection-evidence-reaction-skip-2026-06-05';
+
 export enum SuggestionProductDataWarning {
   IngredientListMissing = 'ingredient list missing',
   ProductCategoryNeedsReview = 'product category needs review',
@@ -78,7 +81,7 @@ export function scoreProductForSuggestion(
     sensitivityLevel: string | null;
     recentUseCount: number;
     adherenceCount?: number;
-    skipCount?: number;
+    reactionSkipCount?: number;
     substitutionCount?: number;
     recentSameDaypartSuggestionCount?: number;
     hasReactionSignal: boolean;
@@ -135,9 +138,9 @@ export function scoreProductForSuggestion(
     score += 8;
     reasons.push(SuggestionProductGoalFitReason.SecondarySelectedGoal);
   }
-  if ((options.skipCount ?? 0) > 0) {
-    score -= Math.min(16, (options.skipCount ?? 0) * 8);
-    cautions.push('recently skipped by user');
+  if ((options.reactionSkipCount ?? 0) > 0) {
+    score -= Math.min(16, (options.reactionSkipCount ?? 0) * 8);
+    cautions.push('recent reaction-related skip by user');
   }
   if ((options.substitutionCount ?? 0) > 0) {
     score -= Math.min(12, (options.substitutionCount ?? 0) * 6);

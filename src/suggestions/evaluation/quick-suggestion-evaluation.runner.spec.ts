@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   QUICK_SUGGESTION_GOLDEN_CASES,
   QUICK_SUGGESTION_NO_STEP_CASE_ID,
+  QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
 } from './quick-suggestion-golden-cases';
 import {
   createLiveQuickSuggestionEvaluationRunner,
@@ -14,7 +15,9 @@ import {
   SuggestionMode,
   SuggestionEvidenceSourceId,
   SuggestionRequestSource,
+  SuggestionStepProvenance,
 } from '../suggestions.constants';
+import { ProductCategory } from '../../shelf/shelf.types';
 import type { SuggestionGenerationOutput } from '../services/suggestion-ai-generator';
 
 describe('Quick Suggestion evaluation runner', () => {
@@ -39,6 +42,65 @@ describe('Quick Suggestion evaluation runner', () => {
         (evaluationCase) =>
           evaluationCase.id === QUICK_SUGGESTION_NO_STEP_CASE_ID,
       ),
+    ).toBe(true);
+    expect(
+      QUICK_SUGGESTION_GOLDEN_CASES.some(
+        (evaluationCase) =>
+          evaluationCase.id === QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
+      ),
+    ).toBe(true);
+  });
+
+  it('requires a plain-skipped SPF to remain selectable for a daytime quick suggestion', () => {
+    const evaluationCase = plainSkipCase();
+
+    const failingChecks = runQuickSuggestionHardChecks(
+      evaluationCase,
+      quickOutput(),
+    );
+    expect(failingChecks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'expected_product_ids',
+          passed: false,
+          failures: expect.arrayContaining([
+            'Required product not selected: plain-skip-spf-1.',
+          ]),
+        }),
+      ]),
+    );
+
+    const passingChecks = runQuickSuggestionHardChecks(
+      evaluationCase,
+      quickOutput({
+        steps: [
+          {
+            stepOrder: 0,
+            routineStepId: null,
+            inventoryProductId: 'plain-skip-spf-1',
+            productBrand: 'Ava Lab',
+            productName: 'Morning SPF 50',
+            stepLabel: ProductCategory.SunProtection,
+            customLabel: null,
+            applicationMethod: null,
+            quantity: null,
+            waitAfterMinutes: null,
+            explanation: 'Use your SPF now for this daylight request.',
+            routineNote: null,
+            provenance: SuggestionStepProvenance.AiAdded,
+            chips: [],
+            safetyWarnings: [],
+          },
+        ],
+      }),
+    );
+    expect(
+      passingChecks.find((check) => check.id === 'expected_product_ids')
+        ?.passed,
+    ).toBe(true);
+    expect(
+      passingChecks.find((check) => check.id === 'preferred_time_compatibility')
+        ?.passed,
     ).toBe(true);
   });
 
@@ -111,6 +173,61 @@ describe('Quick Suggestion evaluation runner', () => {
             fullName: 'Ava Lab Morning SPF 50',
           }),
         ]),
+      }),
+    );
+  });
+
+  it('includes plain skip history in sanitized quick case summaries', async () => {
+    const evaluationCase = plainSkipCase();
+
+    const report = await evaluateQuickSuggestionGoldenCases({
+      model: 'test-model',
+      cases: [evaluationCase],
+      generator: {
+        generate: jest.fn().mockResolvedValue(
+          quickOutput({
+            steps: [
+              {
+                stepOrder: 0,
+                routineStepId: null,
+                inventoryProductId: 'plain-skip-spf-1',
+                productBrand: 'Ava Lab',
+                productName: 'Morning SPF 50',
+                stepLabel: ProductCategory.SunProtection,
+                customLabel: null,
+                applicationMethod: null,
+                quantity: null,
+                waitAfterMinutes: null,
+                explanation: 'Use your SPF now for this daylight request.',
+                routineNote: null,
+                provenance: SuggestionStepProvenance.AiAdded,
+                chips: [],
+                safetyWarnings: [],
+              },
+            ],
+          }),
+        ),
+      },
+      judge: passingJudge(),
+      generatedAt: '2026-05-29T08:00:00.000Z',
+    });
+
+    expect(report.failedCases).toBe(0);
+    expect(report.cases[0]?.sanitizedCaseSummary).toEqual(
+      expect.objectContaining({
+        recentApplications: [
+          expect.objectContaining({
+            items: [
+              expect.objectContaining({
+                productId: 'plain-skip-spf-1',
+                noteKind: 'plain_non_reaction',
+              }),
+            ],
+          }),
+        ],
+        routineMemory: expect.objectContaining({
+          skippedProducts: { 'plain-skip-spf-1': 1 },
+        }),
       }),
     );
   });
@@ -292,6 +409,9 @@ describe('Quick Suggestion evaluation runner', () => {
       'preferredTime=morning is valid in morning or noon dayparts',
     );
     expect(systemPrompt).toContain(
+      'Plain skipped history means the user did not apply a product',
+    );
+    expect(systemPrompt).toContain(
       'Skipped/explanation copy may reference owned products',
     );
     expect(systemPrompt).toContain(
@@ -326,6 +446,14 @@ describe('Quick Suggestion evaluation runner', () => {
 function noStepCase() {
   const evaluationCase = QUICK_SUGGESTION_GOLDEN_CASES.find(
     (candidate) => candidate.id === QUICK_SUGGESTION_NO_STEP_CASE_ID,
+  );
+  expect(evaluationCase).toBeDefined();
+  return evaluationCase!;
+}
+
+function plainSkipCase() {
+  const evaluationCase = QUICK_SUGGESTION_GOLDEN_CASES.find(
+    (candidate) => candidate.id === QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
   );
   expect(evaluationCase).toBeDefined();
   return evaluationCase!;

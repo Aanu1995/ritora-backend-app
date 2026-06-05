@@ -245,7 +245,7 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
-  it('falls back when OpenAI returns a pregnancy-caution retinoid application step', async () => {
+  it('removes pregnancy-caution retinoid steps instead of falling back', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -316,8 +316,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe('unsafe_pregnancy_active');
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
@@ -597,7 +597,7 @@ describe('SuggestionAiGenerator', () => {
     expect(result.metadata.fallbackReason).toBeNull();
   });
 
-  it('falls back when a step is actually copy for later use', async () => {
+  it('removes a step that is actually copy for later use instead of falling back', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -648,13 +648,14 @@ describe('SuggestionAiGenerator', () => {
       inputsWithScoredShelfProducts(SuggestionDaypart.Noon),
     );
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe(
-      'skipped_product_returned_as_step',
-    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'spf-1',
+    ]);
   });
 
-  it('falls back when daytime high-UV output selects a strong active', async () => {
+  it('removes daytime high-UV strong actives instead of falling back', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -708,8 +709,13 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe('unsafe_daytime_strong_active');
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'spf-1' }),
+      ]),
+    );
     expect(result.steps).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
@@ -717,7 +723,7 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
-  it('falls back when OpenAI selects a strong active too soon after another strong active', async () => {
+  it('removes strong actives selected too soon after another strong active instead of falling back', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -798,10 +804,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe(
-      'unsafe_recent_strong_active_spacing',
-    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ inventoryProductId: 'bha-1' }),
@@ -890,6 +894,84 @@ describe('SuggestionAiGenerator', () => {
       'cleanser-1',
       'serum-1',
       'moisturizer-1',
+    ]);
+  });
+
+  it('does not let goal-support repair re-add an unsupported product and force fallback', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning basics',
+                    body: ['Keep the routine safe and simple this morning.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(
+                      1,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.skinProfile = {
+      primary_goal: 'reduce breakouts',
+      current_concerns: ['acne', 'clogged pores'],
+    } as SkinProfile;
+    inputs.contextSummary.skinProfile.primaryGoal = 'reduce breakouts';
+    inputs.contextSummary.skinProfile.activeConcerns = [
+      'acne',
+      'clogged pores',
+    ];
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
+        score.productId === 'serum-1'
+          ? {
+              ...score,
+              suitabilityScore: 96,
+              activeTags: ['niacinamide'],
+              suitabilityReasons: ['primary selected goal'],
+              cautionReasons: ['recent reaction-related skip by user'],
+            }
+          : score,
+      );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'moisturizer-1',
+      'spf-1',
     ]);
   });
 
@@ -1029,10 +1111,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe(
-      'preferred_time_of_day_mismatch',
-    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ inventoryProductId: 'serum-1' }),
@@ -1040,7 +1120,7 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
-  it('falls back when OpenAI selects a morning-preferred product at night', async () => {
+  it('removes a morning-preferred product selected at night instead of falling back', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -1115,10 +1195,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe(
-      'preferred_time_of_day_mismatch',
-    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ inventoryProductId: 'serum-1' }),
@@ -1403,7 +1481,7 @@ describe('SuggestionAiGenerator', () => {
     ]);
   });
 
-  it('falls back when OpenAI adds a product without current selection evidence', async () => {
+  it('removes an AI product without current selection evidence instead of falling back', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -1459,15 +1537,172 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe(
-      'unsupported_product_selection',
-    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
       'moisturizer-1',
       'spf-1',
     ]);
+  });
+
+  it('uses refreshed shelf scoring when cached score context is stale', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Tone support today',
+                    body: ['Use the shelf product that fits the pigment goal.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'serum-1', ProductCategory.Serum),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(3, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.skinProfile = {
+      primary_goal: 'fade post-acne dark marks',
+      current_concerns: ['dark marks'],
+    } as unknown as SkinProfile;
+    inputs.contextSummary.skinProfile.primaryGoal = 'fade post-acne dark marks';
+    inputs.contextSummary.skinProfile.activeConcerns = ['dark marks'];
+    const serum = inputs.shelfActiveProducts.find(
+      (productValue) => productValue.id === 'serum-1',
+    );
+    if (!serum) throw new Error('Missing serum fixture');
+    serum.identity = {
+      inciIngredients: ['Niacinamide'],
+      benefits: ['dark marks', 'uneven tone'],
+    } as InventoryProduct['identity'];
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
+        score.productId === 'serum-1'
+          ? {
+              ...score,
+              activeTags: [],
+              suitabilityReasons: ['stale cached score'],
+              dataQuality: 'partial',
+            }
+          : score,
+      );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'serum-1',
+      'moisturizer-1',
+      'spf-1',
+    ]);
+  });
+
+  it('keeps safe AI-selected steps when a productless routine placeholder cannot recover an unsafe AI output', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning plan',
+                    body: ['Keep SPF consistent and add unsupported novelty.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'mask-1', ProductCategory.Mask),
+                    aiProductStep(1, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.routineSteps = [
+      {
+        id: 'placeholder-cleanser',
+        slot_id: 'slot-1',
+        step_order: 0,
+        inventory_product_id: null,
+        step_label: ProductCategory.Cleanser,
+        custom_label: null,
+        notes: null,
+        optional: false,
+        is_specialist_locked: false,
+        product: null,
+      } as RoutineStep,
+    ];
+    inputs.shelfActiveProducts.push(
+      product('mask-1', 'Glow Mask', ProductCategory.Mask),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('mask-1', ProductCategory.Mask, 82, ['fragrance']),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'spf-1',
+    ]);
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: null }),
+      ]),
+    );
   });
 
   it('keeps fallback non-empty when cached context marked repeated basics as recent repeats', async () => {
@@ -1535,10 +1770,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe(
-      'unsupported_product_selection',
-    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
       'moisturizer-1',
@@ -1611,10 +1844,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(result.metadata.provider).toBe('deterministic_baseline');
-    expect(result.metadata.fallbackReason).toBe(
-      'unsupported_product_selection',
-    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
       'moisturizer-1',

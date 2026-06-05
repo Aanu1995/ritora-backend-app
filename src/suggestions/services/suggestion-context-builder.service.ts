@@ -104,6 +104,7 @@ export class SuggestionContextBuilder {
     );
     const applicationProductSignals = buildApplicationProductSignals(
       normalizedInputs.recentApplications,
+      normalizedInputs.targetDate,
     );
     const recentUseByProduct = buildRecentUseByProduct(
       normalizedInputs.recentApplications,
@@ -144,7 +145,8 @@ export class SuggestionContextBuilder {
           recentUseCount: recentUseByProduct.get(product.id) ?? 0,
           adherenceCount:
             applicationProductSignals.get(product.id)?.adheredCount ?? 0,
-          skipCount: applicationProductSignals.get(product.id)?.skipCount ?? 0,
+          reactionSkipCount:
+            applicationProductSignals.get(product.id)?.reactionSkipCount ?? 0,
           substitutionCount:
             applicationProductSignals.get(product.id)?.substitutedAwayCount ??
             0,

@@ -61,7 +61,7 @@ function hasCurrentContextJustification(
   }
   if (
     score.cautionReasons.some((reason) =>
-      /recently skipped|recently substituted|preferred time of day does not match|product may be expired/i.test(
+      /recent reaction-related skip|recently substituted|preferred time of day does not match|product may be expired/i.test(
         reason,
       ),
     )

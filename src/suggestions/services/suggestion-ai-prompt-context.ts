@@ -210,6 +210,8 @@ export function formatRoutineMemoryForPrompt(
       50,
     ),
     skippedProducts: memory.skippedProducts,
+    skippedProductsRule:
+      'A skipped count means the user did not apply the product. Do not treat it as avoid/suppress unless scored product context or skippedCandidates provides a current safety or reaction reason.',
     substitutedProducts: memory.substitutedProducts,
     adheredProducts: memory.adheredProducts,
     editedLogCount: memory.editedLogCount,

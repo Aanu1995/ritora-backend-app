@@ -12,6 +12,7 @@ import {
   SuggestionAiGenerator,
   type SuggestionGenerationOutput,
 } from '../services/suggestion-ai-generator';
+import { isReactionRelatedSkipReason } from '../services/suggestion-application-history';
 import {
   SUGGESTION_PROMPT_VERSION,
   SuggestionRequestSource,
@@ -256,6 +257,7 @@ export class OpenAiQuickSuggestionEvaluationJudge implements QuickSuggestionEval
                   'Passing requires practical immediate advice, exact active-shelf product ownership, product preferredTime/daypart compliance, safety handling, and clear wording.',
                   'Use ownedProducts productId, brand, name, and fullName fields as the only source of truth for whether a product name is owned.',
                   'PreferredTime policy: preferredTime=morning is valid in morning or noon dayparts, preferredTime=evening is valid only in evening, and preferredTime=either is valid in any daypart.',
+                  'Plain skipped history means the user did not apply a product; it must not count as an avoid/safety reason unless the supplied case shows reaction, intolerance, or a skippedCandidates safety reason.',
                   'Skipped/explanation copy may reference owned products from the supplied case by brand/name; fail only when the named product is not in the supplied ownedProducts or output steps.',
                   'A zero-step output can pass when it clearly says no extra product is needed now, the user is already covered or comfortable, or no owned product fits the current timing/safety constraints.',
                   'Fail outputs that invent products, use off-shelf products, apply a product outside preferredTime, add optional shopping pressure, or add a routine step merely to avoid an empty result.',
@@ -571,8 +573,36 @@ function quickCaseSummary(
       },
     ),
     skinProfile: evaluationCase.inputs.contextSummary.skinProfile,
+    recentApplications: evaluationCase.inputs.recentApplications.map((log) => ({
+      targetDate: log.target_date,
+      daypart: log.daypart,
+      items: (log.items ?? []).map((item) => ({
+        status: item.status,
+        productId:
+          item.recommended_snapshot?.product_id ??
+          item.inventory_product_id ??
+          null,
+        noteKind: classifyQuickApplicationNote(item.notes),
+      })),
+    })),
+    routineMemory: evaluationCase.inputs.contextSummary.routineMemory
+      ? {
+          skippedProducts:
+            evaluationCase.inputs.contextSummary.routineMemory.skippedProducts,
+          skippedProductsRule:
+            'Skipped count alone means not applied, not avoid. Only reaction/intolerance notes or skippedCandidates are safety reasons.',
+        }
+      : null,
+    skippedCandidates: evaluationCase.inputs.contextSummary.skippedCandidates,
     safetyConstraints: evaluationCase.inputs.contextSummary.safetyConstraints,
   });
+}
+
+function classifyQuickApplicationNote(note: string | null | undefined): string {
+  if (!note) return 'none';
+  return isReactionRelatedSkipReason(note)
+    ? 'reaction_or_intolerance'
+    : 'plain_non_reaction';
 }
 
 function quickOutputSummary(output: SuggestionGenerationOutput): unknown {

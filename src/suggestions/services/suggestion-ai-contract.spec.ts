@@ -68,6 +68,12 @@ describe('suggestion AI contract', () => {
     expect(SYSTEM_PROMPT).toContain('Word "only"');
     expect(SYSTEM_PROMPT).toContain('explicit decision inputs only');
     expect(SYSTEM_PROMPT).toContain(
+      'Past skips mean the user did not apply that product; they are not instructions to avoid it',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'A recent reaction-related skip may pause the product for a few days; a plain skip without reaction/intolerance evidence must not.',
+    );
+    expect(SYSTEM_PROMPT).toContain(
       'Use past applications, skips, substitutions, reactions, and prior suggestions only to assess tolerance, spacing, safety, recent overuse, and user context.',
     );
     expect(SYSTEM_PROMPT).toContain(
