@@ -8,9 +8,9 @@ import {
 import { ENGINE_VERSION } from './engine-version';
 import { EXPLANATION_PORT, type ExplanationPort } from './explanation.port';
 import { buildActives } from './focus-analysis';
-import { IngredientCatalogService } from './ingredient-catalog.service';
+import { IngredientIntelligenceService } from './ingredient-intelligence.service';
+import { INGREDIENT_CATEGORY_CONFLICT_RULES } from './ingredient-safety-rules';
 import { buildLayeringOrder } from './layering-orderer';
-import { MatchingService } from './matching.service';
 import { buildConflicts, buildOverlaps } from './multi-analysis';
 import { scoreAnalysis } from './safety-scorer';
 import { TranslationService } from './translation.service';
@@ -23,11 +23,13 @@ import {
   type ProductForAnalysis,
   type ProductMatchResult,
 } from './ingredients.types';
+import type { IngredientAnalysisAiTrackingContext } from './ingredient-analysis-ai-usage-metrics';
 
 type AnalyzeInput = {
   products: ProductForAnalysis[];
   skinProfile: SkinProfile | null;
   language: AppLanguage;
+  tracking?: IngredientAnalysisAiTrackingContext;
   withExplanations: boolean;
   focusProductId?: string;
 };
@@ -35,8 +37,7 @@ type AnalyzeInput = {
 @Injectable()
 export class AnalysisService {
   constructor(
-    private readonly matchingService: MatchingService,
-    private readonly catalog: IngredientCatalogService,
+    private readonly ingredientIntelligence: IngredientIntelligenceService,
     private readonly translationService: TranslationService,
     @Inject(EXPLANATION_PORT)
     private readonly explanationProvider: ExplanationPort,
@@ -79,7 +80,10 @@ export class AnalysisService {
       };
     }
 
-    const match = this.matchingService.matchProduct(focusProduct);
+    const match = await this.ingredientIntelligence.matchProduct(
+      focusProduct,
+      input.tracking,
+    );
     if (match.matchedIngredients.length === 0) {
       return {
         ...this.emptyResult(AnalysisMode.Focus, AnalysisStatus.Ok),
@@ -89,8 +93,8 @@ export class AnalysisService {
 
     const actives = buildActives(
       match.matchedIngredients,
-      this.catalog.getConflictRules(),
-      (slug) => this.catalog.getIngredientBySlug(slug),
+      INGREDIENT_CATEGORY_CONFLICT_RULES,
+      () => undefined,
     );
 
     return {
@@ -106,8 +110,9 @@ export class AnalysisService {
   }
 
   private async analyzeMulti(input: AnalyzeInput): Promise<AnalysisResult> {
-    const matches = input.products.map((product) =>
-      this.matchingService.matchProduct(product),
+    const matches = await this.ingredientIntelligence.matchProducts(
+      input.products,
+      input.tracking,
     );
     const productsMissingInci = input.products
       .filter((product) =>
@@ -137,7 +142,7 @@ export class AnalysisService {
     const conflicts = buildConflicts(
       matches,
       input.skinProfile,
-      this.catalog.getConflictRules(),
+      INGREDIENT_CATEGORY_CONFLICT_RULES,
     );
     const overlaps = buildOverlaps(matches, input.skinProfile);
     const result: AnalysisResult = {
@@ -171,7 +176,7 @@ export class AnalysisService {
       return localised;
     }
 
-    return this.addExplanations(localised, input.language);
+    return this.addExplanations(localised, input.language, input.tracking);
   }
 
   private async localiseActives(
@@ -236,9 +241,11 @@ export class AnalysisService {
   private async addExplanations(
     result: AnalysisResult,
     language: AppLanguage,
+    tracking?: IngredientAnalysisAiTrackingContext,
   ): Promise<AnalysisResult> {
     const explanations = await this.explanationProvider.explainFindings({
       language,
+      tracking,
       conflicts: result.conflicts.map((conflict) => ({
         id: conflict.id,
         code: conflict.code,

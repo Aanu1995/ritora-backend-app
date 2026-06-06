@@ -23,6 +23,8 @@ export interface SuggestionContextSummary {
     activeConcerns: string[];
     pregnancyStatus: string | null;
   };
+  goalSignals?: SuggestionGoalSignals;
+  profileSignals?: SuggestionProfileSignals;
   reaction: {
     hasSignal: boolean;
     severity: string | null;
@@ -35,12 +37,16 @@ export interface SuggestionContextSummary {
     photoInputImages: number;
     multiAnglePhotoEntries: number;
   };
+  journalSignals?: SuggestionJournalSignals;
   routineBreak: {
     recentlyResumed: boolean;
     lastPausedFrom: string | null;
     lastPausedUntil: string | null;
   };
   environment: EnvironmentContextSummary | null;
+  environmentSignals?: SuggestionEnvironmentSignals;
+  appliedProductHistory?: SuggestionAppliedProductHistory;
+  routineMemory?: SuggestionRoutineMemory;
   productScores: SuggestionProductScore[];
   applicationPatterns: {
     days: number;
@@ -65,6 +71,201 @@ export interface SuggestionContextSummary {
     reason: string;
     sourceIds: SuggestionEvidenceSourceId[];
   }[];
+}
+
+export interface SuggestionGoalSignals {
+  mainGoal: string | null;
+  primaryGoal: string | null;
+  selectedGoals: string[];
+  secondaryGoals: SuggestionGoalSignal[];
+  activeConcernCount: number;
+}
+
+export interface SuggestionGoalSignal {
+  concern: string;
+  priority: number | null;
+  severity: string | null;
+  durationMonths: number | null;
+  locations: string[];
+  subtype: string | null;
+  triggers: string[];
+  isPrimary: boolean;
+}
+
+export interface SuggestionProfileSignals {
+  safety: {
+    pregnancyStatus: string | null;
+    underDermatologistCare: string | null;
+    conditions: string[];
+    medications: string[];
+    photosensitizingOther: boolean;
+    recentProcedures: {
+      type: string;
+      performedAt: string | null;
+    }[];
+  };
+  routinePreferences: {
+    pace: string | null;
+    amMinutes: number | null;
+    pmMinutes: number | null;
+    maxActiveNightsPerWeek: number | null;
+    fragranceFree: boolean | null;
+    nonComedogenic: boolean | null;
+    sunscreenFilter: string | null;
+    sunscreenFinish: string | null;
+  };
+  skinBehavior: {
+    burnTendency: string | null;
+    tanTendency: string | null;
+    pihTendency: string | null;
+    melasmaTendency: string | null;
+    sunscreenHabit: string | null;
+    sunscreenTolerance: string | null;
+  };
+  shoppingPreferences: {
+    ingredientDislikes: string[];
+    productDislikes: string[];
+    brandDislikes: string[];
+    texturePreferences: string[];
+  };
+  activeTolerances: {
+    ingredient: string;
+    tolerance: string | null;
+    lastUsed: string | null;
+  }[];
+}
+
+export interface SuggestionJournalSignals {
+  recordsConsidered: number;
+  latestEntryDate: string | null;
+  checkIns: {
+    stressCounts: Record<string, number>;
+    sleepCounts: Record<string, number>;
+    overallFeelCounts: Record<string, number>;
+    sunExposureCounts: Record<string, number>;
+    sweatExerciseDays: number;
+    cycleMarkers: string[];
+    recentChangeKinds: string[];
+    complaintNotes: string[];
+  };
+  detectedConcerns: {
+    concern: string;
+    count: number;
+    severities: string[];
+    locations: string[];
+    averageConfidence: number | null;
+    maxConfidence: number | null;
+    changeDirections: string[];
+  }[];
+  photoCoverage: {
+    photoEntries: number;
+    photoInputImages: number;
+    multiAnglePhotoEntries: number;
+    needsRetakeCount: number;
+  };
+  trendSignals: string[];
+  analysisQuality: {
+    visualLabelCounts: Record<string, number>;
+    trendLabelCounts: Record<string, number>;
+    lightingQualityCounts: Record<string, number>;
+    framingQualityCounts: Record<string, number>;
+    issueCounts: Record<string, number>;
+    trendExcludedReasons: Record<string, number>;
+    averageQualityScore: number | null;
+    usedForAnalysisImages: number;
+  };
+  interpretationSignals: {
+    codes: {
+      code: string;
+      severity: string;
+      count: number;
+      latestEntryDate: string | null;
+      sourceIds: string[];
+    }[];
+    sourceIds: string[];
+    guidanceKeys: string[];
+    caveatKeys: string[];
+  };
+  concernGuidance: {
+    concern: string;
+    severity: string;
+    count: number;
+    locations: string[];
+    confidenceLabels: string[];
+    actionKeys: string[];
+    avoidKeys: string[];
+    factorKeys: string[];
+    escalationKeys: string[];
+    sourceIds: string[];
+  }[];
+  visualChanges: {
+    concern: string;
+    directions: string[];
+    count: number;
+    averageConfidence: number | null;
+    latestDirection: string | null;
+  }[];
+  safetySignals: {
+    urgentReviewRecommended: boolean;
+    doctorFollowUpRecommended: boolean;
+    doctorFlagReasons: string[];
+    safetyReasons: string[];
+    flaggedEntryCount: number;
+  };
+}
+
+export interface SuggestionEnvironmentSignals {
+  signalKinds: string[];
+  alerts: {
+    kind: string;
+    title: string;
+    message: string;
+  }[];
+  safetyConstraints: string[];
+  gapCategories: string[];
+}
+
+export interface SuggestionAppliedProductHistory {
+  windowStartDate: string;
+  windowEndDate: string;
+  recordsConsidered: number;
+  products: SuggestionAppliedProductHistoryItem[];
+}
+
+export interface SuggestionAppliedProductHistoryItem {
+  productId: string | null;
+  brand: string | null;
+  name: string | null;
+  category: string | null;
+  stepLabel: string | null;
+  sourceTypes: string[];
+  dayparts: string[];
+  statuses: string[];
+  useCount: number;
+  lastAppliedDate: string | null;
+  lastAppliedAt: string | null;
+  isOffShelf: boolean;
+  isSubstitution: boolean;
+}
+
+export interface SuggestionRoutineMemory {
+  recordsConsidered: number;
+  previousSuggestionCount: number;
+  sameDaypartSuggestionCount: number;
+  recentSameDaypartFingerprints: {
+    targetDate: string;
+    targetTime: string;
+    productIds: string[];
+    productNames: string[];
+    fingerprint: string;
+  }[];
+  recentlySuggestedProductIds: string[];
+  exactRepeatCountByFingerprint: Record<string, number>;
+  skippedProducts: Record<string, number>;
+  substitutedProducts: Record<string, number>;
+  adheredProducts: Record<string, number>;
+  editedLogCount: number;
+  offShelfUseCount: number;
 }
 
 export interface SuggestionProductScore {

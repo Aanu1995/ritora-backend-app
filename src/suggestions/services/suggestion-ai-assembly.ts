@@ -2,6 +2,11 @@ import { InventoryProduct } from '../../inventory/entities/inventory-product.ent
 import { StepLabel, STEP_LABELS } from '../../schedule/dto/schedule.constants';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import {
+  DEFAULT_LANGUAGE,
+  normalizeLanguage,
+  type AppLanguage,
+} from '../../common/i18n/i18n';
+import {
   SuggestionExplanationJson,
   SuggestionGapRecommendationJson,
   SuggestionEvidenceSourceId,
@@ -22,8 +27,10 @@ import {
   toHumanApplicationMethod,
   toHumanQuantity,
 } from './suggestion-language';
+import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
 
 export type AssemblyContext = {
+  language: AppLanguage;
   lockedSteps: RoutineStep[];
   routineById: Map<string, RoutineStep>;
   activeProductById: Map<string, InventoryProduct>;
@@ -34,6 +41,7 @@ export function buildAssemblyContext(
   inputs: SuggestionGenerationInputs,
 ): AssemblyContext {
   return {
+    language: normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE),
     lockedSteps: inputs.routineSteps
       .filter((step) => step.is_specialist_locked)
       .sort((a, b) => a.step_order - b.step_order),
@@ -61,6 +69,7 @@ export function resolveRawStep(
   if (rawStep.routineStepId && !routineSource) return null;
   if (routineSource?.is_specialist_locked) {
     return routineStepToOutput(routineSource, routineSource.step_order, {
+      language: context.language,
       explanation: rawStep.explanation ?? null,
       safetyWarnings: rawStep.safetyWarnings ?? [],
     });
@@ -79,15 +88,19 @@ export function resolveRawStep(
     inventoryProductId: sourceProduct?.id ?? null,
     productBrand: sourceProduct?.brand ?? null,
     productName: sourceProduct?.name ?? null,
-    stepLabel: toStepLabel(rawStep.stepLabel ?? routineSource?.step_label),
+    stepLabel:
+      sourceProduct?.category ??
+      toStepLabel(rawStep.stepLabel ?? routineSource?.step_label),
     customLabel: rawStep.customLabel ?? routineSource?.custom_label ?? null,
     applicationMethod: toHumanApplicationMethod(
       rawStep.applicationMethod ??
         sourceProduct?.guidance?.applicationMethod ??
         null,
+      context.language,
     ),
     quantity: toHumanQuantity(
       rawStep.quantity ?? sourceProduct?.guidance?.quantity ?? null,
+      context.language,
     ),
     waitAfterMinutes:
       rawStep.waitAfterMinutes ?? sourceProduct?.guidance?.waitMinutes ?? null,
@@ -135,10 +148,12 @@ export function routineStepToOutput(
   step: RoutineStep,
   index: number,
   overrides?: {
+    language?: AppLanguage;
     explanation?: string | null;
     safetyWarnings?: SuggestionSafetyFlagJson[];
   },
 ): SuggestionGenerationStepOutput {
+  const language = normalizeLanguage(overrides?.language ?? DEFAULT_LANGUAGE);
   return {
     stepOrder: index,
     routineStepId: step.id,
@@ -149,8 +164,12 @@ export function routineStepToOutput(
     customLabel: step.custom_label,
     applicationMethod: toHumanApplicationMethod(
       step.product?.guidance?.applicationMethod ?? null,
+      language,
     ),
-    quantity: toHumanQuantity(step.product?.guidance?.quantity ?? null),
+    quantity: toHumanQuantity(
+      step.product?.guidance?.quantity ?? null,
+      language,
+    ),
     waitAfterMinutes: step.product?.guidance?.waitMinutes ?? null,
     explanation: sanitizeSuggestionText(overrides?.explanation ?? null, {
       maxLength: 140,
@@ -161,7 +180,7 @@ export function routineStepToOutput(
       ? SuggestionStepProvenance.SpecialistLocked
       : SuggestionStepProvenance.UserRoutine,
     chips: step.is_specialist_locked
-      ? [{ tone: 'specialist', text: 'Specialist locked' }]
+      ? [{ tone: 'specialist', text: localizedSpecialistLocked(language) }]
       : [],
     safetyWarnings: sanitizeSafetyFlags(overrides?.safetyWarnings ?? []),
   };
@@ -203,20 +222,85 @@ export function buildDeterministicSafetyFlags(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionSafetyFlagJson[] {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
+  const contextWithResolvedScores = {
+    ...inputs.contextSummary,
+    productScores: resolveSuggestionProductScores(inputs),
+  };
   const flags: SuggestionSafetyFlagJson[] = buildPolicySafetyFlags(
-    inputs.contextSummary,
+    contextWithResolvedScores,
     steps,
+    language,
   );
-  if (inputs.skinProfile?.pregnancy_status) {
+  if (
+    hasPregnancyOrMedicationCaution(inputs) &&
+    !flags.some((flag) => hasMedicalCautionText(flag.message))
+  ) {
     flags.push({
       severity: 'info',
-      message:
-        'Check active ingredients with your specialist during pregnancy or medication changes.',
+      message: localizedMedicalSafetyMessage(inputs, language),
       ingredientSlugs: [],
       sourceIds: [SuggestionEvidenceSourceId.DermNetTopicalRetinoids],
     });
   }
   return flags;
+}
+
+function hasPregnancyOrMedicationCaution(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(
+    JSON.stringify([
+      inputs.skinProfile?.pregnancy_status ?? '',
+      inputs.skinProfile?.safety_context?.conditions ?? [],
+      inputs.skinProfile?.safety_context?.medications ?? [],
+      inputs.skinProfile?.safety_context?.photosensitizing_other
+        ? 'photosensitizing medication'
+        : '',
+      inputs.skinProfile?.under_dermatologist_care ?? '',
+    ]),
+  );
+}
+
+function hasPregnancyCaution(inputs: SuggestionGenerationInputs): boolean {
+  return /(pregnan|breastfeed|trying|conceiv)/i.test(
+    JSON.stringify([
+      inputs.skinProfile?.pregnancy_status ?? '',
+      inputs.skinProfile?.safety_context?.conditions ?? [],
+    ]),
+  );
+}
+
+function hasMedicalCautionText(value: string): boolean {
+  return /\b(medication|medicacion|medicin|medicine|pregnan|embarazo|gravid|breastfeed|clinician|clinica|klinisk|specialist|doctor|prescrib)\b/i.test(
+    value,
+  );
+}
+
+function localizedSpecialistLocked(language: AppLanguage): string {
+  return {
+    en: 'Specialist locked',
+    sv: 'Last av specialist',
+    es: 'Bloqueado por especialista',
+  }[language];
+}
+
+function localizedMedicalSafetyMessage(
+  inputs: SuggestionGenerationInputs,
+  language: AppLanguage,
+): string {
+  if (hasPregnancyCaution(inputs)) {
+    return {
+      en: 'Check active ingredients with your specialist during pregnancy or medication changes.',
+      sv: 'Stam av aktiva ingredienser med din specialist vid graviditet eller medicinbyte.',
+      es: 'Consulta los activos con tu especialista durante el embarazo o cambios de medicacion.',
+    }[language];
+  }
+  return {
+    en: 'Check active ingredients with your specialist during medication changes.',
+    sv: 'Stam av aktiva ingredienser med din specialist vid medicinbyte.',
+    es: 'Consulta los activos con tu especialista durante cambios de medicacion.',
+  }[language];
 }
 
 export function sanitizeExplanation(
@@ -288,16 +372,18 @@ export function sanitizeGapRecommendations(
 export function sanitizeSafetyFlags(
   flags: SuggestionSafetyFlagJson[],
 ): SuggestionSafetyFlagJson[] {
-  return flags.map((flag) => ({
-    severity: flag.severity,
-    message:
-      sanitizeSuggestionText(flag.message, {
-        maxLength: 160,
-        maxSentences: 1,
-      }) ?? '',
-    ingredientSlugs: flag.ingredientSlugs ?? [],
-    sourceIds: mergeEvidenceSourceIds(flag.sourceIds ?? []),
-  }));
+  return flags
+    .map((flag) => ({
+      severity: flag.severity,
+      message:
+        sanitizeSuggestionText(flag.message, {
+          maxLength: 160,
+          maxSentences: 1,
+        }) ?? '',
+      ingredientSlugs: flag.ingredientSlugs ?? [],
+      sourceIds: mergeEvidenceSourceIds(flag.sourceIds ?? []),
+    }))
+    .filter((flag) => flag.message.length > 0 && flag.sourceIds.length > 0);
 }
 
 function resolveActiveProduct(

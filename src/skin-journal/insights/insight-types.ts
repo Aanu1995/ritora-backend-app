@@ -47,7 +47,6 @@ export interface InsightSourceCitation {
 export type InsightAction =
   | { kind: 'view_entries'; entry_ids: string[] }
   | { kind: 'open_compare'; from_date: string; to_date: string }
-  | { kind: 'open_export' }
   | { kind: 'open_product'; inventory_product_id: string }
   | { kind: 'open_today_upload' }
   | { kind: 'dismiss' }

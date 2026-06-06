@@ -1,11 +1,6 @@
-import { ConfigService } from '@nestjs/config';
 import { TimedMemoryCache } from './catalogue-memory-cache';
 import type { ExtractionResult } from './openai-extraction.utils';
 
-export const PRIMARY_REASONING_EFFORT_ENV_KEY =
-  'OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT';
-export const WEB_REASONING_EFFORT_ENV_KEY =
-  'OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT';
 export const OPENAI_CACHE_TTL_MS = 30 * 60 * 1000;
 export const OPENAI_CACHE_MAX_ENTRIES = 100;
 
@@ -14,20 +9,6 @@ type FailureLogOptions = {
   timeoutMs?: number;
   optionalFallbackMessage?: string;
 };
-
-export function readReasoningEffort(
-  configService: ConfigService,
-  envKey: string,
-  fallback: string | undefined,
-): string | undefined {
-  const configured = configService.get<string>(envKey)?.trim();
-  const effort = configured || fallback;
-  if (!effort || ['none', 'off', 'disabled'].includes(effort.toLowerCase())) {
-    return undefined;
-  }
-
-  return effort;
-}
 
 export function createOpenAiExtractionCache(): TimedMemoryCache<ExtractionResult | null> {
   return new TimedMemoryCache<ExtractionResult | null>({

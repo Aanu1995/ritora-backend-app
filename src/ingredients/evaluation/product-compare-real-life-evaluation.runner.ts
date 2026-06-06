@@ -137,6 +137,7 @@ function buildProductCompareService(
       loadForUser: () => Promise.resolve(skinProfile),
     } as unknown as SkinProfileAnalysisContextService,
     {
+      find: () => Promise.resolve(inventoryProducts),
       findOne: ({ where }: FindOneInput) =>
         Promise.resolve(
           inventoryProducts.find(

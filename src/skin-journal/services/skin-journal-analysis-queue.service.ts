@@ -131,6 +131,7 @@ export class SkinJournalAnalysisQueueService
       clearTimeout(this.dispatchTimer);
       this.dispatchTimer = null;
     }
+    this.sqsClient?.destroy?.();
   }
 
   getDriver(): AnalysisQueueDriver {

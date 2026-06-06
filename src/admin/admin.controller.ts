@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Optional,
   Param,
   Patch,
   Post,
@@ -55,6 +56,20 @@ import {
   AdminUserRestrictionDto,
   AdminUserUnrestrictionDto,
 } from './dto/admin-user-restriction.dto';
+import {
+  AdminSupportFeedbackListQueryDto,
+  AdminSupportFeedbackNoteListQueryDto,
+  CreateAdminSupportFeedbackDto,
+  CreateAdminSupportFeedbackNoteDto,
+  UpdateAdminSupportFeedbackDto,
+} from '../support/dto/support-feedback.dto';
+import { SupportService } from '../support/support.service';
+import type {
+  SupportFeedbackListResponse,
+  SupportFeedbackNoteListResponse,
+  SupportFeedbackNoteResponse,
+  SupportFeedbackResponse,
+} from '../support/support.types';
 import type {
   AdminAuthenticatedUser,
   AdminAccountMonitoringAutomatedScanResponse,
@@ -74,6 +89,7 @@ import type {
   AdminOverviewResponse,
   AdminPlatformGlobalRestrictionListResponse,
   AdminPlatformGlobalRestrictionResponse,
+  AdminSkinJournalAnalysisFeedbackReportResponse,
   AdminUserDetailResponse,
   AdminUserListResponse,
   AdminUserNoteListResponse,
@@ -97,6 +113,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly adminAuthService: AdminAuthService,
+    @Optional() private readonly supportService?: SupportService,
   ) {}
 
   @Get('me')
@@ -149,6 +166,97 @@ export class AdminController {
       sessionId: user.sessionId,
       userAgent: getHeaderValue(req.headers, 'user-agent'),
     });
+  }
+
+  @Get('support/feedback')
+  listSupportFeedback(
+    @Query() query: AdminSupportFeedbackListQueryDto,
+  ): Promise<SupportFeedbackListResponse> {
+    return this.getSupportService().listAdminFeedback(query);
+  }
+
+  @Post('support/feedback')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  createSupportFeedback(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Body() dto: CreateAdminSupportFeedbackDto,
+    @Req() req: Request,
+  ): Promise<SupportFeedbackResponse> {
+    return this.getSupportService().createAdminFeedback(
+      user,
+      {
+        context: dto.context,
+        description: dto.description,
+        priority: dto.priority,
+        reason: dto.reason,
+        reporterEmail: dto.reporterEmail,
+        source: dto.source,
+        title: dto.title,
+        type: dto.type,
+        userIdentifier: dto.userIdentifier,
+      },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Patch('support/feedback/:id')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  updateSupportFeedback(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminSupportFeedbackDto,
+    @Req() req: Request,
+  ): Promise<SupportFeedbackResponse> {
+    return this.getSupportService().updateAdminFeedback(
+      user,
+      id,
+      {
+        assignedAdminId: dto.assignedAdminId,
+        priority: dto.priority,
+        reason: dto.reason,
+        status: dto.status,
+      },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
+  }
+
+  @Get('support/feedback/:id/notes')
+  listSupportFeedbackNotes(
+    @Param('id') id: string,
+    @Query() query: AdminSupportFeedbackNoteListQueryDto,
+  ): Promise<SupportFeedbackNoteListResponse> {
+    return this.getSupportService().listAdminFeedbackNotes(id, query);
+  }
+
+  @Post('support/feedback/:id/notes')
+  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard)
+  createSupportFeedbackNote(
+    @CurrentUser() user: AdminAuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: CreateAdminSupportFeedbackNoteDto,
+    @Req() req: Request,
+  ): Promise<SupportFeedbackNoteResponse> {
+    return this.getSupportService().createAdminFeedbackNote(
+      user,
+      id,
+      {
+        body: dto.body,
+        reason: dto.reason,
+      },
+      {
+        ip: req.ip,
+        sessionId: user.sessionId,
+        userAgent: getHeaderValue(req.headers, 'user-agent'),
+      },
+    );
   }
 
   @Get('audit-logs')
@@ -336,6 +444,11 @@ export class AdminController {
     return this.adminService.getOperationsMonitoring();
   }
 
+  @Get('skin-journal/analysis-feedback')
+  getSkinJournalAnalysisFeedbackReport(): Promise<AdminSkinJournalAnalysisFeedbackReportResponse> {
+    return this.adminService.getSkinJournalAnalysisFeedbackReport();
+  }
+
   @Get('operations/incidents')
   listOperationalIncidents(
     @Query() query: AdminOperationalIncidentListQueryDto,
@@ -519,5 +632,13 @@ export class AdminController {
       sessionId: user.sessionId,
       userAgent: getHeaderValue(req.headers, 'user-agent'),
     });
+  }
+
+  private getSupportService(): SupportService {
+    if (!this.supportService) {
+      throw new Error('Support service is not configured');
+    }
+
+    return this.supportService;
   }
 }

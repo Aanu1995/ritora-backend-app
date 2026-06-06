@@ -5,6 +5,7 @@ import { CataloguePhotoProcessorService } from '../catalogue/catalogue-photo-pro
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import type { UploadedCatalogueImage } from '../catalogue/catalogue-photo.types';
 import { decodeCursor } from '../common/utils/cursor-pagination';
+import { IngredientProductAnalysisPreparationService } from '../ingredients/ingredient-product-analysis-preparation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import {
@@ -203,6 +204,9 @@ describe('InventoryService', () => {
   const smartPicksPreparation = {
     scheduleForUser: jest.fn(),
   };
+  const ingredientProductAnalysisPreparation = {
+    scheduleForProduct: jest.fn(),
+  };
 
   beforeEach(async () => {
     queryBuilder = createMockQueryBuilder();
@@ -213,6 +217,7 @@ describe('InventoryService', () => {
     cataloguePhotoStorageService.resolvePublicImageUrls.mockClear();
     notificationsService.runProductExpiryAlertForProduct.mockClear();
     smartPicksPreparation.scheduleForUser.mockClear();
+    ingredientProductAnalysisPreparation.scheduleForProduct.mockClear();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventoryService,
@@ -237,6 +242,10 @@ describe('InventoryService', () => {
         {
           provide: SmartPicksPreparationService,
           useValue: smartPicksPreparation,
+        },
+        {
+          provide: IngredientProductAnalysisPreparationService,
+          useValue: ingredientProductAnalysisPreparation,
         },
       ],
     }).compile();
@@ -289,6 +298,9 @@ describe('InventoryService', () => {
     expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
       'user-1',
     );
+    expect(
+      ingredientProductAnalysisPreparation.scheduleForProduct,
+    ).toHaveBeenCalledWith('user-1', 'inventory-1');
     expect(result.id).toBe('inventory-1');
   });
 

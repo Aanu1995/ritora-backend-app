@@ -210,12 +210,6 @@ export class SuggestionHistoryListResponseDto {
   totalEdited: number;
 }
 
-export type SuggestionHistoryExportFile = {
-  fileName: string;
-  contentType: 'text/csv; charset=utf-8';
-  body: string;
-};
-
 export class RegenerateSuggestionDto {
   @ApiPropertyOptional({
     enum: SUGGESTION_REGENERATION_REASONS,

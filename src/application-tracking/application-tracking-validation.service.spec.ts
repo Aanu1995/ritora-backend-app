@@ -5,6 +5,7 @@ import { ScheduleSlot } from '../schedule/entities/schedule-slot.entity';
 import { ProductCategory, ShelfStatus } from '../shelf/shelf.types';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
 import { SuggestionStep } from '../suggestions/entities/suggestion-step.entity';
+import { SuggestionGenerationStatus } from '../suggestions/suggestions.constants';
 import { User } from '../users/entities/user.entity';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
 import { ApplicationLogItem } from './entities/application-log-item.entity';
@@ -22,6 +23,10 @@ describe('ApplicationTrackingValidationService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('derives spoofable target metadata from the suggestion', async () => {
@@ -265,7 +270,32 @@ describe('ApplicationTrackingValidationService', () => {
   it('rejects suggestions that have not produced a ready recommendation', async () => {
     suggestionRepo.findOne.mockResolvedValue({
       ...suggestion(),
-      generation_status: 'failed',
+      generation_status: SuggestionGenerationStatus.Failed,
+    } as SuggestionInstance);
+
+    await expect(
+      service.loadSuggestionForRecord(user, 'suggestion-1'),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('allows superseded historical suggestions to be recorded within 24 hours', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-30T07:59:00'));
+    const superseded = {
+      ...suggestion(),
+      generation_status: SuggestionGenerationStatus.Superseded,
+    } as SuggestionInstance;
+    suggestionRepo.findOne.mockResolvedValue(superseded);
+
+    await expect(
+      service.loadSuggestionForRecord(user, 'suggestion-1'),
+    ).resolves.toBe(superseded);
+  });
+
+  it('rejects superseded historical suggestions after the 24-hour record window', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-30T08:01:00'));
+    suggestionRepo.findOne.mockResolvedValue({
+      ...suggestion(),
+      generation_status: SuggestionGenerationStatus.Superseded,
     } as SuggestionInstance);
 
     await expect(
@@ -276,7 +306,7 @@ describe('ApplicationTrackingValidationService', () => {
   it('allows existing historical logs to keep editing superseded suggestions', async () => {
     const superseded = {
       ...suggestion(),
-      generation_status: 'superseded',
+      generation_status: SuggestionGenerationStatus.Superseded,
     } as SuggestionInstance;
     suggestionRepo.findOne.mockResolvedValue(superseded);
 

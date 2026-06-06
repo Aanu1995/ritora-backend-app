@@ -14,6 +14,8 @@ const mockSkinJournalService = () => ({
   listInsights: jest.fn(),
   getAnalysisQueueOperations: jest.fn(),
   upsertEntryForResolvedDate: jest.fn(),
+  reinterpretAnalysis: jest.fn(),
+  recordAnalysisFeedback: jest.fn(),
 });
 
 const mockRestrictionEnforcement = () => ({
@@ -250,6 +252,31 @@ describe('SkinJournalController', () => {
 
     expect(service.getAnalysisQueueOperations).toHaveBeenCalledWith(
       'ops-token',
+    );
+  });
+
+  it('passes analysis reinterpret requests to the service', async () => {
+    service.reinterpretAnalysis.mockResolvedValue({ id: 'entry-1' });
+
+    await controller.reinterpretAnalysis('user-1', 'entry-1');
+
+    expect(service.reinterpretAnalysis).toHaveBeenCalledWith(
+      'user-1',
+      'entry-1',
+    );
+  });
+
+  it('passes analysis helpfulness feedback to the service', async () => {
+    service.recordAnalysisFeedback.mockResolvedValue({ vote: 'helpful' });
+
+    await controller.recordAnalysisFeedback('user-1', 'entry-1', {
+      vote: 'helpful',
+    });
+
+    expect(service.recordAnalysisFeedback).toHaveBeenCalledWith(
+      'user-1',
+      'entry-1',
+      { vote: 'helpful' },
     );
   });
 

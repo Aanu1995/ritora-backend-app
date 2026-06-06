@@ -69,6 +69,126 @@ describe('Skin Journal analysis evaluation runner', () => {
     expect(result.checks.map((check) => check.code)).toContain(
       'safety_reason_code',
     );
+    expect(result.checks.map((check) => check.code)).toContain(
+      'guidance_decision_integrity',
+    );
+  });
+
+  it('passes guidance integrity when generated guidance matches a high-confidence concern', () => {
+    const result = evaluateAnalysisResult(fixture, {
+      ...observations,
+      detected_concerns: [
+        {
+          concern: 'acne',
+          severity: 'moderate',
+          locations: ['chin'],
+          confidence: 0.78,
+          change_from_previous: 'new',
+          change_confidence: 0.62,
+        },
+      ],
+      guidance_decisions: [
+        {
+          concern: 'acne',
+          possible_factor_codes: ['acne_common_contributors'],
+          possible_cause_items: [
+            'Pore clogging, sweat, stress, or a recent product change could be contributors to compare.',
+          ],
+          action_codes: ['log_clusters'],
+          try_next_items: [
+            'Log whether new spots cluster after sweat, food notes, or product changes.',
+          ],
+          avoid_codes: ['pore_clogging_products'],
+          avoid_items: ['Avoid heavy products on areas that are breaking out.'],
+          reasoning_summary:
+            'Visible chin breakout pattern with safe guidance.',
+        },
+      ],
+    });
+
+    expect(
+      result.checks.find(
+        (check) => check.code === 'guidance_decision_integrity',
+      ),
+    ).toMatchObject({ passed: true });
+    expect(result.notes.join('\n')).toContain('Possible cause: Pore clogging');
+    expect(result.notes.join('\n')).toContain('Try next: Log whether');
+    expect(result.notes.join('\n')).toContain('Avoid: Avoid heavy products');
+  });
+
+  it('fails guidance integrity when a usable high-confidence concern lacks guidance', () => {
+    const result = evaluateAnalysisResult(fixture, {
+      ...observations,
+      detected_concerns: [
+        {
+          concern: 'acne',
+          severity: 'moderate',
+          locations: ['chin'],
+          confidence: 0.78,
+          change_from_previous: 'new',
+          change_confidence: 0.62,
+        },
+      ],
+      guidance_decisions: [],
+    });
+
+    expect(
+      result.checks.find(
+        (check) => check.code === 'guidance_decision_integrity',
+      ),
+    ).toMatchObject({
+      passed: false,
+      actual: expect.objectContaining({
+        invalid_reasons: expect.arrayContaining([
+          'missing_guidance_for_high_confidence_concern:acne',
+        ]),
+      }),
+    });
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails guidance integrity when generated guidance contains unsafe overclaims', () => {
+    const result = evaluateAnalysisResult(fixture, {
+      ...observations,
+      detected_concerns: [
+        {
+          concern: 'acne',
+          severity: 'moderate',
+          locations: ['chin'],
+          confidence: 0.78,
+          change_from_previous: 'new',
+          change_confidence: 0.62,
+        },
+      ],
+      guidance_decisions: [
+        {
+          concern: 'acne',
+          possible_factor_codes: ['acne_common_contributors'],
+          possible_cause_items: ['This proves milk caused your acne.'],
+          action_codes: ['log_clusters'],
+          try_next_items: [
+            'Log whether new spots cluster after sweat, food notes, or product changes.',
+          ],
+          avoid_codes: ['pore_clogging_products'],
+          avoid_items: ['Stop all products immediately.'],
+          reasoning_summary: 'Unsafe guidance should fail.',
+        },
+      ],
+    });
+
+    expect(
+      result.checks.find(
+        (check) => check.code === 'guidance_decision_integrity',
+      ),
+    ).toMatchObject({
+      passed: false,
+      actual: expect.objectContaining({
+        invalid_reasons: expect.arrayContaining([
+          'unsafe_generated_guidance:acne:possible_cause_items',
+          'unsafe_generated_guidance:acne:avoid_items',
+        ]),
+      }),
+    });
   });
 
   it('accepts any matching quality code for fixture families with model wording variance', () => {

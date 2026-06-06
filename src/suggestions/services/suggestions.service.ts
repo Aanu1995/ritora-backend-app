@@ -18,7 +18,6 @@ import { UserNotificationPreference } from '../../notifications/entities/user-no
 import { User } from '../../users/entities/user.entity';
 import {
   RegenerateSuggestionDto,
-  SuggestionHistoryExportFile,
   SuggestionHistoryDayDto,
   SuggestionHistoryListQueryDto,
   SuggestionHistoryListResponseDto,
@@ -36,7 +35,6 @@ import {
   formatTimeInTimeZone,
 } from './suggestion-helpers';
 import { SuggestionHistoryReader } from './suggestion-history-reader.service';
-import { SuggestionHistoryExportService } from './suggestion-history-export.service';
 import { computeSuggestionLifecycle } from './suggestion-lifecycle';
 import { SuggestionRegenerationService } from './suggestion-regeneration.service';
 import { RoutineBreakService } from './routine-break.service';
@@ -74,7 +72,6 @@ export class SuggestionsService {
     @InjectRepository(SkinProfile)
     private readonly skinProfileRepo: Repository<SkinProfile>,
     private readonly historyReader: SuggestionHistoryReader,
-    private readonly historyExporter: SuggestionHistoryExportService,
     private readonly regenerationService: SuggestionRegenerationService,
     private readonly reactionService: TodaysSuggestionReactionService,
     private readonly todayActionService: SuggestionTodayActionService,
@@ -315,14 +312,6 @@ export class SuggestionsService {
     query: SuggestionHistoryListQueryDto,
   ): Promise<SuggestionHistoryListResponseDto> {
     return this.historyReader.getHistory(user, requestTimeZone, query);
-  }
-
-  async exportHistoryCsv(
-    user: User,
-    requestTimeZone: string | null,
-    query: SuggestionHistoryListQueryDto,
-  ): Promise<SuggestionHistoryExportFile> {
-    return this.historyExporter.exportCsv(user, requestTimeZone, query);
   }
 
   async getHistoryDay(

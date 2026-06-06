@@ -30,8 +30,6 @@ export const NOTIFICATION_PARTIALS: ReadonlyArray<{
   { name: '_cta', fileName: '_cta.hbs' },
 ];
 
-export const NOTIFICATION_SUPPORT_EMAIL = 'support@getritora.com';
-
 /**
  * Public, CDN-hosted Ritora logo used in all transactional/notification emails.
  *

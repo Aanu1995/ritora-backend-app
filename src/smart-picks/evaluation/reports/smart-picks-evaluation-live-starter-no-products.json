@@ -1,0 +1,200 @@
+{
+  "generatedAt": "2026-05-28T23:27:52.497Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "smart-picks-ai-first-v2-journal-summary",
+  "totalCases": 1,
+  "passedCases": 1,
+  "reviewCases": 0,
+  "failedCases": 0,
+  "gate": {
+    "passed": true,
+    "blockers": []
+  },
+  "driftHash": "484836f19fb0628627828dfdd0ef63c6bd17600487c6e2442478390e188d9ab2",
+  "cases": [
+    {
+      "id": "starter_deep_skin_premium_dark_marks_canada",
+      "mode": "starter",
+      "countryCode": "CA",
+      "budgetTier": "premium",
+      "primaryGoal": "fade post-breakout dark marks",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"dark-spot-treatment\",\"antioxidant\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"cleanse\",\"dark-spot-treatment\",\"moisturise\",\"retinoid\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"gentle-low-stripping-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50-with-white-cast-checked-finish\",\"azelaic-acid-or-tranexamic-acid-dark-mark-serum\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-no-white-cast-spf-50-sunscreen\",\"azelaic-acid-dark-spot-treatment\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"vitamin-c-antioxidant-serum\",\"gentle-retinoid\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 2",
+          "actual": "2"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 6",
+          "actual": "6"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"gentle-low-stripping-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-sunscreen-spf-50-with-white-cast-checked-finish\",\"azelaic-acid-or-tranexamic-acid-dark-mark-serum\",\"vitamin-c-antioxidant-serum\"]",
+          "actual": "{\"actual\":[\"gentle-cleanser\",\"barrier-support-moisturizer\",\"broad-spectrum-no-white-cast-spf-50-sunscreen\",\"azelaic-acid-dark-spot-treatment\",\"gentle-retinoid\",\"vitamin-c-antioxidant-serum\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 6,
+        "acceptedCoverageSlotCount": 6,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 6,
+        "acceptedGapCount": 6,
+        "acceptedPriorityGapCount": 4,
+        "acceptedConsiderGapCount": 2,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 1964,
+        "outputTokens": 10536,
+        "totalTokens": 12500,
+        "estimatedCostUsd": 0.006616
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 6,
+        "rawGapCount": 6,
+        "acceptedPickCount": 6,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 7253,
+        "outputTokens": 36683,
+        "totalTokens": 43936,
+        "estimatedCostUsd": 0.023098
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "dark-spot-treatment",
+        "antioxidant",
+        "retinoid"
+      ],
+      "priorityGapKeys": [
+        "gentle-cleanser",
+        "barrier-support-moisturizer",
+        "broad-spectrum-no-white-cast-spf-50-sunscreen",
+        "azelaic-acid-dark-spot-treatment"
+      ],
+      "considerGapKeys": [
+        "vitamin-c-antioxidant-serum",
+        "gentle-retinoid"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-cleanser",
+          "brand": "Skinfix",
+          "productName": "Barrier+ Foaming Oil Cleanser",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "The routine has no cleanser, and this is a strong low-irritation base that should help you start without adding dryness or extra friction."
+        },
+        {
+          "normalizedKey": "barrier-support-moisturizer",
+          "brand": "Aestura",
+          "productName": "Atobarrier 365 Lotion",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "No moisturizer is on shelf, and barrier support matters now so future dark-mark care stays comfortable and easier to stick with."
+        },
+        {
+          "normalizedKey": "broad-spectrum-no-white-cast-spf-50-sunscreen",
+          "brand": "Colorescience",
+          "productName": "Sunforgettable Total Protection Face Shield FLEX SPF 50",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit for daily UV protection now; the tint/blend helps it disappear on deep skin so it is easier to wear daily."
+        },
+        {
+          "normalizedKey": "azelaic-acid-dark-spot-treatment",
+          "brand": "Paula's Choice",
+          "productName": "10% Azelaic Acid Booster",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best first active for stable post-breakout marks; strong pigment support without jumping straight to harsher options."
+        },
+        {
+          "normalizedKey": "gentle-retinoid",
+          "brand": "Medik8",
+          "productName": "Crystal Retinal 3",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Your marks have stayed stable, so a slow-start retinal is the stronger long-game step for fade support and prevention."
+        },
+        {
+          "normalizedKey": "vitamin-c-antioxidant-serum",
+          "brand": "Paula's Choice",
+          "productName": "C15 Super Booster",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 0,
+          "recommendationRankReason": "Closest lower-step tradeoff with a similar antioxidant lane."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the plan include the core starter steps before optional extras?",
+        "Does the pigment lane go beyond generic glow or hydration wording?",
+        "Does sunscreen finish matter for deeper skin without making ethnicity claims?",
+        "Are optional premium-support products clearly secondary to essentials?"
+      ]
+    }
+  ]
+}

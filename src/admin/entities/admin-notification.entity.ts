@@ -12,6 +12,7 @@ import { encryptedNullableStringFieldTransformer } from '../../skin-profile/skin
 export enum AdminNotificationType {
   AccountMonitoringAlert = 'account_monitoring_alert',
   OperationalIncidentAlert = 'operational_incident_alert',
+  SupportFeedbackAlert = 'support_feedback_alert',
 }
 
 export enum AdminNotificationSeverity {

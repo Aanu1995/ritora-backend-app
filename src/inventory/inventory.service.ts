@@ -17,6 +17,7 @@ import {
   type PaginatedResult,
 } from '../common/utils/cursor-pagination';
 import { toDateOrNull, toIsoString } from '../common/utils/date';
+import { IngredientProductAnalysisPreparationService } from '../ingredients/ingredient-product-analysis-preparation.service';
 import { computeEffectiveExpiresAt } from '../shelf/shelf-life';
 import {
   ShelfSort,
@@ -84,6 +85,8 @@ export class InventoryService {
     private readonly notificationsService: NotificationsService,
     @Optional()
     private readonly smartPicksPreparation?: SmartPicksPreparationService,
+    @Optional()
+    private readonly ingredientProductAnalysisPreparation?: IngredientProductAnalysisPreparationService,
   ) {}
 
   async list(
@@ -226,6 +229,7 @@ export class InventoryService {
     const saved = await this.inventoryRepository.save(entity);
     await this.evaluateProductExpiryAlerts(userId, saved);
     this.scheduleSmartPicksPreparation(userId);
+    this.scheduleIngredientProductAnalysis(userId, saved.id);
     return this.toResponseDto(saved);
   }
 
@@ -241,6 +245,7 @@ export class InventoryService {
     const saved = await this.saveSnapshot(userId, product, merged);
     await this.evaluateProductExpiryAlerts(userId, saved);
     this.scheduleSmartPicksPreparation(userId);
+    this.scheduleIngredientProductAnalysis(userId, saved.id);
     return this.toResponseDto(saved);
   }
 
@@ -282,6 +287,7 @@ export class InventoryService {
 
     const saved = await this.saveSnapshot(userId, product, merged);
     this.scheduleSmartPicksPreparation(userId);
+    this.scheduleIngredientProductAnalysis(userId, saved.id);
     return this.toResponseDto(saved);
   }
 
@@ -475,6 +481,16 @@ export class InventoryService {
 
   private scheduleSmartPicksPreparation(userId: string): void {
     this.smartPicksPreparation?.scheduleForUser(userId);
+  }
+
+  private scheduleIngredientProductAnalysis(
+    userId: string,
+    productId: string,
+  ): void {
+    this.ingredientProductAnalysisPreparation?.scheduleForProduct(
+      userId,
+      productId,
+    );
   }
 
   private buildNextCursor(

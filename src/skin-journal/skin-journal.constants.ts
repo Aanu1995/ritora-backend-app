@@ -122,6 +122,34 @@ export const INSIGHT_INTERACTION_TYPES = Object.values(
   InsightInteractionTypeValue,
 );
 
+export const AnalysisFeedbackVoteValue = {
+  Helpful: 'helpful',
+  NotHelpful: 'not_helpful',
+} as const;
+
+export type AnalysisFeedbackVote =
+  (typeof AnalysisFeedbackVoteValue)[keyof typeof AnalysisFeedbackVoteValue];
+
+export const ANALYSIS_FEEDBACK_VOTES = Object.values(AnalysisFeedbackVoteValue);
+
+export const AnalysisFeedbackReasonValue = {
+  TooGeneric: 'too_generic',
+  WrongConcern: 'wrong_concern',
+  WrongLocation: 'wrong_location',
+  MissedContext: 'missed_context',
+  NotActionable: 'not_actionable',
+  PhotoQualityConfusing: 'photo_quality_confusing',
+  SourcesNotUseful: 'sources_not_useful',
+  Other: 'other',
+} as const;
+
+export type AnalysisFeedbackReason =
+  (typeof AnalysisFeedbackReasonValue)[keyof typeof AnalysisFeedbackReasonValue];
+
+export const ANALYSIS_FEEDBACK_REASONS = Object.values(
+  AnalysisFeedbackReasonValue,
+);
+
 export type InsightWindow = 'all' | 'week' | 'month';
 
 export type InsightSourceType = 'deterministic' | 'ai_polished' | 'ai_sourced';
@@ -151,14 +179,6 @@ export type SimplificationMode = 'barrier_repair';
 export type RestoreStrategy = 'full' | 'phased';
 
 export type ReactionSeverity = 'none' | 'mild' | 'moderate' | 'severe';
-
-export const ExportStatusValue = {
-  Ready: 'ready',
-  Failed: 'failed',
-} as const;
-
-export type ExportStatus =
-  (typeof ExportStatusValue)[keyof typeof ExportStatusValue];
 
 export const AnalysisJobStatusValue = {
   Queued: 'queued',
@@ -349,34 +369,34 @@ export const SKIN_JOURNAL_PHOTO_MAX_DIMENSION = 1600;
 export const SKIN_JOURNAL_PHOTO_WEBP_QUALITY = 85;
 export const SKIN_JOURNAL_MEDIA_SIGNED_URL_TTL_SECONDS = 300;
 export const SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
-export const SKIN_JOURNAL_ANALYSIS_TIMEOUT_MS = 45000;
-export const SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS = 1600;
+export const SKIN_JOURNAL_ANALYSIS_TIMEOUT_MS = 180_000;
+export const SKIN_JOURNAL_ANALYSIS_MAX_OUTPUT_TOKENS = 24000;
 export const SKIN_JOURNAL_ANALYSIS_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 export const SKIN_JOURNAL_ANALYSIS_MAX_TOTAL_IMAGE_BYTES = 5 * 1024 * 1024;
 export const SKIN_JOURNAL_ANALYSIS_MIN_IMAGE_DIMENSION = 180;
 export const SKIN_JOURNAL_ANALYSIS_MAX_ASPECT_RATIO = 2.4;
 export const SKIN_JOURNAL_ANALYSIS_MIN_LUMA_STANDARD_DEVIATION = 2.5;
 export const SKIN_JOURNAL_ANALYSIS_ASSUMED_INPUT_IMAGE_COST_USD = 0.01;
-export const SKIN_JOURNAL_ANALYSIS_MAX_REQUEST_COST_USD = 0.08;
+export const SKIN_JOURNAL_ANALYSIS_MAX_REQUEST_COST_USD = 0.5;
 export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT = 4;
 export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER = 2;
-export const SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD = 1;
+export const SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD = 3;
 export const SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION =
-  'skin-journal-photo-v2026-05-16.1';
+  'skin-journal-photo-v2026-06-03.1';
 export const SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: AnalysisQueueDriver =
   'database';
 export const SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS = 10;
-export const SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS = 120;
-export const SKIN_JOURNAL_ANALYSIS_JOB_LOCK_TTL_SECONDS = 180;
+export const SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_TIMEOUT_SECONDS = 300;
+export const SKIN_JOURNAL_ANALYSIS_JOB_LOCK_TTL_SECONDS = 300;
 export const SKIN_JOURNAL_ANALYSIS_JOB_MAX_ATTEMPTS = 5;
 export const SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_BASE_SECONDS = 30;
 export const SKIN_JOURNAL_ANALYSIS_JOB_BACKOFF_MAX_SECONDS = 3600;
 export const SKIN_JOURNAL_ANALYSIS_JOB_DISPATCH_INTERVAL_MS = 5000;
 export const SKIN_JOURNAL_ANALYSIS_JOB_POLL_INTERVAL_MS = 5000;
-export const SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_HEARTBEAT_MS = 45000;
+export const SKIN_JOURNAL_ANALYSIS_SQS_VISIBILITY_HEARTBEAT_MS = 60_000;
 export const SKIN_JOURNAL_ANALYSIS_RECOVERY_INTERVAL_MS = 60000;
 export const SKIN_JOURNAL_ANALYSIS_CAPACITY_RETRY_DELAY_MS = 5000;
-export const SKIN_JOURNAL_ANALYSIS_ASSUMED_RUN_COST_USD = 0.01;
+export const SKIN_JOURNAL_ANALYSIS_ASSUMED_RUN_COST_USD = 0.03;
 export const SKIN_JOURNAL_ANALYSIS_QUEUE_AGE_ALERT_SECONDS = 900;
 export const SKIN_JOURNAL_ANALYSIS_FAILURE_RATE_ALERT_THRESHOLD = 0.2;
 export const SKIN_JOURNAL_LOCAL_FACE_REJECTION_RATE_ML_REVIEW_THRESHOLD = 0.02;
@@ -456,6 +476,44 @@ export interface AnalysisEntryContext {
   is_pre_routine?: boolean | null;
 }
 
+export interface AnalysisRoutineProductContext {
+  product_id: string | null;
+  brand: string | null;
+  name: string | null;
+  category: string | null;
+  step_label: string | null;
+  preferred_time?: string | null;
+  opened_at?: string | null;
+  ingredient_preview?: string[];
+  guidance_cautions?: string[];
+  is_specialist_locked?: boolean;
+}
+
+export interface AnalysisRecentApplicationContext {
+  target_date: string;
+  daypart: string | null;
+  applied_at: string | null;
+  items: Array<{
+    status: string;
+    product_id: string | null;
+    brand: string | null;
+    name: string | null;
+    category: string | null;
+    step_label: string | null;
+  }>;
+}
+
+export interface AnalysisCheckInContext extends AnalysisEntryContext {
+  detected_concerns?: AnalysisConcern[];
+}
+
+export interface AnalysisRoutineContext {
+  active_shelf_products: AnalysisRoutineProductContext[];
+  routine_products: AnalysisRoutineProductContext[];
+  recent_applications: AnalysisRecentApplicationContext[];
+  recent_check_ins: AnalysisCheckInContext[];
+}
+
 export interface AnalysisRunMetadata {
   prompt_version: string;
   duration_ms: number;
@@ -469,6 +527,80 @@ export interface AnalysisRunMetadata {
 export interface AnalysisRunResult {
   observations: AnalysisObservations;
   metadata: AnalysisRunMetadata;
+}
+
+export const PHOTO_ANALYSIS_GUIDANCE_FACTOR_CODES = [
+  'check_in_oiliness',
+  'check_in_irritation',
+  'check_in_sun',
+  'check_in_sweat',
+  'check_in_stress',
+  'check_in_sleep',
+  'check_in_feel',
+  'note_diet_acne',
+  'recent_product_change',
+  'recent_routine_change',
+  'routine_product_timing',
+  'active_ingredient_timing',
+  'sunscreen_context',
+  'recent_application_change',
+  'acne_common_contributors',
+  'pigment_common_contributors',
+  'oil_pore_common_contributors',
+  'barrier_common_contributors',
+  'appearance_common_contributors',
+  'general_common_contributors',
+] as const;
+
+export type PhotoAnalysisGuidanceFactorCode =
+  (typeof PHOTO_ANALYSIS_GUIDANCE_FACTOR_CODES)[number];
+
+export const PHOTO_ANALYSIS_GUIDANCE_ACTION_CODES = [
+  'acne_steady_routine',
+  'non_comedogenic',
+  'log_clusters',
+  'spf_context',
+  'prevent_irritation',
+  'same_light',
+  'gentle_cleanse',
+  'oil_free_when_possible',
+  'watch_shine_pattern',
+  'simplify_routine',
+  'moisturizer_support',
+  'watch_comfort',
+  'watch_pattern',
+] as const;
+
+export type PhotoAnalysisGuidanceActionCode =
+  (typeof PHOTO_ANALYSIS_GUIDANCE_ACTION_CODES)[number];
+
+export const PHOTO_ANALYSIS_GUIDANCE_AVOID_CODES = [
+  'multiple_new_actives',
+  'picking_or_squeezing',
+  'logged_diet_pattern',
+  'sweat_friction_after_exercise',
+  'pore_clogging_products',
+  'inconsistent_spf',
+  'irritating_scrubs',
+  'stripping_skin',
+  'over_exfoliation_for_pores',
+  'adding_actives_while_stressed',
+  'fragrance_if_sensitive',
+  'known_irritant_reexposure',
+] as const;
+
+export type PhotoAnalysisGuidanceAvoidCode =
+  (typeof PHOTO_ANALYSIS_GUIDANCE_AVOID_CODES)[number];
+
+export interface AnalysisGuidanceDecision {
+  concern: AnalysisConcern;
+  possible_factor_codes: PhotoAnalysisGuidanceFactorCode[];
+  possible_cause_items: string[];
+  action_codes: PhotoAnalysisGuidanceActionCode[];
+  try_next_items: string[];
+  avoid_codes: PhotoAnalysisGuidanceAvoidCode[];
+  avoid_items: string[];
+  reasoning_summary: string;
 }
 
 export interface AnalysisPhotoInput {
@@ -489,7 +621,7 @@ export interface AnalysisAngleQuality {
 }
 
 export interface AnalysisObservations {
-  schema_version: '1.0' | '1.1' | '1.2';
+  schema_version: '1.0' | '1.1' | '1.2' | '1.3';
   model_version: string;
   comparison_reference?: AnalysisComparisonReference | null;
   image_quality: {
@@ -521,6 +653,7 @@ export interface AnalysisObservations {
     barrier_compromise: boolean;
     indicators: string[];
   };
+  guidance_decisions?: AnalysisGuidanceDecision[];
   overall_assessment: string;
   overall_change_from_previous?: AnalysisChangeDirection;
   user_visible_message?: string;
@@ -553,8 +686,45 @@ export interface PhotoAnalysisSourceCitation {
   last_verified: string;
 }
 
+export type PhotoAnalysisReadingLabel = 'useful' | 'limited' | 'needs_retake';
+
+export type PhotoAnalysisConcernReadLabel =
+  | 'likely_visible'
+  | 'possible'
+  | 'limited';
+
+export interface PhotoAnalysisTextRef {
+  key: string;
+  values?: Record<string, string | number>;
+}
+
+export interface PhotoAnalysisReadingQuality {
+  visual_label: PhotoAnalysisReadingLabel;
+  trend_label: PhotoAnalysisReadingLabel;
+  reason_keys: PhotoAnalysisTextRef[];
+}
+
+export interface PhotoAnalysisConcernGuidance {
+  concern: AnalysisConcern;
+  severity: 'mild' | 'moderate' | 'severe';
+  locations: string[];
+  confidence_label: PhotoAnalysisConcernReadLabel;
+  title_key: string;
+  summary: PhotoAnalysisTextRef;
+  possible_factor_keys: PhotoAnalysisTextRef[];
+  possible_cause_items?: string[];
+  action_keys: PhotoAnalysisTextRef[];
+  try_next_items?: string[];
+  avoid_keys: PhotoAnalysisTextRef[];
+  avoid_items?: string[];
+  track_key: PhotoAnalysisTextRef;
+  escalation_key?: PhotoAnalysisTextRef | null;
+  source_ids: string[];
+  sources: PhotoAnalysisSourceCitation[];
+}
+
 export interface PhotoAnalysisInterpretation {
-  version: '1.0';
+  version: '1.0' | '1.1';
   code: PhotoAnalysisInterpretationCode;
   severity: EventSeverity;
   summary_key: string;
@@ -564,6 +734,8 @@ export interface PhotoAnalysisInterpretation {
   source_ids: string[];
   sources: PhotoAnalysisSourceCitation[];
   generated_at: string;
+  reading_quality?: PhotoAnalysisReadingQuality;
+  concern_guidance?: PhotoAnalysisConcernGuidance[];
 }
 
 export interface WrappedManifestEntry {

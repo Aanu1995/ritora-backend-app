@@ -590,7 +590,12 @@ function referralInsight(
       sourceLinkBlock('derm_hives_emergency'),
       sourceLinkBlock('derm_contact_dermatitis_patch_testing'),
     ],
-    actions: [{ kind: 'open_export' }],
+    actions: [
+      {
+        kind: 'view_entries',
+        entry_ids: trailing.map((entry) => entry.id),
+      },
+    ],
     sourceEntryIds: trailing.map((entry) => entry.id),
     timeWindow: {
       start: trailing[0].entry_date,

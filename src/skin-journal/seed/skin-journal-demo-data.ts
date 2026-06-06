@@ -375,10 +375,5 @@ function buildNotifications(
         bodyKey: 'skinJournal.notifications.analysisFailed.body',
       },
     ),
-    notification('export_ready', 'info', '/journal', {
-      titleKey: 'skinJournal.notifications.exportReady.title',
-      bodyKey: 'skinJournal.notifications.exportReady.body',
-      read: true,
-    }),
   ];
 }

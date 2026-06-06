@@ -54,6 +54,7 @@ describe('MailService', () => {
       API_PUBLIC_URL: 'http://localhost:3001/api/v1',
       MAIL_FROM: 'onboarding@resend.dev',
       NOTIFICATION_MAIL_FROM: 'notifications@resend.dev',
+      SUPPORT_EMAIL: 'support@getritora.com',
       RESEND_API_KEY: 're_test_mock',
       MAIL_UNSUBSCRIBE_SECRET: 'u'.repeat(32),
     };
@@ -93,6 +94,7 @@ describe('MailService', () => {
       'http://localhost:3000/verify-email/token-123',
     );
     expect(payload.html).toContain('Jane');
+    expect(payload.html).toContain('support@getritora.com');
   });
 
   it('sends password reset emails with rendered html and the expected url', async () => {
@@ -264,6 +266,7 @@ describe('MailService', () => {
       API_PUBLIC_URL: 'http://localhost:3001/api/v1',
       MAIL_FROM: 'onboarding@resend.dev',
       NOTIFICATION_MAIL_FROM: 'notifications@resend.dev',
+      SUPPORT_EMAIL: 'support@getritora.com',
       RESEND_API_KEY: '',
       MAIL_UNSUBSCRIBE_SECRET: 'u'.repeat(32),
     };
@@ -316,6 +319,27 @@ describe('MailService', () => {
     expect(payload.html).toContain('Verifiera e-post');
   });
 
+  it('sends localized Spanish verification emails', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendVerificationEmail(
+      'test@example.com',
+      'token-123',
+      'Jane',
+      'es',
+    );
+
+    const payload = getSentEmailPayload(sendEmail);
+
+    expect(payload.subject).toBe('Verifica tu cuenta de Ritora');
+    expect(payload.html).toContain('<html lang="es"');
+    expect(payload.html).toContain('Confirmar correo electrónico');
+  });
+
   it('escapes profile names in auth email templates', async () => {
     const service = new MailService(
       resendClient,
@@ -364,8 +388,60 @@ describe('MailService', () => {
     expect(payload.headers?.['List-Unsubscribe']).toContain(
       'http://localhost:3001/api/v1/notifications/email/unsubscribe?token=',
     );
+    expect(payload.headers?.['List-Unsubscribe']).toContain(
+      'mailto:support@getritora.com?subject=unsubscribe',
+    );
     expect(payload.headers?.['List-Unsubscribe-Post']).toBe(
       'List-Unsubscribe=One-Click',
+    );
+  });
+
+  it('uses the configured support email in notification copy and headers', async () => {
+    const supportEmail = 'help@example.com';
+    jest.spyOn(configService, 'get').mockImplementation((key: string) => {
+      const values: Record<string, string> = {
+        ADMIN_WEB_APP_URL: 'http://localhost:3002',
+        WEB_APP_URL: 'http://localhost:3000',
+        API_PUBLIC_URL: 'http://localhost:3001/api/v1',
+        MAIL_FROM: 'onboarding@resend.dev',
+        NOTIFICATION_MAIL_FROM: 'notifications@resend.dev',
+        SUPPORT_EMAIL: supportEmail,
+        RESEND_API_KEY: 're_test_mock',
+        MAIL_UNSUBSCRIBE_SECRET: 'u'.repeat(32),
+      };
+
+      return values[key];
+    });
+    jest
+      .spyOn(configService, 'getOrThrow')
+      .mockImplementation((key: string) => {
+        const value = configService.get<string>(key);
+        if (value !== undefined) {
+          return value;
+        }
+        throw new Error(`Missing config ${key}`);
+      });
+    unsubscribeTokens = new MailUnsubscribeTokenService(configService);
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendNotificationEmail({
+      userId: 'user-1',
+      email: 'test@example.com',
+      language: 'en',
+      kind: 'photo_reminder',
+      firstName: 'Aanu',
+      payload: { date: 'Today', lastPhotoLabel: 'yesterday' },
+      deepLink: '/journal/upload',
+    });
+
+    const payload = getSentEmailPayload(sendEmail);
+    expect(payload.html).toContain(supportEmail);
+    expect(payload.headers?.['List-Unsubscribe']).toContain(
+      `mailto:${supportEmail}?subject=unsubscribe`,
     );
   });
 
@@ -479,6 +555,29 @@ describe('MailService', () => {
     const payload = getSentEmailPayload(sendEmail);
     expect(payload.subject).toBe('Lägg till dagens hudbild');
     expect(payload.html).toContain('Lägg till dagens bild');
+  });
+
+  it('renders Spanish notification emails when language is es', async () => {
+    const service = new MailService(
+      resendClient,
+      configService,
+      unsubscribeTokens,
+    );
+
+    await service.sendNotificationEmail({
+      userId: 'user-1',
+      email: 'test@example.com',
+      language: 'es',
+      kind: 'photo_reminder',
+      firstName: 'Aanu',
+      payload: { date: 'Hoy · 8 mayo', lastPhotoLabel: 'ayer' },
+      deepLink: '/journal/upload',
+    });
+
+    const payload = getSentEmailPayload(sendEmail);
+    expect(payload.subject).toBe('Añadir la foto de piel de hoy');
+    expect(payload.html).toContain('<html lang="es"');
+    expect(payload.html).toContain('Añade la foto de hoy');
   });
 
   it('escapes HTML in payload string values to prevent injection', async () => {

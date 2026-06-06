@@ -33,14 +33,14 @@ export class RegisterDto {
   @MinLength(1, { message: 'validation.name.required' })
   lastName!: string;
 
-  @ApiProperty({ enum: ['en', 'sv'], default: 'en' })
-  @IsIn(['en', 'sv'], { message: 'validation.language.unsupported' })
+  @ApiProperty({ enum: ['en', 'sv', 'es'], default: 'en' })
+  @IsIn(['en', 'sv', 'es'], { message: 'validation.language.unsupported' })
   preferredLanguage!: string;
 
-  @ApiProperty({ enum: ['en', 'sv'], required: false })
+  @ApiProperty({ enum: ['en', 'sv', 'es'], required: false })
   @EmptyStringToUndefined()
   @IsOptional()
-  @IsIn(['en', 'sv'], { message: 'validation.language.unsupported' })
+  @IsIn(['en', 'sv', 'es'], { message: 'validation.language.unsupported' })
   language?: string;
 
   @ApiProperty({ description: 'Must be true to register' })

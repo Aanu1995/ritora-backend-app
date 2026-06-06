@@ -6,6 +6,10 @@ dist/
 
 # Environment
 .env
+.env.local
+.env.prod
+.env.production
+.env.*.local
 
 # IDE
 .idea/
@@ -32,9 +36,3 @@ openapi.json
 coverage/
 
 .claude
-
-src/scripts/*
-!src/scripts/start-account-deletion-worker.ts
-scripts/
-!src/scripts/
-!src/scripts/evaluate-product-compare.ts

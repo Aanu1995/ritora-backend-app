@@ -169,6 +169,7 @@ function createService(
     configService?: ConfigService;
     jwtService?: Partial<JwtService>;
     mailService?: Partial<MailService>;
+    managerQuery?: jest.Mock;
   } = {},
 ): AdminAuthService {
   const accountsRepository = {
@@ -202,7 +203,7 @@ function createService(
     if (entity === AdminAuditLog) return auditLogsRepository;
     throw new Error('Unexpected transaction repository');
   });
-  const query = jest.fn();
+  const query = options.managerQuery ?? jest.fn();
   Object.defineProperty(accountsRepository, 'manager', {
     configurable: true,
     value: {
@@ -221,6 +222,9 @@ function createService(
     ...options.jwtService,
   } as unknown as JwtService;
   const mailService = {
+    buildAdminPasswordResetUrl: jest.fn(
+      (token: string) => `http://localhost:3002/reset-password/${token}`,
+    ),
     sendAdminInvitationEmail: jest.fn(),
     sendAdminPasswordResetEmail: jest.fn(),
     ...options.mailService,
@@ -237,18 +241,26 @@ function createService(
 }
 
 describe('AdminAuthService', () => {
-  it('bootstraps the root admin as an invited account from a one-time setup token', async () => {
+  it('bootstraps the root admin as an invited account with an emailed setup link', async () => {
     const save = jest.fn(async (value: AdminAccount) => value);
+    const managerQuery = jest.fn();
+    const sendAdminInvitationEmail = jest.fn();
     const service = createService({
       accountsRepository: {
         findOne: jest.fn(async () => null),
         save,
       },
+      configService: createConfig({
+        ADMIN_ROOT_SETUP_TOKEN_HASH: '',
+      }),
+      mailService: { sendAdminInvitationEmail },
+      managerQuery,
     });
 
     await service.onModuleInit();
 
     const savedRoot = save.mock.calls[0]?.[0];
+    const setupToken = sendAdminInvitationEmail.mock.calls[0]?.[1];
     expect(savedRoot).toMatchObject({
       canonical_email: 'owner@ritora.app',
       email: 'owner@ritora.app',
@@ -258,10 +270,19 @@ describe('AdminAuthService', () => {
     });
     expect(savedRoot?.password_hash).toBeNull();
     expect(savedRoot?.accepted_at).toBeNull();
-    expect(savedRoot?.invitation_token_hash).toBe(
-      sha256ForTest(TEST_ROOT_SETUP_TOKEN),
+    expect(setupToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(savedRoot?.invitation_token_hash).toBe(sha256ForTest(setupToken));
+    expect(sendAdminInvitationEmail).toHaveBeenCalledWith(
+      'owner@ritora.app',
+      setupToken,
+      'Ritora',
+      'en',
     );
     expect(savedRoot?.invitation_expires_at).toBeInstanceOf(Date);
+    expect(managerQuery).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      ['ritora_root_admin_bootstrap'],
+    );
   });
 
   it('does not rotate an active root admin password during bootstrap', async () => {
@@ -288,8 +309,8 @@ describe('AdminAuthService', () => {
     ).resolves.toBe(true);
   });
 
-  it('preserves an invited root setup token expiry across restarts', async () => {
-    const existingExpiry = new Date('2026-05-21T10:00:00.000Z');
+  it('keeps a pending invited root setup token stable across restarts', async () => {
+    const existingExpiry = new Date(Date.now() + 60_000);
     const invitedRoot = createAdminAccount({
       accepted_at: null,
       invitation_expires_at: existingExpiry,
@@ -298,11 +319,13 @@ describe('AdminAuthService', () => {
       status: AdminAccountStatus.Invited,
     });
     const save = jest.fn(async (value: AdminAccount) => value);
+    const sendAdminInvitationEmail = jest.fn();
     const service = createService({
       accountsRepository: {
         findOne: jest.fn(async () => invitedRoot),
         save,
       },
+      mailService: { sendAdminInvitationEmail },
     });
 
     await service.onModuleInit();
@@ -312,49 +335,74 @@ describe('AdminAuthService', () => {
       sha256ForTest(TEST_ROOT_SETUP_TOKEN),
     );
     expect(savedRoot?.invitation_expires_at).toBe(existingExpiry);
+    expect(sendAdminInvitationEmail).not.toHaveBeenCalled();
   });
 
-  it('rotates an invited root setup expiry when the configured hash changes', async () => {
-    const previousExpiry = new Date('2026-05-21T10:00:00.000Z');
-    const rotatedHash = sha256ForTest('b'.repeat(64));
+  it('rotates an expired invited root setup token without a configured token hash', async () => {
+    const expiredAt = new Date(Date.now() - 60_000);
     const invitedRoot = createAdminAccount({
       accepted_at: null,
-      invitation_expires_at: previousExpiry,
+      invitation_expires_at: expiredAt,
       invitation_token_hash: sha256ForTest(TEST_ROOT_SETUP_TOKEN),
       password_hash: null,
       status: AdminAccountStatus.Invited,
     });
     const save = jest.fn(async (value: AdminAccount) => value);
+    const sendAdminInvitationEmail = jest.fn();
     const service = createService({
       accountsRepository: {
         findOne: jest.fn(async () => invitedRoot),
         save,
       },
       configService: createConfig({
-        ADMIN_ROOT_SETUP_TOKEN_HASH: rotatedHash,
+        ADMIN_ROOT_SETUP_TOKEN_HASH: '',
       }),
+      mailService: { sendAdminInvitationEmail },
     });
 
     await service.onModuleInit();
 
     const savedRoot = save.mock.calls[0]?.[0];
-    expect(savedRoot?.invitation_token_hash).toBe(rotatedHash);
-    expect(savedRoot?.invitation_expires_at).not.toBe(previousExpiry);
+    const setupToken = sendAdminInvitationEmail.mock.calls[0]?.[1];
+    expect(setupToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(savedRoot?.invitation_token_hash).toBe(sha256ForTest(setupToken));
+    expect(savedRoot?.invitation_token_hash).not.toBe(
+      sha256ForTest(TEST_ROOT_SETUP_TOKEN),
+    );
+    expect(savedRoot?.invitation_expires_at).not.toBe(expiredAt);
+    expect(sendAdminInvitationEmail).toHaveBeenCalledWith(
+      'owner@ritora.app',
+      setupToken,
+      'Ritora',
+      'en',
+    );
   });
 
-  it('requires a one-time root setup token before the first root exists in every environment', async () => {
+  it('clears the pending root setup token when production email delivery fails', async () => {
+    const save = jest.fn(async (value: AdminAccount) => value);
+    const sendAdminInvitationEmail = jest.fn(async () => {
+      throw new Error('mail unavailable');
+    });
     const service = createService({
       accountsRepository: {
         findOne: jest.fn(async () => null),
+        save,
       },
       configService: createConfig({
         ADMIN_ROOT_SETUP_TOKEN_HASH: '',
+        NODE_ENV: 'production',
       }),
+      mailService: { sendAdminInvitationEmail },
     });
 
     await expect(service.onModuleInit()).rejects.toThrow(
-      'ADMIN_ROOT_SETUP_TOKEN_HASH',
+      'Unable to send root admin setup link',
     );
+
+    expect(save).toHaveBeenCalledTimes(2);
+    const clearedRoot = save.mock.calls[1]?.[0];
+    expect(clearedRoot?.invitation_token_hash).toBeNull();
+    expect(clearedRoot?.invitation_expires_at).toBeNull();
   });
 
   it('logs in an active admin and issues an admin refresh cookie', async () => {

@@ -1149,7 +1149,7 @@ describe('SmartPicksOverviewService', () => {
             new Map<string, GeneratedSmartPick>([
               ['broad-spectrum-sunscreen-spf-30', generatedPick()],
             ]),
-            { requestedGapCount: 2, missingPickCount: 1 },
+            { requestedGapCount: 1 },
           ),
         )
         .mockResolvedValueOnce(
@@ -1200,7 +1200,7 @@ describe('SmartPicksOverviewService', () => {
     expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
       1,
       expect.any(Object),
-      [priorityGap, considerGap],
+      [priorityGap],
     );
     expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
       2,
@@ -1352,7 +1352,7 @@ describe('SmartPicksOverviewService', () => {
         .fn()
         .mockResolvedValueOnce(
           aiGenerationResult(new Map<string, GeneratedSmartPick>(), {
-            requestedGapCount: 2,
+            requestedGapCount: 1,
             providerFailed: true,
           }),
         )
@@ -1399,23 +1399,23 @@ describe('SmartPicksOverviewService', () => {
     expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
       1,
       expect.any(Object),
-      [gaps[0], gaps[1]],
+      [gaps[0]],
     );
     expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
       2,
       expect.any(Object),
-      [gaps[2], gaps[3]],
+      [gaps[1]],
     );
-    for (let callIndex = 3; callIndex <= 10; callIndex += 1) {
-      const gapStartIndex = (callIndex - 1) * 2;
+    for (let callIndex = 3; callIndex <= 20; callIndex += 1) {
+      const gapStartIndex = callIndex - 1;
       expect(aiGenerator.generateWithDiagnostics).toHaveBeenNthCalledWith(
         callIndex,
         expect.any(Object),
-        [gaps[gapStartIndex], gaps[gapStartIndex + 1]],
+        [gaps[gapStartIndex]],
       );
     }
-    expect(aiGenerator.generateWithDiagnostics).toHaveBeenCalledTimes(10);
-    expect(repos.suggestions.save).toHaveBeenCalledTimes(18);
+    expect(aiGenerator.generateWithDiagnostics).toHaveBeenCalledTimes(20);
+    expect(repos.suggestions.save).toHaveBeenCalledTimes(19);
     expect(repos.suggestions.save).toHaveBeenCalledWith(
       expect.objectContaining({
         normalized_key: 'smart-lane-20',
@@ -1492,7 +1492,7 @@ describe('SmartPicksOverviewService', () => {
     expect(observability.record).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'smart_pick_unsafe_output_blocked',
-        metadata: expect.objectContaining({ blockedSafetyCount: 6 }),
+        metadata: expect.objectContaining({ blockedSafetyCount: 9 }),
       }),
     );
     expect(observability.record).toHaveBeenCalledWith(
@@ -2858,6 +2858,7 @@ function context(
     mode: 'refine',
     inputsHash: 'hash-1',
     productPerformance: [],
+    skinJournalSummary: null,
     missingProfileFields: [],
     ...overrides,
   };

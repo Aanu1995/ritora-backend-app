@@ -203,7 +203,7 @@ describe('SmartPicksAiGenerator', () => {
     const systemPrompt = requestBody.input?.[0]?.content?.[0]?.text ?? '';
     const userPrompt = requestBody.input?.[1]?.content?.[0]?.text ?? '';
     expect(requestBody).toEqual(
-      expect.objectContaining({ max_output_tokens: 6000, temperature: 0 }),
+      expect.objectContaining({ max_output_tokens: 24000, temperature: 0 }),
     );
     const responseSchema =
       requestBody.text?.format?.schema?.properties?.gaps?.items?.properties;
@@ -219,6 +219,16 @@ describe('SmartPicksAiGenerator', () => {
     expect(systemPrompt).toContain('repeated user reports');
     expect(systemPrompt).toContain(
       'Do not invent review counts, clinical claims, or guaranteed results',
+    );
+    expect(systemPrompt).toContain(
+      'Decision inputs: use only the supplied Smart Picks context',
+    );
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain(
+      'A valid pick must match the gap ingredientOrCategory, gapKind, safety context, budget tier, and shelf compatibility.',
+    );
+    expect(systemPrompt).toContain(
+      'Do not infer missing user facts, medical facts, product ownership, seller availability, or product performance.',
     );
     expect(systemPrompt).not.toMatch(/\bYou are a dermatologist\b/i);
     expect(userPrompt).toContain('Do not return purchase URLs, prices');
@@ -256,17 +266,30 @@ describe('SmartPicksAiGenerator', () => {
       'For priority gaps, explain why this product matters now.',
     );
     expect(userPrompt).toContain(
-      'For worth-considering gaps, explain why it may help but is not essential.',
+      'For priority=consider gaps, explain the specific profile, history, budget, environment, or tolerance signal that supports it.',
     );
     expect(userPrompt).toContain(
       'For goal-focused gaps, infer the most specific evidence-aligned product category',
     );
+    expect(userPrompt).toContain(
+      'Product pick decision hierarchy: safety and user dislikes first, then gap requirement, skin goal, budget tier, shelf compatibility, product performance history, location/access, and reputation.',
+    );
+    expect(userPrompt).toContain(
+      'A product pick must directly satisfy the gap ingredientOrCategory and gapKind',
+    );
+    expect(userPrompt).toContain(
+      'Do not answer an azelaic-acid gap with a generic brightening serum or a replacement gap with an add-on.',
+    );
+    expect(userPrompt).toContain(
+      'priority=consider can be returned only when it has a specific tie to the profile, history, budget, environment, or tolerance data shown above.',
+    );
     expect(userPrompt).not.toContain('retailer');
     expect(userPrompt).not.toContain('availability');
     expect(userPrompt).toContain('Product performance summary');
+    expect(userPrompt).toContain('Skin Journal analysis summary');
     expect(userPrompt).toContain('usageDaysLast90');
     expect(userPrompt).toContain(
-      'For replacement gaps, recommend a true replacement',
+      'For replacement gaps, recommend a product that can replace the owned product role in the routine.',
     );
     expect(userPrompt).toContain(
       'Photo and journal trends are decision support, not clinical proof',
@@ -363,6 +386,7 @@ describe('SmartPicksAiGenerator', () => {
           product('owned-spf', ProductCategory.SunProtection, 'Daily SPF'),
           product('owned-cleanser', ProductCategory.Cleanser, 'Owned Cleanser'),
         ],
+        productPerformance: [],
         skinProfile: profile({
           active_tolerances: {
             retinol: { tolerance: 'cannot_use' },
@@ -374,8 +398,8 @@ describe('SmartPicksAiGenerator', () => {
     expect(plan).toEqual(
       expect.objectContaining({
         coverage: expect.objectContaining({
-          filled: 1,
-          total: 2,
+          filled: 2,
+          total: 3,
           slots: [
             {
               role: 'spf',
@@ -389,6 +413,13 @@ describe('SmartPicksAiGenerator', () => {
               state: 'missing-priority',
               filledByProductId: null,
               filledByName: null,
+              goalRelevance: 'essential',
+            },
+            {
+              role: 'cleanse',
+              state: 'filled',
+              filledByProductId: 'owned-cleanser',
+              filledByName: 'Owned Brand Owned Cleanser',
               goalRelevance: 'essential',
             },
           ],
@@ -414,11 +445,31 @@ describe('SmartPicksAiGenerator', () => {
     expect(systemPrompt).toContain(
       'AI-first Smart Picks coverage and gap analyst',
     );
+    expect(systemPrompt).toContain(
+      'Coverage means owned active products that already answer a role for this user',
+    );
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain(
+      'A valid gap must have a concrete ingredient/product-category lane, a priority, a gapKind, sourceIds, and a reason tied to the supplied context.',
+    );
+    expect(systemPrompt).toContain(
+      'gaps mean missing purchase lanes that have evidence in the supplied context',
+    );
     expect(userPrompt).toContain(
       'Decide the coverage meter and purchase gaps from the full context',
     );
+    expect(userPrompt).toContain(
+      'Decision hierarchy for coverage and gaps: safety and user dislikes, current active shelf, Smart Picks mode, primary goal, current concerns, journal/photo trend summaries, product performance, environment, budget.',
+    );
+    expect(userPrompt).toContain(
+      'Coverage state definitions: filled=an active shelf product id matches the role by category, name, or ingredient list; missing-priority=essential missing role for this Smart Picks mode; missing=non-essential support role with explicit support from supplied data.',
+    );
+    expect(userPrompt).toContain(
+      'Priority definitions: priority=needed to make starter/refine advice coherent for the user goal or safety; consider=helpful secondary lane with explicit support from profile, history, environment, budget, or tolerance.',
+    );
     expect(userPrompt).toContain('Product performance summary');
-    expect(userPrompt).toContain('Photo and journal trends');
+    expect(userPrompt).toContain('Skin Journal analysis summary');
+    expect(userPrompt).toContain('Photo and journal analysis trends');
     expect(userPrompt).toContain(
       'Do not add generic hydration, eye, or nice-to-have coverage just to fill space',
     );
@@ -429,22 +480,22 @@ describe('SmartPicksAiGenerator', () => {
       'Use goal-primary and goal-support only when no specific allowed role describes the need',
     );
     expect(userPrompt).toContain(
-      'When a starter user has no active products, cleanser, moisturizer, and sunscreen are priority gaps unless the profile clearly says one is unsuitable',
+      'When a starter user has no active products, cleanser, moisturizer, and sunscreen are priority gaps unless profile, safety, or preference data says one is unsuitable',
     );
     expect(userPrompt).toContain(
-      'For premium or luxury budgets, include two worth-considering lanes when two safe, useful supports exist',
+      'For premium or luxury budgets, include two consider lanes only when two supports are not blocked by supplied safety/preference context',
     );
     expect(userPrompt).toContain(
-      'For starter mode with no active products and a real goal beyond basic maintenance, aim for four priority essentials or goal steps plus two worth-considering supports when safe',
+      'For starter mode with no active products and a goal beyond maintenance, aim for cleanser, moisturizer, sunscreen, and one goal lane as priority gaps when each fits the supplied profile',
     );
     expect(userPrompt).toContain(
-      'Worth-considering lanes still need concrete product categories',
+      'Priority=consider lanes still need concrete product categories',
     );
     expect(userPrompt).toContain(
       'Use the goal examples as examples, not a closed list',
     );
     expect(userPrompt).toContain(
-      'For pigment or uneven-tone goals, an antioxidant serum should usually be considered before more niche optional steps',
+      'For pigment or uneven-tone goals, consider an antioxidant serum before more niche optional steps unless already owned, blocked by safety, or disliked.',
     );
   });
 
@@ -764,6 +815,51 @@ describe('SmartPicksAiGenerator', () => {
     expect(plan?.considerGaps).toEqual([]);
   });
 
+  it('keeps replacement semantics when AI names only the replacement category', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock.mockResolvedValue(
+      openAiResponse({
+        coverage: {
+          slots: [
+            {
+              role: 'barrier-support',
+              state: 'missing-priority',
+              filledByProductId: null,
+              goalRelevance: 'essential',
+            },
+          ],
+        },
+        gaps: [
+          {
+            ingredientOrCategory: 'Calming barrier serum',
+            priority: 'consider',
+            reason:
+              'Use logs and photo checkpoints suggest the current product is not the right fit.',
+            shortReason: 'Consider a calmer replacement.',
+            goalAlignment: 'replacement for irritation',
+            sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+            gapKind: SmartPicksGapKind.Replacement,
+            replacementForProductId: 'owned-1',
+          },
+        ],
+      }),
+    );
+    const generator = new SmartPicksAiGenerator(configService());
+
+    const plan = await generator.generatePlan(context());
+
+    expect(plan?.priorityGaps).toContainEqual(
+      expect.objectContaining({
+        ingredientOrCategory:
+          'Replacement for Owned Cleanser: Calming barrier serum',
+        normalizedKey: 'replacement-for-owned-cleanser-calming-barrier-serum',
+        priority: 'priority',
+        gapKind: SmartPicksGapKind.Replacement,
+      }),
+    );
+  });
+
   it('removes urgent refine gaps when AI coverage says the shelf is already covered', async () => {
     const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
     global.fetch = fetchMock;
@@ -844,6 +940,97 @@ describe('SmartPicksAiGenerator', () => {
     expect(plan?.priorityGaps).toEqual([]);
     expect(plan?.considerGaps.map((gap) => gap.normalizedKey)).toEqual([
       'optional-calming-mask',
+    ]);
+  });
+
+  it('keeps maintenance shelves as no-buy when active products already cover the goal', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock.mockResolvedValue(
+      openAiResponse({
+        coverage: {
+          slots: [
+            {
+              role: 'cleanse',
+              state: 'filled',
+              filledByProductId: 'owned-cleanser',
+              goalRelevance: 'essential',
+            },
+            {
+              role: 'moisturise',
+              state: 'filled',
+              filledByProductId: 'owned-moisturizer',
+              goalRelevance: 'supportive',
+            },
+            {
+              role: 'spf',
+              state: 'filled',
+              filledByProductId: 'owned-spf',
+              goalRelevance: 'supportive',
+            },
+            {
+              role: 'acne-treatment',
+              state: 'filled',
+              filledByProductId: 'owned-bha',
+              goalRelevance: 'supportive',
+            },
+            {
+              role: 'antioxidant',
+              state: 'missing',
+              filledByProductId: null,
+              goalRelevance: 'optional',
+            },
+          ],
+        },
+        gaps: [
+          {
+            ingredientOrCategory: 'Antioxidant serum',
+            priority: 'consider',
+            reason: 'Optional routine support.',
+            shortReason: 'Optional support.',
+            goalAlignment: 'maintenance',
+            sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+            gapKind: SmartPicksGapKind.GoalSupport,
+          },
+        ],
+      }),
+    );
+    const generator = new SmartPicksAiGenerator(configService());
+    const activeProducts = [
+      product('owned-cleanser', ProductCategory.Cleanser, 'Cleanser'),
+      product('owned-moisturizer', ProductCategory.Moisturizer, 'Moisturizer'),
+      product('owned-spf', ProductCategory.SunProtection, 'SPF'),
+      ownedProduct({
+        id: 'owned-bha',
+        category: ProductCategory.Exfoliant,
+        name: 'Skin Perfecting 2% BHA Liquid Exfoliant',
+        identity: {
+          inciIngredients: ['salicylic acid'],
+        } as InventoryProduct['identity'],
+      }),
+    ];
+
+    const plan = await generator.generatePlan(
+      context({
+        activeProducts,
+        allProducts: activeProducts,
+        productPerformance: [],
+        budgetTier: 'mid',
+        skinProfile: profile({
+          primary_goal: 'maintain a calm clear routine',
+          current_concerns: ['occasional congestion'],
+        }),
+      }),
+    );
+
+    expect(plan?.priorityGaps).toEqual([]);
+    expect(plan?.considerGaps).toEqual([]);
+    expect(plan?.coverage.slots.map((slot) => slot.role)).toEqual([
+      'cleanse',
+      'moisturise',
+      'spf',
+      'acne-treatment',
+      'texture-exfoliant',
     ]);
   });
 
@@ -1581,6 +1768,7 @@ describe('SmartPicksAiGenerator', () => {
           product('owned-spf', ProductCategory.SunProtection, 'Daily SPF'),
           product('owned-cleanser', ProductCategory.Cleanser, 'Owned Cleanser'),
         ],
+        productPerformance: [],
         skinProfile: profile({
           active_tolerances: {
             retinol: { tolerance: 'cannot_use' },
@@ -1591,17 +1779,17 @@ describe('SmartPicksAiGenerator', () => {
 
     expect(result.plan).toEqual(
       expect.objectContaining({
-        coverage: expect.objectContaining({ filled: 1, total: 1 }),
+        coverage: expect.objectContaining({ filled: 2, total: 2 }),
       }),
     );
     expect(result.diagnostics).toEqual(
       expect.objectContaining({
         rawCoverageSlotCount: 2,
-        acceptedCoverageSlotCount: 1,
+        acceptedCoverageSlotCount: 2,
         invalidCoverageSlotCount: 1,
         rawGapCount: 4,
-        acceptedGapCount: 1,
-        acceptedPriorityGapCount: 1,
+        acceptedGapCount: 0,
+        acceptedPriorityGapCount: 0,
         invalidGapCount: 1,
         blockedOwnedGapCount: 1,
         blockedSafetyGapCount: 1,
@@ -1791,7 +1979,7 @@ describe('SmartPicksAiGenerator', () => {
 
     await generator.generateWithDiagnostics(context(), gaps().slice(0, 1));
 
-    expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(180_000);
   });
 
   it('accepts AI gap keys that need the same normalization as backend gaps', async () => {
@@ -1883,6 +2071,49 @@ describe('SmartPicksAiGenerator', () => {
     );
     expect(JSON.stringify(result.diagnostics)).not.toContain('Mineral SPF');
     expect(JSON.stringify(result.diagnostics)).not.toContain('example.com');
+  });
+
+  it('retries malformed structured output before failing Smart Picks', async () => {
+    const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+    global.fetch = fetchMock;
+    fetchMock
+      .mockResolvedValueOnce(openAiTextResponse('{not-json'))
+      .mockResolvedValueOnce(
+        openAiResponse({
+          gaps: [
+            {
+              normalizedKey: 'broad-spectrum-sunscreen-spf-30',
+              brand: 'Good Brand',
+              productName: 'Mineral SPF 50',
+              budgetTier: 'mid',
+              recommendationRankReason: 'Matches the protection gap.',
+              sellerNames: [],
+              reasoningChips: [],
+              reasoningFacts: {},
+              ruledOut: [],
+              alternatives: [],
+              sourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+            },
+          ],
+        }),
+      );
+    const generator = new SmartPicksAiGenerator(configService());
+
+    const result = await generator.generateWithDiagnostics(context(), [
+      gap(
+        'Broad-spectrum sunscreen SPF 30+',
+        'broad-spectrum-sunscreen-spf-30',
+      ),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.diagnostics).toEqual(
+      expect.objectContaining({
+        providerFailed: false,
+        acceptedPickCount: 1,
+        missingPickCount: 0,
+      }),
+    );
   });
 
   it('counts unsafe AI product output blocked by user preferences', async () => {
@@ -2380,10 +2611,30 @@ describe('SmartPicksAiGenerator', () => {
     expect(systemPrompt).toContain(
       'dermatologist-informed starter-kit treatment assessor',
     );
+    expect(systemPrompt).toContain(
+      'Decision inputs: use the supplied starter context only.',
+    );
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain(
+      'A treatment is allowed only when the supplied profile goal or concerns identify a treatment lane and the supplied safety/preference context does not block that lane.',
+    );
+    expect(systemPrompt).toContain(
+      'Do not infer a diagnosis, urgency, medication plan, or product ownership that is not shown.',
+    );
     expect(requestBody.temperature).toBe(0);
     expect(systemPrompt).not.toMatch(/\bYou are a dermatologist\b/i);
     expect(userPrompt).toContain('Starter treatment assessment');
     expect(userPrompt).toContain('Product performance summary');
+    expect(userPrompt).toContain('Skin Journal analysis summary');
+    expect(userPrompt).toContain(
+      'Starter treatment decision hierarchy: safety and dislikes, active tolerance, basic routine readiness, primary goal, current concerns, journal/photo summaries, product performance history.',
+    );
+    expect(userPrompt).toContain(
+      'Return shouldRecommend=false when the user needs only cleanser, moisturizer, and sunscreen first',
+    );
+    expect(userPrompt).toContain(
+      'Return shouldRecommend=true only when the selected lane is not blocked by dislikes, reaction triggers, pregnancy context, prescribed-active overlap, or dermatologist-care context.',
+    );
     expect(userPrompt).not.toContain('user-1');
   });
 
@@ -2544,6 +2795,10 @@ describe('SmartPicksAiGenerator', () => {
 });
 
 function openAiResponse(body: unknown): Response {
+  return openAiTextResponse(JSON.stringify(body));
+}
+
+function openAiTextResponse(text: string): Response {
   return {
     ok: true,
     json: jest.fn().mockResolvedValue({
@@ -2552,7 +2807,7 @@ function openAiResponse(body: unknown): Response {
           content: [
             {
               type: 'output_text',
-              text: JSON.stringify(body),
+              text,
             },
           ],
         },
@@ -2589,6 +2844,7 @@ function context(
     budgetTier: 'mid',
     mode: 'refine',
     inputsHash: 'hash-1',
+    skinJournalSummary: null,
     productPerformance: [
       {
         productId: 'owned-1',
@@ -2646,6 +2902,7 @@ function goldenPersonaContext(
     }),
     activeProducts,
     allProducts,
+    skinJournalSummary: persona.skinJournalSummary ?? null,
     productPerformance: persona.productPerformance.map((summary) => ({
       productId: summary.productId,
       brand: summary.brand,

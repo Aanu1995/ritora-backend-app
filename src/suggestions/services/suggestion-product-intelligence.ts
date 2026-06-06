@@ -19,6 +19,15 @@ import {
   mergeEvidenceSourceIds,
   sourceIdsForActiveTags,
 } from './suggestion-evidence-sources';
+import {
+  scoreSuggestionProductGoalFit,
+  SuggestionProductGoalFitReason,
+} from './suggestion-goal-intelligence';
+
+export { SuggestionProductGoalFitReason } from './suggestion-goal-intelligence';
+
+export const SUGGESTION_PRODUCT_SCORING_VERSION =
+  'selection-evidence-reaction-skip-2026-06-05';
 
 export enum SuggestionProductDataWarning {
   IngredientListMissing = 'ingredient list missing',
@@ -63,19 +72,24 @@ const ACTIVE_TAG_PATTERNS: Array<{ tag: string; pattern: RegExp }> = [
       /\bspf\b|sunscreen|uv filter|avobenzone|zinc oxide|titanium dioxide|uvinul|tinosorb|octocrylene/i,
   },
 ];
-
 export function scoreProductForSuggestion(
   product: InventoryProduct,
   options: {
     daypart: SuggestionDaypart;
     primaryGoal: string | null;
+    secondaryGoals?: string[];
     sensitivityLevel: string | null;
     recentUseCount: number;
+    adherenceCount?: number;
+    reactionSkipCount?: number;
+    substitutionCount?: number;
+    recentSameDaypartSuggestionCount?: number;
     hasReactionSignal: boolean;
     lockedProductIds: Set<string>;
     conservativeRestart: boolean;
     ingredientIntelligence?: ProductIngredientIntelligence;
     environment?: EnvironmentContextSummary | null;
+    targetDate?: string;
   },
 ): SuggestionProductScore {
   const activeTags = detectActiveTags(product);
@@ -111,9 +125,33 @@ export function scoreProductForSuggestion(
       cautions,
     );
   }
-  if (matchesGoal(product, options.primaryGoal)) {
-    score += 12;
-    reasons.push('matches primary skin goal');
+  const goalFit = scoreSuggestionProductGoalFit(product, {
+    primaryGoal: options.primaryGoal,
+    secondaryGoals: options.secondaryGoals ?? [],
+    activeTags,
+  });
+  if (goalFit.primaryMatch) {
+    score += 16;
+    reasons.push(SuggestionProductGoalFitReason.PrimarySelectedGoal);
+  }
+  if (goalFit.secondaryMatch) {
+    score += 8;
+    reasons.push(SuggestionProductGoalFitReason.SecondarySelectedGoal);
+  }
+  if ((options.reactionSkipCount ?? 0) > 0) {
+    score -= Math.min(16, (options.reactionSkipCount ?? 0) * 8);
+    cautions.push('recent reaction-related skip by user');
+  }
+  if ((options.substitutionCount ?? 0) > 0) {
+    score -= Math.min(12, (options.substitutionCount ?? 0) * 6);
+    cautions.push('recently substituted by user');
+  }
+  if (
+    (options.recentSameDaypartSuggestionCount ?? 0) > 0 &&
+    !isEssentialCurrentContextProduct(product, activeTags, options)
+  ) {
+    score -= Math.min(16, (options.recentSameDaypartSuggestionCount ?? 0) * 8);
+    cautions.push('recent same-daypart repeat');
   }
   if (options.recentUseCount > 4 && activeTags.some(isStrongActiveTag)) {
     score -= 18;
@@ -157,6 +195,10 @@ export function scoreProductForSuggestion(
       reasons,
       cautions,
     );
+  }
+  if (isExpiredForTargetDate(product, options.targetDate)) {
+    score -= 20;
+    cautions.push('product may be expired');
   }
 
   return {
@@ -268,12 +310,7 @@ function scorePreferredTime(
     reasons.push('product can be used any time');
     return 6;
   }
-  if (
-    (preferredTime === PreferredTimeOfDay.Morning &&
-      isDaytimeSuggestion(daypart)) ||
-    (preferredTime === PreferredTimeOfDay.Evening &&
-      daypart === SuggestionDaypart.Evening)
-  ) {
+  if (isPreferredTimeCompatibleWithDaypart(preferredTime, daypart)) {
     reasons.push('matches preferred time of day');
     return 12;
   }
@@ -285,6 +322,48 @@ function isDaytimeSuggestion(daypart: SuggestionDaypart): boolean {
   return (
     daypart === SuggestionDaypart.Morning || daypart === SuggestionDaypart.Noon
   );
+}
+
+export function isPreferredTimeCompatibleWithDaypart(
+  preferredTime: PreferredTimeOfDay | null | undefined,
+  daypart: SuggestionDaypart,
+): boolean {
+  if (!preferredTime || preferredTime === PreferredTimeOfDay.Either) {
+    return true;
+  }
+  if (preferredTime === PreferredTimeOfDay.Morning) {
+    return isDaytimeSuggestion(daypart);
+  }
+  return daypart === SuggestionDaypart.Evening;
+}
+
+function isEssentialCurrentContextProduct(
+  product: InventoryProduct,
+  activeTags: string[],
+  options: {
+    daypart: SuggestionDaypart;
+    lockedProductIds: Set<string>;
+    hasReactionSignal: boolean;
+  },
+): boolean {
+  return (
+    options.lockedProductIds.has(product.id) ||
+    product.category === ProductCategory.SunProtection ||
+    (options.hasReactionSignal &&
+      (product.category === ProductCategory.Moisturizer ||
+        activeTags.some(
+          (tag) => tag === 'barrier_support' || tag === 'ceramide',
+        )))
+  );
+}
+
+function isExpiredForTargetDate(
+  product: InventoryProduct,
+  targetDate: string | undefined,
+): boolean {
+  if (!targetDate || !product.effective_expires_at) return false;
+  const targetEnd = new Date(`${targetDate}T23:59:59.999Z`).getTime();
+  return product.effective_expires_at.getTime() < targetEnd;
 }
 
 function applyEnvironmentReasons(
@@ -311,23 +390,4 @@ function applyEnvironmentReasons(
   ) {
     cautions.push('dry air can make exfoliation feel harsher');
   }
-}
-
-function matchesGoal(
-  product: InventoryProduct,
-  primaryGoal: string | null,
-): boolean {
-  if (!primaryGoal) return false;
-  const goal = primaryGoal.toLowerCase();
-  const text = [
-    product.category,
-    ...(product.identity?.benefits ?? []),
-    ...(product.identity?.suitedFor ?? []),
-  ]
-    .join(' ')
-    .toLowerCase();
-  return goal
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .some((token) => token.length > 3 && text.includes(token));
 }

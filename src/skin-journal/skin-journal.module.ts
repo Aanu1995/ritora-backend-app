@@ -5,6 +5,7 @@ import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entit
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalInsightInteraction } from './entities/skin-journal-insight-interaction.entity';
+import { SkinJournalAnalysisFeedback } from './entities/skin-journal-analysis-feedback.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
 import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
 import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
@@ -12,12 +13,13 @@ import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import { SkinJournalAnalysisJob } from './entities/skin-journal-analysis-job.entity';
 import { SkinJournalMediaDeletionJob } from './entities/skin-journal-media-deletion-job.entity';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
-import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
 import { User } from '../users/entities/user.entity';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { RoutineStep } from '../schedule/entities/routine-step.entity';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
@@ -47,6 +49,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       SkinJournalEvent,
       SkinJournalInsight,
       SkinJournalInsightInteraction,
+      SkinJournalAnalysisFeedback,
       SkinJournalInsightGenerationRun,
       SkinJournalInsightJob,
       SkinJournalInsightState,
@@ -54,12 +57,13 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
       SkinJournalAnalysisJob,
       SkinJournalMediaDeletionJob,
       RoutineSimplificationEvent,
-      SkinJournalExportJob,
       AccountMonitoringEvent,
       UserConsent,
       User,
       SkinProfile,
       ApplicationLog,
+      InventoryProduct,
+      RoutineStep,
     ]),
   ],
   controllers: [SkinJournalController],

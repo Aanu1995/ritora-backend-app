@@ -8,8 +8,17 @@ export class AuthResponseDto {
   @ApiProperty({ type: UserResponseDto })
   user: UserResponseDto;
 
-  constructor(accessToken: string, user: UserResponseDto) {
+  declare refreshToken?: string;
+
+  constructor(
+    accessToken: string,
+    user: UserResponseDto,
+    refreshToken?: string,
+  ) {
     this.accessToken = accessToken;
     this.user = user;
+    if (refreshToken) {
+      this.refreshToken = refreshToken;
+    }
   }
 }

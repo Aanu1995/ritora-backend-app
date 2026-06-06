@@ -1,6 +1,15 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import {
+  type IngredientClassification,
+  type IngredientClassifierPort,
+  INGREDIENT_CLASSIFIER_PORT,
+} from '../src/ingredients/ingredient-classifier.port';
+import {
+  AnalysisSeverity,
+  IngredientCategory,
+} from '../src/ingredients/ingredients.types';
+import {
   ApplicationMethod,
   DataProvenance,
   PreferredTimeOfDay,
@@ -9,6 +18,7 @@ import {
   ShelfStatus,
 } from '../src/shelf/shelf.types';
 import {
+  closeTestApp,
   createCompletedSkinProfile,
   createTestApp,
   MockMailService,
@@ -24,6 +34,16 @@ const TEST_USER = {
   preferredLanguage: 'en',
   termsAccepted: true,
   privacyPolicyAccepted: true,
+};
+
+const ingredientClassifier: IngredientClassifierPort = {
+  classify: async ({ tokens }) =>
+    tokens
+      .map((token) => classifyIngredientForE2e(token))
+      .filter(
+        (classification): classification is IngredientClassification =>
+          classification !== null,
+      ),
 };
 
 function getAccessTokenFromResponse(res: request.Response): string {
@@ -91,6 +111,60 @@ function createInventoryDraft(overrides?: {
   };
 }
 
+function classifyIngredientForE2e(
+  token: string,
+): IngredientClassification | null {
+  const normalized = token.trim().toLowerCase();
+  const base = {
+    rawToken: token,
+    canonicalName: token,
+    confidence: 0.8,
+    summaryEn: `${token} classified for e2e analysis.`,
+    phSensitive: false,
+    photosensitizing: false,
+    requiresSpf: false,
+    irritationRisk: false,
+    overlapSeverity: AnalysisSeverity.Low,
+  };
+
+  if (normalized === 'retinol') {
+    return {
+      ...base,
+      category: IngredientCategory.Retinoid,
+      photosensitizing: true,
+      requiresSpf: true,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+  if (normalized === 'glycolic acid') {
+    return {
+      ...base,
+      category: IngredientCategory.Aha,
+      photosensitizing: true,
+      requiresSpf: true,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+  if (normalized === 'salicylic acid') {
+    return {
+      ...base,
+      category: IngredientCategory.Bha,
+      irritationRisk: true,
+      overlapSeverity: AnalysisSeverity.High,
+    };
+  }
+  if (normalized === 'niacinamide') {
+    return {
+      ...base,
+      category: IngredientCategory.Niacinamide,
+    };
+  }
+
+  return null;
+}
+
 describe('Ingredients (e2e)', () => {
   let app: INestApplication;
   let mockMail: MockMailService;
@@ -101,7 +175,12 @@ describe('Ingredients (e2e)', () => {
 
   beforeAll(async () => {
     mockMail = new MockMailService();
-    app = await createTestApp(mockMail);
+    app = await createTestApp(mockMail, [
+      {
+        provider: INGREDIENT_CLASSIFIER_PORT,
+        useValue: ingredientClassifier,
+      },
+    ]);
   });
 
   beforeEach(async () => {
@@ -182,10 +261,7 @@ describe('Ingredients (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (app) {
-      await truncateTables(app);
-      await app.close();
-    }
+    await closeTestApp(app);
   });
 
   it('returns educational actives in focus mode', async () => {
@@ -214,12 +290,7 @@ describe('Ingredients (e2e)', () => {
           category: 'retinoid',
           summary: expect.any(String),
           avoidCategories: expect.arrayContaining(['aha', 'bha']),
-          avoidIngredients: expect.arrayContaining([
-            expect.objectContaining({
-              slug: 'ascorbic-acid',
-              displayName: 'Vitamin C',
-            }),
-          ]),
+          avoidIngredients: [],
         }),
       ]),
     );

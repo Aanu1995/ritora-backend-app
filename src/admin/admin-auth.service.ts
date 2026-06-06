@@ -91,6 +91,11 @@ type AdminSecurityContext = {
   userAgent?: string;
 };
 
+type RootAdminSetupDelivery = {
+  account: AdminAccount;
+  token: string;
+};
+
 type AdminMutationRepositories = {
   accountsRepository: Repository<AdminAccount>;
   auditLogsRepository: Repository<AdminAuditLog>;
@@ -103,6 +108,7 @@ type ParsedRefreshToken = {
 };
 
 const ROOT_ADMIN_NAME = 'Root Admin';
+const ROOT_ADMIN_BOOTSTRAP_LOCK_KEY = 'ritora_root_admin_bootstrap';
 const ADMIN_TOKEN_TYPE = 'admin';
 const ADMIN_LIST_DEFAULT_LIMIT = 50;
 const ADMIN_LIST_MAX_LIMIT = 100;
@@ -1039,78 +1045,101 @@ export class AdminAuthService implements OnModuleInit {
       throw new Error('ADMIN_ROOT_EMAIL is required');
     }
 
-    const existing = await this.accountsRepository.findOne({
-      where: { canonical_email: canonicalEmail },
-      select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
-    });
+    const setupDelivery =
+      await this.accountsRepository.manager.transaction<RootAdminSetupDelivery | null>(
+        async (manager) => {
+          await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+            ROOT_ADMIN_BOOTSTRAP_LOCK_KEY,
+          ]);
+          const accountsRepository = manager.getRepository(AdminAccount);
+          const existing = await accountsRepository.findOne({
+            where: { canonical_email: canonicalEmail },
+            select: [...ADMIN_ACCOUNT_AUTH_SELECT_COLUMNS],
+          });
 
-    if (
-      existing?.password_hash &&
-      existing.status === AdminAccountStatus.Active &&
-      !existing.deleted_at
-    ) {
-      existing.email = rootEmail.trim();
-      existing.canonical_email = canonicalEmail;
-      existing.name = existing.name || ROOT_ADMIN_NAME;
-      existing.role = AdminAccountRole.Root;
-      existing.invitation_token_hash = null;
-      existing.invitation_expires_at = null;
-      existing.password_reset_token_hash = null;
-      existing.password_reset_expires = null;
-      await this.accountsRepository.save(existing);
-      return;
-    }
+          if (
+            existing?.password_hash &&
+            existing.status === AdminAccountStatus.Active &&
+            !existing.deleted_at
+          ) {
+            existing.email = rootEmail.trim();
+            existing.canonical_email = canonicalEmail;
+            existing.name = existing.name || ROOT_ADMIN_NAME;
+            existing.role = AdminAccountRole.Root;
+            existing.invitation_token_hash = null;
+            existing.invitation_expires_at = null;
+            existing.password_reset_token_hash = null;
+            existing.password_reset_expires = null;
+            await accountsRepository.save(existing);
+            return null;
+          }
 
-    const rootSetupTokenHash = this.resolveRootSetupTokenHash();
-    if (!rootSetupTokenHash) {
-      throw new Error(
-        'ADMIN_ROOT_SETUP_TOKEN_HASH is required until the root admin password has been set',
+          if (
+            existing &&
+            !existing.deleted_at &&
+            !existing.password_hash &&
+            existing.status === AdminAccountStatus.Invited &&
+            existing.invitation_token_hash &&
+            existing.invitation_expires_at &&
+            isAfterNow(existing.invitation_expires_at)
+          ) {
+            existing.email = rootEmail.trim();
+            existing.canonical_email = canonicalEmail;
+            existing.name = existing.name || ROOT_ADMIN_NAME;
+            existing.role = AdminAccountRole.Root;
+            existing.password_reset_token_hash = null;
+            existing.password_reset_expires = null;
+            await accountsRepository.save(existing);
+            this.logger.log(
+              `Root admin setup already pending for ${existing.email}; existing link remains valid until ${toIsoString(
+                existing.invitation_expires_at,
+              )}`,
+            );
+            return null;
+          }
+
+          const rootSetupToken = randomBytes(32).toString('hex');
+
+          const rootAccount =
+            existing ??
+            accountsRepository.create({
+              accepted_at: null,
+              canonical_email: canonicalEmail,
+              created_by_admin_id: null,
+              deleted_at: null,
+              email: rootEmail.trim(),
+              last_login_at: null,
+              name: ROOT_ADMIN_NAME,
+              password_reset_expires: null,
+              password_reset_token_hash: null,
+            });
+
+          rootAccount.email = rootEmail.trim();
+          rootAccount.canonical_email = canonicalEmail;
+          rootAccount.name = rootAccount.name || ROOT_ADMIN_NAME;
+          rootAccount.role = AdminAccountRole.Root;
+          rootAccount.status = AdminAccountStatus.Invited;
+          rootAccount.password_hash = null;
+          rootAccount.deleted_at = null;
+          rootAccount.invitation_token_hash = this.sha256(rootSetupToken);
+          rootAccount.invitation_expires_at = expiresFromDuration(
+            this.adminRootSetupExpiry,
+          );
+          rootAccount.password_reset_token_hash = null;
+          rootAccount.password_reset_expires = null;
+          rootAccount.accepted_at = null;
+
+          const savedRoot = await accountsRepository.save(rootAccount);
+          return { account: savedRoot, token: rootSetupToken };
+        },
+      );
+
+    if (setupDelivery) {
+      await this.sendRootSetupEmailOrLogFailure(
+        setupDelivery.account,
+        setupDelivery.token,
       );
     }
-
-    const rootAccount =
-      existing ??
-      this.accountsRepository.create({
-        accepted_at: null,
-        canonical_email: canonicalEmail,
-        created_by_admin_id: null,
-        deleted_at: null,
-        email: rootEmail.trim(),
-        invitation_expires_at: expiresFromDuration(this.adminRootSetupExpiry),
-        invitation_token_hash: rootSetupTokenHash,
-        last_login_at: null,
-        name: ROOT_ADMIN_NAME,
-        password_reset_expires: null,
-        password_reset_token_hash: null,
-      });
-
-    rootAccount.email = rootEmail.trim();
-    rootAccount.canonical_email = canonicalEmail;
-    rootAccount.name = rootAccount.name || ROOT_ADMIN_NAME;
-    rootAccount.role = AdminAccountRole.Root;
-    rootAccount.status = AdminAccountStatus.Invited;
-    rootAccount.password_hash = null;
-    rootAccount.deleted_at = null;
-    const hasSameSetupToken =
-      rootAccount.invitation_token_hash === rootSetupTokenHash;
-    rootAccount.invitation_token_hash = rootSetupTokenHash;
-    rootAccount.invitation_expires_at =
-      hasSameSetupToken && rootAccount.invitation_expires_at
-        ? rootAccount.invitation_expires_at
-        : expiresFromDuration(this.adminRootSetupExpiry);
-    rootAccount.password_reset_token_hash = null;
-    rootAccount.password_reset_expires = null;
-    rootAccount.accepted_at = null;
-
-    await this.accountsRepository.save(rootAccount);
-  }
-
-  private resolveRootSetupTokenHash(): string | null {
-    const configuredHash =
-      this.configService.get<string>('ADMIN_ROOT_SETUP_TOKEN_HASH')?.trim() ??
-      '';
-
-    return configuredHash ? configuredHash.toLowerCase() : null;
   }
 
   private async findAccountForAuth(
@@ -1557,6 +1586,37 @@ export class AdminAuthService implements OnModuleInit {
       );
     } catch (error) {
       this.logEmailDeliveryFailure('admin password reset', email, error);
+    }
+  }
+
+  private async sendRootSetupEmailOrLogFailure(
+    account: AdminAccount,
+    token: string,
+  ): Promise<void> {
+    const email = account.email;
+    const resetUrl = this.mailService.buildAdminPasswordResetUrl(token);
+
+    try {
+      await this.mailService.sendAdminInvitationEmail(
+        email,
+        token,
+        'Ritora',
+        'en',
+      );
+      this.logger.log(`Root admin setup link sent to ${email}`);
+    } catch (error) {
+      this.logEmailDeliveryFailure('root admin setup', email, error);
+
+      if (this.configService.get<string>('NODE_ENV') === 'production') {
+        account.invitation_token_hash = null;
+        account.invitation_expires_at = null;
+        await this.accountsRepository.save(account);
+        throw new Error(
+          `Unable to send root admin setup link to ${email}; check mail configuration and restart the backend.`,
+        );
+      }
+
+      this.logger.warn(`Root admin setup link for local setup: ${resetUrl}`);
     }
   }
 

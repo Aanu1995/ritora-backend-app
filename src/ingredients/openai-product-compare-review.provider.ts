@@ -1,16 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  extractJsonObject,
-  extractOutputText,
-  type OpenAiResponsePayload,
-} from '../catalogue/openai-extraction.utils';
+import { extractJsonObject } from '../catalogue/openai-extraction.utils';
 import {
   OPENAI_MODEL_ENV_KEY,
   PRODUCT_CHECK_AI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_PRODUCT_COMPARE_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
+import {
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
+  INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+} from './ingredient-analysis-runtime.constants';
 import {
   buildProductCompareAiReviewPayload,
   sanitizeProductCompareAiReview,
@@ -26,8 +30,12 @@ import type {
   ProductCompareAiReview,
   ProductCompareAiReviewInput,
 } from './product-compare.types';
+import { requestOpenAiStructuredOutput } from './openai-structured-output-request';
 
-export const OPENAI_PRODUCT_COMPARE_REVIEW_REQUEST_TIMEOUT_MS = 90_000;
+export const OPENAI_PRODUCT_COMPARE_REVIEW_REQUEST_TIMEOUT_MS =
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS;
+export const OPENAI_PRODUCT_COMPARE_REVIEW_MAX_OUTPUT_TOKENS =
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS;
 const DEFAULT_MODEL = 'gpt-5-mini';
 
 @Injectable()
@@ -73,18 +81,18 @@ export class OpenAiProductCompareReviewProvider implements ProductCompareAiRevie
 
     const startedAt = Date.now();
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const response = await requestOpenAiStructuredOutput({
+        apiKey,
+        attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+        timeoutMs: OPENAI_PRODUCT_COMPARE_REVIEW_REQUEST_TIMEOUT_MS,
+        body: {
           model,
           store: false,
-          reasoning: { effort: 'low' },
-          max_output_tokens: 700,
-          ...openAiRepeatabilityRequestOptions(model),
+          max_output_tokens: OPENAI_PRODUCT_COMPARE_REVIEW_MAX_OUTPUT_TOKENS,
+          ...openAiRepeatabilityRequestOptions(
+            model,
+            OPENAI_PRODUCT_COMPARE_REASONING_EFFORT,
+          ),
           input: [
             {
               role: 'system',
@@ -114,10 +122,7 @@ export class OpenAiProductCompareReviewProvider implements ProductCompareAiRevie
             verbosity: 'low',
             format: PRODUCT_COMPARE_REVIEW_FORMAT,
           },
-        }),
-        signal: AbortSignal.timeout(
-          OPENAI_PRODUCT_COMPARE_REVIEW_REQUEST_TIMEOUT_MS,
-        ),
+        },
       });
 
       const durationMs = Date.now() - startedAt;
@@ -127,18 +132,19 @@ export class OpenAiProductCompareReviewProvider implements ProductCompareAiRevie
           reason: 'http_error',
           status: response.status,
           model,
+          attempt: response.attempt,
           durationMs,
         });
         return unavailableProductCompareAiReview();
       }
 
-      const payload = (await response.json()) as OpenAiResponsePayload;
-      const outputText = extractOutputText(payload);
+      const outputText = response.outputText;
       if (!outputText) {
         this.logStructured('warn', {
           event: 'product_compare_ai_review_failed',
           reason: 'empty_output',
           model,
+          attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
           durationMs,
         });
         return unavailableProductCompareAiReview();

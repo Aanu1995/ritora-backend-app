@@ -1,24 +1,77 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  extractJsonObject,
-  extractOutputText,
-  type OpenAiResponsePayload,
-} from '../catalogue/openai-extraction.utils';
+import { DataSource } from 'typeorm';
+import { extractJsonObject } from '../catalogue/openai-extraction.utils';
 import {
   INGREDIENT_EXPLANATION_AI_MODEL_ENV_KEY,
   OPENAI_MODEL_ENV_KEY,
   readFeatureOpenAiModel,
 } from '../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../common/utils/openai-request-options';
+import {
+  OPENAI_INGREDIENT_EXPLANATION_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../common/utils/openai-request-options';
+import {
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS,
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS,
+  INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+  PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS,
+} from './ingredient-analysis-runtime.constants';
 import type {
   ExplanationInput,
   ExplanationOutput,
   ExplanationPort,
 } from './explanation.port';
+import {
+  IngredientAnalysisAiMetricOperation,
+  IngredientAnalysisAiMetricSource,
+  IngredientAnalysisAiMetricStatus,
+  type IngredientAnalysisAiUsage,
+  normalizeIngredientAnalysisAiUsage,
+  recordIngredientAnalysisAiUsageMetric,
+} from './ingredient-analysis-ai-usage-metrics';
+import { requestOpenAiStructuredOutput } from './openai-structured-output-request';
 
-export const OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS = 45_000;
+export const OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS =
+  INGREDIENT_ANALYSIS_AI_REQUEST_TIMEOUT_MS;
+export const OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS =
+  INGREDIENT_ANALYSIS_AI_MAX_OUTPUT_TOKENS;
 const DEFAULT_MODEL = 'gpt-5-mini';
+const EXPLANATION_JSON_CONTRACT =
+  'Keep JSON keys exactly as schema keys: conflicts, overlaps, id, explanation. Keep ids exactly as provided. Translate only explanation string values.';
+const EXPLANATION_LANGUAGE_LABELS: Record<
+  ExplanationInput['language'],
+  string
+> = {
+  en: 'English',
+  sv: 'Swedish',
+  es: 'Spanish',
+};
+const CANONICAL_INGREDIENT_EXPLANATION_PROMPT = [
+  'Role: act as a non-diagnostic skincare ingredient explanation specialist for Ritora ingredient analysis.',
+  'Task: write short user-facing explanations for supplied structured ingredient conflicts and overlaps.',
+  'Decision inputs:',
+  '- language: output language for explanation values.',
+  '- schema: exact JSON response shape.',
+  '- findings.conflicts: structured conflict records with ids, codes, severity, ingredient names, descriptions, and optional mitigation.',
+  '- findings.overlaps: structured overlap records with ids, severity, ingredient name, product count, and description.',
+  'Hard rules:',
+  '- Use only supplied conflicts and overlaps. Do not add new ingredient pairings, new products, new risks, or new instructions.',
+  '- Do not create new advice such as patch testing, stopping a product, adding sunscreen, or seeing a doctor unless supplied in the finding.',
+  '- Do not diagnose, treat, cure, prescribe, or claim certainty about skin outcomes.',
+  '- Do not contradict supplied severity, description, mitigation, ingredient names, ids, or product counts.',
+  '- Do not mention prompts, schemas, internal rules, JSON, model behavior, deterministic engines, or unsupported certainty.',
+  '- Keep explanations practical and non-alarmist. If the finding is mild or informational, do not make it sound severe.',
+  'Writing policy:',
+  '- Write one concise sentence per supplied finding.',
+  '- Sentence structure: mention the supplied ingredient or pair, the supplied routine concern, and the supplied mitigation only when present.',
+  '- Explain why the finding matters for routine use, spacing, duplication, irritation risk, or sunscreen support only when supplied data supports it.',
+  '- Mention only supplied ingredient names or concise ingredient groups already present in the finding.',
+  '- Prefer cautious wording such as may, can, could, or consider when the source finding is not definitive.',
+  'Output format:',
+  EXPLANATION_JSON_CONTRACT,
+  'Return JSON only.',
+];
 const EXPLANATION_RESPONSE_FORMAT = {
   type: 'json_schema',
   name: 'ingredient_explanations',
@@ -60,8 +113,13 @@ const EXPLANATION_RESPONSE_FORMAT = {
 export class OpenAiExplanationProvider implements ExplanationPort {
   private readonly logger = new Logger(OpenAiExplanationProvider.name);
   private hasWarnedMissingModel = false;
+  private hasWarnedMetricWriteFailure = false;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional()
+    private readonly dataSource?: DataSource,
+  ) {}
 
   /**
    * Check once at boot whether the model env var is set. Emits a single WARN
@@ -109,29 +167,29 @@ export class OpenAiExplanationProvider implements ExplanationPort {
     const startedAt = Date.now();
 
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const response = await requestOpenAiStructuredOutput({
+        apiKey,
+        attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
+        timeoutMs: explanationRequestTimeoutMs(input.tracking),
+        body: {
           model,
           store: false,
-          reasoning: { effort: 'low' },
           text: {
             verbosity: 'low',
             format: EXPLANATION_RESPONSE_FORMAT,
           },
-          max_output_tokens: 700,
-          ...openAiRepeatabilityRequestOptions(model),
+          max_output_tokens: OPENAI_EXPLANATION_MAX_OUTPUT_TOKENS,
+          ...openAiRepeatabilityRequestOptions(
+            model,
+            OPENAI_INGREDIENT_EXPLANATION_REASONING_EFFORT,
+          ),
           input: [
             {
               role: 'system',
               content: [
                 {
                   type: 'input_text',
-                  text: this.systemPrompt(input.language),
+                  text: ingredientExplanationSystemPrompt(input.language),
                 },
               ],
             },
@@ -155,8 +213,7 @@ export class OpenAiExplanationProvider implements ExplanationPort {
               ],
             },
           ],
-        }),
-        signal: AbortSignal.timeout(OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS),
+        },
       });
 
       const durationMs = Date.now() - startedAt;
@@ -167,32 +224,80 @@ export class OpenAiExplanationProvider implements ExplanationPort {
           reason: 'http_error',
           status: response.status,
           model,
+          attempt: response.attempt,
           durationMs,
+        });
+        await this.recordMetric({
+          durationMs,
+          model,
+          status: IngredientAnalysisAiMetricStatus.Failed,
+          tracking: input.tracking,
+          usage: null,
         });
         return null;
       }
 
-      const payload = (await response.json()) as OpenAiResponsePayload;
-      const outputText = extractOutputText(payload);
+      const payload = response.payload;
+      const usage = normalizeIngredientAnalysisAiUsage(payload.usage);
+      const outputText = response.outputText;
       if (!outputText) {
         this.logStructured('warn', {
           event: 'explanation_failed',
           reason: 'empty_output',
           model,
+          attempts: INGREDIENT_ANALYSIS_AI_STRUCTURED_OUTPUT_ATTEMPTS,
           durationMs,
+        });
+        await this.recordMetric({
+          durationMs,
+          model,
+          status: IngredientAnalysisAiMetricStatus.Failed,
+          tracking: input.tracking,
+          usage,
         });
         return null;
       }
 
-      const parsed = JSON.parse(extractJsonObject(outputText)) as Partial<{
+      let parsed: Partial<{
         conflicts: Array<{ id?: string; explanation?: string }>;
         overlaps: Array<{ id?: string; explanation?: string }>;
       }>;
+      try {
+        parsed = JSON.parse(extractJsonObject(outputText)) as Partial<{
+          conflicts: Array<{ id?: string; explanation?: string }>;
+          overlaps: Array<{ id?: string; explanation?: string }>;
+        }>;
+      } catch (error) {
+        this.logStructured('warn', {
+          event: 'explanation_failed',
+          reason: 'invalid_output',
+          message: error instanceof Error ? error.message : 'Unknown error',
+          model,
+          attempt: response.attempt,
+          durationMs,
+        });
+        await this.recordMetric({
+          durationMs,
+          model,
+          status: IngredientAnalysisAiMetricStatus.Failed,
+          tracking: input.tracking,
+          usage,
+        });
+        return null;
+      }
 
-      return {
+      const output = {
         conflicts: this.toLookup(parsed.conflicts),
         overlaps: this.toLookup(parsed.overlaps),
       };
+      await this.recordMetric({
+        durationMs,
+        model,
+        status: IngredientAnalysisAiMetricStatus.Completed,
+        tracking: input.tracking,
+        usage,
+      });
+      return output;
     } catch (error) {
       this.logStructured('warn', {
         event: 'explanation_failed',
@@ -201,7 +306,39 @@ export class OpenAiExplanationProvider implements ExplanationPort {
         model,
         durationMs: Date.now() - startedAt,
       });
+      await this.recordMetric({
+        durationMs: Date.now() - startedAt,
+        model,
+        status: IngredientAnalysisAiMetricStatus.Failed,
+        tracking: input.tracking,
+        usage: null,
+      });
       return null;
+    }
+  }
+
+  private async recordMetric(input: {
+    durationMs: number;
+    model: string;
+    status: IngredientAnalysisAiMetricStatus;
+    tracking?: ExplanationInput['tracking'];
+    usage: IngredientAnalysisAiUsage | null;
+  }): Promise<void> {
+    const recorded = await recordIngredientAnalysisAiUsageMetric(
+      this.dataSource,
+      this.logger,
+      {
+        durationMs: input.durationMs,
+        model: input.model,
+        operation: IngredientAnalysisAiMetricOperation.Explanation,
+        status: input.status,
+        tracking: input.tracking,
+        usage: input.usage,
+      },
+      { logFailure: !this.hasWarnedMetricWriteFailure },
+    );
+    if (!recorded) {
+      this.hasWarnedMetricWriteFailure = true;
     }
   }
 
@@ -211,14 +348,6 @@ export class OpenAiExplanationProvider implements ExplanationPort {
       INGREDIENT_EXPLANATION_AI_MODEL_ENV_KEY,
       DEFAULT_MODEL,
     );
-  }
-
-  private systemPrompt(language: ExplanationInput['language']): string {
-    if (language === 'sv') {
-      return 'Du skriver korta, tydliga hudvårdsförklaringar på svenska. Håll dig strikt till de strukturerade fynden. Hitta inte på nya risker eller instruktioner. Svara endast med JSON.';
-    }
-
-    return 'You write short, clear skincare explanations in English. Stay strictly within the structured findings. Do not invent any new risk or instruction. Return JSON only.';
   }
 
   private logStructured(
@@ -253,4 +382,22 @@ export class OpenAiExplanationProvider implements ExplanationPort {
 
     return lookup;
   }
+}
+
+export function ingredientExplanationSystemPrompt(
+  language: ExplanationInput['language'],
+): string {
+  const outputLanguage = EXPLANATION_LANGUAGE_LABELS[language];
+  return [
+    ...CANONICAL_INGREDIENT_EXPLANATION_PROMPT,
+    `Output language: ${outputLanguage}. Write explanation values in ${outputLanguage}.`,
+  ].join(' ');
+}
+
+function explanationRequestTimeoutMs(
+  tracking?: ExplanationInput['tracking'],
+): number {
+  return tracking?.source === IngredientAnalysisAiMetricSource.QuickCheck
+    ? PRODUCT_CHECK_SYNC_AI_REQUEST_TIMEOUT_MS
+    : OPENAI_EXPLANATION_REQUEST_TIMEOUT_MS;
 }

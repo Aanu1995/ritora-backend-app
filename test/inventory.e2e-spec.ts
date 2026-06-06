@@ -20,6 +20,7 @@ import {
   type UserFields,
 } from '../src/shelf/shelf.types';
 import {
+  closeTestApp,
   createCompletedSkinProfile,
   createTestApp,
   MockMailService,
@@ -316,8 +317,7 @@ describe('Inventory (e2e)', () => {
   });
 
   afterAll(async () => {
-    await truncateTables(app);
-    await app.close();
+    await closeTestApp(app);
   });
 
   function authGet(path: string, query?: Record<string, string | number>) {

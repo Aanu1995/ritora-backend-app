@@ -16,6 +16,9 @@ import {
   AdminAccountMonitoringSeverity,
   AdminAccountMonitoringSignalType,
   AdminAccountMonitoringStatus,
+  encryptedAccountMonitoringInternalNoteTransformer,
+  encryptedAccountMonitoringLatestSignalTransformer,
+  encryptedAccountMonitoringResolutionNoteTransformer,
 } from './entities/admin-account-monitoring-flag.entity';
 import {
   ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
@@ -30,6 +33,8 @@ import {
   AdminOperationalIncident,
   AdminOperationalIncidentSeverity,
   AdminOperationalIncidentStatus,
+  encryptedIncidentDescriptionTransformer,
+  encryptedIncidentResolutionTransformer,
 } from './entities/admin-operational-incident.entity';
 import {
   AdminNotification,
@@ -37,12 +42,17 @@ import {
   AdminNotificationType,
 } from './entities/admin-notification.entity';
 import { AdminUserNote } from './entities/admin-user-note.entity';
-import { AdminJobStatus, AdminUserRestrictionFilter } from './admin.types';
+import {
+  AdminAiCostFeatureFilter,
+  AdminJobStatus,
+  AdminUserRestrictionFilter,
+} from './admin.types';
 import { AdminOperationalIncidentStatusFilter } from './dto/admin-operational-incident.dto';
 import { AdminAccountMonitoringStatusFilter } from './dto/admin-account-monitoring.dto';
 import { UserRestrictionCapability } from '../users/user-restrictions';
 import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
+import { SkinJournalAnalysisFeedback } from '../skin-journal/entities/skin-journal-analysis-feedback.entity';
 
 type RepositoryMock = Record<string, unknown>;
 
@@ -57,6 +67,7 @@ const restrictionUserMessageTransformer =
 
 function createAdminDataSourceMock(options: {
   accountsRepository?: Partial<RepositoryMock>;
+  analysisFeedbackRepository?: Partial<RepositoryMock>;
   auditLogsRepository?: Partial<RepositoryMock>;
   incidentsRepository?: Partial<RepositoryMock>;
   notificationsRepository?: Partial<RepositoryMock>;
@@ -81,6 +92,10 @@ function createAdminDataSourceMock(options: {
     create: jest.fn((value: Partial<AdminAuditLog>) => value as AdminAuditLog),
     save: jest.fn(async (value: AdminAuditLog) => value),
     ...options.auditLogsRepository,
+  };
+  const analysisFeedbackRepository = {
+    find: jest.fn(async () => []),
+    ...options.analysisFeedbackRepository,
   };
   const notesRepository = {
     create: jest.fn((value: Partial<AdminUserNote>) => value as AdminUserNote),
@@ -159,6 +174,9 @@ function createAdminDataSourceMock(options: {
       if (entity === AdminUserNote) return notesRepository;
       if (entity === AdminOperationalIncident) return incidentsRepository;
       if (entity === AdminNotification) return notificationsRepository;
+      if (entity === SkinJournalAnalysisFeedback) {
+        return analysisFeedbackRepository;
+      }
       throw new Error('Unexpected repository requested');
     }),
   };
@@ -166,6 +184,7 @@ function createAdminDataSourceMock(options: {
   return {
     getRepository: jest.fn((entity: unknown) => {
       if (entity === AdminAccount) return accountsRepository;
+      if (entity === AdminAuditLog) return auditLogsRepository;
       if (entity === AdminUserNote) return notesRepository;
       if (entity === AdminOperationalIncident) return incidentsRepository;
       if (entity === AdminNotification) return notificationsRepository;
@@ -175,6 +194,9 @@ function createAdminDataSourceMock(options: {
       if (entity === AdminAccountMonitoringFlag) return monitoringRepository;
       if (entity === AdminAccountMonitoringSettings) {
         return monitoringSettingsRepository;
+      }
+      if (entity === SkinJournalAnalysisFeedback) {
+        return analysisFeedbackRepository;
       }
       throw new Error('Unexpected repository requested');
     }),
@@ -389,7 +411,6 @@ describe('AdminService', () => {
           active_restrictions: '4',
           daily_active_users: '90',
           daily_checkin_users: '124',
-          failed_export_count: '2',
           journal_ai_cost_mtd: '7.4',
           journal_ai_cost_today: '1.2',
           journal_users: '520',
@@ -450,6 +471,10 @@ describe('AdminService', () => {
           analysis_failed_count: '2',
           insight_completed_count: '70',
           insight_failed_count: '5',
+          ingredient_analysis_ai_cost_mtd: '1.2',
+          ingredient_analysis_ai_cost_today: '0.2',
+          ingredient_analysis_completed_count: '44',
+          ingredient_analysis_failed_count: '4',
           verified_users: '1000',
           weekly_active_users: '320',
           active_user_trend: [
@@ -506,6 +531,13 @@ describe('AdminService', () => {
           oldest_queued_age_seconds: '120',
           queued: '2',
         },
+        {
+          failed: '1',
+          id: 'ingredient-analysis',
+          label: 'Ingredient analysis',
+          oldest_queued_age_seconds: '300',
+          queued: '4',
+        },
       ]);
     const service = new AdminService({ query } as unknown as DataSource);
 
@@ -517,11 +549,11 @@ describe('AdminService', () => {
     expect(result.metrics).toEqual({
       activeRestrictions: 4,
       activationRate: 61,
-      aiSuccessRate: 99,
-      criticalAlerts: 2,
+      aiSuccessRate: 98,
+      criticalAlerts: 1,
       dailyActiveUsers: 90,
       dailyCheckInRate: 10,
-      monthToDateAiCostUsd: 19.4,
+      monthToDateAiCostUsd: 20.6,
       monthlyActiveUsers: 690,
       newSignups30d: 240,
       newSignups7d: 84,
@@ -529,7 +561,7 @@ describe('AdminService', () => {
       productAddSuccessRate: 40,
       registeredUsers: 1240,
       routineAcceptanceRate: 61,
-      todayAiCostUsd: 3.3,
+      todayAiCostUsd: 3.5,
       verifiedUsers: 1000,
       weeklyActiveUsers: 320,
     });
@@ -651,6 +683,13 @@ describe('AdminService', () => {
         todayCostUsd: 0.6,
       },
       {
+        id: 'ingredient_analysis',
+        label: 'Ingredient analysis',
+        monthToDateCostUsd: 1.2,
+        successRate: 92,
+        todayCostUsd: 0.2,
+      },
+      {
         id: 'smart_picks',
         label: 'Smart Picks',
         monthToDateCostUsd: 3.5,
@@ -707,6 +746,10 @@ describe('AdminService', () => {
         id: 'quick_check_ai_cost',
         source: 'table',
       },
+      {
+        id: 'ingredient_analysis_ai_cost',
+        source: 'table',
+      },
     ]);
     expect(result.jobHealth[0]).toEqual({
       failed: 3,
@@ -722,10 +765,6 @@ describe('AdminService', () => {
           severity: 'critical',
           title: 'Analysis queue delayed',
         }),
-        expect.objectContaining({
-          severity: 'critical',
-          title: 'Journal exports failing',
-        }),
       ]),
     );
     expect(result.alerts).not.toEqual(
@@ -734,7 +773,6 @@ describe('AdminService', () => {
       ]),
     );
     expect(result.compliance).toEqual({
-      failedExportCount: 2,
       pendingDeletionCount: 1,
       sensitiveAccessEvents24h: 3,
     });
@@ -745,6 +783,7 @@ describe('AdminService', () => {
     expect(metricsSql).toContain('http_request_metrics');
     expect(metricsSql).toContain('ai_estimated_cost_usd IS NOT NULL');
     expect(metricsSql).toContain('product_check_ai_review_metrics');
+    expect(metricsSql).toContain('ingredient_analysis_ai_usage_metrics');
     expect(metricsSql).toContain('skin_journal_insight_generation_runs');
     expect(metricsSql).toContain("event_type = 'data_accessed'");
     expect(metricsSql).not.toContain(
@@ -753,6 +792,7 @@ describe('AdminService', () => {
     const jobHealthSql = String(query.mock.calls[1]?.[0]);
     expect(jobHealthSql).toContain('UNION ALL');
     expect(jobHealthSql).toContain('skin_journal_analysis_jobs');
+    expect(jobHealthSql).toContain('ingredient_product_analysis_jobs');
     expect(query).toHaveBeenCalledTimes(2);
     expect(metricsSql).not.toContain('password_hash');
     expect(metricsSql).not.toContain('photo_object_key');
@@ -773,13 +813,15 @@ describe('AdminService', () => {
           journal_analysis_cost_today: '0.4',
           journal_insights_cost_mtd: '0.3',
           journal_insights_cost_today: '0.1',
+          ingredient_analysis_cost_mtd: '0.2',
+          ingredient_analysis_cost_today: '0.1',
           last_name: 'Doe',
-          month_to_date_cost_usd: '3.1',
+          month_to_date_cost_usd: '3.3',
           quick_check_cost_mtd: '0.6',
           quick_check_cost_today: '0.1',
           smart_picks_cost_mtd: '0.3',
           smart_picks_cost_today: '0',
-          today_cost_usd: '0.8',
+          today_cost_usd: '0.9',
           total_count: '1',
           user_id: '01USER',
         },
@@ -788,7 +830,7 @@ describe('AdminService', () => {
 
     await expect(
       service.listAiCostByUsers({
-        feature: 'quick_check',
+        feature: AdminAiCostFeatureFilter.IngredientAnalysis,
         limit: 10,
         page: 1,
         period: 'today',
@@ -830,15 +872,21 @@ describe('AdminService', () => {
               todayCostUsd: 0.1,
             },
             {
+              id: 'ingredient_analysis',
+              label: 'Ingredient analysis',
+              monthToDateCostUsd: 0.2,
+              todayCostUsd: 0.1,
+            },
+            {
               id: 'smart_picks',
               label: 'Smart Picks',
               monthToDateCostUsd: 0.3,
               todayCostUsd: 0,
             },
           ],
-          monthToDateCostUsd: 3.1,
+          monthToDateCostUsd: 3.3,
           name: 'Jane Doe',
-          todayCostUsd: 0.8,
+          todayCostUsd: 0.9,
           userId: '01USER',
         },
       ],
@@ -849,8 +897,9 @@ describe('AdminService', () => {
     expect(sql).toContain('INNER JOIN candidate_users cost_users');
     expect(sql).toContain('INNER JOIN candidate_users users');
     expect(sql).toContain('feature_rollups AS');
-    expect(sql).toContain('product_check_ai_review_metrics');
-    expect(sql).toContain('GROUP BY quick_checks.user_id');
+    expect(sql).toContain('ingredient_analysis_ai_usage_metrics');
+    expect(sql).toContain('GROUP BY ingredient_usage.user_id');
+    expect(sql).not.toContain('product_check_ai_review_metrics');
     expect(sql).not.toContain('skin_journal_entries');
     expect(sql).not.toContain('skin_journal_insight_generation_runs');
     expect(sql).not.toContain('suggestion_instances');
@@ -1208,7 +1257,6 @@ describe('AdminService', () => {
           created_at: '2026-05-01T10:00:00.000Z',
           email: 'jane@example.com',
           email_verified: true,
-          failed_export_count: '0',
           first_name: 'Jane',
           has_skin_profile: true,
           id: '01USER',
@@ -1260,7 +1308,6 @@ describe('AdminService', () => {
       '01USER',
       'completed',
       'failed',
-      'failed',
       expect.any(Date),
     ]);
     expect(result.activity).toEqual({
@@ -1275,7 +1322,6 @@ describe('AdminService', () => {
       totalSessionCount: 3,
     });
     expect(result.safety).toEqual({
-      failedExportCount: 0,
       sensitiveAccessEvents24h: 1,
     });
     expect(result.restrictionInternalNote).toBe(
@@ -1529,10 +1575,16 @@ describe('AdminService', () => {
         created_by_admin_id: 'admin-root',
         created_by_admin_name: 'Root Admin',
         id: 'flag-1',
-        internal_note: 'Review AI cost trend before taking action.',
-        latest_signal: 'AI spend crossed the daily review threshold.',
+        internal_note: encryptedAccountMonitoringInternalNoteTransformer.to(
+          'Review AI cost trend before taking action.',
+        ),
+        latest_signal: encryptedAccountMonitoringLatestSignalTransformer.to(
+          'AI spend crossed the daily review threshold.',
+        ),
         next_review_at: '2099-05-22T09:00:00.000Z',
-        resolution_note: null,
+        resolution_note: encryptedAccountMonitoringResolutionNoteTransformer.to(
+          'Cost returned to normal after review.',
+        ),
         resolved_at: null,
         resolved_by_admin_email: null,
         resolved_by_admin_id: null,
@@ -1583,7 +1635,9 @@ describe('AdminService', () => {
             name: 'Ops Lead',
           },
           auditLogCount: 2,
+          internalNote: 'Review AI cost trend before taking action.',
           latestSignal: 'AI spend crossed the daily review threshold.',
+          resolutionNote: 'Cost returned to normal after review.',
           signalType: AdminAccountMonitoringSignalType.HighAiCost,
           status: AdminAccountMonitoringStatus.Watching,
           user: {
@@ -2282,10 +2336,16 @@ describe('AdminService', () => {
           oldest_queued_age_seconds: '60',
           queued: '1',
         },
+        {
+          failed: '1',
+          id: 'ingredient-analysis',
+          label: 'Ingredient analysis',
+          oldest_queued_age_seconds: '420',
+          queued: '2',
+        },
       ])
       .mockResolvedValueOnce([
         {
-          failed_export_count: '1',
           pending_deletion_count: '2',
           sensitive_access_events_24h: '3',
         },
@@ -2304,6 +2364,13 @@ describe('AdminService', () => {
           updated_at: '2026-05-20T09:55:00.000Z',
           user_email: 'jane@example.com',
           user_id: '01USER',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          error_rate: '0.5',
+          p95_latency_ms: '220',
+          request_count: '540',
         },
       ])
       .mockResolvedValueOnce([{ ok: 1 }])
@@ -2327,8 +2394,15 @@ describe('AdminService', () => {
         status: AdminJobStatus.Critical,
       }),
     );
+    expect(result.jobHealth).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'ingredient-analysis',
+          label: 'Ingredient analysis',
+        }),
+      ]),
+    );
     expect(result.compliance).toEqual({
-      failedExportCount: 1,
       pendingDeletionCount: 2,
       sensitiveAccessEvents24h: 3,
     });
@@ -2339,8 +2413,12 @@ describe('AdminService', () => {
       checkedAt: '2026-05-20T10:00:00.000Z',
       components: expect.arrayContaining([
         expect.objectContaining({
+          errorRate: 0.5,
           id: 'api',
+          p95LatencyMs: 220,
+          requestCount: 540,
           status: AdminJobStatus.Healthy,
+          windowMinutes: 15,
         }),
         expect.objectContaining({
           id: 'database',
@@ -2366,6 +2444,9 @@ describe('AdminService', () => {
         userEmail: 'jane@example.com',
       }),
     );
+    expect(String(query.mock.calls[2]?.[0])).toContain(
+      'ingredient_product_analysis_jobs',
+    );
     expect(JSON.stringify(result)).not.toContain('payload');
   });
 
@@ -2373,7 +2454,9 @@ describe('AdminService', () => {
     const incident = {
       created_at: new Date('2026-05-21T08:00:00.000Z'),
       created_by_admin_id: 'admin-root',
-      description: 'Journal analysis has failed repeatedly for the user.',
+      description: encryptedIncidentDescriptionTransformer.to(
+        'Journal analysis has failed repeatedly for the user.',
+      ),
       id: 'incident-1',
       resolution_summary: null,
       resolved_at: null,
@@ -2465,7 +2548,9 @@ describe('AdminService', () => {
     } as AdminOperationalIncident;
     const resolvedIncident = {
       ...savedIncident,
-      resolution_summary: 'Provider recovered and the queue drained.',
+      resolution_summary: encryptedIncidentResolutionTransformer.to(
+        'Provider recovered and the queue drained.',
+      ),
       resolved_at: new Date('2026-05-21T09:00:00.000Z'),
       resolved_by_admin_id: 'admin-root',
       status: AdminOperationalIncidentStatus.Resolved,
@@ -2573,6 +2658,9 @@ describe('AdminService', () => {
       'Provider recovered and the queue drained.',
     );
     expect(resolved.status).toBe(AdminOperationalIncidentStatus.Resolved);
+    expect(resolved.resolutionSummary).toBe(
+      'Provider recovered and the queue drained.',
+    );
   });
 
   it('upserts scheduled operational incidents from the monitoring queue', async () => {
@@ -2990,4 +3078,74 @@ describe('AdminService', () => {
       ),
     ).rejects.toThrow(NotFoundException);
   });
+
+  it('summarizes skin journal analysis feedback for admin review', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([{ helpful: '6', not_helpful: '4', total: '10' }])
+      .mockResolvedValueOnce([{ helpful: '16', not_helpful: '4', total: '20' }])
+      .mockResolvedValueOnce([
+        { count: '3', id: 'too_generic', label: 'too_generic' },
+      ])
+      .mockResolvedValueOnce([{ count: '10', id: 'useful', label: 'useful' }])
+      .mockResolvedValueOnce([{ count: '10', id: '1.1', label: '1.1' }])
+      .mockResolvedValueOnce([
+        {
+          analyses_with_feedback: '6',
+          analyses_without_feedback: '14',
+        },
+      ]);
+    const feedbackRow = {
+      concern_keys: ['acne'],
+      created_at: new Date('2026-05-27T08:00:00.000Z'),
+      generateId: jest.fn(),
+      id: 'feedback-1',
+      interpretation_version: '1.1',
+      note: 'Too generic for my routine.',
+      reading_label: 'useful',
+      reason: 'too_generic',
+      updated_at: new Date('2026-05-27T08:05:00.000Z'),
+      vote: 'not_helpful',
+    } as unknown as SkinJournalAnalysisFeedback;
+    const service = new AdminService(
+      createAdminDataSourceMock({
+        analysisFeedbackRepository: {
+          find: jest.fn(async () => [feedbackRow]),
+        },
+        query,
+      }),
+    );
+
+    const result = await service.getSkinJournalAnalysisFeedbackReport(
+      new Date('2026-05-27T10:00:00.000Z'),
+    );
+
+    expect(result.window).toMatchObject({
+      helpful: 6,
+      helpfulRate: 60,
+      needsReview: true,
+      notHelpful: 4,
+      total: 10,
+    });
+    expect(result.allTime.helpfulRate).toBe(80);
+    expect(result.coverage).toMatchObject({
+      analysesWithFeedback: 6,
+      analysesWithoutFeedback: 14,
+      feedbackRate: 30,
+    });
+    expect(result.reasons[0]).toMatchObject({
+      count: 3,
+      id: 'too_generic',
+      rate: 75,
+    });
+    expect(result.recentFeedback[0]).toMatchObject({
+      note: 'Too generic for my routine.',
+      reason: 'too_generic',
+      vote: 'not_helpful',
+    });
+    expect(result.recentFeedback[0]).not.toHaveProperty('id');
+    expect(result.recentFeedback[0]).not.toHaveProperty('userId');
+    expect(result.recentFeedback[0]).not.toHaveProperty('entryId');
+  });
+
 });

@@ -8,7 +8,6 @@ import { UserNotificationPreference } from '../../notifications/entities/user-no
 import { RoutineSimplificationEvent } from '../entities/routine-simplification-event.entity';
 import { SkinJournalEntry } from '../entities/skin-journal-entry.entity';
 import { SkinJournalEvent } from '../entities/skin-journal-event.entity';
-import { SkinJournalExportJob } from '../entities/skin-journal-export-job.entity';
 import { SkinJournalInsight } from '../entities/skin-journal-insight.entity';
 import { SkinJournalInsightGenerationRun } from '../entities/skin-journal-insight-generation-run.entity';
 import { SkinJournalInsightJob } from '../entities/skin-journal-insight-job.entity';
@@ -55,7 +54,6 @@ export class SkinJournalDemoSeeder {
   private readonly insightStates: Repository<SkinJournalInsightState>;
   private readonly simplifications: Repository<RoutineSimplificationEvent>;
   private readonly wrapped: Repository<SkinJournalWrapped>;
-  private readonly exportJobs: Repository<SkinJournalExportJob>;
   private readonly notifications: Repository<InAppNotification>;
   private readonly preferences: Repository<UserNotificationPreference>;
 
@@ -72,7 +70,6 @@ export class SkinJournalDemoSeeder {
     this.insightStates = dataSource.getRepository(SkinJournalInsightState);
     this.simplifications = dataSource.getRepository(RoutineSimplificationEvent);
     this.wrapped = dataSource.getRepository(SkinJournalWrapped);
-    this.exportJobs = dataSource.getRepository(SkinJournalExportJob);
     this.notifications = dataSource.getRepository(InAppNotification);
     this.preferences = dataSource.getRepository(UserNotificationPreference);
   }
@@ -203,11 +200,6 @@ export class SkinJournalDemoSeeder {
     );
     await this.deleteUserRows('routine_simplification_events', () =>
       this.simplifications.delete({ user_id: userId }),
-    );
-    await this.deleteUserRows(
-      'skin_journal_export_jobs',
-      () => this.exportJobs.delete({ user_id: userId }),
-      { required: false },
     );
     await this.deleteUserRows(
       'skin_journal_wrapped',

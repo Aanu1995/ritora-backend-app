@@ -1,0 +1,171 @@
+{
+  "generatedAt": "2026-05-29T01:21:09.068Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "smart-picks-ai-first-v2-journal-summary",
+  "totalCases": 1,
+  "passedCases": 1,
+  "reviewCases": 0,
+  "failedCases": 0,
+  "gate": {
+    "passed": true,
+    "blockers": []
+  },
+  "driftHash": "560a4ace5d614eb45d5d36746a30f28217536ffaaf2c3fb0a6fa9439e80c1dc1",
+  "cases": [
+    {
+      "id": "refine_reactive_barrier_france_irritation_replacement",
+      "mode": "refine",
+      "countryCode": "FR",
+      "budgetTier": "mid",
+      "primaryGoal": "calm redness and rebuild barrier after irritation",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"spf\",\"barrier-support\",\"recovery-mask\"]",
+          "actual": "{\"actual\":[\"barrier-support\",\"cleanse\",\"hydrate\",\"moisturise\",\"recovery-mask\",\"spf\",\"texture-exfoliant\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: [\"replacement-calming-barrier-serum\",\"ceramide-barrier-moisturizer\"]",
+          "actual": "{\"actual\":[\"fragrance-free-barrier-repair-cream\",\"replacement-for-glycolic-night-toner-panthenol-calming-serum\"],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"recovery-mask-or-balm\"]",
+          "actual": "{\"actual\":[\"recovery-mask-or-balm\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 1",
+          "actual": "1"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 1",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 3",
+          "actual": "3"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"replacement-calming-barrier-serum\",\"ceramide-barrier-moisturizer\",\"recovery-mask-or-balm\"]",
+          "actual": "{\"actual\":[\"fragrance-free-barrier-repair-cream\",\"replacement-for-glycolic-night-toner-panthenol-calming-serum\",\"recovery-mask-or-balm\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 3,
+        "acceptedCoverageSlotCount": 7,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 2,
+        "acceptedGapCount": 3,
+        "acceptedPriorityGapCount": 2,
+        "acceptedConsiderGapCount": 1,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 2143,
+        "outputTokens": 13966,
+        "totalTokens": 16109,
+        "estimatedCostUsd": 0.008701
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 3,
+        "rawGapCount": 3,
+        "acceptedPickCount": 3,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 7215,
+        "outputTokens": 23840,
+        "totalTokens": 31055,
+        "estimatedCostUsd": 0.015386
+      },
+      "coverageRoles": [
+        "cleanse",
+        "barrier-support",
+        "spf",
+        "hydrate",
+        "texture-exfoliant",
+        "moisturise",
+        "recovery-mask"
+      ],
+      "priorityGapKeys": [
+        "fragrance-free-barrier-repair-cream",
+        "replacement-for-glycolic-night-toner-panthenol-calming-serum"
+      ],
+      "considerGapKeys": [
+        "recovery-mask-or-balm"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "fragrance-free-barrier-repair-cream",
+          "brand": "Avène",
+          "productName": "Cicalfate+ Restorative Protective Cream",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit for a sensitized barrier: a simple leave-on repair cream for calming and support now."
+        },
+        {
+          "normalizedKey": "replacement-for-glycolic-night-toner-panthenol-calming-serum",
+          "brand": "La Roche-Posay",
+          "productName": "Cicaplast B5 Serum",
+          "budgetTier": "mid",
+          "sellerNameCount": 0,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Logged use, photo trends, and your glycolic trigger point to a gentler barrier serum now."
+        },
+        {
+          "normalizedKey": "recovery-mask-or-balm",
+          "brand": "La Roche-Posay",
+          "productName": "Cicaplast Baume B5+",
+          "budgetTier": "mid",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Useful on flare days when skin feels stripped."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the replacement reason use history as support rather than clinical proof?",
+        "Does the output move away from strong acids after irritation signals?",
+        "Does it prioritize barrier recovery before optional extras?",
+        "Does it avoid raw photo or journal details in evaluator output?"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import type { ExtractionResult } from '../../catalogue/openai-extraction.utils';
+import { DEFAULT_LANGUAGE, type AppLanguage } from '../../common/i18n/i18n';
 import { LookupConfidence, ProductCategory } from '../../shelf/shelf.types';
 import {
   ProductCheckSource,
@@ -22,6 +23,8 @@ const DEFAULT_PHOTO_HEIGHT = 1000;
 export async function evaluatePhotoQuickCheckCase(
   runtime: ProductCheckEvaluationRuntime,
   evaluationCase: PhotoQuickCheckRealLifeCase,
+  language: AppLanguage = DEFAULT_LANGUAGE,
+  includeLanguageInCaseId = false,
 ): Promise<PhotoQuickCheckEvaluationCaseResult> {
   const buffer = await createSyntheticLabelPhoto(evaluationCase.labelLines);
   const extraction = await runtime.photoExtractorProvider.extractFromImages({
@@ -40,7 +43,12 @@ export async function evaluatePhotoQuickCheckCase(
     ],
   });
   const checks = photoExtractionAssertions(evaluationCase, extraction);
-  const output = await maybeRunQuickCheck(runtime, evaluationCase, extraction);
+  const output = await maybeRunQuickCheck(
+    runtime,
+    evaluationCase,
+    extraction,
+    language,
+  );
 
   if (output) {
     checks.push(...productCheckAssertions(evaluationCase.expected, output));
@@ -55,8 +63,13 @@ export async function evaluatePhotoQuickCheckCase(
 
   return {
     kind: 'photo_quick_check',
-    id: evaluationCase.id,
-    title: evaluationCase.title,
+    id: includeLanguageInCaseId
+      ? `${evaluationCase.id}__${language}`
+      : evaluationCase.id,
+    title: includeLanguageInCaseId
+      ? `${evaluationCase.title} [${language}]`
+      : evaluationCase.title,
+    language,
     status: checks.every((item) => item.passed) ? 'passed' : 'failed',
     checks,
     extraction,
@@ -68,6 +81,7 @@ async function maybeRunQuickCheck(
   runtime: ProductCheckEvaluationRuntime,
   evaluationCase: PhotoQuickCheckRealLifeCase,
   extraction: ExtractionResult | null,
+  language: AppLanguage,
 ): Promise<ProductCheckResponse | null> {
   const identity = extraction?.data.identity;
   const inciIngredients = identity?.inciIngredients ?? [];
@@ -89,7 +103,7 @@ async function maybeRunQuickCheck(
         reviewRequired: true,
       },
     },
-    'en',
+    language,
   );
 }
 

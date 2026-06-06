@@ -1,7 +1,13 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
-import { ProductCategory, ShelfStatus } from '../../shelf/shelf.types';
+import {
+  ApplicationMethod,
+  ProductCategory,
+  Quantity,
+  ShelfStatus,
+} from '../../shelf/shelf.types';
 import { SuggestionContextSummary } from '../suggestion-context.types';
+import { SuggestionEvidenceSourceId } from '../suggestions.constants';
 import {
   buildAssemblyContext,
   isAllSpecialistLocked,
@@ -10,6 +16,7 @@ import {
   routineStepToOutput,
   sanitizeExplanation,
   sanitizeGapRecommendations,
+  sanitizeSafetyFlags,
 } from './suggestion-ai-assembly';
 import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 
@@ -80,6 +87,39 @@ describe('suggestion AI assembly validation', () => {
     expect(resolved?.chips[0].text.length).toBeLessThanOrEqual(32);
   });
 
+  it('localizes deterministic guidance labels for Swedish suggestions', () => {
+    const inputs = generationInputs([]);
+    inputs.language = 'sv';
+    inputs.shelfActiveProducts = [
+      {
+        ...product(),
+        guidance: {
+          applicationMethod: ApplicationMethod.CottonPad,
+          quantity: Quantity.PeaSize,
+        },
+      } as InventoryProduct,
+    ];
+    const context = buildAssemblyContext(inputs);
+
+    const resolved = resolveRawStep(
+      {
+        stepOrder: 0,
+        inventoryProductId: 'product-1',
+        stepLabel: ProductCategory.Cleanser,
+        provenance: 'ai_added',
+      },
+      0,
+      context,
+    );
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        applicationMethod: 'Bomullsrondell',
+        quantity: 'En arta',
+      }),
+    );
+  });
+
   it('sanitizes explanation copy into concise user-facing text', () => {
     const explanation = sanitizeExplanation({
       headline: 'Diagnose and prescribe a very detailed routine for today',
@@ -135,6 +175,32 @@ describe('suggestion AI assembly validation', () => {
         },
       ]),
     ).toEqual([]);
+  });
+
+  it('drops uncited safety flags instead of showing unsupported warnings', () => {
+    expect(
+      sanitizeSafetyFlags([
+        {
+          severity: 'warning',
+          message: 'Stronger actives are skipped today.',
+          ingredientSlugs: [],
+          sourceIds: [],
+        },
+        {
+          severity: 'info',
+          message: 'Keep this routine gentle today.',
+          ingredientSlugs: [],
+          sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+        },
+      ]),
+    ).toEqual([
+      {
+        severity: 'info',
+        message: 'Keep this routine gentle today.',
+        ingredientSlugs: [],
+        sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+      },
+    ]);
   });
 
   it('keeps specialist-locked steps at their original routine order', () => {

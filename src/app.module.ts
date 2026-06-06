@@ -16,6 +16,7 @@ import { AppBadgesModule } from './app-badges/app-badges.module';
 import { ApplicationTrackingModule } from './application-tracking/application-tracking.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogueModule } from './catalogue/catalogue.module';
+import { CommunityModule } from './community/community.module';
 import { HealthModule } from './health/health.module';
 import { IngredientsModule } from './ingredients/ingredients.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -25,6 +26,7 @@ import { SkinJournalModule } from './skin-journal/skin-journal.module';
 import { SkinProfileModule } from './skin-profile/skin-profile.module';
 import { SmartPicksModule } from './smart-picks/smart-picks.module';
 import { SuggestionsModule } from './suggestions/suggestions.module';
+import { SupportModule } from './support/support.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -49,6 +51,7 @@ import { UsersModule } from './users/users.module';
     HealthModule,
     AuthModule,
     CatalogueModule,
+    CommunityModule,
     IngredientsModule,
     InventoryModule,
     NotificationsModule,
@@ -57,6 +60,7 @@ import { UsersModule } from './users/users.module';
     SkinProfileModule,
     SmartPicksModule,
     SuggestionsModule,
+    SupportModule,
     UsersModule,
   ],
   providers: [

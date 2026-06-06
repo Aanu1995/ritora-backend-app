@@ -133,12 +133,12 @@ export function toExtractionResult(
   const steps = sanitizeConciseList(guidance.steps, {
     maxItems: 5,
     maxChars: 80,
-    maxWords: 10,
+    maxWords: 12,
   });
   const cautions = sanitizeConciseList(guidance.cautions, {
     maxItems: 5,
     maxChars: 80,
-    maxWords: 10,
+    maxWords: 12,
   });
   const guidanceText = [
     sanitizeOptionalString(guidance.applicationMethod),

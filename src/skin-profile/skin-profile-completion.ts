@@ -154,7 +154,7 @@ function hasCompletedReactionHistory(profile: SkinProfile): boolean {
     return entryCount > 0;
   }
 
-  return true;
+  return reactionHistory.has_known_reactions === false;
 }
 
 function hasLocationContext(profile: SkinProfile): boolean {

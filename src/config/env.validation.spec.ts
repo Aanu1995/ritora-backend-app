@@ -55,6 +55,7 @@ function developmentEnv(
     GOOGLE_CLIENT_ID: 'dev-google-client-id',
     GOOGLE_CLIENT_SECRET: 'dev-google-client-secret',
     GOOGLE_CALLBACK_URL: 'http://localhost:3001/api/v1/auth/google/callback',
+    GOOGLE_ID_TOKEN_AUDIENCES: 'dev-google-web-client-id',
     APPLE_CLIENT_ID: 'com.ritora.dev',
     APPLE_TEAM_ID: 'TEAM123456',
     APPLE_KEY_ID: 'KEY1234567',
@@ -65,12 +66,17 @@ function developmentEnv(
     OPENAI_API_KEY: '',
     OPENAI_MODEL: '',
     CATALOGUE_AI_MODEL: 'gpt-5.5',
+    INGREDIENT_ANALYSIS_AI_MODEL: 'gpt-5.5',
     INGREDIENT_EXPLANATION_AI_MODEL: 'gpt-5.5',
     INGREDIENT_TRANSLATION_AI_MODEL: 'gpt-5.5',
     INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
     SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'gpt-5.5',
     SUGGESTION_AI_MODEL: 'gpt-5.5',
     SMART_PICKS_AI_MODEL: 'gpt-5.5',
+    COMMUNITY_MODERATION_AI_MODEL: 'gpt-5.5',
+    INGREDIENT_ANALYSIS_QUEUE_DRIVER: 'database',
+    INGREDIENT_ANALYSIS_SQS_QUEUE_URL: '',
+    INGREDIENT_ANALYSIS_SQS_DLQ_URL: '',
     SMART_PICKS_QUEUE_DRIVER: 'database',
     SMART_PICKS_SQS_QUEUE_URL: '',
     SMART_PICKS_SQS_DLQ_URL: '',
@@ -83,8 +89,6 @@ function developmentEnv(
     ACCOUNT_MONITORING_QUEUE_DRIVER: 'none',
     ACCOUNT_MONITORING_SQS_QUEUE_URL: '',
     ACCOUNT_MONITORING_SQS_DLQ_URL: '',
-    OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: 'low',
-    OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: '',
     INSIGHTS_AI_MODEL: 'gpt-5.5',
     SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD: 0,
     SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD: 0,
@@ -99,6 +103,7 @@ function developmentEnv(
     SKIN_PROFILE_FIELD_ENCRYPTION_KEY_ID: 'primary',
     MAIL_FROM: 'onboarding@resend.dev',
     NOTIFICATION_MAIL_FROM: '',
+    SUPPORT_EMAIL: 'support@getritora.com',
     MAIL_UNSUBSCRIBE_SECRET: '',
     WEB_APP_URL: 'http://localhost:3000',
     API_PUBLIC_URL: '',
@@ -147,6 +152,7 @@ function productionEnv(
     GOOGLE_CLIENT_ID: 'google-client-id',
     GOOGLE_CLIENT_SECRET: 'google-client-secret',
     GOOGLE_CALLBACK_URL: 'https://api.ritora.com/api/v1/auth/google/callback',
+    GOOGLE_ID_TOKEN_AUDIENCES: 'google-client-id,ios-google-client-id',
     APPLE_CLIENT_ID: 'com.ritora.web',
     APPLE_TEAM_ID: 'TEAM123456',
     APPLE_KEY_ID: 'KEY1234567',
@@ -182,6 +188,10 @@ function productionEnv(
     SMART_PICKS_SQS_QUEUE_URL:
       'https://sqs.eu-west-1.amazonaws.com/123/smart-picks',
     SMART_PICKS_SQS_DLQ_URL: '',
+    INGREDIENT_ANALYSIS_QUEUE_DRIVER: 'sqs',
+    INGREDIENT_ANALYSIS_SQS_QUEUE_URL:
+      'https://sqs.eu-west-1.amazonaws.com/123/ingredient-analysis',
+    INGREDIENT_ANALYSIS_SQS_DLQ_URL: '',
     ACCOUNT_DELETION_FINALIZATION_DRIVER: 'eventbridge-sqs',
     ACCOUNT_DELETION_SQS_QUEUE_URL:
       'https://sqs.eu-west-1.amazonaws.com/123/account-deletions',
@@ -221,6 +231,7 @@ describe('envValidationSchema', () => {
       JWT_REFRESH_SECRET: 'dev-refresh-secret-change-me',
       MAIL_FROM: 'onboarding@resend.dev',
       NOTIFICATION_MAIL_FROM: '',
+      SUPPORT_EMAIL: 'support@getritora.com',
       COOKIE_DOMAIN: '',
       SWAGGER_ENABLED: true,
     });
@@ -239,11 +250,13 @@ describe('envValidationSchema', () => {
     expect(result.error).toBeUndefined();
     expect(result.value.OPENAI_MODEL).toBe('');
     expect(result.value.CATALOGUE_AI_MODEL).toBe('gpt-5.5');
+    expect(result.value.INGREDIENT_ANALYSIS_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.INGREDIENT_EXPLANATION_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.INGREDIENT_TRANSLATION_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.SKIN_JOURNAL_ANALYSIS_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.SUGGESTION_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.SMART_PICKS_AI_MODEL).toBe('gpt-5.5');
+    expect(result.value.COMMUNITY_MODERATION_AI_MODEL).toBe('gpt-5.5');
     expect(result.value.INSIGHTS_AI_MODEL).toBe('gpt-5.5');
   });
 
@@ -254,6 +267,31 @@ describe('envValidationSchema', () => {
     expect(result.value.SWAGGER_ENABLED).toBe(false);
     expect(result.value.DATABASE_SSL).toBe(true);
     expect(result.value.DATABASE_SSL_REJECT_UNAUTHORIZED).toBe(true);
+  });
+
+  it('allows production database SSL to be disabled for private database hosts', () => {
+    const result = validateEnv(
+      productionEnv({
+        DATABASE_HOST: '10.10.0.5',
+        DATABASE_SSL: false,
+        DATABASE_SSL_REJECT_UNAUTHORIZED: false,
+      }),
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.DATABASE_SSL).toBe(false);
+  });
+
+  it('rejects disabled production database SSL for public database hosts', () => {
+    const result = validateEnv(
+      productionEnv({
+        DATABASE_HOST: 'db.example.com',
+        DATABASE_SSL: false,
+        DATABASE_SSL_REJECT_UNAUTHORIZED: false,
+      }),
+    );
+
+    expect(result.error).toBeDefined();
   });
 
   it('requires Web Push VAPID credentials in production', () => {
@@ -277,14 +315,25 @@ describe('envValidationSchema', () => {
     expect(result.error?.message).toContain('ADMIN_ROOT_EMAIL');
   });
 
-  it('allows the root setup token hash to be removed after production bootstrap', () => {
+  it('strips the legacy root setup token hash when present', () => {
     const result = validateEnv(
       productionEnv({
-        ADMIN_ROOT_SETUP_TOKEN_HASH: '',
+        ADMIN_ROOT_SETUP_TOKEN_HASH: 'legacy-no-longer-used',
       }),
     );
 
     expect(result.error).toBeUndefined();
+    expect(result.value.ADMIN_ROOT_SETUP_TOKEN_HASH).toBeUndefined();
+  });
+
+  it('allows the legacy root setup token hash to be omitted', () => {
+    const input = developmentEnv();
+    delete input.ADMIN_ROOT_SETUP_TOKEN_HASH;
+
+    const result = validateEnv(input);
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.ADMIN_ROOT_SETUP_TOKEN_HASH).toBeUndefined();
   });
 
   it('rejects raw root setup tokens in every environment', () => {
@@ -295,16 +344,6 @@ describe('envValidationSchema', () => {
     );
 
     expect(result.error?.message).toContain('ADMIN_ROOT_SETUP_TOKEN');
-  });
-
-  it('rejects malformed root setup token hashes', () => {
-    const result = validateEnv(
-      developmentEnv({
-        ADMIN_ROOT_SETUP_TOKEN_HASH: 'not-a-sha256-hash',
-      }),
-    );
-
-    expect(result.error?.message).toContain('ADMIN_ROOT_SETUP_TOKEN_HASH');
   });
 
   it('rejects malformed root admin emails', () => {
@@ -325,6 +364,16 @@ describe('envValidationSchema', () => {
     );
 
     expect(result.error?.message).toContain('MAIL_UNSUBSCRIBE_SECRET');
+  });
+
+  it('requires a valid support email in every environment', () => {
+    const result = validateEnv(
+      developmentEnv({
+        SUPPORT_EMAIL: 'not-an-email',
+      }),
+    );
+
+    expect(result.error?.message).toContain('SUPPORT_EMAIL');
   });
 
   it('requires a separate notification email sender in production', () => {
@@ -391,10 +440,17 @@ describe('envValidationSchema', () => {
 
   it('requires OAuth strategy values outside production because Passport needs them at boot', () => {
     const googleResult = validateEnv(developmentEnv({ GOOGLE_CLIENT_ID: '' }));
+    const googleAudienceResult = validateEnv(
+      developmentEnv({ GOOGLE_ID_TOKEN_AUDIENCES: '' }),
+    );
     const appleResult = validateEnv(developmentEnv({ APPLE_CLIENT_ID: '' }));
 
     expect(googleResult.error).toBeDefined();
     expect(googleResult.error?.message).toContain('GOOGLE_CLIENT_ID');
+    expect(googleAudienceResult.error).toBeDefined();
+    expect(googleAudienceResult.error?.message).toContain(
+      'GOOGLE_ID_TOKEN_AUDIENCES',
+    );
     expect(appleResult.error).toBeDefined();
     expect(appleResult.error?.message).toContain('APPLE_CLIENT_ID');
   });
@@ -565,6 +621,17 @@ describe('envValidationSchema', () => {
     expect(result.error?.message).toContain('SMART_PICKS_QUEUE_DRIVER');
   });
 
+  it('requires an explicit ingredient analysis queue driver outside production', () => {
+    const result = validateEnv(
+      developmentEnv({
+        INGREDIENT_ANALYSIS_QUEUE_DRIVER: undefined,
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('INGREDIENT_ANALYSIS_QUEUE_DRIVER');
+  });
+
   it('requires an SQS queue URL in production when the insight queue driver is SQS', () => {
     const result = validateEnv(
       productionEnv({ SKIN_JOURNAL_INSIGHT_SQS_QUEUE_URL: '' }),
@@ -588,6 +655,20 @@ describe('envValidationSchema', () => {
     expect(result.error?.message).toContain('SMART_PICKS_SQS_QUEUE_URL');
   });
 
+  it('requires an SQS queue URL when the ingredient analysis queue driver is SQS', () => {
+    const result = validateEnv(
+      productionEnv({
+        INGREDIENT_ANALYSIS_QUEUE_DRIVER: 'sqs',
+        INGREDIENT_ANALYSIS_SQS_QUEUE_URL: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain(
+      'INGREDIENT_ANALYSIS_SQS_QUEUE_URL',
+    );
+  });
+
   it('requires the Smart Picks queue driver to be SQS in production', () => {
     const result = validateEnv(
       productionEnv({
@@ -598,6 +679,18 @@ describe('envValidationSchema', () => {
 
     expect(result.error).toBeDefined();
     expect(result.error?.message).toContain('SMART_PICKS_QUEUE_DRIVER');
+  });
+
+  it('requires the ingredient analysis queue driver to be SQS in production', () => {
+    const result = validateEnv(
+      productionEnv({
+        INGREDIENT_ANALYSIS_QUEUE_DRIVER: 'database',
+        INGREDIENT_ANALYSIS_SQS_QUEUE_URL: '',
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('INGREDIENT_ANALYSIS_QUEUE_DRIVER');
   });
 
   it('requires EventBridge Scheduler backed account deletion in production', () => {

@@ -4,8 +4,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThanOrEqual, Not, Repository } from 'typeorm';
+import {
+  EntityManager,
+  IsNull,
+  LessThanOrEqual,
+  Not,
+  Repository,
+} from 'typeorm';
 import { User } from './entities/user.entity';
+import {
+  CommunityContentType,
+  CommunityHelpfulnessVote,
+  CommunityOutcomeSignal,
+} from '../community/community.types';
 import {
   buildTimeZonePatch,
   canonicalizeEmailForIdentity,
@@ -34,6 +45,80 @@ const EXPLICIT_USER_DATA_TABLES = [
   'push_notification_deliveries',
   'skin_journal_media_deletion_jobs',
 ] as const;
+const COMMUNITY_ROUTINES_TABLE = 'community_routines';
+const COMMUNITY_REVIEWS_TABLE = 'community_reviews';
+
+type CommunityContentReference = {
+  content_type: CommunityContentType;
+  content_id: string;
+};
+
+type CommunityHelpfulnessCountRow = {
+  vote: CommunityHelpfulnessVote;
+  count: number | string;
+};
+
+type CommunityOutcomeSignalCountRow = {
+  signal: CommunityOutcomeSignal;
+  count: number | string;
+};
+
+const COMMUNITY_CONTENT_TYPES = new Set<unknown>(
+  Object.values(CommunityContentType),
+);
+const COMMUNITY_HELPFULNESS_VOTES = new Set<unknown>(
+  Object.values(CommunityHelpfulnessVote),
+);
+const COMMUNITY_OUTCOME_SIGNALS = new Set<unknown>(
+  Object.values(CommunityOutcomeSignal),
+);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isCommunityContentReference(
+  value: unknown,
+): value is CommunityContentReference {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    COMMUNITY_CONTENT_TYPES.has(value.content_type) &&
+    typeof value.content_id === 'string'
+  );
+}
+
+function isCommunityHelpfulnessCountRow(
+  value: unknown,
+): value is CommunityHelpfulnessCountRow {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    COMMUNITY_HELPFULNESS_VOTES.has(value.vote) &&
+    isCommunityCountValue(value.count)
+  );
+}
+
+function isCommunityOutcomeSignalCountRow(
+  value: unknown,
+): value is CommunityOutcomeSignalCountRow {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    COMMUNITY_OUTCOME_SIGNALS.has(value.signal) &&
+    isCommunityCountValue(value.count)
+  );
+}
+
+function isCommunityCountValue(value: unknown): value is number | string {
+  return typeof value === 'number' || typeof value === 'string';
+}
 
 @Injectable()
 export class UsersService {
@@ -394,12 +479,225 @@ export class UsersService {
   async remove(id: string): Promise<void> {
     const user = await this.findByIdOrFail(id);
     await this.usersRepository.manager.transaction(async (manager) => {
+      await this.removeCommunityContentForAccountDeletion(manager, id);
+
       for (const tableName of EXPLICIT_USER_DATA_TABLES) {
         await manager.delete(tableName, { user_id: id });
       }
 
       await manager.remove(User, user);
     });
+  }
+
+  private async removeCommunityContentForAccountDeletion(
+    manager: EntityManager,
+    userId: string,
+  ): Promise<void> {
+    await this.removeUserCommunitySignalsForAccountDeletion(manager, userId);
+
+    const authoredContentWhere = `
+      (
+        "content_type" = $2
+        AND "content_id" IN (
+          SELECT "id" FROM "${COMMUNITY_ROUTINES_TABLE}" WHERE "author_user_id" = $1
+        )
+      )
+      OR (
+        "content_type" = $3
+        AND "content_id" IN (
+          SELECT "id" FROM "${COMMUNITY_REVIEWS_TABLE}" WHERE "author_user_id" = $1
+        )
+      )
+    `;
+    const contentParams = [
+      userId,
+      CommunityContentType.Routine,
+      CommunityContentType.Review,
+    ];
+
+    await manager.query(
+      `DELETE FROM "community_reports" WHERE ${authoredContentWhere}`,
+      contentParams,
+    );
+    await manager.query(
+      `DELETE FROM "community_moderation_decisions" WHERE ${authoredContentWhere}`,
+      contentParams,
+    );
+    await manager.query(
+      `DELETE FROM "community_safety_scan_results" WHERE ${authoredContentWhere}`,
+      contentParams,
+    );
+    await manager.query(
+      `DELETE FROM "community_helpfulness_votes" WHERE ${authoredContentWhere}`,
+      contentParams,
+    );
+    await manager.query(
+      `DELETE FROM "community_outcome_signal_votes" WHERE ${authoredContentWhere}`,
+      contentParams,
+    );
+    await manager.query(
+      `
+        DELETE FROM "community_routine_adaptations"
+        WHERE "routine_id" IN (
+          SELECT "id" FROM "${COMMUNITY_ROUTINES_TABLE}" WHERE "author_user_id" = $1
+        )
+      `,
+      [userId],
+    );
+    await manager.delete(COMMUNITY_ROUTINES_TABLE, { author_user_id: userId });
+    await manager.delete(COMMUNITY_REVIEWS_TABLE, { author_user_id: userId });
+  }
+
+  private async removeUserCommunitySignalsForAccountDeletion(
+    manager: EntityManager,
+    userId: string,
+  ): Promise<void> {
+    const helpfulnessReferences = await this.queryRawRows(
+      manager,
+      `
+        DELETE FROM "community_helpfulness_votes"
+        WHERE "user_id" = $1
+        RETURNING "content_type", "content_id"
+      `,
+      [userId],
+      isCommunityContentReference,
+    );
+    await this.recountCommunityHelpfulness(manager, helpfulnessReferences);
+
+    const outcomeReferences = await this.queryRawRows(
+      manager,
+      `
+        DELETE FROM "community_outcome_signal_votes"
+        WHERE "user_id" = $1
+        RETURNING "content_type", "content_id"
+      `,
+      [userId],
+      isCommunityContentReference,
+    );
+    await this.recountCommunityOutcomeSignals(manager, outcomeReferences);
+  }
+
+  private async recountCommunityHelpfulness(
+    manager: EntityManager,
+    references: CommunityContentReference[],
+  ): Promise<void> {
+    for (const reference of this.uniqueCommunityContentReferences(references)) {
+      const rows = await this.queryRawRows(
+        manager,
+        `
+          SELECT "vote", COUNT(*)::int AS "count"
+          FROM "community_helpfulness_votes"
+          WHERE "content_type" = $1 AND "content_id" = $2
+          GROUP BY "vote"
+        `,
+        [reference.content_type, reference.content_id],
+        isCommunityHelpfulnessCountRow,
+      );
+      const helpfulCount = this.communityVoteCount(
+        rows,
+        CommunityHelpfulnessVote.Helpful,
+      );
+      const notHelpfulCount = this.communityVoteCount(
+        rows,
+        CommunityHelpfulnessVote.NotHelpful,
+      );
+
+      await manager.query(
+        `
+          UPDATE "${this.communityContentTable(reference.content_type)}"
+          SET "helpful_count" = $1, "not_helpful_count" = $2
+          WHERE "id" = $3
+        `,
+        [helpfulCount, notHelpfulCount, reference.content_id],
+      );
+    }
+  }
+
+  private async recountCommunityOutcomeSignals(
+    manager: EntityManager,
+    references: CommunityContentReference[],
+  ): Promise<void> {
+    for (const reference of this.uniqueCommunityContentReferences(references)) {
+      const rows = await this.queryRawRows(
+        manager,
+        `
+          SELECT "signal", COUNT(*)::int AS "count"
+          FROM "community_outcome_signal_votes"
+          WHERE "content_type" = $1
+            AND "content_id" = $2
+            AND "note_moderation_status" = 'published'
+            AND "withdrawn_at" IS NULL
+          GROUP BY "signal"
+        `,
+        [reference.content_type, reference.content_id],
+        isCommunityOutcomeSignalCountRow,
+      );
+      const counts = this.emptyCommunityOutcomeSignalCounts();
+      rows.forEach((row) => {
+        counts[row.signal] = Number(row.count);
+      });
+
+      await manager.query(
+        `
+          UPDATE "${this.communityContentTable(reference.content_type)}"
+          SET "outcome_signal_counts" = $1::jsonb
+          WHERE "id" = $2
+        `,
+        [JSON.stringify(counts), reference.content_id],
+      );
+    }
+  }
+
+  private async queryRawRows<Row>(
+    manager: EntityManager,
+    query: string,
+    parameters: unknown[],
+    isRow: (value: unknown) => value is Row,
+  ): Promise<Row[]> {
+    const rawRows: unknown = await manager.query(query, parameters);
+    const rows: unknown[] = Array.isArray(rawRows) ? rawRows : [];
+
+    return rows.filter(isRow);
+  }
+
+  private communityVoteCount(
+    rows: CommunityHelpfulnessCountRow[],
+    vote: CommunityHelpfulnessVote,
+  ): number {
+    return Number(rows.find((row) => row.vote === vote)?.count ?? 0);
+  }
+
+  private emptyCommunityOutcomeSignalCounts(): Record<
+    CommunityOutcomeSignal,
+    number
+  > {
+    return {
+      [CommunityOutcomeSignal.WorkedForMeToo]: 0,
+      [CommunityOutcomeSignal.WorkedWithChanges]: 0,
+      [CommunityOutcomeSignal.MixedResult]: 0,
+      [CommunityOutcomeSignal.DidNotWork]: 0,
+      [CommunityOutcomeSignal.CausedIrritation]: 0,
+      [CommunityOutcomeSignal.NotRelevant]: 0,
+    };
+  }
+
+  private uniqueCommunityContentReferences(
+    references: CommunityContentReference[],
+  ): CommunityContentReference[] {
+    return Array.from(
+      new Map(
+        references.map((reference) => [
+          `${reference.content_type}:${reference.content_id}`,
+          reference,
+        ]),
+      ).values(),
+    );
+  }
+
+  private communityContentTable(contentType: CommunityContentType): string {
+    return contentType === CommunityContentType.Routine
+      ? COMMUNITY_ROUTINES_TABLE
+      : COMMUNITY_REVIEWS_TABLE;
   }
 
   private findForAuth({

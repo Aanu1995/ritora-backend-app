@@ -3,7 +3,6 @@ import Joi, { type CustomHelpers } from 'joi';
 const COOKIE_DOMAIN_PATTERN =
   /^(?:\.[a-z0-9-]+(?:\.[a-z0-9-]+)*|localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)*)$/i;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
-const HEX_64_PATTERN = /^[a-f0-9]{64}$/i;
 
 const environmentSecret = Joi.when('NODE_ENV', {
   is: 'production',
@@ -47,6 +46,19 @@ function validateCorsOrigins(value: string, helpers: CustomHelpers<string>) {
   }
 
   return value;
+}
+
+function validateCommaSeparatedValues(
+  value: string,
+  helpers: CustomHelpers<string>,
+) {
+  const entries = value.split(',').map((entry) => entry.trim());
+
+  if (entries.length === 0 || entries.some((entry) => !entry)) {
+    return helpers.error('any.invalid');
+  }
+
+  return value.trim();
 }
 
 function validateCookieDomain(value: string, helpers: CustomHelpers<string>) {
@@ -131,6 +143,20 @@ function validateCookieSettings(
   }
 
   if (env.NODE_ENV === 'production') {
+    if (env.DATABASE_SSL !== true) {
+      const databaseHost =
+        typeof env.DATABASE_HOST === 'string' ? env.DATABASE_HOST.trim() : '';
+      const isPrivateDatabaseHost =
+        databaseHost === 'localhost' ||
+        databaseHost.startsWith('10.') ||
+        databaseHost.startsWith('192.168.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(databaseHost);
+
+      if (!isPrivateDatabaseHost) {
+        return helpers.error('any.invalid');
+      }
+    }
+
     if (
       typeof env.MAIL_FROM === 'string' &&
       typeof env.NOTIFICATION_MAIL_FROM === 'string' &&
@@ -203,7 +229,7 @@ export const envValidationSchema = Joi.object({
   DATABASE_PASSWORD: environmentSecret,
   DATABASE_SSL: Joi.when('NODE_ENV', {
     is: 'production',
-    then: Joi.boolean().valid(true).required(),
+    then: Joi.boolean().required(),
     otherwise: Joi.boolean().required(),
   }),
   DATABASE_LOGGING: Joi.boolean().required(),
@@ -220,11 +246,7 @@ export const envValidationSchema = Joi.object({
     .custom(validateCorsOrigins, 'CORS origin validation'),
 
   ADMIN_ROOT_EMAIL: Joi.string().trim().email({ tlds: false }).required(),
-  ADMIN_ROOT_SETUP_TOKEN_HASH: Joi.string()
-    .trim()
-    .allow('')
-    .pattern(HEX_64_PATTERN)
-    .required(),
+  ADMIN_ROOT_SETUP_TOKEN_HASH: Joi.string().allow('').optional().strip(),
   ADMIN_ROOT_SETUP_TOKEN: Joi.string().valid('').optional().strip(),
   ADMIN_ROOT_SETUP_EXPIRY: Joi.string()
     .trim()
@@ -303,6 +325,11 @@ export const envValidationSchema = Joi.object({
       .uri({ scheme: ['http', 'https'] })
       .required(),
   }),
+  GOOGLE_ID_TOKEN_AUDIENCES: Joi.string()
+    .trim()
+    .min(1)
+    .required()
+    .custom(validateCommaSeparatedValues, 'comma-separated value validation'),
   APPLE_CLIENT_ID: Joi.string().trim().min(1).required(),
   APPLE_TEAM_ID: Joi.string().trim().min(1).required(),
   APPLE_KEY_ID: Joi.string().trim().min(1).required(),
@@ -331,12 +358,35 @@ export const envValidationSchema = Joi.object({
   }),
   OPENAI_MODEL: Joi.string().trim().allow('').required(),
   CATALOGUE_AI_MODEL: Joi.string().trim().allow('').required(),
+  INGREDIENT_ANALYSIS_AI_MODEL: Joi.string().trim().allow('').required(),
   INGREDIENT_EXPLANATION_AI_MODEL: Joi.string().trim().allow('').required(),
   INGREDIENT_TRANSLATION_AI_MODEL: Joi.string().trim().allow('').required(),
   INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: Joi.string().trim().required(),
   SKIN_JOURNAL_ANALYSIS_AI_MODEL: Joi.string().trim().allow('').required(),
   SUGGESTION_AI_MODEL: Joi.string().trim().allow('').required(),
   SMART_PICKS_AI_MODEL: Joi.string().trim().allow('').required(),
+  COMMUNITY_MODERATION_AI_MODEL: Joi.string().trim().allow('').required(),
+  INGREDIENT_ANALYSIS_QUEUE_DRIVER: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().valid('sqs').required(),
+    otherwise: Joi.string().valid('sqs', 'database').required(),
+  }),
+  INGREDIENT_ANALYSIS_SQS_QUEUE_URL: Joi.when(
+    'INGREDIENT_ANALYSIS_QUEUE_DRIVER',
+    {
+      is: 'sqs',
+      then: Joi.string()
+        .trim()
+        .uri({ scheme: ['https'] })
+        .required(),
+      otherwise: Joi.string().trim().allow('').required(),
+    },
+  ),
+  INGREDIENT_ANALYSIS_SQS_DLQ_URL: Joi.string()
+    .trim()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .required(),
   SMART_PICKS_QUEUE_DRIVER: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().valid('sqs').required(),
@@ -414,14 +464,6 @@ export const envValidationSchema = Joi.object({
     .uri({ scheme: ['https'] })
     .allow('')
     .default(''),
-  OPENAI_PRODUCT_DISCOVERY_REASONING_EFFORT: Joi.string()
-    .trim()
-    .allow('')
-    .required(),
-  OPENAI_PRODUCT_DISCOVERY_WEB_REASONING_EFFORT: Joi.string()
-    .trim()
-    .allow('')
-    .required(),
   INSIGHTS_AI_MODEL: Joi.string().trim().allow('').required(),
   SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD: Joi.number()
     .min(0)
@@ -501,6 +543,7 @@ export const envValidationSchema = Joi.object({
     then: Joi.string().trim().email().required(),
     otherwise: Joi.string().trim().email().allow('').default(''),
   }),
+  SUPPORT_EMAIL: Joi.string().trim().email().required(),
   MAIL_UNSUBSCRIBE_SECRET: Joi.when('NODE_ENV', {
     is: 'production',
     then: Joi.string().trim().min(32).required(),

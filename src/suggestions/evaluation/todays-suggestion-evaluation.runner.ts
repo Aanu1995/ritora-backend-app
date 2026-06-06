@@ -1,8 +1,11 @@
 import { createHash } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { readFeatureOpenAiModel } from '../../common/utils/openai-config';
-import { openAiRepeatabilityRequestOptions } from '../../common/utils/openai-request-options';
-import { ProductCategory } from '../../shelf/shelf.types';
+import {
+  OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
+  openAiRepeatabilityRequestOptions,
+} from '../../common/utils/openai-request-options';
+import { PreferredTimeOfDay, ProductCategory } from '../../shelf/shelf.types';
 import type { SuggestionProductScore } from '../suggestion-context.types';
 import {
   SUGGESTION_MODES,
@@ -86,6 +89,8 @@ const MEDICAL_CLAIM_PATTERN =
   /\b(diagnose|diagnosed|diagnosis|cure|cures|cured|curing|prescribe|prescribes|prescribed|prescription|treat|treats|treated|treating)\b/i;
 
 const DEFAULT_CASES = TODAYS_SUGGESTION_GOLDEN_CASES;
+const SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS = 12000;
+const SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 2;
 
 export type TodaysSuggestionEvaluationStatus = 'passed' | 'failed';
 
@@ -178,7 +183,23 @@ export interface TodaysSuggestionEvaluationRunnerOptions {
   cases?: readonly TodaysSuggestionEvaluationCase[];
   generatedAt?: string;
   repeatabilityRuns?: number;
+  onProgress?: (event: TodaysSuggestionEvaluationProgressEvent) => void;
 }
+
+export type TodaysSuggestionEvaluationProgressEvent =
+  | {
+      phase: 'started';
+      index: number;
+      total: number;
+      caseId: string;
+    }
+  | {
+      phase: 'completed';
+      index: number;
+      total: number;
+      caseId: string;
+      status: TodaysSuggestionEvaluationStatus;
+    };
 
 export async function evaluateTodaysSuggestionGoldenCases(
   options: TodaysSuggestionEvaluationRunnerOptions,
@@ -189,18 +210,30 @@ export async function evaluateTodaysSuggestionGoldenCases(
   const repeatabilityRuns = Math.max(1, options.repeatabilityRuns ?? 1);
   const results: TodaysSuggestionCaseResult[] = [];
 
-  for (const evaluationCase of cases) {
-    results.push(
-      await evaluateCase({
-        evaluationCase,
-        generator: options.generator,
-        judge: options.judge,
-        model: options.model,
-        promptVersion,
-        generatedAt,
-        repeatabilityRuns,
-      }),
-    );
+  for (const [index, evaluationCase] of cases.entries()) {
+    options.onProgress?.({
+      phase: 'started',
+      index: index + 1,
+      total: cases.length,
+      caseId: evaluationCase.id,
+    });
+    const result = await evaluateCase({
+      evaluationCase,
+      generator: options.generator,
+      judge: options.judge,
+      model: options.model,
+      promptVersion,
+      generatedAt,
+      repeatabilityRuns,
+    });
+    results.push(result);
+    options.onProgress?.({
+      phase: 'completed',
+      index: index + 1,
+      total: cases.length,
+      caseId: evaluationCase.id,
+      status: result.status,
+    });
   }
 
   const passedCases = results.filter(
@@ -230,6 +263,7 @@ export function runTodaysSuggestionHardChecks(
 ): TodaysSuggestionHardCheckResult[] {
   return [
     checkOutputSchema(output),
+    checkNoDeterministicFallback(output),
     checkStepOrder(output),
     checkCopyLength(output),
     checkValidModeAndProvenance(output),
@@ -243,10 +277,39 @@ export function runTodaysSuggestionHardChecks(
     checkEvidenceSourceIds(evaluationCase, output),
     checkMedicalClaims(output),
     checkExpectedProductIds(evaluationCase, output),
+    checkExpectedAnyProductIds(evaluationCase, output),
     checkExpectedGapKeywords(evaluationCase, output),
     checkExpectedSafetyKeywords(evaluationCase, output),
+    checkPreferredTimeCompatibility(evaluationCase, output),
+    checkMinStepCount(evaluationCase, output),
     checkMaxStepCount(evaluationCase, output),
+    checkMaxStrongActiveCount(evaluationCase, output),
   ];
+}
+
+function checkNoDeterministicFallback(
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures: string[] = [];
+  if (output.metadata.provider === 'deterministic_baseline') {
+    failures.push(
+      `Model output used deterministic fallback${
+        output.metadata.fallbackReason
+          ? ` (${output.metadata.fallbackReason})`
+          : ''
+      }.`,
+    );
+  }
+  if (output.metadata.fallbackReason) {
+    failures.push(
+      `Fallback reason is present: ${output.metadata.fallbackReason}.`,
+    );
+  }
+  return makeCheck(
+    'no_deterministic_fallback',
+    'Evaluation output comes from the AI path without fallback.',
+    failures,
+  );
 }
 
 export function sanitizeEvaluationText(
@@ -259,7 +322,10 @@ export function sanitizeEvaluationText(
     sanitized = sanitized.split(secret).join('[redacted-secret]');
   }
   return sanitized
-    .replace(/sk-[A-Za-z0-9_-]{10,}/g, '[redacted-openai-key]')
+    .replace(
+      /(^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}/g,
+      '$1[redacted-openai-key]',
+    )
     .replace(
       /\b(OPENAI_API_KEY|SUGGESTION_AI_MODEL|AWS_SECRET_ACCESS_KEY|DATABASE_URL|JWT_SECRET)\b\s*[:=]\s*["']?[^"'\s,}]+/gi,
       '$1=[redacted]',
@@ -306,14 +372,53 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
       throw new Error('OpenAI evaluation judge configuration is missing.');
     }
 
+    const outputText = await this.requestStructuredJudgement({
+      apiKey,
+      model,
+      input,
+    });
+    if (!outputText) {
+      throw new Error('OpenAI evaluation judge returned no structured output.');
+    }
+    return normalizeRubric(JSON.parse(outputText));
+  }
+
+  private async requestStructuredJudgement(input: {
+    apiKey: string;
+    model: string;
+    input: {
+      evaluationCase: TodaysSuggestionEvaluationCase;
+      output: SuggestionGenerationOutput;
+    };
+  }): Promise<string | null> {
+    let outputText: string | null = null;
+    for (
+      let attempt = 1;
+      attempt <= SUGGESTION_EVALUATION_JUDGE_ATTEMPTS;
+      attempt += 1
+    ) {
+      outputText = extractOutputText(await this.requestOpenAiJudgement(input));
+      if (outputText) break;
+    }
+    return outputText;
+  }
+
+  private async requestOpenAiJudgement(input: {
+    apiKey: string;
+    model: string;
+    input: {
+      evaluationCase: TodaysSuggestionEvaluationCase;
+      output: SuggestionGenerationOutput;
+    };
+  }): Promise<OpenAiResponsePayload> {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${input.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model,
+        model: input.model,
         store: false,
         input: [
           {
@@ -340,10 +445,10 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
                 type: 'input_text',
                 text: JSON.stringify(
                   sanitizeForReport({
-                    case: buildCaseSummary(input.evaluationCase),
+                    case: buildCaseSummary(input.input.evaluationCase),
                     output: buildOutputSummary(
-                      input.output,
-                      input.evaluationCase,
+                      input.input.output,
+                      input.input.evaluationCase,
                     ),
                     rubric: {
                       answersQuestion:
@@ -365,8 +470,14 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
             ],
           },
         ],
-        max_output_tokens: Math.min(SUGGESTION_AI_MAX_OUTPUT_TOKENS, 900),
-        ...openAiRepeatabilityRequestOptions(model),
+        max_output_tokens: Math.min(
+          SUGGESTION_AI_MAX_OUTPUT_TOKENS,
+          SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS,
+        ),
+        ...openAiRepeatabilityRequestOptions(
+          input.model,
+          OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT,
+        ),
         text: {
           verbosity: 'low',
           format: JUDGE_RESPONSE_FORMAT,
@@ -379,12 +490,7 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
       throw new Error(`OpenAI evaluation judge failed (${response.status}).`);
     }
 
-    const payload = (await response.json()) as OpenAiResponsePayload;
-    const outputText = extractOutputText(payload);
-    if (!outputText) {
-      throw new Error('OpenAI evaluation judge returned no structured output.');
-    }
-    return normalizeRubric(JSON.parse(outputText));
+    return (await response.json()) as OpenAiResponsePayload;
   }
 }
 
@@ -1070,6 +1176,30 @@ function checkExpectedProductIds(
   );
 }
 
+function checkExpectedAnyProductIds(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures: string[] = [];
+  const selected = new Set(
+    output.steps
+      .map((step) => step.inventoryProductId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  for (const group of evaluationCase.expected.requiredAnyProductIds ?? []) {
+    if (!group.some((id) => selected.has(id))) {
+      failures.push(
+        `Expected one of these products to be selected: ${group.join(', ')}.`,
+      );
+    }
+  }
+  return makeCheck(
+    'expected_any_product_ids',
+    'At least one product from each required product group is selected.',
+    failures,
+  );
+}
+
 function checkExpectedGapKeywords(
   evaluationCase: TodaysSuggestionEvaluationCase,
   output: SuggestionGenerationOutput,
@@ -1114,6 +1244,60 @@ function checkExpectedSafetyKeywords(
   );
 }
 
+function checkPreferredTimeCompatibility(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const productById = new Map(
+    evaluationCase.inputs.shelfActiveProducts.map((product) => [
+      product.id,
+      product,
+    ]),
+  );
+  const failures = output.steps
+    .filter(
+      (step) =>
+        step.provenance !== SuggestionStepProvenance.SpecialistLocked &&
+        step.inventoryProductId,
+    )
+    .flatMap((step) => {
+      const product = productById.get(step.inventoryProductId as string);
+      const preferredTime =
+        product?.user_fields?.preferredTimeOfDay ?? PreferredTimeOfDay.Either;
+      return isPreferredTimeCompatible(
+        preferredTime,
+        evaluationCase.inputs.daypart,
+      )
+        ? []
+        : [
+            `Product ${step.inventoryProductId} prefers ${preferredTime} but output daypart is ${evaluationCase.inputs.daypart}.`,
+          ];
+    });
+  return makeCheck(
+    'preferred_time_compatibility',
+    'Shelf preferred time is respected.',
+    failures,
+  );
+}
+
+function checkMinStepCount(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures: string[] = [];
+  const min = evaluationCase.expected.minStepCount;
+  if (typeof min === 'number' && output.steps.length < min) {
+    failures.push(
+      `Expected at least ${min} steps, got ${output.steps.length}.`,
+    );
+  }
+  return makeCheck(
+    'min_step_count',
+    'Step count meets the case minimum.',
+    failures,
+  );
+}
+
 function checkMaxStepCount(
   evaluationCase: TodaysSuggestionEvaluationCase,
   output: SuggestionGenerationOutput,
@@ -1126,6 +1310,33 @@ function checkMaxStepCount(
   return makeCheck(
     'max_step_count',
     'Step count stays within case limit.',
+    failures,
+  );
+}
+
+function checkMaxStrongActiveCount(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const max = evaluationCase.expected.maxStrongActiveCount;
+  const failures: string[] = [];
+  if (typeof max === 'number') {
+    const products = productScoresById(evaluationCase);
+    const selectedStrong = output.steps
+      .map((step) => productForStep(step, products))
+      .filter((product): product is SuggestionProductScore => Boolean(product))
+      .filter((product) => hasAnyTag(product, STRONG_ACTIVE_TAGS));
+    if (selectedStrong.length > max) {
+      failures.push(
+        `Expected at most ${max} strong active step(s), got ${selectedStrong
+          .map((product) => product.productId)
+          .join(', ')}.`,
+      );
+    }
+  }
+  return makeCheck(
+    'max_strong_active_count',
+    'Strong active count stays within the case limit.',
     failures,
   );
 }
@@ -1201,6 +1412,20 @@ function hasAnyTag(
     product.activeTags.map((tag) => tag.toLowerCase()),
   );
   return tags.some((tag) => normalizedTags.has(tag));
+}
+
+function isPreferredTimeCompatible(
+  preferredTime: PreferredTimeOfDay,
+  daypart: SuggestionDaypart,
+): boolean {
+  if (preferredTime === PreferredTimeOfDay.Either) return true;
+  if (preferredTime === PreferredTimeOfDay.Morning) {
+    return (
+      daypart === SuggestionDaypart.Morning ||
+      daypart === SuggestionDaypart.Noon
+    );
+  }
+  return daypart === SuggestionDaypart.Evening;
 }
 
 function collectSourceIds(
@@ -1307,10 +1532,88 @@ function buildCaseSummary(
         evaluationCase.inputs.skinProfile?.pregnancy_status ?? null,
       dermatologistCare:
         evaluationCase.inputs.skinProfile?.under_dermatologist_care ?? null,
+      safetyContext: {
+        conditions:
+          evaluationCase.inputs.contextSummary.profileSignals?.safety
+            .conditions ??
+          evaluationCase.inputs.skinProfile?.safety_context?.conditions ??
+          [],
+        medications:
+          evaluationCase.inputs.contextSummary.profileSignals?.safety
+            .medications ??
+          evaluationCase.inputs.skinProfile?.safety_context?.medications ??
+          [],
+        photosensitizingOther:
+          evaluationCase.inputs.contextSummary.profileSignals?.safety
+            .photosensitizingOther ??
+          evaluationCase.inputs.skinProfile?.safety_context
+            ?.photosensitizing_other ??
+          false,
+      },
+      activeTolerances: evaluationCase.inputs.contextSummary.profileSignals
+        ?.activeTolerances.length
+        ? Object.fromEntries(
+            evaluationCase.inputs.contextSummary.profileSignals.activeTolerances.map(
+              (item) => [
+                item.ingredient,
+                {
+                  tolerance: item.tolerance,
+                  lastUsed: item.lastUsed,
+                },
+              ],
+            ),
+          )
+        : (evaluationCase.inputs.skinProfile?.active_tolerances ?? {}),
+      routinePreferences:
+        evaluationCase.inputs.skinProfile?.routine_preferences ?? {},
     },
     contextSignals: {
       reaction: evaluationCase.inputs.contextSummary.reaction,
       routineBreak: evaluationCase.inputs.contextSummary.routineBreak,
+      applicationPatterns:
+        evaluationCase.inputs.contextSummary.applicationPatterns,
+      appliedProductHistory: evaluationCase.inputs.contextSummary
+        .appliedProductHistory
+        ? {
+            windowStartDate:
+              evaluationCase.inputs.contextSummary.appliedProductHistory
+                .windowStartDate,
+            windowEndDate:
+              evaluationCase.inputs.contextSummary.appliedProductHistory
+                .windowEndDate,
+            recordsConsidered:
+              evaluationCase.inputs.contextSummary.appliedProductHistory
+                .recordsConsidered,
+            products:
+              evaluationCase.inputs.contextSummary.appliedProductHistory.products.map(
+                (product) => ({
+                  productId: product.productId,
+                  brand: product.brand,
+                  name: product.name,
+                  category: product.category,
+                  dayparts: product.dayparts,
+                  statuses: product.statuses,
+                  useCount: product.useCount,
+                  lastAppliedDate: product.lastAppliedDate,
+                  isOffShelf: product.isOffShelf,
+                  isSubstitution: product.isSubstitution,
+                }),
+              ),
+          }
+        : null,
+      routineMemory: evaluationCase.inputs.contextSummary.routineMemory
+        ? {
+            sameDaypartSuggestionCount:
+              evaluationCase.inputs.contextSummary.routineMemory
+                .sameDaypartSuggestionCount,
+            recentlySuggestedProductIds:
+              evaluationCase.inputs.contextSummary.routineMemory
+                .recentlySuggestedProductIds,
+            exactRepeatCountByFingerprint:
+              evaluationCase.inputs.contextSummary.routineMemory
+                .exactRepeatCountByFingerprint,
+          }
+        : null,
       environment: evaluationCase.inputs.contextSummary.environment
         ? {
             uvRisk: evaluationCase.inputs.contextSummary.environment.uvRisk,

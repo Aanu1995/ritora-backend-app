@@ -37,15 +37,12 @@ import { DayDetailResponseDto } from './dto/day-detail-response.dto';
 import { JournalEventResponseDto } from './dto/event-response.dto';
 import { JournalInsightsResponseDto } from './dto/insight-response.dto';
 import { RecordInsightActionDto } from './dto/insight-interaction.dto';
+import { RecordAnalysisFeedbackDto } from './dto/analysis-feedback.dto';
 import { JournalStatsResponseDto } from './dto/stats-response.dto';
 import { WrappedResponseDto } from './dto/wrapped-response.dto';
 import { PhotoDatesResponseDto } from './dto/photo-dates-response.dto';
 import { PhotoFiltersResponseDto } from './dto/photo-filters-response.dto';
 import { PhotoPageResponseDto } from './dto/photo-page-response.dto';
-import {
-  CreateJournalExportDto,
-  JournalExportResponseDto,
-} from './dto/export-journal.dto';
 import { StartSimplificationDto } from './dto/start-simplification.dto';
 import type { Angle, EventKind, InsightWindow } from './skin-journal.constants';
 import {
@@ -263,6 +260,23 @@ export class SkinJournalController {
     return this.service.retryAnalysis(userId, id);
   }
 
+  @Post('entries/:id/analyze/reinterpret')
+  async reinterpretAnalysis(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ) {
+    return this.service.reinterpretAnalysis(userId, id);
+  }
+
+  @Post('entries/:id/analysis-feedback')
+  async recordAnalysisFeedback(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() body: RecordAnalysisFeedbackDto,
+  ) {
+    return this.service.recordAnalysisFeedback(userId, id, body);
+  }
+
   @Get('compare')
   async compare(
     @CurrentUser('id') userId: string,
@@ -407,23 +421,6 @@ export class SkinJournalController {
     return this.service.getInsightOperations(operationsToken);
   }
 
-  @Post('export')
-  @ApiOkResponse({ type: JournalExportResponseDto })
-  async createExport(
-    @CurrentUser('id') userId: string,
-    @Body() dto: CreateJournalExportDto,
-  ) {
-    return this.service.createExport(userId, dto);
-  }
-
-  @Get('export/:jobId')
-  @ApiOkResponse({ type: JournalExportResponseDto })
-  async getExport(
-    @CurrentUser('id') userId: string,
-    @Param('jobId') jobId: string,
-  ) {
-    return this.service.getExport(userId, jobId);
-  }
 }
 
 function normalizeUploadedPhotoAngles(

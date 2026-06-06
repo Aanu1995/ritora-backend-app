@@ -123,3 +123,17 @@ export const OPENAI_OFFICIAL_DISCOVERY_FORMAT: OpenAiTextFormat = {
     },
   },
 };
+
+export const OPENAI_PHOTO_INGREDIENT_RECOVERY_FORMAT: OpenAiTextFormat = {
+  type: 'json_schema',
+  name: 'ritora_photo_ingredient_recovery',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['inciIngredients'],
+    properties: {
+      inciIngredients: STRING_ARRAY_SCHEMA,
+    },
+  },
+};

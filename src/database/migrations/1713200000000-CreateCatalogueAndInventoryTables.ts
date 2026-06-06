@@ -1,6 +1,4 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
-import { ulid } from 'ulid';
-import { CATALOGUE_SEED_PRODUCTS } from '../../catalogue/catalogue.seed';
 
 export class CreateCatalogueAndInventoryTables1713200000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -87,38 +85,6 @@ export class CreateCatalogueAndInventoryTables1713200000000 implements Migration
       CREATE INDEX "IDX_inventory_products_user_effective_expires"
       ON "inventory_products" ("user_id", "effective_expires_at")
     `);
-
-    for (const product of CATALOGUE_SEED_PRODUCTS) {
-      const id = ulid();
-      await queryRunner.query(
-        `
-          INSERT INTO "catalogue_products" (
-            "id",
-            "brand",
-            "name",
-            "category",
-            "barcode",
-            "brand_search",
-            "name_search",
-            "identity",
-            "guidance",
-            "manufacturer"
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)
-        `,
-        [
-          id,
-          product.identity.brand,
-          product.identity.name,
-          product.identity.category,
-          product.identity.barcode,
-          product.identity.brand.toLowerCase(),
-          product.identity.name.toLowerCase(),
-          JSON.stringify(product.identity),
-          JSON.stringify(product.guidance),
-          JSON.stringify(product.manufacturer),
-        ],
-      );
-    }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

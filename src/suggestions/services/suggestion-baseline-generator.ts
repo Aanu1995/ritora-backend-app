@@ -1,6 +1,14 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ProductCategory } from '../../shelf/shelf.types';
-import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
+import {
+  buildEnvironmentAdaptationPolicy,
+  isHighUvRisk,
+} from '../../environment-intelligence/environment-adaptation-policy';
+import {
+  DEFAULT_LANGUAGE,
+  normalizeLanguage,
+  type AppLanguage,
+} from '../../common/i18n/i18n';
 import type {
   SuggestionGenerationInputs,
   SuggestionGenerationStepOutput,
@@ -17,14 +25,169 @@ import {
 import { SuggestionProductScore } from '../suggestion-context.types';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
 import {
-  sanitizeSuggestionText,
   toHumanApplicationMethod,
   toHumanQuantity,
 } from './suggestion-language';
+import {
+  hasCurrentSelectionEvidence,
+  requiresOwnedDaytimeSpf,
+} from './suggestion-routine-repeat-policy';
+import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
+import {
+  isPreferredTimeCompatibleWithDaypart,
+  isStrongActiveTag,
+} from './suggestion-product-intelligence';
+
+const baselineCopy = {
+  noStepsHeadline: {
+    en: 'No shelf steps yet',
+    sv: 'Inga hyllsteg an',
+    es: 'Aun no hay pasos',
+  },
+  noExtraStepHeadline: {
+    en: 'No extra step needed',
+    sv: 'Inget extra steg behovs',
+    es: 'No hace falta otro paso',
+  },
+  quickHeadline: {
+    en: 'Quick shelf suggestion',
+    sv: 'Snabbt hyllforslag',
+    es: 'Sugerencia rapida',
+  },
+  shelfHeadline: {
+    en: 'Using your shelf today',
+    sv: 'Anvander din hylla idag',
+    es: 'Usando tu estante hoy',
+  },
+  scheduledDetail: {
+    en: 'Ritora used your shelf and safety rules for this slot.',
+    sv: 'Ritora anvande din hylla och sakerhetsregler for denna tid.',
+    es: 'Ritora uso tu estante y reglas de seguridad para este horario.',
+  },
+  noActiveProducts: {
+    en: 'No active shelf products are available to apply right now.',
+    sv: 'Inga aktiva hyllprodukter finns att applicera just nu.',
+    es: 'No hay productos activos disponibles para aplicar ahora.',
+  },
+  noExtraStep: {
+    en: 'No extra shelf product looks necessary right now.',
+    sv: 'Ingen extra hyllprodukt verkar behovas just nu.',
+    es: 'No parece necesario otro producto del estante ahora.',
+  },
+  preferredTimeMismatch: {
+    en: 'Your shelf products are better saved for their preferred time.',
+    sv: 'Dina hyllprodukter passar battre vid sin foredragna tid.',
+    es: 'Tus productos del estante encajan mejor en su horario preferido.',
+  },
+  missingSunscreen: {
+    en: 'Sunscreen is missing from your shelf, so it stays a gap instead of an invented step.',
+    sv: 'Solskydd saknas pa din hylla, sa det blir ett gap i stallet for ett hittat steg.',
+    es: 'Falta protector solar en tu estante, asi que queda como carencia y no como paso inventado.',
+  },
+  medicationCaution: {
+    en: 'Medication or pregnancy context: keep retinoids paused unless your clinician clears them.',
+    sv: 'Medicin- eller graviditetslage: pausa retinoider om specialist inte har godkant dem.',
+    es: 'Contexto de medicacion o embarazo: pausa retinoides salvo que tu especialista los autorice.',
+  },
+  pigmentSpfGap: {
+    en: 'For dark marks or uneven tone, that SPF gap is essential for daytime care.',
+    sv: 'Vid morka marken eller ojamn ton ar SPF-gapet viktigt dagtid.',
+    es: 'Para manchas oscuras o tono desigual, esa carencia de SPF es esencial de dia.',
+  },
+  restart: {
+    en: 'Restarting gently after your break.',
+    sv: 'Startar forsiktigt igen efter din paus.',
+    es: 'Retomando suavemente despues de tu pausa.',
+  },
+  goodFit: {
+    en: 'Good fit for this slot.',
+    sv: 'Passar bra for denna tid.',
+    es: 'Encaja bien para este horario.',
+  },
+  evidenceLabel: { en: 'Evidence', sv: 'Underlag', es: 'Evidencia' },
+  environmentLabel: { en: 'Environment', sv: 'Miljo', es: 'Entorno' },
+  environmentConsidered: {
+    en: 'Environment data was considered.',
+    sv: 'Miljodata vagdes in.',
+    es: 'Se considero el entorno.',
+  },
+  baselineChip: { en: 'Ritora baseline', sv: 'Ritora-bas', es: 'Base Ritora' },
+  sunscreenCategory: {
+    en: 'Broad-spectrum sunscreen SPF 30+',
+    sv: 'Brett spektrum solskydd SPF 30+',
+    es: 'Protector solar de amplio espectro SPF 30+',
+  },
+  barrierMoisturizerCategory: {
+    en: 'Fragrance-free barrier moisturizer',
+    sv: 'Parfymfri barriarkram',
+    es: 'Hidratante de barrera sin fragancia',
+  },
+  barrierSupportGoal: {
+    en: 'barrier support',
+    sv: 'barriarstod',
+    es: 'apoyo de barrera',
+  },
+  gapSunscreen: {
+    en: 'Daytime routines need a sunscreen option.',
+    sv: 'Rutiner dagtid behover ett solskydd.',
+    es: 'Las rutinas diurnas necesitan una opcion de protector solar.',
+  },
+  gapSunscreenPigment: {
+    en: 'A sunscreen is the essential missing daytime step for dark marks or uneven tone.',
+    sv: 'Solskydd ar det viktiga saknade steget dagtid for morka marken eller ojamn ton.',
+    es: 'El protector solar es el paso diurno esencial que falta para manchas o tono desigual.',
+  },
+  gapBarrierMoisturizer: {
+    en: 'A simple moisturizer can support barrier recovery.',
+    sv: 'En enkel kram kan stodja barriaraterhamtning.',
+    es: 'Una hidratante simple puede apoyar la recuperacion de la barrera.',
+  },
+  onDemandPostWorkout: {
+    en: 'Post-workout reset: cleanse sweat, keep it quick, and avoid strong actives.',
+    sv: 'Efter traning: rengor svett, hall det snabbt och undvik starka aktiva amnen.',
+    es: 'Despues de entrenar: limpia el sudor, hazlo rapido y evita activos fuertes.',
+  },
+  onDemandEventPrep: {
+    en: 'Event prep: keep skin calm now and avoid risky last-minute actives.',
+    sv: 'Infor event: hall huden lugn och undvik riskabla aktiva amnen i sista minuten.',
+    es: 'Antes de un evento: calma la piel y evita activos arriesgados de ultimo momento.',
+  },
+  onDemandPostSun: {
+    en: 'Post-sun reset: keep skin comfortable and prioritize barrier support.',
+    sv: 'Efter sol: hall huden bekvam och prioritera barriarstott.',
+    es: 'Despues del sol: manten la piel comoda y prioriza la barrera.',
+  },
+  onDemandPostSwim: {
+    en: 'Post-swim reset: rinse, moisturize, and protect the barrier.',
+    sv: 'Efter simning: skolj, aterfukta och skydda barriaren.',
+    es: 'Despues de nadar: enjuaga, hidrata y protege la barrera.',
+  },
+  onDemandTravel: {
+    en: 'Travel refresh: keep the routine simple and comfortable.',
+    sv: 'Resefrisch: hall rutinen enkel och bekvam.',
+    es: 'Refresco de viaje: manten la rutina simple y comoda.',
+  },
+  onDemandQuick: {
+    en: 'Quick refresh: use the simplest helpful shelf steps right now.',
+    sv: 'Snabb uppfriskning: anvand de enklaste hjalpsamma stegen nu.',
+    es: 'Refresco rapido: usa ahora los pasos utiles mas simples.',
+  },
+  onDemandPostMakeup: {
+    en: 'Post-makeup or shower reset: cleanse gently and support the barrier.',
+    sv: 'Efter makeup eller dusch: rengor milt och stod barriaren.',
+    es: 'Despues del maquillaje o la ducha: limpia suave y apoya la barrera.',
+  },
+  onDemandOther: {
+    en: 'Ritora used your shelf and safety rules for this request.',
+    sv: 'Ritora anvande din hylla och sakerhetsregler for denna forfragan.',
+    es: 'Ritora uso tu estante y reglas de seguridad para esta solicitud.',
+  },
+} satisfies Record<string, Record<AppLanguage, string>>;
 
 export function buildDeterministicAiSteps(
   inputs: SuggestionGenerationInputs,
 ): SuggestionGenerationStepOutput[] {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
   const productById = new Map(
     inputs.shelfActiveProducts.map((product) => [product.id, product]),
   );
@@ -32,7 +195,7 @@ export function buildDeterministicAiSteps(
     .map((score, index) => {
       const product = productById.get(score.productId);
       if (!product) return null;
-      return productScoreToStep(product, score, index);
+      return productScoreToStep(product, score, index, language);
     })
     .filter((step): step is SuggestionGenerationStepOutput => step !== null);
 }
@@ -41,69 +204,95 @@ export function deterministicExplanation(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionExplanationJson {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
   const missingSunscreen = needsMissingDaytimeSunscreen(inputs);
   return {
     headline:
       steps.length === 0
-        ? 'No shelf steps yet'
+        ? noStepHeadline(inputs, language)
         : inputs.requestSource === SuggestionRequestSource.OnDemand
-          ? 'Quick shelf suggestion'
-          : 'Using your shelf today',
+          ? baselineCopy.quickHeadline[language]
+          : baselineCopy.shelfHeadline[language],
     body: [
       inputs.requestSource === SuggestionRequestSource.OnDemand
-        ? onDemandFallbackDetail(inputs)
-        : 'Ritora used your shelf and safety rules for this slot.',
-      ...(steps.length === 0
-        ? ['No active shelf products are available to apply right now.']
+        ? onDemandFallbackDetail(inputs, language)
+        : baselineCopy.scheduledDetail[language],
+      ...(hasPregnancyOrMedicationCaution(inputs)
+        ? [baselineCopy.medicationCaution[language]]
         : []),
-      ...(missingSunscreen
-        ? [
-            'Sunscreen is missing from your shelf, so it stays a gap instead of an invented step.',
-          ]
-        : []),
+      ...(steps.length === 0 ? [noStepBodyLine(inputs, language)] : []),
+      ...(missingSunscreen ? [baselineCopy.missingSunscreen[language]] : []),
       ...(missingSunscreen && needsPigmentProtection(inputs)
-        ? [
-            'For dark marks or uneven tone, that SPF gap is essential for daytime care.',
-          ]
+        ? [baselineCopy.pigmentSpfGap[language]]
         : []),
       ...(inputs.contextSummary.routineBreak.recentlyResumed
-        ? ['Restarting gently after your break.']
+        ? [baselineCopy.restart[language]]
         : []),
     ],
     perStepReasons: steps.map((step) => ({
       stepOrder: step.stepOrder,
-      reason: step.explanation ?? 'Good fit for this slot.',
+      reason: step.explanation ?? baselineCopy.goodFit[language],
     })),
     skipped: inputs.contextSummary.skippedCandidates.map((candidate) => {
-      const product = inputs.contextSummary.productScores.find(
+      const product = resolveSuggestionProductScores(inputs).find(
         (score) => score.productId === candidate.productId,
       );
       return {
         name: product
           ? `${product.brand} ${product.name}`
           : candidate.productId,
-        reason:
-          sanitizeSuggestionText(candidate.reason, {
-            maxLength: 140,
-            maxSentences: 1,
-          }) ?? '',
+        reason: deterministicSkippedReason(language),
       };
     }),
     inputs: [
       {
-        label: 'Evidence',
-        detail: `${inputs.contextSummary.evidenceSources.length} trusted sources informed the safety check.`,
+        label: baselineCopy.evidenceLabel[language],
+        detail: evidenceDetail(
+          inputs.contextSummary.evidenceSources.length,
+          language,
+        ),
       },
       ...(inputs.contextSummary.environment
         ? [
             {
-              label: 'Environment',
-              detail: environmentDetail(inputs.contextSummary.environment),
+              label: baselineCopy.environmentLabel[language],
+              detail: environmentDetail(
+                inputs.contextSummary.environment,
+                language,
+              ),
             },
           ]
         : []),
     ],
   };
+}
+
+function noStepHeadline(
+  inputs: SuggestionGenerationInputs,
+  language: AppLanguage,
+): string {
+  return inputs.shelfActiveProducts.length === 0
+    ? baselineCopy.noStepsHeadline[language]
+    : baselineCopy.noExtraStepHeadline[language];
+}
+
+function noStepBodyLine(
+  inputs: SuggestionGenerationInputs,
+  language: AppLanguage,
+): string {
+  if (inputs.shelfActiveProducts.length === 0) {
+    return baselineCopy.noActiveProducts[language];
+  }
+  const scores = resolveSuggestionProductScores(inputs);
+  const hasPreferredTimeCompatibleProduct = scores.some((score) =>
+    isPreferredTimeCompatibleWithDaypart(
+      score.preferredTimeOfDay,
+      inputs.daypart,
+    ),
+  );
+  return hasPreferredTimeCompatibleProduct
+    ? baselineCopy.noExtraStep[language]
+    : baselineCopy.preferredTimeMismatch[language];
 }
 
 function needsMissingDaytimeSunscreen(
@@ -112,38 +301,146 @@ function needsMissingDaytimeSunscreen(
   return (
     (inputs.daypart === SuggestionDaypart.Morning ||
       inputs.daypart === SuggestionDaypart.Noon) &&
-    !inputs.contextSummary.productScores.some(
+    !resolveSuggestionProductScores(inputs).some(
       (score) => score.category === ProductCategory.SunProtection,
     )
   );
 }
 
-function onDemandFallbackDetail(inputs: SuggestionGenerationInputs): string {
+function evidenceDetail(count: number, language: AppLanguage): string {
+  return {
+    en: `${count} trusted sources informed the safety check.`,
+    sv: `${count} betrodda kallor vagledde sakerhetskontrollen.`,
+    es: `${count} fuentes fiables informaron la revision de seguridad.`,
+  }[language];
+}
+
+function deterministicSkippedReason(language: AppLanguage): string {
+  return {
+    en: 'Skipped because today calls for a simpler routine.',
+    sv: 'Hoppas over eftersom dagen behover en enklare rutin.',
+    es: 'Se omite porque hoy conviene una rutina mas simple.',
+  }[language];
+}
+
+function deterministicStepReason(
+  category: ProductCategory,
+  language: AppLanguage,
+): string {
+  const categoryReasons: Partial<
+    Record<ProductCategory, Record<AppLanguage, string>>
+  > = {
+    [ProductCategory.Cleanser]: {
+      en: 'Gentle cleanse fits this slot.',
+      sv: 'Mild rengoring passar denna tid.',
+      es: 'Una limpieza suave encaja en este horario.',
+    },
+    [ProductCategory.Moisturizer]: {
+      en: 'Barrier support fits this slot.',
+      sv: 'Barriarstod passar denna tid.',
+      es: 'El apoyo de barrera encaja en este horario.',
+    },
+    [ProductCategory.SunProtection]: {
+      en: 'Daytime sun protection fits this slot.',
+      sv: 'Solskydd dagtid passar denna tid.',
+      es: 'La proteccion solar diurna encaja en este horario.',
+    },
+  };
+  return (
+    categoryReasons[category]?.[language] ?? baselineCopy.goodFit[language]
+  );
+}
+
+function deterministicCautionReason(language: AppLanguage): string {
+  return {
+    en: 'Use this step gently today.',
+    sv: 'Anvand detta steg forsiktigt idag.',
+    es: 'Usa este paso con suavidad hoy.',
+  }[language];
+}
+
+function localizeEnvironmentGapCategory(
+  value: string,
+  language: AppLanguage,
+): string {
+  if (/sunscreen|spf/i.test(value))
+    return baselineCopy.sunscreenCategory[language];
+  if (/moisturizer|barrier/i.test(value)) {
+    return {
+      en: 'Barrier-support moisturizer',
+      sv: 'Barriarstodjande kram',
+      es: 'Hidratante de apoyo de barrera',
+    }[language];
+  }
+  return value;
+}
+
+function localizeEnvironmentGapReason(
+  value: string,
+  language: AppLanguage,
+): string {
+  if (/high uv/i.test(value)) {
+    return {
+      en: 'High UV makes daily sunscreen important.',
+      sv: 'Hog UV gor dagligt solskydd viktigt.',
+      es: 'El UV alto hace importante el protector solar diario.',
+    }[language];
+  }
+  if (/dry air|hard-water/i.test(value)) {
+    return {
+      en: 'Dry air or hard-water sensitivity can increase tightness.',
+      sv: 'Torr luft eller kanslighet for hart vatten kan oka stramhet.',
+      es: 'El aire seco o la sensibilidad al agua dura puede aumentar la tirantez.',
+    }[language];
+  }
+  return value;
+}
+
+function localizeEnvironmentGoal(
+  value: string | null | undefined,
+  language: AppLanguage,
+): string | null {
+  if (!value) return null;
+  if (/sun protection/i.test(value)) {
+    return { en: 'sun protection', sv: 'solskydd', es: 'proteccion solar' }[
+      language
+    ];
+  }
+  if (/barrier support/i.test(value))
+    return baselineCopy.barrierSupportGoal[language];
+  return value;
+}
+
+function onDemandFallbackDetail(
+  inputs: SuggestionGenerationInputs,
+  language: AppLanguage,
+): string {
   switch (inputs.requestContext?.intent) {
     case 'post_workout':
-      return 'Post-workout reset: cleanse sweat, keep it quick, and avoid strong actives.';
+      return baselineCopy.onDemandPostWorkout[language];
     case 'event_prep':
-      return 'Event prep: keep skin calm now and avoid risky last-minute actives.';
+      return baselineCopy.onDemandEventPrep[language];
     case 'post_sun':
-      return 'Post-sun reset: keep skin comfortable and prioritize barrier support.';
+      return baselineCopy.onDemandPostSun[language];
     case 'post_swim':
-      return 'Post-swim reset: rinse, moisturize, and protect the barrier.';
+      return baselineCopy.onDemandPostSwim[language];
     case 'travel_refresh':
-      return 'Travel refresh: keep the routine simple and comfortable.';
+      return baselineCopy.onDemandTravel[language];
     case 'quick_refresh':
-      return 'Quick refresh: use the simplest helpful shelf steps right now.';
+      return baselineCopy.onDemandQuick[language];
     case 'post_makeup_or_shower':
-      return 'Post-makeup or shower reset: cleanse gently and support the barrier.';
+      return baselineCopy.onDemandPostMakeup[language];
     case 'other':
     case undefined:
-      return 'Ritora used your shelf and safety rules for this request.';
+      return baselineCopy.onDemandOther[language];
   }
 }
 
 export function buildDeterministicGapRecommendations(
   inputs: SuggestionGenerationInputs,
 ): SuggestionGapRecommendationJson[] {
-  const productScores = inputs.contextSummary.productScores;
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
+  const productScores = resolveSuggestionProductScores(inputs);
   const hasSunscreen = productScores.some(
     (score) => score.category === ProductCategory.SunProtection,
   );
@@ -161,10 +458,10 @@ export function buildDeterministicGapRecommendations(
     !hasSunscreen
   ) {
     const sunscreenReason = needsPigmentProtection(inputs)
-      ? 'A sunscreen is the essential missing daytime step for dark marks or uneven tone.'
-      : 'Daytime routines need a sunscreen option.';
+      ? baselineCopy.gapSunscreenPigment[language]
+      : baselineCopy.gapSunscreen[language];
     gaps.push({
-      ingredientOrCategory: 'Broad-spectrum sunscreen SPF 30+',
+      ingredientOrCategory: baselineCopy.sunscreenCategory[language],
       reason: sunscreenReason,
       budgetTier: null,
       goalAlignment: inputs.skinProfile?.primary_goal ?? null,
@@ -181,15 +478,17 @@ export function buildDeterministicGapRecommendations(
     !hasMoisturizer
   ) {
     gaps.push({
-      ingredientOrCategory: 'Fragrance-free barrier moisturizer',
-      reason: 'A simple moisturizer can support barrier recovery.',
+      ingredientOrCategory: baselineCopy.barrierMoisturizerCategory[language],
+      reason: baselineCopy.gapBarrierMoisturizer[language],
       budgetTier: null,
-      goalAlignment: 'barrier support',
+      goalAlignment: baselineCopy.barrierSupportGoal[language],
       sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
     });
   }
 
   for (const gap of environmentPolicy.gapRecommendations) {
+    if (hasSunscreen && isSunscreenGap(gap)) continue;
+    if (hasMoisturizer && isMoisturizerGap(gap)) continue;
     const alreadyCovered = gaps.some(
       (candidate) =>
         candidate.ingredientOrCategory.toLowerCase() ===
@@ -198,9 +497,16 @@ export function buildDeterministicGapRecommendations(
     if (!alreadyCovered) {
       gaps.push({
         ...gap,
+        ingredientOrCategory: localizeEnvironmentGapCategory(
+          gap.ingredientOrCategory,
+          language,
+        ),
+        reason: localizeEnvironmentGapReason(gap.reason, language),
         budgetTier: null,
         goalAlignment:
-          gap.goalAlignment ?? inputs.skinProfile?.primary_goal ?? null,
+          localizeEnvironmentGoal(gap.goalAlignment, language) ??
+          inputs.skinProfile?.primary_goal ??
+          null,
       });
     }
   }
@@ -209,6 +515,26 @@ export function buildDeterministicGapRecommendations(
     ...gap,
     sourceIds: mergeEvidenceSourceIds(gap.sourceIds),
   }));
+}
+
+function isSunscreenGap(gap: {
+  ingredientOrCategory: string;
+  reason: string;
+  goalAlignment?: string | null;
+}): boolean {
+  return /spf|sunscreen|sun protection/i.test(
+    `${gap.ingredientOrCategory} ${gap.reason} ${gap.goalAlignment ?? ''}`,
+  );
+}
+
+function isMoisturizerGap(gap: {
+  ingredientOrCategory: string;
+  reason: string;
+  goalAlignment?: string | null;
+}): boolean {
+  return /moisturizer|moisturiser|barrier|cream|hydrating/i.test(
+    `${gap.ingredientOrCategory} ${gap.reason} ${gap.goalAlignment ?? ''}`,
+  );
 }
 
 function needsPigmentProtection(inputs: SuggestionGenerationInputs): boolean {
@@ -225,6 +551,7 @@ function environmentDetail(
   environment: NonNullable<
     SuggestionGenerationInputs['contextSummary']['environment']
   >,
+  language: AppLanguage,
 ): string {
   const parts = [
     environment.conditionLabel,
@@ -235,8 +562,8 @@ function environmentDetail(
       : null,
   ].filter(Boolean);
   return parts.length > 0
-    ? parts.join(' · ')
-    : 'Environment data was considered.';
+    ? parts.join(' - ')
+    : baselineCopy.environmentConsidered[language];
 }
 
 function selectBaselineProducts(
@@ -245,14 +572,16 @@ function selectBaselineProducts(
   const preferredOrder = preferredCategoryOrder(inputs);
   const selected: SuggestionProductScore[] = [];
   const usedCategories = new Set<ProductCategory>();
-  const skippedProductIds = new Set(
-    inputs.contextSummary.skippedCandidates.map(
-      (candidate) => candidate.productId,
-    ),
-  );
-  const candidates = inputs.contextSummary.productScores
+  const candidates = resolveSuggestionProductScores(inputs)
     .filter((score) => score.suitabilityScore >= 40)
-    .filter((score) => !skippedProductIds.has(score.productId))
+    .filter((score) =>
+      isPreferredTimeCompatibleWithDaypart(
+        score.preferredTimeOfDay,
+        inputs.daypart,
+      ),
+    )
+    .filter((score) => hasCurrentSelectionEvidence(inputs, score.productId))
+    .filter((score) => isUsableBaselineCandidate(inputs, score))
     .filter((score) =>
       shouldAvoidStrongActives(inputs)
         ? !score.activeTags.some((tag) =>
@@ -278,6 +607,19 @@ function selectBaselineProducts(
         : 2
       : 4;
   return selected.slice(0, limit);
+}
+
+function isUsableBaselineCandidate(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionProductScore,
+): boolean {
+  const skipped = inputs.contextSummary.skippedCandidates.filter(
+    (candidate) => candidate.productId === score.productId,
+  );
+  if (skipped.length === 0) return true;
+  return skipped.every((candidate) =>
+    /recent same-daypart repeat/i.test(candidate.reason),
+  );
 }
 
 function preferredCategoryOrder(
@@ -327,9 +669,19 @@ function preferredCategoryOrder(
 
   if (shouldAvoidStrongActives(inputs)) {
     return inputs.daypart === SuggestionDaypart.Evening
-      ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
+      ? [
+          ProductCategory.Cleanser,
+          ProductCategory.Toner,
+          ProductCategory.Essence,
+          ProductCategory.Serum,
+          ProductCategory.Treatment,
+          ProductCategory.Moisturizer,
+        ]
       : [
           ProductCategory.Cleanser,
+          ProductCategory.Toner,
+          ProductCategory.Essence,
+          ProductCategory.Serum,
           ProductCategory.Moisturizer,
           ProductCategory.SunProtection,
         ];
@@ -359,8 +711,67 @@ function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
     inputs.contextSummary.reaction.barrierCompromised ||
     inputs.contextSummary.routineBreak.recentlyResumed ||
     inputs.contextSummary.applicationPatterns.conservativeRestart ||
+    hasRecentStrongActiveApplication(inputs) ||
+    inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /avoid_strong_actives|avoid_new_strong_actives|photosensit/i.test(
+        constraint,
+      ),
+    ) ||
+    shouldAvoidDaytimeStrongActives(inputs) ||
     hasPregnancyOrMedicationCaution(inputs)
   );
+}
+
+function shouldAvoidDaytimeStrongActives(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  if (inputs.daypart === SuggestionDaypart.Evening) return false;
+  const uvRisk = inputs.contextSummary.environment?.uvRisk ?? null;
+  return (
+    (uvRisk ? isHighUvRisk(uvRisk) : false) ||
+    inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /space_strong_actives/i.test(constraint),
+    )
+  );
+}
+
+function hasRecentStrongActiveApplication(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  if (
+    !inputs.contextSummary.safetyConstraints.some((constraint) =>
+      /space_strong_actives|avoid_new_strong_actives/i.test(constraint),
+    )
+  ) {
+    return false;
+  }
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const latestAppliedDate =
+    inputs.contextSummary.appliedProductHistory?.products
+      .filter(
+        (product) =>
+          product.productId &&
+          product.lastAppliedDate &&
+          scoreByProductId
+            .get(product.productId)
+            ?.activeTags.some(isStrongActiveTag),
+      )
+      .map((product) => product.lastAppliedDate as string)
+      .sort((left, right) => right.localeCompare(left))[0] ?? null;
+  if (!latestAppliedDate) return false;
+  return daysBetweenDates(latestAppliedDate, inputs.targetDate) <= 1;
+}
+
+function daysBetweenDates(startDate: string, endDate: string): number {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
 function hasPregnancyOrMedicationCaution(
@@ -373,25 +784,6 @@ function hasPregnancyOrMedicationCaution(
     inputs.skinProfile?.under_dermatologist_care ?? '',
   ]).toLowerCase();
   return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(text);
-}
-
-function requiresOwnedDaytimeSpf(inputs: SuggestionGenerationInputs): boolean {
-  if (
-    inputs.daypart !== SuggestionDaypart.Morning &&
-    inputs.daypart !== SuggestionDaypart.Noon
-  ) {
-    return false;
-  }
-  if (
-    /\b(indoor|indoors|inside|at home all day|no daylight)\b/i.test(
-      inputs.requestContext?.note ?? '',
-    )
-  ) {
-    return false;
-  }
-  return inputs.contextSummary.productScores.some(
-    (score) => score.category === ProductCategory.SunProtection,
-  );
 }
 
 function prefersMinimalRoutine(inputs: SuggestionGenerationInputs): boolean {
@@ -418,6 +810,7 @@ function productScoreToStep(
   product: InventoryProduct,
   score: SuggestionProductScore,
   index: number,
+  language: AppLanguage,
 ): SuggestionGenerationStepOutput {
   return {
     stepOrder: index,
@@ -429,31 +822,24 @@ function productScoreToStep(
     customLabel: null,
     applicationMethod: toHumanApplicationMethod(
       product.guidance?.applicationMethod ?? null,
+      language,
     ),
-    quantity: toHumanQuantity(product.guidance?.quantity ?? null),
+    quantity: toHumanQuantity(product.guidance?.quantity ?? null, language),
     waitAfterMinutes: score.waitMinutes,
-    explanation:
-      sanitizeSuggestionText(score.suitabilityReasons[0], {
-        maxLength: 140,
-        maxSentences: 1,
-      }) ?? 'Selected from your shelf.',
+    explanation: deterministicStepReason(score.category, language),
     routineNote: null,
     provenance: SuggestionStepProvenance.AiAdded,
     chips: [
       {
         tone: SuggestionStepChipTone.Ai,
-        text: 'Ritora baseline',
+        text: baselineCopy.baselineChip[language],
       },
     ],
     safetyWarnings: score.cautionReasons.length
       ? [
           {
             severity: 'info',
-            message:
-              sanitizeSuggestionText(score.cautionReasons[0], {
-                maxLength: 160,
-                maxSentences: 1,
-              }) ?? '',
+            message: deterministicCautionReason(language),
             ingredientSlugs: score.activeTags,
             sourceIds: score.evidenceSourceIds,
           },

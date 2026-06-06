@@ -1,0 +1,340 @@
+{
+  "reportType": "todays_suggestion_live_ai_evaluation",
+  "generatedAt": "2026-05-31T20:03:08.482Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "2026-05-26.v1",
+  "totalCases": 1,
+  "passedCases": 1,
+  "failedCases": 0,
+  "repeatabilityRuns": 1,
+  "repeatabilityFailures": 0,
+  "strict": true,
+  "cases": [
+    {
+      "caseId": "sparse_history_partial_shelf",
+      "title": "Sparse history still uses goals without overconfident repeats",
+      "status": "passed",
+      "hardChecksPassed": 21,
+      "hardChecksTotal": 21,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 4,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Gives a clear morning routine the user can do now.",
+          "Simple, beginner-friendly wording and reasons.",
+          "Uses the stated goals and owned shelf items without inventing products or overreading sparse history.",
+          "Handles missing SPF correctly as a gap, with no pressure to use an owned product that doesn't exist.",
+          "Avoids unsafe actives and respects the max step count."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-05-26.v1",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "15ddb7624c98f6dbaaa3cb1411f3255167642dfa76cc766b5870c86e58d4df08",
+      "repeatability": {
+        "runs": 1,
+        "passed": true,
+        "baselineSignature": "c4c5a4b3c95600eed4add0d4036cd745632362b7e0402f12667c01bd11dcb875",
+        "variations": [],
+        "mismatches": []
+      },
+      "generatedAt": "2026-05-31T20:03:08.482Z",
+      "sanitizedCaseSummary": {
+        "id": "sparse_history_partial_shelf",
+        "title": "Sparse history still uses goals without overconfident repeats",
+        "riskFocus": [
+          "sparse_history",
+          "goal_priority",
+          "no_invented_products"
+        ],
+        "manualReviewChecklist": [
+          "Does it avoid claiming a strong pattern from only two history records?",
+          "Does the dark-mark goal still make sunscreen a clear gap?"
+        ],
+        "request": {
+          "source": "scheduled",
+          "intent": null,
+          "intensity": null,
+          "daypart": "morning",
+          "targetTime": "08:20"
+        },
+        "skinProfile": {
+          "skinType": "combination",
+          "skinTone": "medium",
+          "sensitivityLevel": "medium",
+          "primaryGoal": "reduce post-breakout marks",
+          "currentConcerns": [
+            "dark marks",
+            "dryness"
+          ],
+          "pregnancyStatus": null,
+          "dermatologistCare": null,
+          "safetyContext": {
+            "conditions": [],
+            "medications": [],
+            "photosensitizingOther": false
+          },
+          "activeTolerances": {},
+          "routinePreferences": {}
+        },
+        "contextSignals": {
+          "reaction": {
+            "hasSignal": false,
+            "severity": null,
+            "confidence": null,
+            "indicators": [],
+            "affectedZones": [],
+            "concernKeys": [],
+            "daysSinceLatestSignal": null,
+            "barrierCompromised": false,
+            "photoInputImages": 0,
+            "multiAnglePhotoEntries": 0
+          },
+          "routineBreak": {
+            "recentlyResumed": false,
+            "lastPausedFrom": null,
+            "lastPausedUntil": null
+          },
+          "applicationPatterns": {
+            "days": 2,
+            "daysSinceLastApplication": 1,
+            "conservativeRestart": false,
+            "skippedByCategory": {},
+            "substitutedByCategory": {},
+            "addedOffShelfCount": 0,
+            "editedLogCount": 0,
+            "adherenceByCategory": {
+              "cleanser": 1,
+              "moisturizer": 1
+            }
+          },
+          "appliedProductHistory": {
+            "windowStartDate": "2026-05-17",
+            "windowEndDate": "2026-05-16",
+            "recordsConsidered": 2,
+            "products": [
+              {
+                "productId": "cleanser-1",
+                "brand": "Ava Lab",
+                "name": "Soft Cream Cleanser",
+                "category": "cleanser",
+                "dayparts": [
+                  "morning"
+                ],
+                "statuses": [
+                  "applied"
+                ],
+                "useCount": 1,
+                "lastAppliedDate": "2026-05-16",
+                "isOffShelf": false,
+                "isSubstitution": false
+              },
+              {
+                "productId": "moisturizer-1",
+                "brand": "Ava Lab",
+                "name": "Barrier Cream",
+                "category": "moisturizer",
+                "dayparts": [
+                  "evening"
+                ],
+                "statuses": [
+                  "applied"
+                ],
+                "useCount": 1,
+                "lastAppliedDate": "2026-05-17",
+                "isOffShelf": false,
+                "isSubstitution": false
+              }
+            ]
+          },
+          "routineMemory": {
+            "sameDaypartSuggestionCount": 1,
+            "recentlySuggestedProductIds": [
+              "cleanser-1"
+            ],
+            "exactRepeatCountByFingerprint": {
+              "cleanser-1": 1
+            }
+          },
+          "environment": null,
+          "safetyConstraints": []
+        },
+        "spfExpectation": {
+          "required": true,
+          "ownedSunscreen": false,
+          "correctHandling": "No sunscreen is owned; a sunscreen gap or safety flag is the correct handling, not an invented SPF step."
+        },
+        "ownedProducts": [
+          {
+            "productId": "cleanser-1",
+            "brand": "Ava Lab",
+            "name": "Soft Cream Cleanser",
+            "category": "cleanser",
+            "activeTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "moisturizer-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Cream",
+            "category": "moisturizer",
+            "activeTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          }
+        ],
+        "routineSteps": [],
+        "expectations": {
+          "requiresSpfProtection": true,
+          "requiresGapRecommendation": true,
+          "requiredGapKeywords": [
+            "sunscreen"
+          ],
+          "forbiddenProductIds": [
+            "retinoid-1",
+            "bha-1"
+          ],
+          "maxStepCount": 3
+        }
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "hasReactionSignal": false,
+        "simplifiedForReaction": false,
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-05-26.v1",
+          "inputTokens": 4065,
+          "outputTokens": 2982,
+          "totalTokens": 7047,
+          "estimatedCostUsd": 0.002399,
+          "durationMs": 18202
+        },
+        "spfHandling": {
+          "required": true,
+          "ownedSunscreen": false,
+          "hasSunscreenStep": false,
+          "hasSunscreenGap": true
+        },
+        "explanation": {
+          "headline": "Morning care for dark marks",
+          "body": [
+            "Gentle care for a bright morning.",
+            "Cleanse, then support dryness.",
+            "No sunscreen is on shelf today."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Gentle cleanse prepares skin without extra stress."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Ceramides and panthenol help dryness and comfort."
+            }
+          ],
+          "skipped": [],
+          "inputs": [
+            {
+              "label": "Target slot",
+              "detail": "2026-05-18, 08:20 morning"
+            },
+            {
+              "label": "Main goals",
+              "detail": "Reduce post-breakout marks and dryness"
+            },
+            {
+              "label": "Shelf context",
+              "detail": "Gentle cleanser and barrier cream available"
+            }
+          ]
+        },
+        "steps": [
+          {
+            "resolvedCategory": "cleanser",
+            "resolvedActiveTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "stepOrder": 0,
+            "routineStepId": null,
+            "inventoryProductId": "cleanser-1",
+            "productBrand": "Ava Lab",
+            "productName": "Soft Cream Cleanser",
+            "stepLabel": "cleanser",
+            "provenance": "ai_added",
+            "explanation": "Gentle cleanse prepares skin without extra stress.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "moisturizer",
+            "resolvedActiveTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "stepOrder": 1,
+            "routineStepId": null,
+            "inventoryProductId": "moisturizer-1",
+            "productBrand": "Ava Lab",
+            "productName": "Barrier Cream",
+            "stepLabel": "moisturizer",
+            "provenance": "ai_added",
+            "explanation": "Ceramides and panthenol help dryness and comfort.",
+            "routineNote": null,
+            "safetyWarnings": []
+          }
+        ],
+        "gapRecommendations": [
+          {
+            "ingredientOrCategory": "Broad-spectrum SPF 30+ sunscreen",
+            "reason": "Needed to help protect dark marks in the morning.",
+            "budgetTier": "mid",
+            "goalAlignment": "Helps keep marks from darkening.",
+            "sourceIds": [
+              "aad_sunscreen_selection",
+              "dermnet_post_inflammatory_hyperpigmentation"
+            ]
+          }
+        ],
+        "safetyFlags": [
+          {
+            "severity": "info",
+            "message": "Morning sun can deepen post-breakout marks.",
+            "ingredientSlugs": [],
+            "sourceIds": [
+              "aad_sunscreen_selection",
+              "dermnet_post_inflammatory_hyperpigmentation"
+            ]
+          },
+          {
+            "severity": "info",
+            "message": "No sunscreen is on your shelf, so daytime SPF stays a gap rather than an application step.",
+            "ingredientSlugs": [
+              "spf"
+            ],
+            "sourceIds": [
+              "aad_sunscreen_selection"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

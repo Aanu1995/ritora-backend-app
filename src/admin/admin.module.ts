@@ -4,6 +4,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OriginCheckGuard } from '../common/guards/origin-check.guard';
 import { MailModule } from '../mail/mail.module';
+import { SupportModule } from '../support/support.module';
+import { SkinJournalAnalysisFeedback } from '../skin-journal/entities/skin-journal-analysis-feedback.entity';
 import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
 import { UserConsent } from '../users/entities/user-consent.entity';
 import { UserDataAccessLog } from '../users/entities/user-data-access-log.entity';
@@ -46,11 +48,13 @@ import { AdminUserNote } from './entities/admin-user-note.entity';
       AdminSession,
       AdminUserNote,
       AccountMonitoringEvent,
+      SkinJournalAnalysisFeedback,
       User,
       UserConsent,
       UserDataAccessLog,
     ]),
     MailModule,
+    SupportModule,
   ],
   controllers: [AdminAuthController, AdminController],
   providers: [

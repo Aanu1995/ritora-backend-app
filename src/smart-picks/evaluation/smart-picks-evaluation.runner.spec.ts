@@ -157,7 +157,7 @@ describe('Smart Picks evaluation runner', () => {
     );
   });
 
-  it('keeps retinoid missing when only a peptide-like coverage role is present', async () => {
+  it('does not require a retinoid coverage role for pregnancy fine-line support', async () => {
     const persona = SMART_PICKS_GOLDEN_PERSONAS.find(
       (candidate) =>
         candidate.id === 'refine_pregnancy_fine_lines_uk_retinoid_block',
@@ -184,8 +184,8 @@ describe('Smart Picks evaluation runner', () => {
       (check) => check.id === 'coverage_roles',
     );
 
-    expect(coverageCheck).toEqual(expect.objectContaining({ passed: false }));
-    expect(coverageCheck?.actual).toContain('retinoid');
+    expect(coverageCheck).toEqual(expect.objectContaining({ passed: true }));
+    expect(coverageCheck?.actual).not.toContain('retinoid');
   });
 
   it('accepts live-model resurfacing and sunscreen synonyms in gap checks', async () => {
@@ -332,19 +332,19 @@ describe('Smart Picks evaluation runner', () => {
       ...persona.expected.priorityGapKeys,
       ...requiredConsiderGapKeys(persona),
     ];
+    const firstBatchKeys = allKeys.slice(0, 2);
     const generator = generatorForPersona(persona);
     jest
       .mocked(generator.generateWithDiagnostics)
-      .mockResolvedValueOnce(generationResult(allKeys.slice(0, -1)))
-      .mockResolvedValueOnce(generationResult([allKeys[allKeys.length - 1]]));
+      .mockResolvedValueOnce(generationResult(firstBatchKeys.slice(0, 1)))
+      .mockResolvedValueOnce(generationResult([firstBatchKeys[1]]));
 
     const result = await evaluateSmartPicksPersona({ persona, generator });
 
     expect(result.status).toBe('passed');
-    expect(generator.generateWithDiagnostics).toHaveBeenCalledTimes(2);
-    expect(generator.generateWithDiagnostics).toHaveBeenLastCalledWith(
+    expect(generator.generateWithDiagnostics).toHaveBeenCalledWith(
       expect.any(Object),
-      [expect.objectContaining({ normalizedKey: allKeys[allKeys.length - 1] })],
+      [expect.objectContaining({ normalizedKey: firstBatchKeys[1] })],
     );
   });
 

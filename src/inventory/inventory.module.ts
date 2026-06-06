@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogueModule } from '../catalogue/catalogue.module';
+import { IngredientsModule } from '../ingredients/ingredients.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
@@ -13,6 +14,7 @@ import { InventoryProduct } from './entities/inventory-product.entity';
 @Module({
   imports: [
     CatalogueModule,
+    IngredientsModule,
     NotificationsModule,
     PlatformGlobalRestrictionsModule,
     SmartPicksModule,

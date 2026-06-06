@@ -1,14 +1,12 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import type { AppLanguage } from '../common/i18n/i18n';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { AnalysisService } from './analysis.service';
 import { AnalyzeProductsDto } from './dto/analyze-products.dto';
+import { IngredientProductAnalysisSnapshotService } from './ingredient-product-analysis-snapshot.service';
+import { IngredientAnalysisAiMetricSource } from './ingredient-analysis-ai-usage-metrics';
 import type { AnalysisResult, ProductForAnalysis } from './ingredients.types';
 import { SkinProfileAnalysisContextService } from './skin-profile-analysis-context.service';
 
@@ -19,6 +17,7 @@ export class IngredientsService {
     private readonly inventoryRepository: Repository<InventoryProduct>,
     private readonly analysisService: AnalysisService,
     private readonly analysisContext: SkinProfileAnalysisContextService,
+    private readonly productAnalysisSnapshots: IngredientProductAnalysisSnapshotService,
   ) {}
 
   async analyzeForUser(
@@ -29,29 +28,13 @@ export class IngredientsService {
     this.validateAnalyzeRequest(dto);
 
     if (dto.focusProductId) {
-      const [skinProfile, focusProduct] = await Promise.all([
-        this.analysisContext.loadForUser(userId),
-        this.inventoryRepository.findOne({
-          where: {
-            id: dto.focusProductId,
-            user_id: userId,
-          },
-        }),
-      ]);
-      if (!focusProduct) {
-        throw new NotFoundException('Inventory product not found');
-      }
-
-      // Focus mode is purely educational — we only need the focus product
-      // itself. No cross-shelf comparison (that assumption is what the
-      // reframe removed).
-      return this.analysisService.analyze({
-        products: [this.toAnalysisProduct(focusProduct)],
-        focusProductId: focusProduct.id,
-        skinProfile,
+      return this.productAnalysisSnapshots.analyzeFocusProductForUser(
+        userId,
+        dto.focusProductId,
         language,
-        withExplanations: dto.withExplanations ?? false,
-      });
+        dto.withExplanations ?? false,
+        { forceRefresh: dto.forceRefresh ?? false },
+      );
     }
 
     const uniqueProductIds = Array.from(new Set(dto.productIds ?? []));
@@ -68,10 +51,30 @@ export class IngredientsService {
       );
     }
 
+    const ownedProductsById = new Map(
+      ownedProducts.map((product) => [product.id, product]),
+    );
+    const orderedOwnedProducts = uniqueProductIds.map((productId) => {
+      const product = ownedProductsById.get(productId);
+      if (!product) {
+        throw new BadRequestException(
+          'Some selected products are not on your shelf',
+        );
+      }
+
+      return product;
+    });
+
     return this.analysisService.analyze({
-      products: ownedProducts.map((product) => this.toAnalysisProduct(product)),
+      products: orderedOwnedProducts.map((product) =>
+        this.toAnalysisProduct(product),
+      ),
       skinProfile,
       language,
+      tracking: {
+        source: IngredientAnalysisAiMetricSource.ShelfAnalysis,
+        userId,
+      },
       withExplanations: dto.withExplanations ?? false,
     });
   }

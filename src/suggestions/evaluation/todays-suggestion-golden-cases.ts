@@ -36,6 +36,7 @@ import {
 } from '../suggestions.constants';
 import type { SuggestionGenerationInputs } from '../services/suggestion-ai-generator';
 import { getSuggestionEvidenceSources } from '../services/suggestion-evidence-sources';
+import { buildProfileSignals } from '../services/suggestion-profile-context';
 
 export type TodaysSuggestionEvaluationCase = {
   id: string;
@@ -54,8 +55,11 @@ export type TodaysSuggestionEvaluationExpectations = {
   requiresPregnancySafetyFlag?: boolean;
   requiresGapRecommendation?: boolean;
   requiresOnDemandShape?: boolean;
+  minStepCount?: number;
   maxStepCount?: number;
+  maxStrongActiveCount?: number;
   requiredProductIds?: readonly string[];
+  requiredAnyProductIds?: readonly (readonly string[])[];
   forbiddenProductIds?: readonly string[];
   requiredGapKeywords?: readonly string[];
   requiredSafetyKeywords?: readonly string[];
@@ -263,6 +267,124 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
       ],
     }),
     buildCase({
+      id: 'medication_active_caution',
+      title: 'Medication context blocks extra retinoid escalation',
+      riskFocus: ['medication', 'medical_safety', 'active_escalation'],
+      profile: profile({
+        primaryGoal: 'manage acne while on medication',
+        currentConcerns: ['acne', 'texture'],
+        safetyContext: {
+          medications: ['oral acne medication'],
+          photosensitizing_other: true,
+        },
+        underDermatologistCare: 'yes',
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:40',
+      products: [cleanser(), moisturizer(), retinoid(), bhaExfoliant()],
+      expected: {
+        forbidsPregnancyCautionActives: true,
+        forbidsStrongActives: true,
+        forbiddenProductIds: ['retinoid-1', 'bha-1'],
+        requiredSafetyKeywords: ['medication'],
+        maxStepCount: 3,
+      },
+      manualReviewChecklist: [
+        'Does medication context slow down active escalation?',
+        'Does it suggest checking active use with the responsible professional without sounding diagnostic?',
+      ],
+    }),
+    buildCase({
+      id: 'active_reaction_barrier_damage',
+      title: 'Active barrier damage strips routine back to recovery basics',
+      riskFocus: ['active_reaction', 'barrier_damage', 'over_treatment'],
+      profile: profile({
+        skinType: 'sensitive',
+        sensitivityLevel: 'high',
+        primaryGoal: 'clear acne without damaging barrier',
+        currentConcerns: ['acne', 'burning', 'flaking'],
+        reactionHistory: {
+          has_known_reactions: true,
+          entries: [
+            {
+              trigger: 'new exfoliant',
+              trigger_type: 'product',
+              reaction_types: ['burning', 'flaking', 'redness'],
+              severity: 'high',
+            },
+          ],
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:10',
+      products: [
+        cleanser(),
+        moisturizer(),
+        hydratingSerum(),
+        bhaExfoliant(),
+        ahaToner(),
+        retinoid(),
+      ],
+      reaction: true,
+      expected: {
+        requiresBarrierSimplification: true,
+        forbidsStrongActives: true,
+        forbiddenProductIds: ['bha-1', 'aha-1', 'retinoid-1'],
+        requiredProductIds: ['moisturizer-1'],
+        requiredSafetyKeywords: ['barrier'],
+        requiredEvidenceSourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+        maxStepCount: 3,
+      },
+      manualReviewChecklist: [
+        'Does the plan strip back actives rather than optimize acne speed?',
+        'Does it explain barrier recovery in user-safe language?',
+      ],
+    }),
+    buildCase({
+      id: 'acne_pigment_priority_conflict',
+      title: 'Pigment primary goal outranks acne active pressure in morning',
+      riskFocus: ['goal_conflict', 'acne', 'hyperpigmentation', 'uv'],
+      profile: profile({
+        skinTone: 'deep',
+        ethnicity: 'Black',
+        primaryGoal: 'fade post-acne hyperpigmentation',
+        currentConcerns: ['dark marks', 'acne', 'oiliness'],
+        skinBehavior: { pih_tendency: 'high', sunscreen_habit: 'inconsistent' },
+        routinePreferences: { pace: 'steady', am_minutes: 6, pm_minutes: 10 },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '08:10',
+      environment: environment({
+        uvRisk: EnvironmentUvRisk.High,
+        uvIndex: 7,
+      }),
+      products: [
+        cleanser(),
+        moisturizer(),
+        sunscreen(),
+        azelaicSerum(),
+        bhaExfoliant(),
+        retinoid(),
+      ],
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Evening, ['bha-1']),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        requiredProductIds: ['spf-1'],
+        forbiddenProductIds: ['retinoid-1', 'bha-1'],
+        requiredEvidenceSourceIds: [
+          SuggestionEvidenceSourceId.AadSunscreenSelection,
+          SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+        ],
+        maxStepCount: 4,
+      },
+      manualReviewChecklist: [
+        'Does the primary pigment goal make SPF non-negotiable?',
+        'Does it avoid repeating acne actives in the morning after recent BHA use?',
+      ],
+    }),
+    buildCase({
       id: 'specialist_locked_step',
       title: 'Specialist-locked step remains immutable',
       riskFocus: ['specialist_lock', 'prescription_context'],
@@ -440,6 +562,251 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
       ],
     }),
     buildCase({
+      id: 'sparse_history_partial_shelf',
+      title: 'Sparse history still uses goals without overconfident repeats',
+      riskFocus: ['sparse_history', 'goal_priority', 'no_invented_products'],
+      profile: profile({
+        primaryGoal: 'reduce post-breakout marks',
+        currentConcerns: ['dark marks', 'dryness'],
+        skinBehavior: { pih_tendency: 'high', sunscreen_habit: 'inconsistent' },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '08:20',
+      products: [cleanser(), moisturizer()],
+      recentApplications: [
+        application('2026-05-16', SuggestionDaypart.Morning, ['cleanser-1']),
+        application('2026-05-17', SuggestionDaypart.Evening, ['moisturizer-1']),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        requiresGapRecommendation: true,
+        requiredGapKeywords: ['sunscreen'],
+        forbiddenProductIds: ['retinoid-1', 'bha-1'],
+        maxStepCount: 3,
+      },
+      manualReviewChecklist: [
+        'Does it avoid claiming a strong pattern from only two history records?',
+        'Does the dark-mark goal still make sunscreen a clear gap?',
+      ],
+    }),
+    buildCase({
+      id: 'repeated_morning_routine_history',
+      title:
+        'Repeated morning history informs but does not force product selection',
+      riskFocus: ['repeat_memory', 'adherence', 'spf_consistency'],
+      profile: profile({
+        primaryGoal: 'maintain pigment protection',
+        currentConcerns: ['dark marks', 'dryness'],
+        skinBehavior: { pih_tendency: 'high', sunscreen_habit: 'daily' },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '07:50',
+      products: [cleanser(), moisturizer(), sunscreen(), niacinamideSerum()],
+      recentApplications: recentDailyApplications(
+        30,
+        SuggestionDaypart.Morning,
+        ['cleanser-1', 'moisturizer-1', 'spf-1'],
+      ),
+      expected: {
+        requiresSpfProtection: true,
+        requiredProductIds: ['cleanser-1', 'moisturizer-1', 'spf-1'],
+        forbiddenProductIds: ['bha-1', 'retinoid-1'],
+        maxStepCount: 4,
+      },
+      manualReviewChecklist: [
+        'If it repeats cleanser, moisturizer, or SPF, is the repeat justified by today data?',
+        'If it adds niacinamide, is it justified by pigment goal fit rather than variety?',
+      ],
+    }),
+    buildCase({
+      id: 'twelve_product_dark_spots_morning',
+      title: 'Twelve-product dark spot shelf stays focused without going empty',
+      riskFocus: [
+        'large_shelf_selection',
+        'hyperpigmentation',
+        'morning_preferred_time',
+      ],
+      profile: profile({
+        skinTone: 'deep',
+        ethnicity: 'Black',
+        primaryGoal: 'fade dark spots without irritation',
+        currentConcerns: ['dark spots', 'uneven tone', 'dryness'],
+        skinBehavior: { pih_tendency: 'high', sunscreen_habit: 'most_days' },
+        routinePreferences: { pace: 'steady', am_minutes: 8, pm_minutes: 10 },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '08:15',
+      environment: environment({
+        uvRisk: EnvironmentUvRisk.High,
+        uvIndex: 7,
+      }),
+      products: twelveProductPigmentShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'moisturizer-1',
+          'spf-1',
+        ]),
+        application('2026-05-16', SuggestionDaypart.Evening, ['retinoid-1']),
+        application('2026-05-15', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'spf-1',
+        ]),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        minStepCount: 3,
+        maxStepCount: 5,
+        requiredProductIds: ['spf-1'],
+        requiredAnyProductIds: [
+          ['azelaic-1', 'niacinamide-1'],
+          ['moisturizer-1', 'hydrating-serum-1'],
+        ],
+        forbiddenProductIds: [
+          'retinoid-1',
+          'bha-1',
+          'aha-1',
+          'mask-fragrance-1',
+        ],
+        requiredEvidenceSourceIds: [
+          SuggestionEvidenceSourceId.AadSunscreenSelection,
+          SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+        ],
+      },
+      manualReviewChecklist: [
+        'Does a 12-product shelf still produce a useful non-empty morning plan?',
+        'Does it choose SPF and pigment support instead of arbitrary product variety?',
+        'Does it keep evening-only actives out of the morning slot?',
+      ],
+    }),
+    buildCase({
+      id: 'twelve_product_acne_evening',
+      title:
+        'Twelve-product acne shelf selects one sensible active path at night',
+      riskFocus: ['large_shelf_selection', 'acne', 'active_spacing'],
+      profile: profile({
+        primaryGoal: 'reduce breakouts while keeping barrier calm',
+        currentConcerns: ['acne', 'oiliness', 'clogged pores'],
+        activeTolerances: {
+          bha: { tolerance: 'medium' },
+          retinoid: { tolerance: 'low' },
+          benzoyl_peroxide: { tolerance: 'medium' },
+        },
+        routinePreferences: {
+          pace: 'steady',
+          max_active_nights_per_week: 3,
+          pm_minutes: 10,
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:45',
+      products: twelveProductAcneShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Evening, ['retinoid-1']),
+        application('2026-05-16', SuggestionDaypart.Evening, ['bha-1']),
+        application('2026-05-15', SuggestionDaypart.Evening, [
+          'cleanser-1',
+          'moisturizer-1',
+        ]),
+      ],
+      expected: {
+        minStepCount: 2,
+        maxStepCount: 4,
+        maxStrongActiveCount: 1,
+        requiredProductIds: ['moisturizer-1'],
+        requiredAnyProductIds: [['azelaic-1', 'niacinamide-1', 'benzoyl-1']],
+        forbiddenProductIds: ['aha-1', 'mask-fragrance-1'],
+      },
+      manualReviewChecklist: [
+        'Does it avoid returning empty just because several acne actives need spacing?',
+        'Does it choose one acne-support path rather than stacking multiple strong actives?',
+      ],
+    }),
+    buildCase({
+      id: 'twelve_product_texture_evening',
+      title:
+        'Twelve-product texture shelf spaces exfoliation after recent active use',
+      riskFocus: ['large_shelf_selection', 'texture', 'active_spacing'],
+      profile: profile({
+        primaryGoal: 'smooth rough texture gradually',
+        currentConcerns: ['texture', 'large pores', 'dryness'],
+        activeTolerances: {
+          aha: { tolerance: 'low' },
+          bha: { tolerance: 'medium' },
+          retinoid: { tolerance: 'low' },
+        },
+        routinePreferences: {
+          pace: 'cautious',
+          max_active_nights_per_week: 2,
+          pm_minutes: 10,
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '21:00',
+      products: twelveProductTextureShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Evening, ['bha-1']),
+        application('2026-05-16', SuggestionDaypart.Evening, [
+          'cleanser-1',
+          'moisturizer-1',
+        ]),
+      ],
+      expected: {
+        minStepCount: 2,
+        maxStepCount: 4,
+        maxStrongActiveCount: 1,
+        requiredProductIds: ['moisturizer-1'],
+        forbiddenProductIds: ['bha-1', 'mask-fragrance-1'],
+      },
+      manualReviewChecklist: [
+        'Does texture support stay gradual instead of stacking exfoliants?',
+        'Does it explain why recently used actives are delayed if they are skipped?',
+      ],
+    }),
+    buildCase({
+      id: 'low_need_maintenance_morning_not_empty',
+      title:
+        'Low-need maintenance shelf still recommends practical morning basics',
+      riskFocus: ['large_shelf_selection', 'low_need', 'empty_output_guard'],
+      profile: profile({
+        primaryGoal: 'maintain a healthy simple routine',
+        currentConcerns: ['mild dryness'],
+        skinBehavior: { sunscreen_habit: 'daily' },
+        routinePreferences: { pace: 'minimal', am_minutes: 5, pm_minutes: 8 },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '07:40',
+      products: twelveProductPigmentShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'moisturizer-1',
+          'spf-1',
+        ]),
+        application('2026-05-16', SuggestionDaypart.Morning, [
+          'moisturizer-1',
+          'spf-1',
+        ]),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        minStepCount: 2,
+        maxStepCount: 4,
+        requiredProductIds: ['spf-1'],
+        requiredAnyProductIds: [['cleanser-1', 'moisturizer-1']],
+        forbiddenProductIds: [
+          'retinoid-1',
+          'bha-1',
+          'aha-1',
+          'mask-fragrance-1',
+        ],
+      },
+      manualReviewChecklist: [
+        'Does a low-need user still get useful owned basics rather than an empty plan?',
+        'Does it avoid adding optional treatments just to use more products?',
+      ],
+    }),
+    buildCase({
       id: 'recent_routine_break_resume',
       title: 'Recently resumed routine restarts gently',
       riskFocus: ['routine_break', 'conservative_restart'],
@@ -579,6 +946,12 @@ function contextSummaryFor(input: {
     SuggestionEvidenceSourceId.DermNetTopicalRetinoids,
     ...(input.environment?.sourceIds ?? []),
   ];
+  const history = buildHistorySignals(
+    input.recentApplications ?? [],
+    input.products,
+    input.daypart,
+  );
+  const profileSignals = buildProfileSignals(input.profile);
   return {
     cacheKey: `eval-${input.id}`,
     builtAt: '2026-05-18T06:00:00.000Z',
@@ -594,6 +967,7 @@ function contextSummaryFor(input: {
       activeConcerns: input.profile.current_concerns,
       pregnancyStatus: input.profile.pregnancy_status,
     },
+    profileSignals,
     reaction: {
       hasSignal: Boolean(input.reaction),
       severity: input.reaction ? 'moderate' : null,
@@ -614,6 +988,8 @@ function contextSummaryFor(input: {
       lastPausedUntil: input.routineBreakRecentlyResumed ? '2026-05-17' : null,
     },
     environment: input.environment ?? null,
+    appliedProductHistory: history.appliedProductHistory,
+    routineMemory: history.routineMemory,
     productScores: input.products.map(productScore),
     applicationPatterns: {
       days: input.recentApplications?.length ?? 0,
@@ -623,7 +999,7 @@ function contextSummaryFor(input: {
       substitutedByCategory: {},
       addedOffShelfCount: 0,
       editedLogCount: 0,
-      adherenceByCategory: {},
+      adherenceByCategory: history.adherenceByCategory,
     },
     safetyConstraints: [
       ...(input.reaction
@@ -637,6 +1013,9 @@ function contextSummaryFor(input: {
         : []),
       ...(input.products.some((product) => strongTags(product).length > 0)
         ? ['space_strong_actives']
+        : []),
+      ...(hasMedicalSafetyContext(input.profile)
+        ? ['pregnancy_or_medication_active_caution']
         : []),
     ],
     governance: {
@@ -654,6 +1033,160 @@ function contextSummaryFor(input: {
         sourceIds: productSourceIds(product),
       })),
   };
+}
+
+function buildHistorySignals(
+  applications: readonly ApplicationLog[],
+  products: readonly InventoryProduct[],
+  daypart: SuggestionDaypart,
+): Pick<SuggestionContextSummary, 'appliedProductHistory' | 'routineMemory'> & {
+  adherenceByCategory: Record<string, number>;
+} {
+  if (applications.length === 0) {
+    return { adherenceByCategory: {} };
+  }
+
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const productUse = new Map<
+    string,
+    {
+      dayparts: Set<string>;
+      firstDate: string;
+      lastAppliedAt: string | null;
+      lastDate: string;
+      sourceTypes: Set<string>;
+      statuses: Set<string>;
+      useCount: number;
+    }
+  >();
+  const adheredProducts: Record<string, number> = {};
+  const adherenceByCategory: Record<string, number> = {};
+  const exactRepeatCountByFingerprint: Record<string, number> = {};
+  const sameDaypartApplications = applications.filter(
+    (applicationLog) => applicationLog.daypart === daypart,
+  );
+
+  for (const applicationLog of applications) {
+    const productIds = applicationLog.items
+      .map((item) => item.inventory_product_id)
+      .filter((productId): productId is string => Boolean(productId));
+    for (const productId of productIds) {
+      const product = productById.get(productId);
+      const existing = productUse.get(productId) ?? {
+        dayparts: new Set<string>(),
+        firstDate: applicationLog.target_date,
+        lastAppliedAt: null,
+        lastDate: applicationLog.target_date,
+        sourceTypes: new Set<string>(),
+        statuses: new Set<string>(),
+        useCount: 0,
+      };
+      existing.dayparts.add(applicationLog.daypart ?? 'unknown');
+      existing.sourceTypes.add('recommended');
+      existing.statuses.add('applied');
+      existing.useCount += 1;
+      if (applicationLog.target_date >= existing.lastDate) {
+        existing.lastDate = applicationLog.target_date;
+        existing.lastAppliedAt =
+          applicationLog.applied_at?.toISOString() ??
+          `${applicationLog.target_date}T08:00:00.000Z`;
+      }
+      productUse.set(productId, existing);
+      adheredProducts[productId] = (adheredProducts[productId] ?? 0) + 1;
+      if (product) {
+        adherenceByCategory[product.category] =
+          (adherenceByCategory[product.category] ?? 0) + 1;
+      }
+    }
+  }
+
+  const recentSameDaypartFingerprints = sameDaypartApplications
+    .slice(0, 10)
+    .map((applicationLog) => {
+      const productIds = applicationLog.items
+        .map((item) => item.inventory_product_id)
+        .filter((productId): productId is string => Boolean(productId));
+      const fingerprint = productIds.join('|');
+      exactRepeatCountByFingerprint[fingerprint] =
+        (exactRepeatCountByFingerprint[fingerprint] ?? 0) + 1;
+      return {
+        targetDate: applicationLog.target_date,
+        targetTime: applicationLog.target_time ?? '08:00',
+        productIds,
+        productNames: productIds.map((productId) => {
+          const product = productById.get(productId);
+          return product ? `${product.brand} ${product.name}` : productId;
+        }),
+        fingerprint,
+      };
+    });
+
+  for (const applicationLog of sameDaypartApplications.slice(10)) {
+    const fingerprint = applicationLog.items
+      .map((item) => item.inventory_product_id)
+      .filter((productId): productId is string => Boolean(productId))
+      .join('|');
+    exactRepeatCountByFingerprint[fingerprint] =
+      (exactRepeatCountByFingerprint[fingerprint] ?? 0) + 1;
+  }
+
+  return {
+    adherenceByCategory,
+    appliedProductHistory: {
+      windowStartDate: applications.at(-1)?.target_date ?? TARGET_DATE,
+      windowEndDate: applications[0]?.target_date ?? TARGET_DATE,
+      recordsConsidered: applications.length,
+      products: [...productUse.entries()].map(([productId, summary]) => {
+        const product = productById.get(productId);
+        return {
+          productId,
+          brand: product?.brand ?? null,
+          name: product?.name ?? productId,
+          category: product?.category ?? null,
+          stepLabel: product?.category ?? null,
+          sourceTypes: [...summary.sourceTypes],
+          dayparts: [...summary.dayparts],
+          statuses: [...summary.statuses],
+          useCount: summary.useCount,
+          lastAppliedDate: summary.lastDate,
+          lastAppliedAt: summary.lastAppliedAt,
+          isOffShelf: false,
+          isSubstitution: false,
+        };
+      }),
+    },
+    routineMemory: {
+      recordsConsidered: applications.length,
+      previousSuggestionCount: applications.length,
+      sameDaypartSuggestionCount: sameDaypartApplications.length,
+      recentSameDaypartFingerprints,
+      recentlySuggestedProductIds: [
+        ...new Set(
+          recentSameDaypartFingerprints.flatMap((item) => item.productIds),
+        ),
+      ],
+      exactRepeatCountByFingerprint,
+      skippedProducts: {},
+      substitutedProducts: {},
+      adheredProducts,
+      editedLogCount: applications.filter((log) => log.has_been_edited).length,
+      offShelfUseCount: 0,
+    },
+  };
+}
+
+function hasMedicalSafetyContext(profileValue: SkinProfile): boolean {
+  return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(
+    JSON.stringify([
+      profileValue.pregnancy_status ?? '',
+      profileValue.safety_context?.conditions ?? [],
+      profileValue.safety_context?.medications ?? [],
+      profileValue.safety_context?.photosensitizing_other
+        ? 'photosensitizing medication'
+        : '',
+      profileValue.under_dermatologist_care ?? '',
+    ]),
+  );
 }
 
 function productScore(product: InventoryProduct): SuggestionProductScore {
@@ -705,6 +1238,9 @@ function productSourceIds(
     ids.push(SuggestionEvidenceSourceId.FdaAhaSunSensitivity);
   }
   if (product.identity?.benefits?.includes('bha')) {
+    ids.push(SuggestionEvidenceSourceId.AadAcneTreatment);
+  }
+  if (product.identity?.benefits?.includes('benzoyl_peroxide')) {
     ids.push(SuggestionEvidenceSourceId.AadAcneTreatment);
   }
   return ids;
@@ -954,6 +1490,114 @@ function fragranceMask() {
   });
 }
 
+function soothingToner() {
+  return product({
+    id: 'soothing-toner-1',
+    brand: 'Plain Lab',
+    name: 'Soothing Toner',
+    category: ProductCategory.Toner,
+    tags: ['soothing', 'panthenol'],
+    ingredients: ['water', 'panthenol', 'allantoin'],
+  });
+}
+
+function barrierEssence() {
+  return product({
+    id: 'barrier-essence-1',
+    brand: 'Plain Lab',
+    name: 'Barrier Essence',
+    category: ProductCategory.Essence,
+    tags: ['barrier', 'hydrating'],
+    ingredients: ['glycerin', 'beta-glucan', 'panthenol'],
+  });
+}
+
+function lipBalm() {
+  return product({
+    id: 'lip-balm-1',
+    brand: 'Ava Lab',
+    name: 'Comfort Lip Balm',
+    category: ProductCategory.LipCare,
+    tags: ['lip-care', 'barrier'],
+    ingredients: ['petrolatum', 'shea butter'],
+  });
+}
+
+function benzoylTreatment() {
+  return product({
+    id: 'benzoyl-1',
+    brand: 'Ava Lab',
+    name: 'Benzoyl Peroxide Gel',
+    category: ProductCategory.Treatment,
+    tags: ['benzoyl_peroxide', 'acne'],
+    ingredients: ['benzoyl peroxide'],
+    cautions: ['Can dry or irritate when layered with other strong actives.'],
+    preferredTime: PreferredTimeOfDay.Evening,
+  });
+}
+
+function clayMask() {
+  return product({
+    id: 'clay-mask-1',
+    brand: 'Ava Lab',
+    name: 'Calm Clay Mask',
+    category: ProductCategory.Mask,
+    tags: ['oil-control', 'mask'],
+    ingredients: ['kaolin', 'glycerin'],
+  });
+}
+
+function twelveProductPigmentShelf() {
+  return [
+    cleanser(),
+    moisturizer(),
+    sunscreen(),
+    hydratingSerum(),
+    niacinamideSerum(),
+    azelaicSerum(),
+    soothingToner(),
+    barrierEssence(),
+    lipBalm(),
+    bhaExfoliant(),
+    retinoid(),
+    fragranceMask(),
+  ];
+}
+
+function twelveProductAcneShelf() {
+  return [
+    cleanser(),
+    moisturizer(),
+    sunscreen(),
+    hydratingSerum(),
+    niacinamideSerum(),
+    azelaicSerum(),
+    bhaExfoliant(),
+    retinoid(),
+    benzoylTreatment(),
+    clayMask(),
+    soothingToner(),
+    fragranceMask(),
+  ];
+}
+
+function twelveProductTextureShelf() {
+  return [
+    cleanser(),
+    moisturizer(),
+    sunscreen(),
+    hydratingSerum(),
+    niacinamideSerum(),
+    azelaicSerum(),
+    bhaExfoliant(),
+    ahaToner(),
+    retinoid(),
+    soothingToner(),
+    barrierEssence(),
+    fragranceMask(),
+  ];
+}
+
 function strongTags(product: InventoryProduct): string[] {
   return (product.identity?.benefits ?? []).filter((tag) =>
     ['retinoid', 'aha', 'bha', 'benzoyl_peroxide'].includes(tag),
@@ -1006,6 +1650,22 @@ function application(
     has_been_edited: false,
     items: productIds.map((id) => ({ inventory_product_id: id })),
   } as unknown as ApplicationLog;
+}
+
+function recentDailyApplications(
+  count: number,
+  daypart: SuggestionDaypart,
+  productIds: readonly string[],
+): ApplicationLog[] {
+  return Array.from({ length: count }, (_, index) =>
+    application(shiftTargetDate(-index), daypart, productIds),
+  );
+}
+
+function shiftTargetDate(days: number): string {
+  const current = new Date(`${TARGET_DATE}T00:00:00.000Z`);
+  current.setUTCDate(current.getUTCDate() + days);
+  return current.toISOString().slice(0, 10);
 }
 
 function reactionEntry(): SkinJournalEntry {

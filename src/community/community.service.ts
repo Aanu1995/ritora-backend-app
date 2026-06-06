@@ -1,0 +1,6247 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import {
+  Brackets,
+  DataSource,
+  Equal,
+  type FindOptionsWhere,
+  ILike,
+  In,
+  IsNull,
+  LessThan,
+  MoreThan,
+  Repository,
+  type SelectQueryBuilder,
+} from 'typeorm';
+import { ulid } from 'ulid';
+import { AdminAccount } from '../admin/entities/admin-account.entity';
+import {
+  AdminAuditAction,
+  AdminAuditLog,
+} from '../admin/entities/admin-audit-log.entity';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { InAppNotification } from '../notifications/entities/in-app-notification.entity';
+import { hasCompletedEssentialSkinProfile } from '../skin-profile/skin-profile-completion';
+import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
+import { UserConsent } from '../users/entities/user-consent.entity';
+import { User } from '../users/entities/user.entity';
+import { UserConsentType } from '../users/user-consent.constants';
+import { decodeCursor, encodeCursor } from '../common/utils/cursor-pagination';
+import {
+  COMMUNITY_DISCOVERY_LIMIT,
+  COMMUNITY_LIST_PAGE_DEFAULT_LIMIT,
+  COMMUNITY_LIST_PAGE_MAX_LIMIT,
+} from './community.constants';
+import {
+  type AdminCommunityAssignDto,
+  type AdminCommunityModerationDto,
+  type AdminCommunityModerationQueryDto,
+  type AdminCommunityReportStatusDto,
+  type AdminCommunitySettingsDto,
+  type AdminCommunityWarningDto,
+  type CommunityCursorPageQueryDto,
+  type CommunityHelpfulnessDto,
+  type CommunityListQueryDto,
+  type CommunityOutcomeResultsQueryDto,
+  type CommunityOutcomeSignalDto,
+  type CreateCommunityReportDto,
+  type CreateCommunityReviewDto,
+  type CreateCommunityRoutineDto,
+  type EditCommunityReviewDto,
+  type EditCommunityRoutineDto,
+} from './dto/community.dto';
+import { CommunityHelpfulnessVoteEntity } from './entities/community-helpfulness-vote.entity';
+import { CommunityModerationDecision } from './entities/community-moderation-decision.entity';
+import { CommunityOutcomeSignalVote } from './entities/community-outcome-signal-vote.entity';
+import { CommunityProfile } from './entities/community-profile.entity';
+import { CommunityReport } from './entities/community-report.entity';
+import { CommunityReviewContextProduct } from './entities/community-review-context-product.entity';
+import { CommunityReview } from './entities/community-review.entity';
+import { CommunityRoutineAdaptation } from './entities/community-routine-adaptation.entity';
+import { CommunityRoutineStep } from './entities/community-routine-step.entity';
+import { CommunityRoutine } from './entities/community-routine.entity';
+import { CommunitySafetyScanResult } from './entities/community-safety-scan-result.entity';
+import {
+  COMMUNITY_SETTINGS_ID,
+  DEFAULT_COMMUNITY_MIN_ACCOUNT_AGE_DAYS,
+  CommunitySettings,
+} from './entities/community-settings.entity';
+import { CommunityWarning } from './entities/community-warning.entity';
+import { CommunityAiModerationService } from './community-ai-moderation.service';
+import { CommunitySafetyService } from './community-safety.service';
+import {
+  CommunityAdaptationChangeType,
+  CommunityContentType,
+  CommunityDisclosureType,
+  CommunityHelpfulnessVote,
+  CommunityListSort,
+  CommunityModerationStatus,
+  CommunityOutcomeFollowedPart,
+  CommunityOutcomeIrritationLevel,
+  CommunityOutcomeSignal,
+  type CommunityOutcomeSignalProductContext,
+  type CommunityOutcomeSignalContext,
+  CommunityOutcomeTrialDuration,
+  type CommunityReviewResultPublic,
+  type CommunityReviewResultsResponse,
+  CommunityReportStatus,
+  CommunityReportReason,
+  CommunitySafetySeverity,
+  type CommunityAdaptationChange,
+  type CommunityModerationAutomationSnapshot,
+  type CommunityRoutineContextProductPublic,
+  type CommunityRoutineStepSnapshot,
+  type CommunityRoutineStepPublic,
+  type CommunitySafeProfileFacets,
+  type CommunitySafetyFlag,
+  CommunityReviewRoutineContextUsage,
+  CommunityReviewRoutineSlot,
+} from './community.types';
+import {
+  buildCommunitySafeFacets,
+  normalizeCommunityTags,
+} from './community-privacy';
+import { CommunityBookmark } from './entities/community-bookmark.entity';
+
+const DEFAULT_LIMIT = COMMUNITY_DISCOVERY_LIMIT;
+const COMMUNITY_RESULT_SUBMISSION_KIND = 'result' as const;
+const COMMUNITY_PUBLISHED_CONTENT_KIND_VALUES = new Set<string>([
+  CommunityContentType.Review,
+  CommunityContentType.Routine,
+]);
+
+type CommunityListContentKind =
+  | 'people-like-me'
+  | 'review'
+  | 'routine'
+  | 'submission';
+
+type CommunityPublishedContentKind =
+  | CommunityContentType.Review
+  | CommunityContentType.Routine;
+
+type CommunitySafeProfileFacetsSource =
+  | CommunitySafeProfileFacets
+  | Promise<CommunitySafeProfileFacets>;
+
+type CommunitySubmissionContentKind =
+  | CommunityPublishedContentKind
+  | typeof COMMUNITY_RESULT_SUBMISSION_KIND;
+
+type CommunityCursorEntity = {
+  id: string;
+  updated_at: Date;
+};
+
+type CommunityCombinedCursorEntity = CommunityCursorEntity & {
+  contentKind: CommunitySubmissionContentKind;
+};
+
+type CommunityScoredCursorEntity = CommunityCursorEntity & {
+  contentKind: CommunityPublishedContentKind;
+  matchScore: number;
+};
+
+type CommunityResultCursorEntity = {
+  created_at: Date;
+  id: string;
+};
+
+type CommunityBookmarkCursorRow = {
+  bookmark_id: string;
+  content_type: string;
+  content_id: string;
+  created_at: Date | string;
+};
+
+type CommunityBookmarkCursorEntity = {
+  contentId: string;
+  contentType: CommunityPublishedContentKind;
+  created_at: Date;
+  id: string;
+};
+
+type CommunityRawCursorRow = {
+  content_kind: string;
+  id: string;
+  match_score?: number | string | null;
+  updated_at: Date | string;
+};
+
+type CommunityListPage<T extends CommunityCursorEntity> = {
+  rows: T[];
+  nextCursor: string | null;
+};
+
+type CommunityListFilterKey =
+  | 'avoidTag'
+  | 'concern'
+  | 'contextProductCategory'
+  | 'disclosureType'
+  | 'goal'
+  | 'habitTag'
+  | 'minRating'
+  | 'outcome'
+  | 'productCategory'
+  | 'productRole'
+  | 'result'
+  | 'resultSignal'
+  | 'routineContextUsage'
+  | 'routineSlot'
+  | 'search'
+  | 'sensitivity'
+  | 'skinResponse'
+  | 'skinType'
+  | 'sort'
+  | 'timeframe'
+  | 'usageDuration'
+  | 'warningTag';
+
+type CommunitySubmissionModerationGuidance = {
+  reason: string;
+  source: 'ai' | 'admin' | 'system';
+  createdAt: string;
+};
+
+type CommunitySubmissionContentReference = {
+  id: string;
+  status: CommunityModerationStatus;
+  type: CommunityContentType;
+};
+
+type CommunityResultParentContent = {
+  id: string;
+  status: CommunityModerationStatus;
+  title: string;
+  type: CommunityContentType;
+};
+
+type CommunitySubmissionListItem = {
+  id: string;
+  type: CommunityContentType | typeof COMMUNITY_RESULT_SUBMISSION_KIND;
+  title: string;
+  editableText: string | null;
+  status: CommunityModerationStatus;
+  disclosureType: CommunityDisclosureType;
+  safetyFlags: CommunitySafetyFlag[];
+  moderationGuidance: CommunitySubmissionModerationGuidance | null;
+  editableRoutine: unknown;
+  editableReview: unknown;
+  parentContent?: CommunityResultParentContent | null;
+  resultSignal?: CommunityOutcomeSignal | null;
+  authorUserId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const GUIDANCE_MODERATION_STATUSES = new Set<CommunityModerationStatus>([
+  CommunityModerationStatus.NeedsEdit,
+  CommunityModerationStatus.Rejected,
+  CommunityModerationStatus.Hidden,
+]);
+
+function normalizeCommunityListLimit(limit?: number): number {
+  if (typeof limit !== 'number' || !Number.isFinite(limit)) {
+    return COMMUNITY_LIST_PAGE_DEFAULT_LIMIT;
+  }
+  return Math.min(
+    COMMUNITY_LIST_PAGE_MAX_LIMIT,
+    Math.max(1, Math.floor(limit)),
+  );
+}
+
+function communityListFingerprint(
+  userId: string,
+  kind: CommunityListContentKind,
+  limit: number,
+  query: Partial<CommunityListQueryDto> = {},
+): string {
+  const filterKey = communityListFilterFingerprint(query);
+  return filterKey
+    ? `community:${kind}:v1:${userId}:${limit}:${filterKey}`
+    : `community:${kind}:v1:${userId}:${limit}`;
+}
+
+function decodeCommunityListCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [updatedAtValue, idValue] = decoded.tuple;
+  if (typeof updatedAtValue !== 'string' || typeof idValue !== 'string') {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const updatedAt = new Date(updatedAtValue);
+  if (Number.isNaN(updatedAt.getTime())) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return { updatedAt, id: idValue };
+}
+
+function communityListCursorTuple(
+  item: CommunityCursorEntity,
+): [string, string] {
+  return [item.updated_at.toISOString(), item.id];
+}
+
+function communityResultFingerprint({
+  contentId,
+  contentType,
+  limit,
+  signal,
+  userId,
+}: {
+  contentId: string;
+  contentType: CommunityContentType;
+  limit: number;
+  signal: CommunityOutcomeSignal | null | undefined;
+  userId: string;
+}): string {
+  return [
+    'community',
+    'results',
+    'v1',
+    userId,
+    contentType,
+    contentId,
+    limit,
+    signal ?? 'all',
+  ].join(':');
+}
+
+function decodeCommunityResultCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [createdAtValue, idValue] = decoded.tuple;
+  if (typeof createdAtValue !== 'string' || typeof idValue !== 'string') {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const createdAt = new Date(createdAtValue);
+  if (Number.isNaN(createdAt.getTime())) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return { createdAt, id: idValue };
+}
+
+function communityResultCursorTuple(
+  item: CommunityResultCursorEntity,
+): [string, string] {
+  return [item.created_at.toISOString(), item.id];
+}
+
+function communityBookmarkFingerprint(userId: string, limit: number): string {
+  return `community:bookmarks:v1:${userId}:${limit}`;
+}
+
+function communityBookmarkCursorTuple(
+  item: Pick<CommunityBookmark, 'created_at' | 'id'>,
+): [string, string] {
+  return [item.created_at.toISOString(), item.id];
+}
+
+function communityResultListPage<T extends CommunityResultCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+) {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityResultCursorTuple(lastRow),
+          })
+        : null,
+  };
+}
+
+function communityListPage<T extends CommunityCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+): CommunityListPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityListCursorTuple(lastRow),
+          })
+        : null,
+  };
+}
+
+function decodeCommunityCombinedCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [updatedAtValue, contentKindValue, idValue] = decoded.tuple;
+  if (
+    typeof updatedAtValue !== 'string' ||
+    typeof contentKindValue !== 'string' ||
+    typeof idValue !== 'string'
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const updatedAt = new Date(updatedAtValue);
+  if (
+    Number.isNaN(updatedAt.getTime()) ||
+    !isCommunitySubmissionContentKind(contentKindValue)
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return { contentKind: contentKindValue, id: idValue, updatedAt };
+}
+
+function decodeCommunityScoredCursor(cursor: string, fingerprint: string) {
+  const decoded = decodeCursor(cursor);
+  if (decoded.fingerprint !== fingerprint) {
+    throw new BadRequestException('Cursor does not match this request');
+  }
+
+  const [scoreValue, updatedAtValue, contentKindValue, idValue] = decoded.tuple;
+  if (
+    typeof scoreValue !== 'number' ||
+    typeof updatedAtValue !== 'string' ||
+    typeof contentKindValue !== 'string' ||
+    typeof idValue !== 'string'
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  const updatedAt = new Date(updatedAtValue);
+  if (
+    Number.isNaN(updatedAt.getTime()) ||
+    !isCommunityPublishedContentKind(contentKindValue)
+  ) {
+    throw new BadRequestException('Invalid cursor');
+  }
+
+  return {
+    contentKind: contentKindValue,
+    id: idValue,
+    matchScore: scoreValue,
+    updatedAt,
+  };
+}
+
+function communityCombinedCursorTuple(
+  item: CommunityCombinedCursorEntity,
+): [string, string, string] {
+  return [item.updated_at.toISOString(), item.contentKind, item.id];
+}
+
+function communityScoredCursorTuple(
+  item: CommunityScoredCursorEntity,
+): [number, string, string, string] {
+  return [
+    item.matchScore,
+    item.updated_at.toISOString(),
+    item.contentKind,
+    item.id,
+  ];
+}
+
+function communityCombinedListPage<T extends CommunityCombinedCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+): CommunityListPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityCombinedCursorTuple(lastRow),
+          })
+        : null,
+  };
+}
+
+function communityScoredListPage<T extends CommunityScoredCursorEntity>(
+  rows: T[],
+  limit: number,
+  fingerprint: string,
+): CommunityListPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  return {
+    rows: pageRows,
+    nextCursor:
+      rows.length > limit && lastRow
+        ? encodeCursor({
+            fingerprint,
+            tuple: communityScoredCursorTuple(lastRow),
+          })
+        : null,
+  };
+}
+
+function isCommunityPublishedContentKind(
+  value: string,
+): value is CommunityPublishedContentKind {
+  return COMMUNITY_PUBLISHED_CONTENT_KIND_VALUES.has(value);
+}
+
+function isCommunitySubmissionContentKind(
+  value: string,
+): value is CommunitySubmissionContentKind {
+  return (
+    isCommunityPublishedContentKind(value) ||
+    value === COMMUNITY_RESULT_SUBMISSION_KIND
+  );
+}
+
+function parseCursorRowDate(value: Date | string): Date {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException('Invalid cursor row');
+  }
+  return date;
+}
+
+function parseCursorRowScore(
+  value: number | string | null | undefined,
+): number {
+  const score = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(score)) {
+    throw new BadRequestException('Invalid cursor row');
+  }
+  return score;
+}
+
+function cleanQueryString(
+  value: string | null | undefined,
+  maxLength: number,
+): string | undefined {
+  return cleanText(value, maxLength) ?? undefined;
+}
+
+function communityListFilterFingerprint(
+  query: Partial<CommunityListQueryDto>,
+): string | null {
+  const values = communityListFilterEntries(query);
+  if (values.length === 0) return null;
+  return Buffer.from(
+    JSON.stringify(Object.fromEntries(values)),
+    'utf8',
+  ).toString('base64url');
+}
+
+function communityListFilterEntries(
+  query: Partial<CommunityListQueryDto>,
+): Array<[CommunityListFilterKey, string | number]> {
+  const filters: Array<[CommunityListFilterKey, string | number]> = [];
+  const addString = (
+    key: CommunityListFilterKey,
+    value: string | null | undefined,
+    maxLength: number,
+  ) => {
+    const cleaned = cleanQueryString(value, maxLength);
+    if (cleaned) filters.push([key, cleaned]);
+  };
+
+  addString('avoidTag', query.avoidTag, 60);
+  addString('concern', query.concern, 60);
+  addString('contextProductCategory', query.contextProductCategory, 40);
+  addString('disclosureType', query.disclosureType, 30);
+  addString('goal', query.goal, 60);
+  addString('habitTag', query.habitTag, 60);
+  addString('outcome', query.outcome, 60);
+  addString('productCategory', query.productCategory, 40);
+  addString('productRole', query.productRole, 40);
+  addString('result', query.result, 30);
+  addString('resultSignal', query.resultSignal, 30);
+  addString('routineContextUsage', query.routineContextUsage, 30);
+  addString('routineSlot', query.routineSlot, 20);
+  addString('search', query.search, 80);
+  addString('sensitivity', query.sensitivity, 40);
+  addString('skinResponse', query.skinResponse, 30);
+  addString('skinType', query.skinType, 40);
+  addString('timeframe', query.timeframe, 30);
+  addString('usageDuration', query.usageDuration, 40);
+  addString('warningTag', query.warningTag, 60);
+  if (typeof query.minRating === 'number' && Number.isFinite(query.minRating)) {
+    filters.push(['minRating', Math.floor(query.minRating)]);
+  }
+  if (query.sort && query.sort !== CommunityListSort.Newest) {
+    filters.push(['sort', query.sort]);
+  }
+  return filters.sort(([first], [second]) => first.localeCompare(second));
+}
+
+function hasCommunityListFilters(
+  query: Partial<CommunityListQueryDto>,
+  keys: readonly CommunityListFilterKey[],
+): boolean {
+  const keySet = new Set(keys);
+  return communityListFilterEntries(query).some(([key]) => keySet.has(key));
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function queryLikePattern(
+  value: string | null | undefined,
+  maxLength: number,
+): string | null {
+  const cleaned = cleanQueryString(value, maxLength);
+  return cleaned ? `%${escapeLikePattern(cleaned)}%` : null;
+}
+
+function cleanText(
+  value: string | null | undefined,
+  maxLength: number,
+): string | null {
+  const cleaned = (value ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned ? cleaned.slice(0, maxLength) : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function communityContentKey(
+  type: CommunityContentType,
+  contentId: string,
+): string {
+  return `${type}:${contentId}`;
+}
+
+function submissionCursorKey(
+  type: CommunitySubmissionContentKind,
+  contentId: string,
+): string {
+  return `${type}:${contentId}`;
+}
+
+function normalizeTags(values: string[] | null | undefined): string[] {
+  return normalizeCommunityTags(values);
+}
+
+type ReviewContextModerationSnapshot = {
+  productId?: string | null;
+  productBrand?: string | null;
+  productName?: string | null;
+  category?: string | null;
+};
+
+function toReviewSafetySlot(
+  slot: CommunityReviewRoutineSlot | string | null | undefined,
+): CommunityRoutineStepSnapshot['slot'] {
+  if (slot === CommunityReviewRoutineSlot.AM) return 'am';
+  if (slot === CommunityReviewRoutineSlot.PM) return 'pm';
+  return 'either';
+}
+
+function buildReviewRoutineSafetySteps(input: {
+  productId?: string | null;
+  productBrand?: string | null;
+  productName?: string | null;
+  productCategory?: string | null;
+  frequency?: string | null;
+  routineSlot?: CommunityReviewRoutineSlot | string | null;
+  routineContext: ReviewContextModerationSnapshot[];
+}): CommunityRoutineStepSnapshot[] {
+  const slot = toReviewSafetySlot(input.routineSlot);
+  const steps: CommunityRoutineStepSnapshot[] = [];
+  if (input.productBrand || input.productName || input.productCategory) {
+    steps.push({
+      stepOrder: 1,
+      slot,
+      productId: input.productId ?? null,
+      productBrand: input.productBrand ?? null,
+      productName: input.productName ?? null,
+      category: input.productCategory ?? 'reviewed_product',
+      frequency: input.frequency ?? null,
+      notes: 'Reviewed product',
+    });
+  }
+
+  input.routineContext.forEach((item, index) => {
+    steps.push({
+      stepOrder: index + 2,
+      slot,
+      productId: item.productId ?? null,
+      productBrand: item.productBrand ?? null,
+      productName: item.productName ?? null,
+      category: item.category ?? 'used_with_product',
+      frequency: null,
+      notes: 'Used alongside reviewed product',
+    });
+  });
+
+  return steps;
+}
+
+function moderationLine(label: string, value: unknown): string | null {
+  const text = moderationValueText(value);
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  return cleaned ? `${label}: ${cleaned}` : null;
+}
+
+function moderationValueText(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .filter((item) => item.trim())
+      .join(', ');
+  }
+
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return '';
+}
+
+function buildRoutineModerationText(input: {
+  title?: string | null;
+  summary?: string | null;
+  disclosureType: CommunityDisclosureType;
+  concernTags?: string[] | null;
+  goalTags?: string[] | null;
+  goalResult?: string | null;
+  timeframe?: string | null;
+  avoidTags?: string[] | null;
+  habitTags?: string[] | null;
+  didNotWorkTags?: string[] | null;
+  warningTags?: string[] | null;
+  steps: CommunityRoutineStepSnapshot[];
+}): string {
+  return [
+    moderationLine('Title', input.title),
+    moderationLine('Summary', input.summary),
+    moderationLine('Disclosure', input.disclosureType),
+    moderationLine('Concerns', input.concernTags),
+    moderationLine('Goals', input.goalTags),
+    moderationLine('Goal result', input.goalResult),
+    moderationLine('Timeframe', input.timeframe),
+    moderationLine('Avoided', input.avoidTags),
+    moderationLine('Helpful habits', input.habitTags),
+    moderationLine('Did not work', input.didNotWorkTags),
+    moderationLine('Warnings', input.warningTags),
+    moderationLine(
+      'Routine steps',
+      input.steps.map((step) =>
+        [
+          `step ${step.stepOrder}`,
+          `slot ${step.slot}`,
+          step.productBrand,
+          step.productName,
+          step.category,
+          step.frequency ? `frequency ${step.frequency}` : null,
+          step.notes ? `notes ${step.notes}` : null,
+        ]
+          .filter(Boolean)
+          .join(' | '),
+      ),
+    ),
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
+function buildReviewModerationText(input: {
+  productBrand?: string | null;
+  productName?: string | null;
+  productCategory?: string | null;
+  disclosureType: CommunityDisclosureType;
+  usageDuration?: string | null;
+  frequency?: string | null;
+  routineContextUsage: CommunityReviewRoutineContextUsage;
+  routineSlot?: string | null;
+  skinResponse?: string | null;
+  overallRating?: number | null;
+  effectivenessRating?: number | null;
+  irritationRating?: number | null;
+  textureRating?: number | null;
+  valueRating?: number | null;
+  outcomes?: string[] | null;
+  repurchase?: string | null;
+  routineContext: ReviewContextModerationSnapshot[];
+  body?: string | null;
+}): string {
+  return [
+    moderationLine(
+      'Reviewed product',
+      [input.productBrand, input.productName, input.productCategory]
+        .filter(Boolean)
+        .join(' | '),
+    ),
+    moderationLine('Disclosure', input.disclosureType),
+    moderationLine('Usage duration', input.usageDuration),
+    moderationLine('Frequency', input.frequency),
+    moderationLine('Routine context usage', input.routineContextUsage),
+    moderationLine('Routine slot', input.routineSlot),
+    moderationLine('Skin response', input.skinResponse),
+    moderationLine('Ratings', [
+      input.overallRating == null ? null : `overall ${input.overallRating}`,
+      input.effectivenessRating == null
+        ? null
+        : `effectiveness ${input.effectivenessRating}`,
+      input.irritationRating == null
+        ? null
+        : `irritation ${input.irritationRating}`,
+      input.textureRating == null ? null : `texture ${input.textureRating}`,
+      input.valueRating == null ? null : `value ${input.valueRating}`,
+    ]),
+    moderationLine('Outcomes', input.outcomes),
+    moderationLine('Repurchase', input.repurchase),
+    moderationLine(
+      'Routine context',
+      input.routineContext.map((item) =>
+        [item.productBrand, item.productName, item.category]
+          .filter(Boolean)
+          .join(' | '),
+      ),
+    ),
+    moderationLine('Review body', input.body),
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
+function buildOutcomeSignalModerationText(input: {
+  signal: CommunityOutcomeSignal;
+  sameGoal: boolean;
+  trialDuration: CommunityOutcomeTrialDuration;
+  followedParts: CommunityOutcomeFollowedPart[];
+  irritationLevel: CommunityOutcomeIrritationLevel;
+  routineSlot: CommunityReviewRoutineSlot | null;
+  reviewedProduct?: CommunityOutcomeSignalProductContext | null;
+  usedWithProducts: CommunityOutcomeSignalProductContext[];
+  note: string | null;
+}): string {
+  return [
+    moderationLine('Community result note', input.note),
+    moderationLine('Result type', input.signal),
+    moderationLine('Same goal', input.sameGoal),
+    moderationLine('Trial duration', input.trialDuration),
+    moderationLine('Matched context', input.followedParts),
+    moderationLine('Irritation level', input.irritationLevel),
+    moderationLine('Routine slot', input.routineSlot),
+    moderationLine(
+      'Reviewed product',
+      input.reviewedProduct
+        ? [
+            input.reviewedProduct.productBrand,
+            input.reviewedProduct.productName,
+            input.reviewedProduct.category,
+          ]
+            .filter(Boolean)
+            .join(' | ')
+        : null,
+    ),
+    moderationLine(
+      'Products used alongside',
+      input.usedWithProducts.map((item) =>
+        [item.productBrand, item.productName, item.category]
+          .filter(Boolean)
+          .join(' | '),
+      ),
+    ),
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
+function publicProfileName(userId: string): string {
+  return `Ritora member ${userId.slice(-4).toUpperCase()}`;
+}
+
+type AdminCommunityAuditContext = {
+  ip?: string | null;
+  sessionId: string;
+  userAgent?: string | null;
+};
+
+type CommunitySettingsResponse = {
+  minimumAccountAgeDays: number;
+  updatedAt: string;
+  updatedByAdminId: string | null;
+  updatedByAdminLabel: string | null;
+};
+
+const SEVERE_REPORT_REASONS = new Set<CommunityReportReason>([
+  CommunityReportReason.UnsafeAdvice,
+  CommunityReportReason.MedicalClaims,
+  CommunityReportReason.PrivacyViolation,
+  CommunityReportReason.MisleadingBeforeAfter,
+]);
+const RESULT_NOTE_REJECTION_FLAG_CODES = new Set([
+  'possible_harassment',
+  'possible_spam_or_moderation_manipulation',
+]);
+
+const REPORT_ESCALATION_THRESHOLD = 3;
+const COMMUNITY_GUIDELINES_VERSION = '1.0.0';
+const COMMUNITY_ABUSE_LOOKBACK_DAYS = 30;
+const COMMUNITY_ABUSE_STATUS_THRESHOLD = 2;
+const COMMUNITY_ABUSE_SEVERE_REPORT_THRESHOLD = 3;
+const USER_EDITABLE_MODERATION_STATUSES = new Set<CommunityModerationStatus>([
+  CommunityModerationStatus.Draft,
+  CommunityModerationStatus.PendingReview,
+  CommunityModerationStatus.NeedsEdit,
+  CommunityModerationStatus.Rejected,
+]);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type CommunityPostingEligibilityReason = {
+  code:
+    | 'email_unverified'
+    | 'skin_profile_required'
+    | 'shelf_product_required'
+    | 'community_guidelines_required'
+    | 'account_too_new'
+    | 'recent_moderation_abuse';
+  message: string;
+};
+
+@Injectable()
+export class CommunityService {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly safety: CommunitySafetyService,
+    private readonly aiModeration: CommunityAiModerationService,
+    @InjectRepository(CommunityProfile)
+    private readonly profiles: Repository<CommunityProfile>,
+    @InjectRepository(CommunityRoutine)
+    private readonly routines: Repository<CommunityRoutine>,
+    @InjectRepository(CommunityRoutineStep)
+    private readonly routineSteps: Repository<CommunityRoutineStep>,
+    @InjectRepository(CommunityReview)
+    private readonly reviews: Repository<CommunityReview>,
+    @InjectRepository(CommunityReviewContextProduct)
+    private readonly reviewContext: Repository<CommunityReviewContextProduct>,
+    @InjectRepository(CommunityReport)
+    private readonly reports: Repository<CommunityReport>,
+    @InjectRepository(CommunityBookmark)
+    private readonly bookmarks: Repository<CommunityBookmark>,
+    @InjectRepository(CommunityModerationDecision)
+    private readonly decisions: Repository<CommunityModerationDecision>,
+    @InjectRepository(CommunityHelpfulnessVoteEntity)
+    private readonly votes: Repository<CommunityHelpfulnessVoteEntity>,
+    @InjectRepository(CommunityOutcomeSignalVote)
+    private readonly outcomeVotes: Repository<CommunityOutcomeSignalVote>,
+    @InjectRepository(CommunityRoutineAdaptation)
+    private readonly adaptations: Repository<CommunityRoutineAdaptation>,
+    @InjectRepository(CommunitySafetyScanResult)
+    private readonly safetyScans: Repository<CommunitySafetyScanResult>,
+    @InjectRepository(CommunitySettings)
+    private readonly communitySettings: Repository<CommunitySettings>,
+    @InjectRepository(CommunityWarning)
+    private readonly warnings: Repository<CommunityWarning>,
+    @InjectRepository(AdminAccount)
+    private readonly adminAccounts: Repository<AdminAccount>,
+    @InjectRepository(AdminAuditLog)
+    private readonly auditLogs: Repository<AdminAuditLog>,
+    @InjectRepository(InAppNotification)
+    private readonly notifications: Repository<InAppNotification>,
+    @InjectRepository(SkinProfile)
+    private readonly skinProfiles: Repository<SkinProfile>,
+    @InjectRepository(InventoryProduct)
+    private readonly inventory: Repository<InventoryProduct>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
+    @InjectRepository(UserConsent)
+    private readonly consents: Repository<UserConsent>,
+  ) {}
+
+  async getHome(userId: string) {
+    const facetsPromise = this.getSafeFacets(userId);
+    const [facets, routines, reviews, warnings, postingEligibility] =
+      await Promise.all([
+        facetsPromise,
+        this.listRoutinesForViewer(
+          userId,
+          { limit: DEFAULT_LIMIT },
+          facetsPromise,
+        ),
+        this.listReviewsForViewer(
+          userId,
+          { limit: DEFAULT_LIMIT },
+          facetsPromise,
+        ),
+        this.listWarnings(),
+        this.getPostingEligibility(userId),
+      ]);
+
+    return {
+      profileFacets: facets,
+      postingEligibility,
+      routines: routines.items.slice(0, 6),
+      reviews: reviews.items.slice(0, 6),
+      warnings: warnings.slice(0, 4),
+      patterns: this.buildPatterns(facets, routines.items, reviews.items),
+    };
+  }
+
+  async getPostingEligibility(userId: string) {
+    const [
+      user,
+      profile,
+      shelfProductCount,
+      guidelinesConsent,
+      recentAbuse,
+      settings,
+    ] = await Promise.all([
+      this.users.findOne({ where: { id: userId } }),
+      this.skinProfiles.findOne({ where: { user_id: userId } }),
+      this.inventory.count({ where: { user_id: userId } }),
+      this.findActiveConsent(userId, UserConsentType.CommunityGuidelines),
+      this.hasRecentModerationAbuse(userId),
+      this.getCommunitySettings(),
+    ]);
+    if (!user) throw new NotFoundException('User not found');
+
+    const now = Date.now();
+    const ageMs = now - user.created_at.getTime();
+    const minimumAccountAgeDays = settings.minimumAccountAgeDays;
+    const minimumAgeMs = minimumAccountAgeDays * DAY_MS;
+    const eligibleAt = new Date(user.created_at.getTime() + minimumAgeMs);
+    const reasons: CommunityPostingEligibilityReason[] = [];
+
+    if (!user.email_verified) {
+      reasons.push({
+        code: 'email_unverified',
+        message: 'Verify your email before posting to Community.',
+      });
+    }
+    const profileWithUser = profile
+      ? ({ ...profile, user } as SkinProfile)
+      : null;
+    const hasCompletedSkinProfile =
+      hasCompletedEssentialSkinProfile(profileWithUser);
+
+    if (!hasCompletedSkinProfile) {
+      reasons.push({
+        code: 'skin_profile_required',
+        message: 'Complete your skin profile before posting to Community.',
+      });
+    }
+    if (shelfProductCount < 1) {
+      reasons.push({
+        code: 'shelf_product_required',
+        message: 'Add at least one shelf product before posting to Community.',
+      });
+    }
+    if (!guidelinesConsent) {
+      reasons.push({
+        code: 'community_guidelines_required',
+        message:
+          'Accept the Community guidelines and disclosure rules before posting.',
+      });
+    }
+    if (ageMs < minimumAgeMs) {
+      reasons.push({
+        code: 'account_too_new',
+        message: `Community posting unlocks ${minimumAccountAgeDays} days after account creation.`,
+      });
+    }
+    if (recentAbuse) {
+      reasons.push({
+        code: 'recent_moderation_abuse',
+        message:
+          'Recent moderation history prevents Community posting for now.',
+      });
+    }
+
+    return {
+      eligible: reasons.length === 0,
+      minimumAccountAgeDays,
+      accountAgeDays: Math.max(0, Math.floor(ageMs / DAY_MS)),
+      eligibleAt: eligibleAt.toISOString(),
+      hasAcceptedGuidelines: Boolean(guidelinesConsent),
+      hasCompletedSkinProfile,
+      hasShelfProduct: shelfProductCount > 0,
+      emailVerified: user.email_verified,
+      reasons,
+    };
+  }
+
+  async acceptCommunityGuidelines(userId: string, ip?: string | null) {
+    const existing = await this.findActiveConsent(
+      userId,
+      UserConsentType.CommunityGuidelines,
+    );
+    if (existing) return this.getPostingEligibility(userId);
+
+    await this.consents.save(
+      this.consents.create({
+        user_id: userId,
+        consent_type: UserConsentType.CommunityGuidelines,
+        consent_version: COMMUNITY_GUIDELINES_VERSION,
+        granted: true,
+        granted_at: new Date(),
+        revoked_at: null,
+        ip_address: ip ?? null,
+      }),
+    );
+    return this.getPostingEligibility(userId);
+  }
+
+  async getPeopleLikeMe(
+    userId: string,
+    query: Partial<CommunityCursorPageQueryDto> = {},
+  ) {
+    const facets = await this.getSafeFacets(userId);
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(
+      userId,
+      'people-like-me',
+      limit,
+    );
+    const page = communityScoredListPage(
+      await this.findPeopleLikeMeCursorRows(
+        facets,
+        query.cursor,
+        limit,
+        fingerprint,
+      ),
+      limit,
+      fingerprint,
+    );
+    const routineIds = page.rows
+      .filter((row) => row.contentKind === CommunityContentType.Routine)
+      .map((row) => row.id);
+    const reviewIds = page.rows
+      .filter((row) => row.contentKind === CommunityContentType.Review)
+      .map((row) => row.id);
+    const [routineMap, reviewMap, bookmarkedRoutineIds, bookmarkedReviewIds] =
+      await Promise.all([
+        this.loadRoutinesById(routineIds),
+        this.loadReviewsById(reviewIds),
+        this.loadBookmarkedContentIds(
+          userId,
+          CommunityContentType.Routine,
+          routineIds,
+        ),
+        this.loadBookmarkedContentIds(
+          userId,
+          CommunityContentType.Review,
+          reviewIds,
+        ),
+      ]);
+    const [stepsByRoutine, contextByReview] = await Promise.all([
+      this.loadSteps(Array.from(routineMap.keys())),
+      this.loadReviewContext(Array.from(reviewMap.keys())),
+    ]);
+    const items = page.rows
+      .map((row) => {
+        if (row.contentKind === CommunityContentType.Routine) {
+          const routine = routineMap.get(row.id);
+          return routine
+            ? this.toRoutineResponse(
+                routine,
+                stepsByRoutine.get(row.id) ?? [],
+                facets,
+                userId,
+                bookmarkedRoutineIds.has(row.id),
+              )
+            : null;
+        }
+
+        const review = reviewMap.get(row.id);
+        return review
+          ? this.toReviewResponse(
+              review,
+              contextByReview.get(row.id) ?? [],
+              facets,
+              userId,
+              bookmarkedReviewIds.has(row.id),
+            )
+          : null;
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    return {
+      profileFacets: facets,
+      items,
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  private async findPeopleLikeMeCursorRows(
+    facets: CommunitySafeProfileFacets,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityScoredCursorEntity[]> {
+    const params: unknown[] = [];
+    const addParam = (value: unknown) => {
+      params.push(value);
+      return `$${params.length}`;
+    };
+    const statusParam = addParam(CommunityModerationStatus.Published);
+    const skinTypeParam = addParam(facets.skinType);
+    const sensitivityParam = addParam(facets.sensitivityLevel);
+    const skinToneParam = addParam(facets.skinToneRange);
+    const climateParam = addParam(facets.climateBucket);
+    const routinePaceParam = addParam(facets.routinePace);
+    const concernTagsParam = addParam(facets.concernTags);
+    const ordinaryParam = addParam(CommunityDisclosureType.Ordinary);
+    const sponsoredParam = addParam(CommunityDisclosureType.Sponsored);
+    const affiliateParam = addParam(CommunityDisclosureType.Affiliate);
+    const brandRepParam = addParam(CommunityDisclosureType.BrandRep);
+    const usedAloneParam = addParam(
+      CommunityReviewRoutineContextUsage.UsedAlone,
+    );
+    let cursorFilter = '';
+
+    if (cursor) {
+      const decoded = decodeCommunityScoredCursor(cursor, fingerprint);
+      const scoreParam = addParam(decoded.matchScore);
+      const updatedAtParam = addParam(decoded.updatedAt);
+      const contentKindParam = addParam(decoded.contentKind);
+      const cursorIdParam = addParam(decoded.id);
+      cursorFilter = `
+        WHERE (
+          "match_score" < ${scoreParam}
+          OR ("match_score" = ${scoreParam} AND "updated_at" < ${updatedAtParam})
+          OR (
+            "match_score" = ${scoreParam}
+            AND "updated_at" = ${updatedAtParam}
+            AND "content_kind" < ${contentKindParam}
+          )
+          OR (
+            "match_score" = ${scoreParam}
+            AND "updated_at" = ${updatedAtParam}
+            AND "content_kind" = ${contentKindParam}
+            AND "id" < ${cursorIdParam}
+          )
+        )
+      `;
+    }
+
+    const limitParam = addParam(limit + 1);
+    const scoreExpression = (
+      alias: string,
+      tagExpression: string,
+      evidenceBoost = '0',
+    ) => `
+      GREATEST(0, LEAST(100,
+        ${evidenceBoost}
+        + CASE
+            WHEN ${skinTypeParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'skinType' = ${skinTypeParam}::varchar
+            THEN 25 ELSE 0
+          END
+        + CASE
+            WHEN ${sensitivityParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'sensitivityLevel' = ${sensitivityParam}::varchar
+            THEN 15 ELSE 0
+          END
+        + CASE
+            WHEN ${skinToneParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'skinToneRange' = ${skinToneParam}::varchar
+            THEN 10 ELSE 0
+          END
+        + CASE
+            WHEN ${climateParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'climateBucket' = ${climateParam}::varchar
+            THEN 10 ELSE 0
+          END
+        + CASE
+            WHEN ${routinePaceParam}::varchar IS NOT NULL
+             AND ${alias}."safe_facets" ->> 'routinePace' = ${routinePaceParam}::varchar
+            THEN 10 ELSE 0
+          END
+        + LEAST(25, (
+            SELECT COUNT(*)::int * 8
+            FROM jsonb_array_elements_text(${tagExpression}) tag(value)
+            WHERE tag.value = ANY(${concernTagsParam}::text[])
+          ))
+        + CASE
+            WHEN ${alias}."disclosure_type" = ${ordinaryParam} THEN 10
+            ELSE 0
+          END
+        - CASE
+            WHEN ${alias}."disclosure_type" IN (
+              ${sponsoredParam},
+              ${affiliateParam},
+              ${brandRepParam}
+            )
+            THEN 30 ELSE 0
+          END
+      ))`;
+    const routineTags = `
+      COALESCE(routine."concern_tags", '[]'::jsonb)
+      || COALESCE(routine."goal_tags", '[]'::jsonb)
+      || COALESCE(routine."avoid_tags", '[]'::jsonb)
+      || COALESCE(routine."habit_tags", '[]'::jsonb)
+    `;
+    const reviewEvidenceBoost = `
+      CASE WHEN review."overall_rating" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE WHEN review."effectiveness_rating" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE WHEN review."irritation_rating" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE WHEN review."skin_response" IS NOT NULL THEN 4 ELSE 0 END
+      + CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM "community_review_context_products" context_product
+            WHERE context_product."review_id" = review."id"
+              AND NULLIF(context_product."product_name", '') IS NOT NULL
+          )
+          THEN 6 ELSE 0
+        END
+      + CASE
+          WHEN review."routine_context_usage" = ${usedAloneParam} THEN 4
+          ELSE 0
+        END
+      + LEAST(
+          8,
+          GREATEST(
+            0,
+            (review."helpful_count" - review."not_helpful_count") * 2
+          )
+        )
+    `;
+    const rows = await this.dataSource.query<CommunityRawCursorRow[]>(
+      `
+        WITH scored AS (
+          SELECT
+            'routine'::varchar AS "content_kind",
+            routine."id" AS "id",
+            routine."updated_at" AS "updated_at",
+            ${scoreExpression('routine', routineTags)} AS "match_score"
+          FROM "community_routines" routine
+          WHERE routine."moderation_status" = ${statusParam}
+            AND routine."withdrawn_at" IS NULL
+          UNION ALL
+          SELECT
+            'review'::varchar AS "content_kind",
+            review."id" AS "id",
+            review."updated_at" AS "updated_at",
+            ${scoreExpression(
+              'review',
+              `COALESCE(review."outcomes", '[]'::jsonb)`,
+              reviewEvidenceBoost,
+            )} AS "match_score"
+          FROM "community_reviews" review
+          WHERE review."moderation_status" = ${statusParam}
+            AND review."withdrawn_at" IS NULL
+        )
+        SELECT "content_kind", "id", "updated_at", "match_score"
+        FROM scored
+        ${cursorFilter}
+        ORDER BY "match_score" DESC, "updated_at" DESC, "content_kind" DESC, "id" DESC
+        LIMIT ${limitParam}
+      `,
+      params,
+    );
+
+    return rows.map((row) => {
+      if (!isCommunityPublishedContentKind(row.content_kind)) {
+        throw new BadRequestException('Invalid cursor row');
+      }
+      return {
+        contentKind: row.content_kind,
+        id: row.id,
+        matchScore: parseCursorRowScore(row.match_score),
+        updated_at: parseCursorRowDate(row.updated_at),
+      };
+    });
+  }
+
+  async listRoutines(
+    userId: string,
+    query: Partial<CommunityListQueryDto> = {},
+  ) {
+    return this.listRoutinesForViewer(userId, query);
+  }
+
+  private async listRoutinesForViewer(
+    userId: string,
+    query: Partial<CommunityListQueryDto>,
+    facetsSource?: CommunitySafeProfileFacetsSource,
+  ) {
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(
+      userId,
+      'routine',
+      limit,
+      query,
+    );
+    const [facets, page] = await Promise.all([
+      facetsSource ?? this.getSafeFacets(userId),
+      this.findPublishedRoutineRows(query, limit, fingerprint).then((rows) =>
+        communityListPage(rows, limit, fingerprint),
+      ),
+    ]);
+    const routineIds = page.rows.map((row) => row.id);
+    const [stepsByRoutine, bookmarkedRoutineIds] = await Promise.all([
+      this.loadSteps(routineIds),
+      this.loadBookmarkedContentIds(
+        userId,
+        CommunityContentType.Routine,
+        routineIds,
+      ),
+    ]);
+    return {
+      items: page.rows.map((routine) =>
+        this.toRoutineResponse(
+          routine,
+          stepsByRoutine.get(routine.id) ?? [],
+          facets,
+          userId,
+          bookmarkedRoutineIds.has(routine.id),
+        ),
+      ),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  async bookmarkRoutine(userId: string, routineId: string) {
+    await this.bookmarkContent(userId, CommunityContentType.Routine, routineId);
+    return { bookmarked: true };
+  }
+
+  async bookmarkReview(userId: string, reviewId: string) {
+    await this.bookmarkContent(userId, CommunityContentType.Review, reviewId);
+    return { bookmarked: true };
+  }
+
+  async unbookmarkRoutine(userId: string, routineId: string) {
+    await this.unbookmarkContent(
+      userId,
+      CommunityContentType.Routine,
+      routineId,
+    );
+    return { bookmarked: false };
+  }
+
+  async unbookmarkReview(userId: string, reviewId: string) {
+    await this.unbookmarkContent(userId, CommunityContentType.Review, reviewId);
+    return { bookmarked: false };
+  }
+
+  async listBookmarks(
+    userId: string,
+    query: Partial<CommunityCursorPageQueryDto> = {},
+  ) {
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityBookmarkFingerprint(userId, limit);
+    const [facets, page] = await Promise.all([
+      this.getSafeFacets(userId),
+      this.findBookmarkCursorRows(userId, query.cursor, limit, fingerprint),
+    ]);
+    const routineIds = page.rows
+      .filter((row) => row.contentType === CommunityContentType.Routine)
+      .map((row) => row.contentId);
+    const reviewIds = page.rows
+      .filter((row) => row.contentType === CommunityContentType.Review)
+      .map((row) => row.contentId);
+    const [routinesById, reviewsById, stepsByRoutine, contextByReview] =
+      await Promise.all([
+        this.loadRoutinesById(routineIds),
+        this.loadReviewsById(reviewIds),
+        this.loadSteps(routineIds),
+        this.loadReviewContext(reviewIds),
+      ]);
+
+    const items = page.rows
+      .map((row) => {
+        if (row.contentType === CommunityContentType.Routine) {
+          const routine = routinesById.get(row.contentId);
+          return routine && this.isPubliclyVisibleContent(routine)
+            ? this.toRoutineResponse(
+                routine,
+                stepsByRoutine.get(routine.id) ?? [],
+                facets,
+                userId,
+                true,
+              )
+            : null;
+        }
+
+        const review = reviewsById.get(row.contentId);
+        return review && this.isPubliclyVisibleContent(review)
+          ? this.toReviewResponse(
+              review,
+              contextByReview.get(review.id) ?? [],
+              facets,
+              userId,
+              true,
+            )
+          : null;
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    return {
+      items,
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  private async bookmarkContent(
+    userId: string,
+    contentType: CommunityPublishedContentKind,
+    contentId: string,
+  ) {
+    await this.assertPublicContentExists(contentType, contentId);
+    await this.dataSource.query(
+      `
+        INSERT INTO "community_bookmarks" (
+          "id", "user_id", "content_type", "content_id", "created_at"
+        )
+        VALUES ($1, $2, $3, $4, now())
+        ON CONFLICT ("user_id", "content_type", "content_id") DO NOTHING
+      `,
+      [ulid(), userId, contentType, contentId],
+    );
+  }
+
+  private async unbookmarkContent(
+    userId: string,
+    contentType: CommunityPublishedContentKind,
+    contentId: string,
+  ) {
+    await this.bookmarks.delete({
+      user_id: userId,
+      content_type: contentType,
+      content_id: contentId,
+    });
+  }
+
+  private async assertPublicContentExists(
+    contentType: CommunityPublishedContentKind,
+    contentId: string,
+  ) {
+    const count =
+      contentType === CommunityContentType.Routine
+        ? await this.routines.count({
+            where: {
+              id: contentId,
+              moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          })
+        : await this.reviews.count({
+            where: {
+              id: contentId,
+              moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          });
+    if (count < 1) {
+      throw new NotFoundException('Community content not found');
+    }
+  }
+
+  private async findBookmarkCursorRows(
+    userId: string,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<{
+    rows: CommunityBookmarkCursorEntity[];
+    nextCursor: string | null;
+  }> {
+    const params: unknown[] = [
+      userId,
+      CommunityModerationStatus.Published,
+      CommunityContentType.Routine,
+      CommunityContentType.Review,
+    ];
+    let cursorFilter = '';
+    if (cursor) {
+      const decoded = decodeCommunityResultCursor(cursor, fingerprint);
+      const createdAtParam = `$${params.push(decoded.createdAt)}`;
+      const idParam = `$${params.push(decoded.id)}`;
+      cursorFilter = `
+        AND (
+          bookmark."created_at" < ${createdAtParam}
+          OR (
+            bookmark."created_at" = ${createdAtParam}
+            AND bookmark."id" < ${idParam}
+          )
+        )
+      `;
+    }
+    const limitParam = `$${params.push(limit + 1)}`;
+    const rows = await this.dataSource.query<CommunityBookmarkCursorRow[]>(
+      `
+        SELECT
+          bookmark."id" AS "bookmark_id",
+          bookmark."content_type" AS "content_type",
+          bookmark."content_id" AS "content_id",
+          bookmark."created_at" AS "created_at"
+        FROM "community_bookmarks" bookmark
+        LEFT JOIN "community_routines" routine
+          ON bookmark."content_type" = $3
+         AND bookmark."content_id" = routine."id"
+        LEFT JOIN "community_reviews" review
+          ON bookmark."content_type" = $4
+         AND bookmark."content_id" = review."id"
+        WHERE bookmark."user_id" = $1
+          ${cursorFilter}
+          AND (
+            (
+              bookmark."content_type" = $3
+              AND routine."moderation_status" = $2
+              AND routine."withdrawn_at" IS NULL
+            )
+            OR (
+              bookmark."content_type" = $4
+              AND review."moderation_status" = $2
+              AND review."withdrawn_at" IS NULL
+            )
+          )
+        ORDER BY bookmark."created_at" DESC, bookmark."id" DESC
+        LIMIT ${limitParam}
+      `,
+      params,
+    );
+    const parsed = rows.map((row): CommunityBookmarkCursorEntity => {
+      if (!isCommunityPublishedContentKind(row.content_type)) {
+        throw new BadRequestException('Invalid bookmark row');
+      }
+      return {
+        id: row.bookmark_id,
+        contentType: row.content_type,
+        contentId: row.content_id,
+        created_at: parseCursorRowDate(row.created_at),
+      };
+    });
+    const pageRows = parsed.slice(0, limit);
+    const lastRow = pageRows[pageRows.length - 1];
+
+    return {
+      rows: pageRows,
+      nextCursor:
+        parsed.length > limit && lastRow
+          ? encodeCursor({
+              fingerprint,
+              tuple: communityBookmarkCursorTuple(lastRow),
+            })
+          : null,
+    };
+  }
+
+  private findPublishedRoutineRows(
+    query: Partial<CommunityListQueryDto>,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityRoutine[]> {
+    const pageSize = limit + 1;
+    if (!query.cursor && !this.hasRoutineListFilters(query)) {
+      return this.routines.find({
+        where: {
+          moderation_status: CommunityModerationStatus.Published,
+          withdrawn_at: IsNull(),
+        },
+        order: { updated_at: 'DESC', id: 'DESC' },
+        take: pageSize,
+      });
+    }
+
+    const builder = this.routines
+      .createQueryBuilder('routine')
+      .where('routine.moderation_status = :status', {
+        status: CommunityModerationStatus.Published,
+      })
+      .andWhere('routine.withdrawn_at IS NULL');
+
+    this.applyRoutineListFilters(builder, query);
+    this.applyCommunityListCursor(
+      builder,
+      'routine',
+      query.cursor,
+      fingerprint,
+    );
+
+    return builder
+      .orderBy('routine.updated_at', 'DESC')
+      .addOrderBy('routine.id', 'DESC')
+      .take(pageSize)
+      .getMany();
+  }
+
+  private applyCommunityListCursor<T extends CommunityCursorEntity>(
+    builder: SelectQueryBuilder<T>,
+    alias: string,
+    cursor: string | null | undefined,
+    fingerprint: string,
+  ) {
+    if (!cursor) return;
+
+    const decoded = decodeCommunityListCursor(cursor, fingerprint);
+    builder.andWhere(
+      new Brackets((where) => {
+        where
+          .where(`${alias}.updated_at < :updatedAt`, {
+            updatedAt: decoded.updatedAt,
+          })
+          .orWhere(
+            `${alias}.updated_at = :updatedAt AND ${alias}.id < :cursorId`,
+            {
+              cursorId: decoded.id,
+              updatedAt: decoded.updatedAt,
+            },
+          );
+      }),
+    );
+  }
+
+  private applyCommonListFilters<T extends CommunityCursorEntity>(
+    builder: SelectQueryBuilder<T>,
+    alias: string,
+    query: Partial<CommunityListQueryDto>,
+    contentConcernExpression?: string,
+  ) {
+    const skinType = cleanQueryString(query.skinType, 40);
+    if (skinType) {
+      builder.andWhere(`${alias}.safe_facets ->> 'skinType' = :skinType`, {
+        skinType,
+      });
+    }
+
+    const concern = cleanQueryString(query.concern, 60);
+    if (concern) {
+      builder.andWhere(
+        new Brackets((where) => {
+          where.where(`${alias}.safe_facets -> 'concernTags' ? :concern`, {
+            concern,
+          });
+          if (contentConcernExpression) {
+            where.orWhere(`${contentConcernExpression} ? :concern`, {
+              concern,
+            });
+          }
+        }),
+      );
+    }
+
+    const sensitivity = cleanQueryString(query.sensitivity, 40);
+    if (sensitivity) {
+      builder.andWhere(
+        `${alias}.safe_facets ->> 'sensitivityLevel' = :sensitivity`,
+        { sensitivity },
+      );
+    }
+
+    if (query.disclosureType) {
+      builder.andWhere(`${alias}.disclosure_type = :disclosureType`, {
+        disclosureType: query.disclosureType,
+      });
+    }
+  }
+
+  private hasRoutineListFilters(
+    query: Partial<CommunityListQueryDto>,
+  ): boolean {
+    return hasCommunityListFilters(query, [
+      'avoidTag',
+      'concern',
+      'disclosureType',
+      'goal',
+      'habitTag',
+      'productRole',
+      'result',
+      'search',
+      'sensitivity',
+      'skinType',
+      'timeframe',
+      'warningTag',
+    ]);
+  }
+
+  private applyRoutineListFilters(
+    builder: SelectQueryBuilder<CommunityRoutine>,
+    query: Partial<CommunityListQueryDto>,
+  ) {
+    this.applyCommonListFilters(
+      builder,
+      'routine',
+      query,
+      'routine.concern_tags',
+    );
+
+    const search = queryLikePattern(query.search, 80);
+    if (search) {
+      builder.andWhere(
+        new Brackets((where) => {
+          where
+            .where("routine.title ILIKE :search ESCAPE '\\'", { search })
+            .orWhere("routine.summary ILIKE :search ESCAPE '\\'", { search })
+            .orWhere("routine.concern_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("routine.goal_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("routine.avoid_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("routine.habit_tags::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere(
+              `EXISTS (
+                SELECT 1
+                FROM community_routine_steps step
+                WHERE step.routine_id = routine.id
+                  AND (
+                    step.product_brand ILIKE :search ESCAPE '\\'
+                    OR step.product_name ILIKE :search ESCAPE '\\'
+                    OR step.category ILIKE :search ESCAPE '\\'
+                    OR step.notes ILIKE :search ESCAPE '\\'
+                  )
+              )`,
+              { search },
+            );
+        }),
+      );
+    }
+
+    const goal = cleanQueryString(query.goal, 60);
+    if (goal) builder.andWhere('routine.goal_tags ? :goal', { goal });
+
+    if (query.result) {
+      builder.andWhere('routine.goal_result = :goalResult', {
+        goalResult: query.result,
+      });
+    }
+
+    if (query.timeframe) {
+      builder.andWhere('routine.timeframe = :timeframe', {
+        timeframe: query.timeframe,
+      });
+    }
+
+    const productRole = cleanQueryString(query.productRole, 40);
+    if (productRole) {
+      builder.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM community_routine_steps step
+          WHERE step.routine_id = routine.id
+            AND step.category = :productRole
+        )`,
+        { productRole },
+      );
+    }
+
+    const avoidTag = cleanQueryString(query.avoidTag, 60);
+    if (avoidTag) {
+      builder.andWhere('routine.avoid_tags ? :avoidTag', { avoidTag });
+    }
+
+    const habitTag = cleanQueryString(query.habitTag, 60);
+    if (habitTag) {
+      builder.andWhere('routine.habit_tags ? :habitTag', { habitTag });
+    }
+
+    const warningTag = cleanQueryString(query.warningTag, 60);
+    if (warningTag) {
+      builder.andWhere('routine.warning_tags ? :warningTag', { warningTag });
+    }
+  }
+
+  async getRoutine(userId: string, id: string) {
+    const routine = await this.routines.findOne({ where: { id } });
+    if (!routine || !this.canRead(routine, userId)) {
+      throw new NotFoundException('Community routine not found');
+    }
+    const [facets, stepsByRoutine, bookmarkedIds] = await Promise.all([
+      this.getSafeFacets(userId),
+      this.loadSteps([id]),
+      this.loadBookmarkedContentIds(userId, CommunityContentType.Routine, [id]),
+    ]);
+    return this.toRoutineResponse(
+      routine,
+      stepsByRoutine.get(id) ?? [],
+      facets,
+      userId,
+      bookmarkedIds.has(id),
+    );
+  }
+
+  async getProductEvidence(userId: string, productId: string) {
+    const [product, viewer] = await Promise.all([
+      this.inventory.findOne({ where: { id: productId, user_id: userId } }),
+      this.getSafeFacets(userId),
+    ]);
+    if (!product) {
+      throw new NotFoundException('Shelf product not found');
+    }
+
+    const [reviewRows, matchingSteps] = await Promise.all([
+      this.reviews.find({
+        select: {
+          id: true,
+          overall_rating: true,
+          effectiveness_rating: true,
+          irritation_rating: true,
+          outcomes: true,
+          safe_facets: true,
+          outcome_signal_counts: true,
+        },
+        where: [
+          {
+            product_id: product.id,
+            moderation_status: CommunityModerationStatus.Published,
+            withdrawn_at: IsNull(),
+          },
+          {
+            product_brand: ILike(product.brand),
+            product_name: ILike(product.name),
+            product_category: product.category,
+            moderation_status: CommunityModerationStatus.Published,
+            withdrawn_at: IsNull(),
+          },
+        ],
+        order: { updated_at: 'DESC' },
+        take: DEFAULT_LIMIT,
+      }),
+      this.routineSteps.find({
+        select: { routine_id: true },
+        where: [
+          { product_id: product.id },
+          {
+            product_brand: ILike(product.brand),
+            product_name: ILike(product.name),
+            category: product.category,
+          },
+        ],
+      }),
+    ]);
+    const reviews = Array.from(
+      new Map(reviewRows.map((review) => [review.id, review])).values(),
+    );
+    const routineIds = Array.from(
+      new Set(matchingSteps.map((step) => step.routine_id)),
+    );
+    const routines =
+      routineIds.length > 0
+        ? await this.routines.find({
+            select: {
+              id: true,
+              goal_tags: true,
+              avoid_tags: true,
+              safe_facets: true,
+              outcome_signal_counts: true,
+            },
+            where: {
+              id: In(routineIds),
+              moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+            take: DEFAULT_LIMIT,
+          })
+        : [];
+    const contentVoteWhere = [
+      ...(routines.length > 0
+        ? [
+            {
+              content_type: CommunityContentType.Routine,
+              content_id: In(routines.map((routine) => routine.id)),
+              note_moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          ]
+        : []),
+      ...(reviews.length > 0
+        ? [
+            {
+              content_type: CommunityContentType.Review,
+              content_id: In(reviews.map((review) => review.id)),
+              note_moderation_status: CommunityModerationStatus.Published,
+              withdrawn_at: IsNull(),
+            },
+          ]
+        : []),
+    ];
+    const outcomeVotes =
+      contentVoteWhere.length > 0
+        ? await this.outcomeVotes.find({
+            select: {
+              safe_facets: true,
+              signal: true,
+            },
+            where: contentVoteWhere,
+          })
+        : [];
+    const outcomeSignalCounts = this.defaultOutcomeSignalCounts({});
+    for (const routine of routines) {
+      this.addOutcomeSignalCounts(
+        outcomeSignalCounts,
+        routine.outcome_signal_counts,
+      );
+    }
+    for (const review of reviews) {
+      this.addOutcomeSignalCounts(
+        outcomeSignalCounts,
+        review.outcome_signal_counts,
+      );
+    }
+    const similarOutcomeSignalCounts = this.defaultOutcomeSignalCounts({});
+    for (const vote of outcomeVotes) {
+      if (this.isSimilarFacets(viewer, vote.safe_facets)) {
+        similarOutcomeSignalCounts[vote.signal] += 1;
+      }
+    }
+
+    return {
+      productId: product.id,
+      productBrand: product.brand,
+      productName: product.name,
+      reviewCount: reviews.length,
+      playbookCount: routines.length,
+      similarAuthorEvidenceCount: [
+        ...reviews.map((review) => review.safe_facets),
+        ...routines.map((routine) => routine.safe_facets),
+      ].filter((facets) => this.isSimilarFacets(viewer, facets)).length,
+      similarOutcomeConfirmationCount: Object.values(
+        similarOutcomeSignalCounts,
+      ).reduce((sum, count) => sum + count, 0),
+      averageOverallRating: this.averageRating(
+        reviews.map((review) => review.overall_rating),
+      ),
+      averageEffectivenessRating: this.averageRating(
+        reviews.map((review) => review.effectiveness_rating),
+      ),
+      averageIrritationRating: this.averageRating(
+        reviews.map((review) => review.irritation_rating),
+      ),
+      outcomeSignalCounts,
+      similarOutcomeSignalCounts,
+      topGoals: this.topCounts(
+        routines.flatMap((routine) => routine.goal_tags),
+      ),
+      topAvoids: this.topCounts(
+        routines.flatMap((routine) => routine.avoid_tags ?? []),
+      ),
+      topOutcomes: this.topCounts(reviews.flatMap((review) => review.outcomes)),
+    };
+  }
+
+  async createRoutine(userId: string, dto: CreateCommunityRoutineDto) {
+    await this.assertCanPostCommunityContent(userId);
+    await this.assertActionLimit({
+      label: 'routine publishes',
+      repository: this.routines,
+      userColumn: 'author_user_id',
+      userId,
+      maxPerDay: 5,
+    });
+    if (dto.steps.length === 0) {
+      throw new BadRequestException('Routine requires at least one step');
+    }
+    const [profile, products] = await Promise.all([
+      this.ensureCommunityProfile(userId),
+      this.loadOwnedProductMap(
+        userId,
+        dto.steps.map((step) => step.productId).filter(Boolean) as string[],
+      ),
+    ]);
+    const stepSnapshots = dto.steps.map(
+      (step, index): CommunityRoutineStepSnapshot => {
+        const product = step.productId ? products.get(step.productId) : null;
+        if (step.productId && !product) {
+          throw new BadRequestException(
+            'Routine step product must be on your shelf',
+          );
+        }
+        if (!step.productId && !cleanText(step.productName, 255)) {
+          throw new BadRequestException(
+            'Goal playbook steps require product names or shelf products',
+          );
+        }
+        return {
+          stepOrder: index + 1,
+          slot: step.slot,
+          productId: product?.id ?? null,
+          productBrand: product?.brand ?? cleanText(step.productBrand, 255),
+          productName: product?.name ?? cleanText(step.productName, 255),
+          category: product?.category ?? step.category,
+          frequency: cleanText(step.frequency, 80),
+          notes: cleanText(step.notes, 500),
+        };
+      },
+    );
+    const scannedText = buildRoutineModerationText({
+      title: dto.title,
+      summary: dto.summary,
+      disclosureType: dto.disclosureType,
+      concernTags: normalizeTags(dto.concernTags),
+      goalTags: normalizeTags(dto.goalTags),
+      goalResult: dto.goalResult,
+      timeframe: dto.timeframe,
+      avoidTags: normalizeTags(dto.avoidTags),
+      habitTags: normalizeTags(dto.habitTags),
+      didNotWorkTags: normalizeTags(dto.didNotWorkTags),
+      warningTags: normalizeTags(dto.warningTags),
+      steps: stepSnapshots,
+    });
+    const flags = [
+      ...this.safety.scanText(scannedText),
+      ...this.safety.scanRoutine(stepSnapshots),
+    ];
+    this.safety.resolveStatus({
+      disclosureType: dto.disclosureType,
+      flags,
+    });
+    const moderation = await this.aiModeration.triage({
+      contentType: CommunityContentType.Routine,
+      disclosureType: dto.disclosureType,
+      flags,
+      text: scannedText,
+    });
+    const status = moderation.status;
+
+    const created = await this.dataSource.transaction(async (manager) => {
+      const routine = await manager.getRepository(CommunityRoutine).save(
+        manager.getRepository(CommunityRoutine).create({
+          author_user_id: userId,
+          community_profile_id: profile.id,
+          title: cleanText(dto.title, 120) ?? 'Shared routine',
+          summary: cleanText(dto.summary, 500),
+          concern_tags: normalizeTags(dto.concernTags),
+          goal_tags: normalizeTags(dto.goalTags),
+          goal_result: dto.goalResult ?? null,
+          timeframe: dto.timeframe,
+          avoid_tags: normalizeTags(dto.avoidTags),
+          habit_tags: normalizeTags(dto.habitTags),
+          did_not_work_tags: normalizeTags(dto.didNotWorkTags),
+          warning_tags: normalizeTags(dto.warningTags),
+          disclosure_type: dto.disclosureType,
+          moderation_status: status,
+          safe_facets: profile.safe_facets,
+          safety_flags: flags,
+        }),
+      );
+      await manager.getRepository(CommunityRoutineStep).save(
+        stepSnapshots.map((step) =>
+          manager.getRepository(CommunityRoutineStep).create({
+            routine_id: routine.id,
+            step_order: step.stepOrder,
+            slot: step.slot,
+            product_id: step.productId,
+            product_brand: step.productBrand,
+            product_name: step.productName,
+            category: step.category,
+            frequency: step.frequency,
+            notes: step.notes,
+          }),
+        ),
+      );
+      await this.recordDecision(manager, {
+        contentType: CommunityContentType.Routine,
+        contentId: routine.id,
+        actorAdminId: null,
+        from: CommunityModerationStatus.Draft,
+        to: status,
+        reason: this.automationDecisionReason(moderation.automation),
+      });
+      await this.recordSafetyScan(manager, {
+        contentType: CommunityContentType.Routine,
+        contentId: routine.id,
+        flags,
+        status,
+        scannedTextLength: scannedText.length,
+        automation: moderation.automation,
+      });
+      return routine;
+    });
+
+    if (created.moderation_status === CommunityModerationStatus.NeedsEdit) {
+      await this.notifyModerationOutcome(
+        created,
+        CommunityContentType.Routine,
+        created.moderation_status,
+      );
+    }
+    return this.getRoutine(userId, created.id);
+  }
+
+  async updateRoutine(
+    userId: string,
+    routineId: string,
+    dto: EditCommunityRoutineDto,
+  ) {
+    await this.assertCanPostCommunityContent(userId);
+    const routine = await this.routines.findOne({
+      where: { id: routineId, author_user_id: userId },
+    });
+    if (!routine) throw new NotFoundException('Community routine not found');
+    if (!USER_EDITABLE_MODERATION_STATUSES.has(routine.moderation_status)) {
+      throw new BadRequestException(
+        'Only draft, pending, or returned routines can be edited',
+      );
+    }
+
+    routine.title = cleanText(dto.title, 120) ?? routine.title;
+    routine.summary =
+      dto.summary === undefined ? routine.summary : cleanText(dto.summary, 500);
+    routine.disclosure_type = dto.disclosureType ?? routine.disclosure_type;
+    routine.concern_tags =
+      dto.concernTags === undefined
+        ? routine.concern_tags
+        : normalizeTags(dto.concernTags);
+    routine.goal_tags =
+      dto.goalTags === undefined
+        ? routine.goal_tags
+        : normalizeTags(dto.goalTags);
+    routine.goal_result =
+      dto.goalResult === undefined ? routine.goal_result : dto.goalResult;
+    routine.timeframe =
+      dto.timeframe === undefined ? routine.timeframe : dto.timeframe;
+    routine.avoid_tags =
+      dto.avoidTags === undefined
+        ? routine.avoid_tags
+        : normalizeTags(dto.avoidTags);
+    routine.habit_tags =
+      dto.habitTags === undefined
+        ? routine.habit_tags
+        : normalizeTags(dto.habitTags);
+    routine.did_not_work_tags =
+      dto.didNotWorkTags === undefined
+        ? routine.did_not_work_tags
+        : normalizeTags(dto.didNotWorkTags);
+    routine.warning_tags =
+      dto.warningTags === undefined
+        ? routine.warning_tags
+        : normalizeTags(dto.warningTags);
+
+    const existingSteps = await this.routineSteps.find({
+      where: { routine_id: routineId },
+      order: { step_order: 'ASC' },
+    });
+    const stepSnapshots =
+      dto.steps === undefined
+        ? existingSteps.map((step) => ({
+            stepOrder: step.step_order,
+            slot: step.slot,
+            productId: step.product_id,
+            productBrand: step.product_brand,
+            productName: step.product_name,
+            category: step.category,
+            frequency: step.frequency,
+            notes: step.notes,
+          }))
+        : await this.buildRoutineStepSnapshots(userId, dto.steps);
+    const scannedText = buildRoutineModerationText({
+      title: routine.title,
+      summary: routine.summary,
+      disclosureType: routine.disclosure_type,
+      concernTags: routine.concern_tags,
+      goalTags: routine.goal_tags,
+      goalResult: routine.goal_result,
+      timeframe: routine.timeframe,
+      avoidTags: routine.avoid_tags,
+      habitTags: routine.habit_tags,
+      didNotWorkTags: routine.did_not_work_tags,
+      warningTags: routine.warning_tags,
+      steps: stepSnapshots,
+    });
+    const flags = [
+      ...this.safety.scanText(scannedText),
+      ...this.safety.scanRoutine(stepSnapshots),
+    ];
+    const from = routine.moderation_status;
+    this.safety.resolveStatus({
+      disclosureType: routine.disclosure_type,
+      flags,
+    });
+    const moderation = await this.aiModeration.triage({
+      contentType: CommunityContentType.Routine,
+      disclosureType: routine.disclosure_type,
+      flags,
+      text: scannedText,
+    });
+    const status = moderation.status;
+    routine.safety_flags = flags;
+    routine.moderation_status = status;
+    routine.assigned_admin_id =
+      moderation.automation.handledBy === 'admin'
+        ? routine.assigned_admin_id
+        : null;
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(CommunityRoutine).save(routine);
+      if (dto.steps !== undefined) {
+        await manager
+          .getRepository(CommunityRoutineStep)
+          .delete({ routine_id: routine.id });
+        await manager.getRepository(CommunityRoutineStep).save(
+          stepSnapshots.map((step) =>
+            manager.getRepository(CommunityRoutineStep).create({
+              routine_id: routine.id,
+              step_order: step.stepOrder,
+              slot: step.slot,
+              product_id: step.productId,
+              product_brand: step.productBrand,
+              product_name: step.productName,
+              category: step.category,
+              frequency: step.frequency,
+              notes: step.notes,
+            }),
+          ),
+        );
+      }
+      await this.recordDecision(manager, {
+        contentType: CommunityContentType.Routine,
+        contentId: routine.id,
+        actorAdminId: null,
+        from,
+        to: status,
+        reason: `User edited routine. ${this.automationDecisionReason(moderation.automation)}`,
+      });
+      await this.recordSafetyScan(manager, {
+        contentType: CommunityContentType.Routine,
+        contentId: routine.id,
+        flags,
+        status,
+        scannedTextLength: scannedText.length,
+        automation: moderation.automation,
+      });
+    });
+    await this.notifyModerationOutcome(
+      routine,
+      CommunityContentType.Routine,
+      status,
+    );
+    return this.getRoutine(userId, routineId);
+  }
+
+  async listReviews(
+    userId: string,
+    query: Partial<CommunityListQueryDto> = {},
+  ) {
+    return this.listReviewsForViewer(userId, query);
+  }
+
+  private async listReviewsForViewer(
+    userId: string,
+    query: Partial<CommunityListQueryDto>,
+    facetsSource?: CommunitySafeProfileFacetsSource,
+  ) {
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(
+      userId,
+      'review',
+      limit,
+      query,
+    );
+    const [facets, page] = await Promise.all([
+      facetsSource ?? this.getSafeFacets(userId),
+      this.findPublishedReviewRows(query, limit, fingerprint).then((rows) =>
+        communityListPage(rows, limit, fingerprint),
+      ),
+    ]);
+    const reviewIds = page.rows.map((row) => row.id);
+    const [contextByReview, bookmarkedReviewIds] = await Promise.all([
+      this.loadReviewContext(reviewIds),
+      this.loadBookmarkedContentIds(
+        userId,
+        CommunityContentType.Review,
+        reviewIds,
+      ),
+    ]);
+    return {
+      items: page.rows.map((review) =>
+        this.toReviewResponse(
+          review,
+          contextByReview.get(review.id) ?? [],
+          facets,
+          userId,
+          bookmarkedReviewIds.has(review.id),
+        ),
+      ),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  private findPublishedReviewRows(
+    query: Partial<CommunityListQueryDto>,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityReview[]> {
+    const pageSize = limit + 1;
+    if (!query.cursor && !this.hasReviewListFilters(query)) {
+      return this.reviews.find({
+        where: {
+          moderation_status: CommunityModerationStatus.Published,
+          withdrawn_at: IsNull(),
+        },
+        order: { updated_at: 'DESC', id: 'DESC' },
+        take: pageSize,
+      });
+    }
+
+    const builder = this.reviews
+      .createQueryBuilder('review')
+      .where('review.moderation_status = :status', {
+        status: CommunityModerationStatus.Published,
+      })
+      .andWhere('review.withdrawn_at IS NULL');
+
+    this.applyReviewListFilters(builder, query);
+    this.applyCommunityListCursor(builder, 'review', query.cursor, fingerprint);
+
+    return builder
+      .orderBy('review.updated_at', 'DESC')
+      .addOrderBy('review.id', 'DESC')
+      .take(pageSize)
+      .getMany();
+  }
+
+  private hasReviewListFilters(query: Partial<CommunityListQueryDto>): boolean {
+    return hasCommunityListFilters(query, [
+      'concern',
+      'contextProductCategory',
+      'disclosureType',
+      'minRating',
+      'outcome',
+      'productCategory',
+      'resultSignal',
+      'routineContextUsage',
+      'routineSlot',
+      'search',
+      'sensitivity',
+      'skinResponse',
+      'skinType',
+      'usageDuration',
+    ]);
+  }
+
+  private applyReviewListFilters(
+    builder: SelectQueryBuilder<CommunityReview>,
+    query: Partial<CommunityListQueryDto>,
+  ) {
+    this.applyCommonListFilters(builder, 'review', query);
+
+    const search = queryLikePattern(query.search, 80);
+    if (search) {
+      builder.andWhere(
+        new Brackets((where) => {
+          where
+            .where("review.product_brand ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("review.product_name ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("review.product_category ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere("review.body ILIKE :search ESCAPE '\\'", { search })
+            .orWhere("review.outcomes::text ILIKE :search ESCAPE '\\'", {
+              search,
+            })
+            .orWhere(
+              `EXISTS (
+                SELECT 1
+                FROM community_review_context_products context_product
+                WHERE context_product.review_id = review.id
+                  AND (
+                    context_product.product_brand ILIKE :search ESCAPE '\\'
+                    OR context_product.product_name ILIKE :search ESCAPE '\\'
+                    OR context_product.category ILIKE :search ESCAPE '\\'
+                  )
+              )`,
+              { search },
+            );
+        }),
+      );
+    }
+
+    const productCategory = cleanQueryString(query.productCategory, 40);
+    if (productCategory) {
+      builder.andWhere('review.product_category = :productCategory', {
+        productCategory,
+      });
+    }
+
+    if (query.routineContextUsage) {
+      builder.andWhere('review.routine_context_usage = :routineContextUsage', {
+        routineContextUsage: query.routineContextUsage,
+      });
+    }
+
+    if (query.routineSlot) {
+      builder.andWhere('review.routine_slot = :routineSlot', {
+        routineSlot: query.routineSlot,
+      });
+    }
+
+    const contextProductCategory = cleanQueryString(
+      query.contextProductCategory,
+      40,
+    );
+    if (contextProductCategory) {
+      builder.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM community_review_context_products context_product
+          WHERE context_product.review_id = review.id
+            AND context_product.category = :contextProductCategory
+        )`,
+        { contextProductCategory },
+      );
+    }
+
+    if (query.skinResponse) {
+      builder.andWhere('review.skin_response = :skinResponse', {
+        skinResponse: query.skinResponse,
+      });
+    }
+
+    const usageDuration = cleanQueryString(query.usageDuration, 40);
+    if (usageDuration) {
+      builder.andWhere('review.usage_duration = :usageDuration', {
+        usageDuration,
+      });
+    }
+
+    if (
+      typeof query.minRating === 'number' &&
+      Number.isFinite(query.minRating)
+    ) {
+      builder.andWhere('review.overall_rating >= :minRating', {
+        minRating: Math.floor(query.minRating),
+      });
+    }
+
+    const outcome = cleanQueryString(query.outcome, 60);
+    if (outcome) {
+      builder.andWhere('review.outcomes ? :outcome', { outcome });
+    }
+
+    if (query.resultSignal) {
+      builder.andWhere(
+        `COALESCE((review.outcome_signal_counts ->> :resultSignal)::int, 0) > 0`,
+        { resultSignal: query.resultSignal },
+      );
+    }
+  }
+
+  async createReview(userId: string, dto: CreateCommunityReviewDto) {
+    await this.assertCanPostCommunityContent(userId);
+    await this.assertActionLimit({
+      label: 'reviews',
+      repository: this.reviews,
+      userColumn: 'author_user_id',
+      userId,
+      maxPerDay: 10,
+    });
+    const routineContextUsage =
+      dto.routineContextUsage ??
+      CommunityReviewRoutineContextUsage.WithProducts;
+    const submittedRoutineContext = dto.routineContext ?? [];
+    const routineContext =
+      routineContextUsage === CommunityReviewRoutineContextUsage.WithProducts
+        ? submittedRoutineContext
+        : [];
+    if ((dto.outcomes ?? []).length === 0) {
+      throw new BadRequestException('Review requires outcomes');
+    }
+    if (
+      routineContextUsage === CommunityReviewRoutineContextUsage.WithProducts &&
+      routineContext.length === 0
+    ) {
+      throw new BadRequestException(
+        'Review requires at least one product used with it',
+      );
+    }
+    if (
+      routineContextUsage !== CommunityReviewRoutineContextUsage.WithProducts &&
+      submittedRoutineContext.length > 0
+    ) {
+      throw new BadRequestException(
+        'Routine context products are only allowed when products were used together',
+      );
+    }
+    if (
+      routineContext.some(
+        (item) => !item.productId && !cleanText(item.productName, 255),
+      )
+    ) {
+      throw new BadRequestException(
+        'Review routine context requires product names or shelf products',
+      );
+    }
+    const productIds = [
+      ...(dto.productId ? [dto.productId] : []),
+      ...routineContext.map((item) => item.productId).filter(Boolean),
+    ] as string[];
+    const [profile, products] = await Promise.all([
+      this.ensureCommunityProfile(userId),
+      this.loadOwnedProductMap(userId, productIds),
+    ]);
+    if (dto.productId && !products.has(dto.productId)) {
+      throw new BadRequestException('Reviewed product must be on your shelf');
+    }
+    const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
+    const contextSnapshots = routineContext.map((item) => {
+      const product = item.productId ? products.get(item.productId) : null;
+      if (item.productId && !product) {
+        throw new BadRequestException(
+          'Routine context products must be on your shelf',
+        );
+      }
+      return {
+        productId: product?.id ?? item.productId ?? null,
+        productBrand: product?.brand ?? cleanText(item.productBrand, 255),
+        productName: product?.name ?? cleanText(item.productName, 255),
+        category: product?.category ?? item.category,
+      };
+    });
+    const scannedText = buildReviewModerationText({
+      productBrand: reviewedProduct?.brand ?? cleanText(dto.productBrand, 255),
+      productName: reviewedProduct?.name ?? cleanText(dto.productName, 255),
+      productCategory: reviewedProduct?.category ?? dto.productCategory,
+      disclosureType: dto.disclosureType,
+      usageDuration: cleanText(dto.usageDuration, 30),
+      frequency: cleanText(dto.frequency, 50),
+      routineContextUsage,
+      routineSlot: dto.routineSlot,
+      skinResponse: dto.skinResponse,
+      overallRating: dto.overallRating,
+      effectivenessRating: dto.effectivenessRating,
+      irritationRating: dto.irritationRating,
+      textureRating: dto.textureRating ?? null,
+      valueRating: dto.valueRating ?? null,
+      outcomes: normalizeTags(dto.outcomes),
+      repurchase: cleanText(dto.repurchase, 30),
+      routineContext: contextSnapshots,
+      body: cleanText(dto.body, 1200),
+    });
+    const reviewSafetySteps = buildReviewRoutineSafetySteps({
+      productId: reviewedProduct?.id ?? dto.productId ?? null,
+      productBrand: reviewedProduct?.brand ?? cleanText(dto.productBrand, 255),
+      productName: reviewedProduct?.name ?? cleanText(dto.productName, 255),
+      productCategory: reviewedProduct?.category ?? dto.productCategory,
+      frequency: cleanText(dto.frequency, 50),
+      routineSlot: dto.routineSlot,
+      routineContext: contextSnapshots,
+    });
+    const flags = [
+      ...this.safety.scanText(scannedText),
+      ...this.safety.scanRoutine(reviewSafetySteps),
+    ];
+    this.safety.resolveStatus({
+      disclosureType: dto.disclosureType,
+      flags,
+    });
+    const moderation = await this.aiModeration.triage({
+      contentType: CommunityContentType.Review,
+      disclosureType: dto.disclosureType,
+      flags,
+      text: scannedText,
+    });
+    const status = moderation.status;
+
+    const created = await this.dataSource.transaction(async (manager) => {
+      const review = await manager.getRepository(CommunityReview).save(
+        manager.getRepository(CommunityReview).create({
+          author_user_id: userId,
+          community_profile_id: profile.id,
+          product_id: reviewedProduct?.id ?? dto.productId ?? null,
+          product_brand:
+            reviewedProduct?.brand ??
+            cleanText(dto.productBrand, 255) ??
+            'Unknown brand',
+          product_name:
+            reviewedProduct?.name ??
+            cleanText(dto.productName, 255) ??
+            'Unknown product',
+          product_category: reviewedProduct?.category ?? dto.productCategory,
+          disclosure_type: dto.disclosureType,
+          usage_duration: cleanText(dto.usageDuration, 30) ?? 'unspecified',
+          frequency: cleanText(dto.frequency, 50) ?? 'unspecified',
+          routine_context_usage: routineContextUsage,
+          routine_slot: dto.routineSlot,
+          skin_response: dto.skinResponse,
+          overall_rating: dto.overallRating,
+          effectiveness_rating: dto.effectivenessRating,
+          irritation_rating: dto.irritationRating,
+          texture_rating: dto.textureRating ?? null,
+          value_rating: dto.valueRating ?? null,
+          outcomes: normalizeTags(dto.outcomes),
+          repurchase: cleanText(dto.repurchase, 30) ?? 'unsure',
+          body: cleanText(dto.body, 1200),
+          moderation_status: status,
+          safe_facets: profile.safe_facets,
+          safety_flags: flags,
+        }),
+      );
+      await manager.getRepository(CommunityReviewContextProduct).save(
+        routineContext.map((item, index) =>
+          manager.getRepository(CommunityReviewContextProduct).create({
+            review_id: review.id,
+            product_id: item.productId ?? null,
+            product_brand: contextSnapshots[index]?.productBrand ?? null,
+            product_name: contextSnapshots[index]?.productName ?? null,
+            category: contextSnapshots[index]?.category ?? item.category,
+          }),
+        ),
+      );
+      await this.recordDecision(manager, {
+        contentType: CommunityContentType.Review,
+        contentId: review.id,
+        actorAdminId: null,
+        from: CommunityModerationStatus.Draft,
+        to: status,
+        reason: this.automationDecisionReason(moderation.automation),
+      });
+      await this.recordSafetyScan(manager, {
+        contentType: CommunityContentType.Review,
+        contentId: review.id,
+        flags,
+        status,
+        scannedTextLength: scannedText.length,
+        automation: moderation.automation,
+      });
+      return review;
+    });
+
+    if (created.moderation_status === CommunityModerationStatus.NeedsEdit) {
+      await this.notifyModerationOutcome(
+        created,
+        CommunityContentType.Review,
+        created.moderation_status,
+      );
+    }
+    return {
+      item: created,
+      moderationStatus: created.moderation_status,
+      safetyFlags: created.safety_flags,
+    };
+  }
+
+  async updateReview(
+    userId: string,
+    reviewId: string,
+    dto: EditCommunityReviewDto,
+  ) {
+    await this.assertCanPostCommunityContent(userId);
+    const review = await this.reviews.findOne({
+      where: { id: reviewId, author_user_id: userId },
+    });
+    if (!review) throw new NotFoundException('Community review not found');
+    if (!USER_EDITABLE_MODERATION_STATUSES.has(review.moderation_status)) {
+      throw new BadRequestException(
+        'Only draft, pending, or returned reviews can be edited',
+      );
+    }
+
+    const existingContextRows =
+      dto.routineContext === undefined
+        ? await this.reviewContext.find({ where: { review_id: reviewId } })
+        : [];
+    const submittedRoutineContext = dto.routineContext;
+    const inferredRoutineContextUsage =
+      submittedRoutineContext !== undefined
+        ? submittedRoutineContext.length > 0
+          ? CommunityReviewRoutineContextUsage.WithProducts
+          : CommunityReviewRoutineContextUsage.UsedAlone
+        : existingContextRows.length > 0
+          ? CommunityReviewRoutineContextUsage.WithProducts
+          : CommunityReviewRoutineContextUsage.UsedAlone;
+    const nextRoutineContextUsage =
+      dto.routineContextUsage ??
+      review.routine_context_usage ??
+      inferredRoutineContextUsage;
+    const requestedRoutineContext =
+      submittedRoutineContext ??
+      existingContextRows.map((item) => ({
+        productId: item.product_id,
+        productBrand: item.product_brand,
+        productName: item.product_name,
+        category: item.category,
+      }));
+    const activeRoutineContext =
+      nextRoutineContextUsage ===
+      CommunityReviewRoutineContextUsage.WithProducts
+        ? requestedRoutineContext
+        : [];
+
+    if (
+      nextRoutineContextUsage ===
+        CommunityReviewRoutineContextUsage.WithProducts &&
+      activeRoutineContext.length === 0
+    ) {
+      throw new BadRequestException(
+        'Review requires at least one product used with it',
+      );
+    }
+    if (
+      nextRoutineContextUsage !==
+        CommunityReviewRoutineContextUsage.WithProducts &&
+      dto.routineContext !== undefined &&
+      dto.routineContext.length > 0
+    ) {
+      throw new BadRequestException(
+        'Routine context products are only allowed when products were used together',
+      );
+    }
+
+    const productIds = [
+      ...(dto.productId ? [dto.productId] : []),
+      ...activeRoutineContext.map((item) => item.productId).filter(Boolean),
+    ] as string[];
+    const products = await this.loadOwnedProductMap(userId, productIds);
+    if (dto.productId && !products.has(dto.productId)) {
+      throw new BadRequestException('Reviewed product must be on your shelf');
+    }
+    const reviewedProduct = dto.productId ? products.get(dto.productId) : null;
+    if (activeRoutineContext.length > 0) {
+      if (
+        activeRoutineContext.some(
+          (item) => !item.productId && !cleanText(item.productName, 255),
+        )
+      ) {
+        throw new BadRequestException(
+          'Review routine context requires product names or shelf products',
+        );
+      }
+      for (const item of activeRoutineContext) {
+        if (item.productId && !products.has(item.productId)) {
+          throw new BadRequestException(
+            'Routine context products must be on your shelf',
+          );
+        }
+      }
+    }
+
+    review.product_id =
+      dto.productId === undefined
+        ? review.product_id
+        : (reviewedProduct?.id ?? null);
+    review.product_brand =
+      reviewedProduct?.brand ??
+      (dto.productBrand === undefined
+        ? review.product_brand
+        : (cleanText(dto.productBrand, 255) ?? review.product_brand));
+    review.product_name =
+      reviewedProduct?.name ??
+      (dto.productName === undefined
+        ? review.product_name
+        : (cleanText(dto.productName, 255) ?? review.product_name));
+    review.product_category =
+      reviewedProduct?.category ??
+      (dto.productCategory === undefined
+        ? review.product_category
+        : dto.productCategory);
+    review.disclosure_type = dto.disclosureType ?? review.disclosure_type;
+    review.usage_duration =
+      dto.usageDuration === undefined
+        ? review.usage_duration
+        : (cleanText(dto.usageDuration, 30) ?? review.usage_duration);
+    review.frequency =
+      dto.frequency === undefined
+        ? review.frequency
+        : (cleanText(dto.frequency, 50) ?? review.frequency);
+    review.routine_context_usage = nextRoutineContextUsage;
+    review.routine_slot = dto.routineSlot ?? review.routine_slot;
+    review.skin_response = dto.skinResponse ?? review.skin_response;
+    review.overall_rating = dto.overallRating ?? review.overall_rating;
+    review.effectiveness_rating =
+      dto.effectivenessRating ?? review.effectiveness_rating;
+    review.irritation_rating = dto.irritationRating ?? review.irritation_rating;
+    review.texture_rating =
+      dto.textureRating === undefined
+        ? review.texture_rating
+        : dto.textureRating;
+    review.value_rating =
+      dto.valueRating === undefined ? review.value_rating : dto.valueRating;
+    review.outcomes =
+      dto.outcomes === undefined
+        ? review.outcomes
+        : normalizeTags(dto.outcomes);
+    review.repurchase =
+      dto.repurchase === undefined
+        ? review.repurchase
+        : (cleanText(dto.repurchase, 30) ?? review.repurchase);
+    review.body =
+      dto.body === undefined ? review.body : cleanText(dto.body, 1200);
+    const contextSnapshots = activeRoutineContext.map((item) => {
+      const product = item.productId ? products.get(item.productId) : null;
+      return {
+        productId: product?.id ?? item.productId ?? null,
+        productBrand: product?.brand ?? cleanText(item.productBrand, 255),
+        productName: product?.name ?? cleanText(item.productName, 255),
+        category: product?.category ?? item.category,
+      };
+    });
+    const scannedText = buildReviewModerationText({
+      productBrand: review.product_brand,
+      productName: review.product_name,
+      productCategory: review.product_category,
+      disclosureType: review.disclosure_type,
+      usageDuration: review.usage_duration,
+      frequency: review.frequency,
+      routineContextUsage: review.routine_context_usage,
+      routineSlot: review.routine_slot,
+      skinResponse: review.skin_response,
+      overallRating: review.overall_rating,
+      effectivenessRating: review.effectiveness_rating,
+      irritationRating: review.irritation_rating,
+      textureRating: review.texture_rating,
+      valueRating: review.value_rating,
+      outcomes: review.outcomes,
+      repurchase: review.repurchase,
+      routineContext: contextSnapshots,
+      body: review.body,
+    });
+    const reviewSafetySteps = buildReviewRoutineSafetySteps({
+      productId: review.product_id,
+      productBrand: review.product_brand,
+      productName: review.product_name,
+      productCategory: review.product_category,
+      frequency: review.frequency,
+      routineSlot: review.routine_slot,
+      routineContext: contextSnapshots,
+    });
+    const flags = [
+      ...this.safety.scanText(scannedText),
+      ...this.safety.scanRoutine(reviewSafetySteps),
+    ];
+    const from = review.moderation_status;
+    this.safety.resolveStatus({
+      disclosureType: review.disclosure_type,
+      flags,
+    });
+    const moderation = await this.aiModeration.triage({
+      contentType: CommunityContentType.Review,
+      disclosureType: review.disclosure_type,
+      flags,
+      text: scannedText,
+    });
+    const status = moderation.status;
+    review.safety_flags = flags;
+    review.moderation_status = status;
+    review.assigned_admin_id =
+      moderation.automation.handledBy === 'admin'
+        ? review.assigned_admin_id
+        : null;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(CommunityReview).save(review);
+      if (
+        dto.routineContext !== undefined ||
+        dto.routineContextUsage !== undefined
+      ) {
+        await manager
+          .getRepository(CommunityReviewContextProduct)
+          .delete({ review_id: review.id });
+        await manager.getRepository(CommunityReviewContextProduct).save(
+          activeRoutineContext.map((item, index) =>
+            manager.getRepository(CommunityReviewContextProduct).create({
+              review_id: review.id,
+              product_id: item.productId ?? null,
+              product_brand: contextSnapshots[index]?.productBrand ?? null,
+              product_name: contextSnapshots[index]?.productName ?? null,
+              category: contextSnapshots[index]?.category ?? item.category,
+            }),
+          ),
+        );
+      }
+      await this.recordDecision(manager, {
+        contentType: CommunityContentType.Review,
+        contentId: review.id,
+        actorAdminId: null,
+        from,
+        to: status,
+        reason: `User edited review. ${this.automationDecisionReason(moderation.automation)}`,
+      });
+      await this.recordSafetyScan(manager, {
+        contentType: CommunityContentType.Review,
+        contentId: review.id,
+        flags,
+        status,
+        scannedTextLength: scannedText.length,
+        automation: moderation.automation,
+      });
+    });
+    await this.notifyModerationOutcome(
+      review,
+      CommunityContentType.Review,
+      status,
+    );
+    return this.toReviewResponse(
+      review,
+      await this.reviewContext.find({ where: { review_id: reviewId } }),
+      await this.getSafeFacets(userId),
+      userId,
+    );
+  }
+
+  async reportRoutine(
+    userId: string,
+    routineId: string,
+    dto: CreateCommunityReportDto,
+  ) {
+    const routine = await this.routines.findOne({ where: { id: routineId } });
+    if (!routine) {
+      throw new NotFoundException('Community routine not found');
+    }
+    if (routine.author_user_id === userId) {
+      throw new ForbiddenException('You cannot report your own content');
+    }
+    if (routine.moderation_status !== CommunityModerationStatus.Published) {
+      const existingReport = await this.findActiveReport(
+        userId,
+        CommunityContentType.Routine,
+        routineId,
+      );
+      if (existingReport) {
+        return this.toReportResponse(existingReport);
+      }
+      throw new NotFoundException('Community routine not found');
+    }
+    return this.createReport(
+      userId,
+      CommunityContentType.Routine,
+      routineId,
+      dto,
+    );
+  }
+
+  async reportReview(
+    userId: string,
+    reviewId: string,
+    dto: CreateCommunityReportDto,
+  ) {
+    const review = await this.reviews.findOne({ where: { id: reviewId } });
+    if (!review) {
+      throw new NotFoundException('Community review not found');
+    }
+    if (review.author_user_id === userId) {
+      throw new ForbiddenException('You cannot report your own content');
+    }
+    if (review.moderation_status !== CommunityModerationStatus.Published) {
+      const existingReport = await this.findActiveReport(
+        userId,
+        CommunityContentType.Review,
+        reviewId,
+      );
+      if (existingReport) {
+        return this.toReportResponse(existingReport);
+      }
+      throw new NotFoundException('Community review not found');
+    }
+    return this.createReport(
+      userId,
+      CommunityContentType.Review,
+      reviewId,
+      dto,
+    );
+  }
+
+  async voteRoutine(
+    userId: string,
+    routineId: string,
+    dto: CommunityHelpfulnessDto,
+  ) {
+    await this.assertActionLimit({
+      label: 'helpfulness votes',
+      repository: this.votes,
+      userColumn: 'user_id',
+      userId,
+      maxPerDay: 120,
+    });
+    const routine = await this.routines.findOne({ where: { id: routineId } });
+    if (
+      !routine ||
+      routine.moderation_status !== CommunityModerationStatus.Published
+    ) {
+      throw new NotFoundException('Community routine not found');
+    }
+    if (routine.author_user_id === userId) {
+      throw new ForbiddenException('You cannot vote on your own content');
+    }
+    return this.vote(userId, CommunityContentType.Routine, routineId, dto.vote);
+  }
+
+  async voteReview(
+    userId: string,
+    reviewId: string,
+    dto: CommunityHelpfulnessDto,
+  ) {
+    await this.assertActionLimit({
+      label: 'helpfulness votes',
+      repository: this.votes,
+      userColumn: 'user_id',
+      userId,
+      maxPerDay: 120,
+    });
+    const review = await this.reviews.findOne({ where: { id: reviewId } });
+    if (
+      !review ||
+      review.moderation_status !== CommunityModerationStatus.Published
+    ) {
+      throw new NotFoundException('Community review not found');
+    }
+    if (review.author_user_id === userId) {
+      throw new ForbiddenException('You cannot vote on your own content');
+    }
+    return this.vote(userId, CommunityContentType.Review, reviewId, dto.vote);
+  }
+
+  async signalRoutineOutcome(
+    userId: string,
+    routineId: string,
+    dto: CommunityOutcomeSignalDto,
+  ) {
+    await this.assertActionLimit({
+      label: 'community outcome signals',
+      repository: this.outcomeVotes,
+      userColumn: 'user_id',
+      userId,
+      maxPerDay: 120,
+    });
+    const routine = await this.routines.findOne({ where: { id: routineId } });
+    if (
+      !routine ||
+      routine.moderation_status !== CommunityModerationStatus.Published
+    ) {
+      throw new NotFoundException('Community routine not found');
+    }
+    if (routine.author_user_id === userId) {
+      throw new ForbiddenException('You cannot signal your own content');
+    }
+    return this.signalOutcome(
+      userId,
+      CommunityContentType.Routine,
+      routineId,
+      dto,
+    );
+  }
+
+  async signalReviewOutcome(
+    userId: string,
+    reviewId: string,
+    dto: CommunityOutcomeSignalDto,
+  ) {
+    await this.assertActionLimit({
+      label: 'community outcome signals',
+      repository: this.outcomeVotes,
+      userColumn: 'user_id',
+      userId,
+      maxPerDay: 120,
+    });
+    const review = await this.reviews.findOne({ where: { id: reviewId } });
+    if (
+      !review ||
+      review.moderation_status !== CommunityModerationStatus.Published
+    ) {
+      throw new NotFoundException('Community review not found');
+    }
+    if (review.author_user_id === userId) {
+      throw new ForbiddenException('You cannot signal your own content');
+    }
+    return this.signalOutcome(
+      userId,
+      CommunityContentType.Review,
+      reviewId,
+      dto,
+      {
+        reviewedProduct: this.toOutcomeSignalProductContext({
+          category: review.product_category,
+          productBrand: review.product_brand,
+          productName: review.product_name,
+        }),
+      },
+    );
+  }
+
+  async listReviewResults(
+    userId: string,
+    reviewId: string,
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
+  ): Promise<CommunityReviewResultsResponse> {
+    const review = await this.reviews.findOne({ where: { id: reviewId } });
+    if (!review || !this.canRead(review, userId)) {
+      throw new NotFoundException('Community review not found');
+    }
+    return this.listContentResults(
+      userId,
+      CommunityContentType.Review,
+      reviewId,
+      review.outcome_signal_counts,
+      queryOrSignal,
+    );
+  }
+
+  async listRoutineResults(
+    userId: string,
+    routineId: string,
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
+  ): Promise<CommunityReviewResultsResponse> {
+    const routine = await this.routines.findOne({ where: { id: routineId } });
+    if (!routine || !this.canRead(routine, userId)) {
+      throw new NotFoundException('Community routine not found');
+    }
+    return this.listContentResults(
+      userId,
+      CommunityContentType.Routine,
+      routineId,
+      routine.outcome_signal_counts,
+      queryOrSignal,
+    );
+  }
+
+  private async listContentResults(
+    userId: string,
+    contentType: CommunityContentType,
+    contentId: string,
+    outcomeSignalCounts:
+      | Partial<Record<CommunityOutcomeSignal, number>>
+      | null
+      | undefined,
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
+  ): Promise<CommunityReviewResultsResponse> {
+    const query = this.normalizeOutcomeResultsQuery(queryOrSignal);
+    const limit = normalizeCommunityListLimit(query.limit);
+    const signalFilter = this.parseOutcomeSignalFilter(query.signal);
+    const fingerprint = communityResultFingerprint({
+      contentId,
+      contentType,
+      limit,
+      signal: signalFilter,
+      userId,
+    });
+    const [viewer, page] = await Promise.all([
+      this.getSafeFacets(userId),
+      this.findContentResultRows(
+        contentType,
+        contentId,
+        signalFilter,
+        query.cursor,
+        limit,
+        fingerprint,
+      ).then((rows) => communityResultListPage(rows, limit, fingerprint)),
+    ]);
+    const items = page.rows
+      .filter(
+        (row) =>
+          row.note_moderation_status === CommunityModerationStatus.Published &&
+          row.withdrawn_at === null &&
+          (!signalFilter || row.signal === signalFilter),
+      )
+      .map((row) => this.toReviewResultResponse(row, viewer));
+
+    return {
+      counts: this.defaultOutcomeSignalCounts(outcomeSignalCounts),
+      items,
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  private normalizeOutcomeResultsQuery(
+    queryOrSignal?: Partial<CommunityOutcomeResultsQueryDto> | string,
+  ): Partial<CommunityOutcomeResultsQueryDto> {
+    if (typeof queryOrSignal === 'string') {
+      return { signal: queryOrSignal as CommunityOutcomeSignal };
+    }
+
+    return queryOrSignal ?? {};
+  }
+
+  private findContentResultRows(
+    contentType: CommunityContentType,
+    contentId: string,
+    signalFilter: CommunityOutcomeSignal | null | undefined,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityOutcomeSignalVote[]> {
+    const pageSize = limit + 1;
+    const baseWhere: FindOptionsWhere<CommunityOutcomeSignalVote> = {
+      content_id: contentId,
+      content_type: contentType,
+      note_moderation_status: CommunityModerationStatus.Published,
+      withdrawn_at: IsNull(),
+    };
+
+    if (signalFilter) {
+      baseWhere.signal = signalFilter;
+    }
+
+    const decodedCursor = cursor
+      ? decodeCommunityResultCursor(cursor, fingerprint)
+      : null;
+    const where:
+      | FindOptionsWhere<CommunityOutcomeSignalVote>[]
+      | FindOptionsWhere<CommunityOutcomeSignalVote> = decodedCursor
+      ? [
+          {
+            ...baseWhere,
+            created_at: LessThan(decodedCursor.createdAt),
+          },
+          {
+            ...baseWhere,
+            created_at: Equal(decodedCursor.createdAt),
+            id: LessThan(decodedCursor.id),
+          },
+        ]
+      : baseWhere;
+
+    return this.outcomeVotes.find({
+      where,
+      order: { created_at: 'DESC', id: 'DESC' },
+      take: pageSize,
+    });
+  }
+
+  async adaptRoutine(userId: string, routineId: string) {
+    const routine = await this.routines.findOne({ where: { id: routineId } });
+    if (!routine || !this.canRead(routine, userId)) {
+      throw new NotFoundException('Community routine not found');
+    }
+    const [steps, owned, profile] = await Promise.all([
+      this.routineSteps.find({
+        where: { routine_id: routineId },
+        order: { step_order: 'ASC' },
+      }),
+      this.inventory.find({ where: { user_id: userId } }),
+      this.skinProfiles.findOne({
+        where: { user_id: userId },
+      }),
+    ]);
+    const reactionTriggers = (profile?.reaction_history?.entries ?? [])
+      .map((entry) => entry.trigger.trim().toLowerCase())
+      .filter(Boolean);
+    const routinePreferences = profile?.routine_preferences ?? {};
+    const activeTolerances = profile?.active_tolerances ?? {};
+    const usedTargetIds = new Set<string>();
+    const ownedById = new Map(owned.map((product) => [product.id, product]));
+    const ownedByCategory = new Map<string, InventoryProduct[]>();
+    for (const product of owned) {
+      const products = ownedByCategory.get(product.category) ?? [];
+      products.push(product);
+      ownedByCategory.set(product.category, products);
+    }
+    const changes: CommunityAdaptationChange[] = [];
+
+    for (const step of steps) {
+      const profileRemovalReason = this.stepRemovalReasonForProfile(
+        step,
+        profile,
+        routinePreferences,
+        activeTolerances,
+      );
+      if (profileRemovalReason) {
+        changes.push({
+          changeType: CommunityAdaptationChangeType.Removed,
+          stepOrder: step.step_order,
+          sourceProductName: step.product_name,
+          sourceProductBrand: step.product_brand,
+          targetProductId: null,
+          targetProductName: null,
+          targetProductBrand: null,
+          category: step.category,
+          reason: profileRemovalReason,
+        });
+        continue;
+      }
+      const exact = step.product_id ? ownedById.get(step.product_id) : null;
+      const similar = (ownedByCategory.get(step.category) ?? []).find(
+        (product) =>
+          !usedTargetIds.has(product.id) &&
+          this.productCompatibleForStep(product, step, routinePreferences) &&
+          !this.productMatchesReactionTrigger(product, reactionTriggers) &&
+          (!exact || product.id !== exact.id),
+      );
+      const unsafe = routine.safety_flags.some(
+        (flag) => flag.severity === CommunitySafetySeverity.High,
+      );
+      if (unsafe && ['exfoliant', 'treatment'].includes(step.category)) {
+        changes.push({
+          changeType: CommunityAdaptationChangeType.Removed,
+          stepOrder: step.step_order,
+          sourceProductName: step.product_name,
+          sourceProductBrand: step.product_brand,
+          targetProductId: null,
+          targetProductName: null,
+          targetProductBrand: null,
+          category: step.category,
+          reason:
+            'Removed because the shared routine has a high-risk active safety flag.',
+        });
+        continue;
+      }
+
+      const safeExact =
+        exact &&
+        this.productCompatibleForStep(exact, step, routinePreferences) &&
+        !this.productMatchesReactionTrigger(exact, reactionTriggers)
+          ? exact
+          : null;
+      const target = safeExact ?? similar ?? null;
+      if (target) usedTargetIds.add(target.id);
+      changes.push({
+        changeType: safeExact
+          ? CommunityAdaptationChangeType.Kept
+          : target
+            ? CommunityAdaptationChangeType.Swapped
+            : CommunityAdaptationChangeType.Gap,
+        stepOrder: step.step_order,
+        sourceProductName: step.product_name,
+        sourceProductBrand: step.product_brand,
+        targetProductId: target?.id ?? null,
+        targetProductName: target?.name ?? null,
+        targetProductBrand: target?.brand ?? null,
+        category: step.category,
+        reason: safeExact
+          ? 'Exact product found on your shelf.'
+          : target
+            ? this.adaptationSwapReason(step, target)
+            : 'No safe owned product matched this step; treat it as an honest category gap.',
+      });
+    }
+
+    const saved = await this.adaptations.save(
+      this.adaptations.create({
+        user_id: userId,
+        routine_id: routineId,
+        changes,
+        saved: false,
+      }),
+    );
+    return {
+      id: saved.id,
+      routineId,
+      changes,
+      summary: {
+        kept: changes.filter(
+          (item) => item.changeType === CommunityAdaptationChangeType.Kept,
+        ).length,
+        swapped: changes.filter(
+          (item) => item.changeType === CommunityAdaptationChangeType.Swapped,
+        ).length,
+        removed: changes.filter(
+          (item) => item.changeType === CommunityAdaptationChangeType.Removed,
+        ).length,
+        gaps: changes.filter(
+          (item) => item.changeType === CommunityAdaptationChangeType.Gap,
+        ).length,
+      },
+    };
+  }
+
+  async saveAdaptation(
+    userId: string,
+    routineId: string,
+    adaptationId: string,
+  ) {
+    const adaptation = await this.adaptations.findOne({
+      where: { id: adaptationId, user_id: userId, routine_id: routineId },
+    });
+    if (!adaptation)
+      throw new NotFoundException('Community adaptation not found');
+    adaptation.saved = true;
+    await this.adaptations.save(adaptation);
+    return { saved: true };
+  }
+
+  async listMySubmissions(
+    userId: string,
+    query: Partial<CommunityCursorPageQueryDto> = {},
+  ) {
+    const limit = normalizeCommunityListLimit(query.limit);
+    const fingerprint = communityListFingerprint(userId, 'submission', limit);
+    const page = communityCombinedListPage(
+      await this.findMySubmissionCursorRows(
+        userId,
+        query.cursor,
+        limit,
+        fingerprint,
+      ),
+      limit,
+      fingerprint,
+    );
+    const routineIds = page.rows
+      .filter((item) => item.contentKind === CommunityContentType.Routine)
+      .map((item) => item.id);
+    const reviewIds = page.rows
+      .filter((item) => item.contentKind === CommunityContentType.Review)
+      .map((item) => item.id);
+    const resultIds = page.rows
+      .filter((item) => item.contentKind === COMMUNITY_RESULT_SUBMISSION_KIND)
+      .map((item) => item.id);
+    const [routineMap, reviewMap, resultSignalMap] = await Promise.all([
+      this.loadRoutinesById(routineIds),
+      this.loadReviewsById(reviewIds),
+      this.loadOutcomeVotesById(resultIds),
+    ]);
+    const routines = routineIds
+      .map((id) => routineMap.get(id))
+      .filter((item): item is CommunityRoutine => Boolean(item));
+    const reviews = reviewIds
+      .map((id) => reviewMap.get(id))
+      .filter((item): item is CommunityReview => Boolean(item));
+    const resultSignals = resultIds
+      .map((id) => resultSignalMap.get(id))
+      .filter((item): item is CommunityOutcomeSignalVote => Boolean(item));
+    const [stepsByRoutine, contextByReview, resultParents] = await Promise.all([
+      this.loadSteps(routines.map((item) => item.id)),
+      this.loadReviewContext(reviews.map((item) => item.id)),
+      this.loadResultParentContent(resultSignals),
+    ]);
+    const guidanceByContent = await this.loadSubmissionModerationGuidance([
+      ...routines.map((item) => ({
+        id: item.id,
+        status: item.moderation_status,
+        type: CommunityContentType.Routine,
+      })),
+      ...reviews.map((item) => ({
+        id: item.id,
+        status: item.moderation_status,
+        type: CommunityContentType.Review,
+      })),
+    ]);
+    const itemsByCursorKey = new Map<string, CommunitySubmissionListItem>();
+    for (const item of routines) {
+      itemsByCursorKey.set(
+        submissionCursorKey(CommunityContentType.Routine, item.id),
+        this.toSubmissionItem(
+          CommunityContentType.Routine,
+          item,
+          stepsByRoutine.get(item.id) ?? [],
+          guidanceByContent.get(
+            communityContentKey(CommunityContentType.Routine, item.id),
+          ) ?? null,
+        ),
+      );
+    }
+    for (const item of reviews) {
+      itemsByCursorKey.set(
+        submissionCursorKey(CommunityContentType.Review, item.id),
+        this.toSubmissionItem(
+          CommunityContentType.Review,
+          item,
+          contextByReview.get(item.id) ?? [],
+          guidanceByContent.get(
+            communityContentKey(CommunityContentType.Review, item.id),
+          ) ?? null,
+        ),
+      );
+    }
+    for (const item of resultSignals) {
+      itemsByCursorKey.set(
+        submissionCursorKey(COMMUNITY_RESULT_SUBMISSION_KIND, item.id),
+        this.toResultSubmissionItem(
+          item,
+          resultParents.get(
+            communityContentKey(item.content_type, item.content_id),
+          ) ?? null,
+        ),
+      );
+    }
+
+    return {
+      items: page.rows
+        .map((row) =>
+          itemsByCursorKey.get(submissionCursorKey(row.contentKind, row.id)),
+        )
+        .filter((item): item is CommunitySubmissionListItem => Boolean(item)),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  private async findMySubmissionCursorRows(
+    userId: string,
+    cursor: string | null | undefined,
+    limit: number,
+    fingerprint: string,
+  ): Promise<CommunityCombinedCursorEntity[]> {
+    const params: unknown[] = [
+      userId,
+      CommunityContentType.Routine,
+      CommunityContentType.Review,
+      COMMUNITY_RESULT_SUBMISSION_KIND,
+    ];
+    let cursorFilter = '';
+
+    if (cursor) {
+      const decoded = decodeCommunityCombinedCursor(cursor, fingerprint);
+      params.push(decoded.updatedAt, decoded.contentKind, decoded.id);
+      const updatedAtParam = `$${params.length - 2}`;
+      const contentKindParam = `$${params.length - 1}`;
+      const cursorIdParam = `$${params.length}`;
+      cursorFilter = `
+        WHERE (
+          "updated_at" < ${updatedAtParam}
+          OR ("updated_at" = ${updatedAtParam} AND "content_kind" < ${contentKindParam})
+          OR (
+            "updated_at" = ${updatedAtParam}
+            AND "content_kind" = ${contentKindParam}
+            AND "id" < ${cursorIdParam}
+          )
+        )
+      `;
+    }
+
+    params.push(limit + 1);
+    const limitParam = `$${params.length}`;
+    const rows = await this.dataSource.query<CommunityRawCursorRow[]>(
+      `
+        SELECT "content_kind", "id", "updated_at"
+        FROM (
+          SELECT $2::varchar AS "content_kind", routine."id", routine."updated_at"
+          FROM "community_routines" routine
+          WHERE routine."author_user_id" = $1
+            AND routine."withdrawn_at" IS NULL
+          UNION ALL
+          SELECT $3::varchar AS "content_kind", review."id", review."updated_at"
+          FROM "community_reviews" review
+          WHERE review."author_user_id" = $1
+            AND review."withdrawn_at" IS NULL
+          UNION ALL
+          SELECT $4::varchar AS "content_kind", vote."id", vote."updated_at"
+          FROM "community_outcome_signal_votes" vote
+          WHERE vote."user_id" = $1
+            AND vote."withdrawn_at" IS NULL
+        ) submissions
+        ${cursorFilter}
+        ORDER BY "updated_at" DESC, "content_kind" DESC, "id" DESC
+        LIMIT ${limitParam}
+      `,
+      params,
+    );
+
+    return rows.map((row) => {
+      if (!isCommunitySubmissionContentKind(row.content_kind)) {
+        throw new BadRequestException('Invalid cursor row');
+      }
+      return {
+        contentKind: row.content_kind,
+        id: row.id,
+        updated_at: parseCursorRowDate(row.updated_at),
+      };
+    });
+  }
+
+  private async loadResultParentContent(
+    resultSignals: CommunityOutcomeSignalVote[],
+  ): Promise<Map<string, CommunityResultParentContent>> {
+    const reviewIds = Array.from(
+      new Set(
+        resultSignals
+          .filter((item) => item.content_type === CommunityContentType.Review)
+          .map((item) => item.content_id),
+      ),
+    );
+    const routineIds = Array.from(
+      new Set(
+        resultSignals
+          .filter((item) => item.content_type === CommunityContentType.Routine)
+          .map((item) => item.content_id),
+      ),
+    );
+    const [reviews, routines] = await Promise.all([
+      reviewIds.length > 0
+        ? this.reviews.find({
+            where: {
+              id: In(reviewIds),
+              withdrawn_at: IsNull(),
+            },
+          })
+        : Promise.resolve([]),
+      routineIds.length > 0
+        ? this.routines.find({
+            where: {
+              id: In(routineIds),
+              withdrawn_at: IsNull(),
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+    const parents = new Map<string, CommunityResultParentContent>();
+    reviews.forEach((review) => {
+      parents.set(communityContentKey(CommunityContentType.Review, review.id), {
+        id: review.id,
+        status: review.moderation_status,
+        title: `${review.product_brand} ${review.product_name}`.trim(),
+        type: CommunityContentType.Review,
+      });
+    });
+    routines.forEach((routine) => {
+      parents.set(
+        communityContentKey(CommunityContentType.Routine, routine.id),
+        {
+          id: routine.id,
+          status: routine.moderation_status,
+          title: routine.title,
+          type: CommunityContentType.Routine,
+        },
+      );
+    });
+    return parents;
+  }
+
+  private async loadSubmissionModerationGuidance(
+    references: CommunitySubmissionContentReference[],
+  ): Promise<Map<string, CommunitySubmissionModerationGuidance>> {
+    const eligibleReferences = references.filter((reference) =>
+      GUIDANCE_MODERATION_STATUSES.has(reference.status),
+    );
+    const contentIds = Array.from(
+      new Set(eligibleReferences.map((reference) => reference.id)),
+    );
+    const guidanceByContent = new Map<
+      string,
+      CommunitySubmissionModerationGuidance
+    >();
+
+    if (contentIds.length === 0) {
+      return guidanceByContent;
+    }
+
+    const [safetyScans, decisions] = await Promise.all([
+      this.safetyScans.find({
+        where: { content_id: In(contentIds) },
+        order: { created_at: 'DESC' },
+      }),
+      this.decisions.find({
+        where: { content_id: In(contentIds) },
+        order: { created_at: 'DESC' },
+      }),
+    ]);
+    const latestScanByContent = this.latestSafetyScanByContent(safetyScans);
+    const latestDecisionByContent = this.latestDecisionByContent(decisions);
+
+    for (const reference of eligibleReferences) {
+      const key = communityContentKey(reference.type, reference.id);
+      const scan = latestScanByContent.get(key);
+      const decision = latestDecisionByContent.get(key);
+      const scanGuidance = this.guidanceFromSafetyScan(scan);
+      const decisionGuidance = this.guidanceFromDecision(decision);
+      const guidance = this.newestSubmissionGuidance(
+        scanGuidance,
+        decisionGuidance,
+      );
+
+      if (guidance) {
+        guidanceByContent.set(key, guidance);
+      }
+    }
+
+    return guidanceByContent;
+  }
+
+  private newestSubmissionGuidance(
+    ...guidances: Array<CommunitySubmissionModerationGuidance | null>
+  ): CommunitySubmissionModerationGuidance | null {
+    let newestGuidance: CommunitySubmissionModerationGuidance | null = null;
+
+    for (const guidance of guidances) {
+      if (
+        guidance &&
+        (!newestGuidance || guidance.createdAt > newestGuidance.createdAt)
+      ) {
+        newestGuidance = guidance;
+      }
+    }
+
+    return newestGuidance;
+  }
+
+  private latestSafetyScanByContent(
+    scans: CommunitySafetyScanResult[],
+  ): Map<string, CommunitySafetyScanResult> {
+    const byContent = new Map<string, CommunitySafetyScanResult>();
+
+    for (const scan of scans) {
+      const key = communityContentKey(scan.content_type, scan.content_id);
+      if (!byContent.has(key)) {
+        byContent.set(key, scan);
+      }
+    }
+
+    return byContent;
+  }
+
+  private latestDecisionByContent(
+    decisions: CommunityModerationDecision[],
+  ): Map<string, CommunityModerationDecision> {
+    const byContent = new Map<string, CommunityModerationDecision>();
+
+    for (const decision of decisions) {
+      const key = communityContentKey(
+        decision.content_type,
+        decision.content_id,
+      );
+      if (!byContent.has(key)) {
+        byContent.set(key, decision);
+      }
+    }
+
+    return byContent;
+  }
+
+  private guidanceFromSafetyScan(
+    scan: CommunitySafetyScanResult | undefined,
+  ): CommunitySubmissionModerationGuidance | null {
+    const reason = this.cleanSubmissionGuidanceReason(
+      scan?.result?.automation?.reason,
+    );
+
+    if (!scan || !reason) {
+      return null;
+    }
+
+    return {
+      reason,
+      source: scan.result.automation?.provider === 'openai' ? 'ai' : 'system',
+      createdAt: scan.created_at.toISOString(),
+    };
+  }
+
+  private guidanceFromDecision(
+    decision: CommunityModerationDecision | undefined,
+  ): CommunitySubmissionModerationGuidance | null {
+    const reason = this.cleanSubmissionGuidanceReason(decision?.reason);
+
+    if (!decision || !reason) {
+      return null;
+    }
+
+    return {
+      reason,
+      source: this.moderationGuidanceSource(decision),
+      createdAt: decision.created_at.toISOString(),
+    };
+  }
+
+  private cleanSubmissionGuidanceReason(
+    value: string | null | undefined,
+  ): string | null {
+    const reason = cleanText(value, 500);
+
+    if (!reason) {
+      return null;
+    }
+
+    const withoutUserPrefix = reason.replace(
+      /^User (?:edited|resubmitted) (?:routine|review|content)\.\s*/i,
+      '',
+    );
+    const withoutAiPrefix = withoutUserPrefix.replace(
+      /^AI moderation\s+[a-z_]+:\s*/i,
+      '',
+    );
+
+    return cleanText(withoutAiPrefix, 500);
+  }
+
+  private moderationGuidanceSource(
+    decision: CommunityModerationDecision,
+  ): CommunitySubmissionModerationGuidance['source'] {
+    if (decision.actor_admin_id) {
+      return 'admin';
+    }
+
+    if (/^AI moderation\s+/i.test(decision.reason)) {
+      return 'ai';
+    }
+
+    return 'system';
+  }
+
+  async withdrawContent(userId: string, contentId: string) {
+    const resultSignal = await this.outcomeVotes.findOne({
+      where: { id: contentId },
+    });
+    if (resultSignal) {
+      return this.withdrawResultSignal(userId, resultSignal);
+    }
+
+    const content = await this.findContent(contentId);
+    if (content.item.author_user_id !== userId) {
+      throw new NotFoundException('Community content not found');
+    }
+    if (content.item.withdrawn_at) {
+      return { deleted: true };
+    }
+
+    const from = content.item.moderation_status;
+    content.item.moderation_status = CommunityModerationStatus.Hidden;
+    content.item.assigned_admin_id = null;
+    content.item.withdrawn_at = new Date();
+    content.item.withdrawn_by_user_id = userId;
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(content.entity).save(content.item);
+      await this.recordDecision(manager, {
+        contentType: content.type,
+        contentId,
+        actorAdminId: null,
+        from,
+        to: CommunityModerationStatus.Hidden,
+        reason:
+          'User withdrew community content. Removed from public evidence and matching.',
+      });
+    });
+
+    return { deleted: true };
+  }
+
+  private async withdrawResultSignal(
+    userId: string,
+    resultSignal: CommunityOutcomeSignalVote,
+  ) {
+    if (resultSignal.user_id !== userId) {
+      throw new NotFoundException('Community content not found');
+    }
+    if (resultSignal.withdrawn_at) {
+      return { deleted: true };
+    }
+
+    resultSignal.note_moderation_status = CommunityModerationStatus.Hidden;
+    resultSignal.withdrawn_at = new Date();
+    resultSignal.withdrawn_by_user_id = userId;
+
+    await this.outcomeVotes.save(resultSignal);
+    await this.recountOutcomeSignals(
+      resultSignal.content_type,
+      resultSignal.content_id,
+    );
+
+    return { deleted: true };
+  }
+
+  async resubmitContent(userId: string, contentId: string) {
+    await this.assertCanPostCommunityContent(userId);
+    const content = await this.findContent(contentId);
+    if (content.item.author_user_id !== userId) {
+      throw new NotFoundException('Community content not found');
+    }
+    if (
+      content.item.moderation_status !== CommunityModerationStatus.NeedsEdit &&
+      content.item.moderation_status !== CommunityModerationStatus.Rejected
+    ) {
+      throw new BadRequestException(
+        'Only content needing edits can be resubmitted',
+      );
+    }
+    let scannedText: string;
+    let scannedFlags: CommunitySafetyFlag[];
+    if (content.type === CommunityContentType.Routine) {
+      const routine = content.item as CommunityRoutine;
+      const stepSnapshots = (
+        await this.routineSteps.find({
+          where: { routine_id: contentId },
+          order: { step_order: 'ASC' },
+        })
+      ).map((step) => ({
+        stepOrder: step.step_order,
+        slot: step.slot,
+        productId: step.product_id,
+        productBrand: step.product_brand,
+        productName: step.product_name,
+        category: step.category,
+        frequency: step.frequency,
+        notes: step.notes,
+      }));
+      scannedText = buildRoutineModerationText({
+        title: routine.title,
+        summary: routine.summary,
+        disclosureType: routine.disclosure_type,
+        concernTags: routine.concern_tags,
+        goalTags: routine.goal_tags,
+        goalResult: routine.goal_result,
+        timeframe: routine.timeframe,
+        avoidTags: routine.avoid_tags,
+        habitTags: routine.habit_tags,
+        didNotWorkTags: routine.did_not_work_tags,
+        warningTags: routine.warning_tags,
+        steps: stepSnapshots,
+      });
+      scannedFlags = [
+        ...this.safety.scanText(scannedText),
+        ...this.safety.scanRoutine(stepSnapshots),
+      ];
+    } else {
+      const review = content.item as CommunityReview;
+      const contextSnapshots = (
+        await this.reviewContext.find({ where: { review_id: contentId } })
+      ).map((item) => ({
+        productId: item.product_id,
+        productBrand: item.product_brand,
+        productName: item.product_name,
+        category: item.category,
+      }));
+      scannedText = buildReviewModerationText({
+        productBrand: review.product_brand,
+        productName: review.product_name,
+        productCategory: review.product_category,
+        disclosureType: review.disclosure_type,
+        usageDuration: review.usage_duration,
+        frequency: review.frequency,
+        routineContextUsage: review.routine_context_usage,
+        routineSlot: review.routine_slot,
+        skinResponse: review.skin_response,
+        overallRating: review.overall_rating,
+        effectivenessRating: review.effectiveness_rating,
+        irritationRating: review.irritation_rating,
+        textureRating: review.texture_rating,
+        valueRating: review.value_rating,
+        outcomes: review.outcomes,
+        repurchase: review.repurchase,
+        routineContext: contextSnapshots,
+        body: review.body,
+      });
+      scannedFlags = [
+        ...this.safety.scanText(scannedText),
+        ...this.safety.scanRoutine(
+          buildReviewRoutineSafetySteps({
+            productId: review.product_id,
+            productBrand: review.product_brand,
+            productName: review.product_name,
+            productCategory: review.product_category,
+            frequency: review.frequency,
+            routineSlot: review.routine_slot,
+            routineContext: contextSnapshots,
+          }),
+        ),
+      ];
+    }
+    this.safety.resolveStatus({
+      disclosureType: content.item.disclosure_type,
+      flags: scannedFlags,
+    });
+    const moderation = await this.aiModeration.triage({
+      contentType: content.type,
+      disclosureType: content.item.disclosure_type,
+      flags: scannedFlags,
+      text: scannedText,
+    });
+    const status = moderation.status;
+    const from = content.item.moderation_status;
+    content.item.safety_flags = scannedFlags;
+    content.item.moderation_status = status;
+    content.item.assigned_admin_id =
+      moderation.automation.handledBy === 'admin'
+        ? content.item.assigned_admin_id
+        : null;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(content.entity).save(content.item);
+      await this.recordDecision(manager, {
+        contentType: content.type,
+        contentId,
+        actorAdminId: null,
+        from,
+        to: status,
+        reason: `User resubmitted content. ${this.automationDecisionReason(moderation.automation)}`,
+      });
+      await this.recordSafetyScan(manager, {
+        contentType: content.type,
+        contentId,
+        flags: scannedFlags,
+        status,
+        scannedTextLength: scannedText.length,
+        automation: moderation.automation,
+      });
+    });
+    await this.notifyModerationOutcome(content.item, content.type, status);
+    return this.toAdminContentItem(content.type, content.item);
+  }
+
+  listWarnings() {
+    return this.warnings.find({
+      where: { active: true },
+      order: { updated_at: 'DESC' },
+      take: DEFAULT_LIMIT,
+    });
+  }
+
+  async listAdminModeration(query: AdminCommunityModerationQueryDto) {
+    const statuses = query.status
+      ? [query.status]
+      : [
+          CommunityModerationStatus.PendingReview,
+          CommunityModerationStatus.Hidden,
+        ];
+    const [routines, reviews] = await Promise.all([
+      !query.contentType || query.contentType === CommunityContentType.Routine
+        ? this.queryAdminModerationRows(
+            this.routines,
+            CommunityContentType.Routine,
+            statuses,
+            query,
+          )
+        : [],
+      !query.contentType || query.contentType === CommunityContentType.Review
+        ? this.queryAdminModerationRows(
+            this.reviews,
+            CommunityContentType.Review,
+            statuses,
+            query,
+          )
+        : [],
+    ]);
+    const items = [
+      ...routines.map((item) =>
+        this.toAdminContentItem(CommunityContentType.Routine, item),
+      ),
+      ...reviews.map((item) =>
+        this.toAdminContentItem(CommunityContentType.Review, item),
+      ),
+    ];
+    return {
+      items: items
+        .filter((item) => this.matchesAdminModerationFilters(item, query))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    };
+  }
+
+  async listAdminReports() {
+    const rows = await this.reports.find({
+      where: { status: CommunityReportStatus.Open },
+      order: { created_at: 'DESC' },
+      take: DEFAULT_LIMIT,
+    });
+    return { reports: rows.map((report) => this.toReportResponse(report)) };
+  }
+
+  async getCommunitySettings() {
+    const settings = await this.communitySettings.findOne({
+      where: { id: COMMUNITY_SETTINGS_ID },
+    });
+    return this.toCommunitySettingsResponse(settings);
+  }
+
+  async updateCommunitySettings(
+    adminId: string,
+    dto: AdminCommunitySettingsDto,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const settings =
+      (await this.communitySettings.findOne({
+        where: { id: COMMUNITY_SETTINGS_ID },
+      })) ??
+      this.communitySettings.create({
+        id: COMMUNITY_SETTINGS_ID,
+        minimum_account_age_days: DEFAULT_COMMUNITY_MIN_ACCOUNT_AGE_DAYS,
+      });
+    const previousMinimumAccountAgeDays = settings.minimum_account_age_days;
+    settings.minimum_account_age_days = dto.minimumAccountAgeDays;
+    settings.updated_by_admin_id = adminId;
+    const saved = await this.communitySettings.save(settings);
+
+    await this.writeCommunityAuditLog({
+      action: AdminAuditAction.CommunitySettingsUpdated,
+      actorAdminId: adminId,
+      contentId: COMMUNITY_SETTINGS_ID,
+      contentType: 'settings',
+      context,
+      reason: cleanText(dto.reason, 500) ?? 'Community settings updated',
+      targetUserId: null,
+      metadata: {
+        minimumAccountAgeDays: saved.minimum_account_age_days,
+        previousMinimumAccountAgeDays,
+      },
+    });
+
+    return this.toCommunitySettingsResponse(saved);
+  }
+
+  async updateAdminReportStatus(
+    adminId: string,
+    reportId: string,
+    dto: AdminCommunityReportStatusDto,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const report = await this.reports.findOne({ where: { id: reportId } });
+    if (!report) throw new NotFoundException('Community report not found');
+    report.status = dto.status;
+    const saved = await this.reports.save(report);
+    await this.decisions.save(
+      this.decisions.create({
+        content_type: report.content_type,
+        content_id: report.content_id,
+        actor_admin_id: adminId,
+        from_status: CommunityModerationStatus.PendingReview,
+        to_status: CommunityModerationStatus.PendingReview,
+        reason: cleanText(dto.reason, 500) ?? `Report marked ${dto.status}`,
+      }),
+    );
+    await this.writeCommunityAuditLog({
+      action: AdminAuditAction.CommunityReportUpdated,
+      actorAdminId: adminId,
+      contentId: report.content_id,
+      contentType: report.content_type,
+      context,
+      reason: cleanText(dto.reason, 500) ?? `Report marked ${dto.status}`,
+      targetUserId: null,
+    });
+    return this.toReportResponse(saved);
+  }
+
+  async moderateContent(
+    adminId: string,
+    contentId: string,
+    dto: AdminCommunityModerationDto,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const content = await this.findContent(contentId);
+    const from = content.item.moderation_status;
+    content.item.moderation_status = dto.status;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(content.entity).save(content.item);
+      await this.recordDecision(manager, {
+        contentType: content.type,
+        contentId,
+        actorAdminId: adminId,
+        from,
+        to: dto.status,
+        reason: cleanText(dto.reason, 500) ?? 'Community moderation update',
+      });
+    });
+    await this.writeCommunityAuditLog({
+      action: AdminAuditAction.CommunityContentModerated,
+      actorAdminId: adminId,
+      contentId,
+      contentType: content.type,
+      context,
+      reason: cleanText(dto.reason, 500) ?? 'Community moderation update',
+      targetUserId: content.item.author_user_id,
+    });
+    await this.notifyModerationOutcome(content.item, content.type, dto.status);
+    return this.toAdminContentItem(content.type, content.item);
+  }
+
+  async assignContent(
+    adminId: string,
+    contentId: string,
+    dto: AdminCommunityAssignDto,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const content = await this.findContent(contentId);
+    const assignedAdminId = dto.assignedAdminId ?? adminId;
+    content.item.assigned_admin_id = assignedAdminId;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(content.entity).save(content.item);
+      await this.recordDecision(manager, {
+        contentType: content.type,
+        contentId,
+        actorAdminId: adminId,
+        from: content.item.moderation_status,
+        to: content.item.moderation_status,
+        reason:
+          cleanText(dto.reason, 500) ?? 'Community moderation item assigned',
+      });
+    });
+    await this.writeCommunityAuditLog({
+      action: AdminAuditAction.CommunityContentModerated,
+      actorAdminId: adminId,
+      contentId,
+      contentType: content.type,
+      context,
+      reason:
+        cleanText(dto.reason, 500) ?? 'Community moderation item assigned',
+      targetUserId: content.item.author_user_id,
+    });
+    return this.toAdminContentItem(content.type, content.item);
+  }
+
+  async addAdminNote(
+    adminId: string,
+    contentId: string,
+    note: string,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const content = await this.findContent(contentId);
+    await this.decisions.save(
+      this.decisions.create({
+        content_type: content.type,
+        content_id: contentId,
+        actor_admin_id: adminId,
+        from_status: content.item.moderation_status,
+        to_status: content.item.moderation_status,
+        reason: cleanText(note, 500) ?? 'Admin note',
+      }),
+    );
+    await this.writeCommunityAuditLog({
+      action: AdminAuditAction.CommunityContentModerated,
+      actorAdminId: adminId,
+      contentId,
+      contentType: content.type,
+      context,
+      reason: cleanText(note, 500) ?? 'Admin note',
+      targetUserId: content.item.author_user_id,
+    });
+    return { created: true };
+  }
+
+  async createWarning(
+    dto: AdminCommunityWarningDto,
+    adminId?: string,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const warning = await this.warnings.save(
+      this.warnings.create({
+        title: cleanText(dto.title, 160) ?? 'Community warning',
+        body: cleanText(dto.body, 1000) ?? 'Community warning',
+        severity: dto.severity,
+        affected_facets: normalizeTags(dto.affectedFacets),
+        active: dto.active ?? true,
+      }),
+    );
+    if (adminId) {
+      await this.writeCommunityAuditLog({
+        action: AdminAuditAction.CommunityWarningUpdated,
+        actorAdminId: adminId,
+        contentId: warning.id,
+        contentType: 'warning',
+        context,
+        reason: 'Community warning created',
+        targetUserId: null,
+      });
+    }
+    return warning;
+  }
+
+  async updateWarning(
+    id: string,
+    dto: AdminCommunityWarningDto,
+    adminId?: string,
+    context?: AdminCommunityAuditContext,
+  ) {
+    const warning = await this.warnings.findOne({ where: { id } });
+    if (!warning) throw new NotFoundException('Community warning not found');
+    warning.title = cleanText(dto.title, 160) ?? warning.title;
+    warning.body = cleanText(dto.body, 1000) ?? warning.body;
+    warning.severity = dto.severity;
+    warning.affected_facets = normalizeTags(dto.affectedFacets);
+    warning.active = dto.active ?? warning.active;
+    const saved = await this.warnings.save(warning);
+    if (adminId) {
+      await this.writeCommunityAuditLog({
+        action: AdminAuditAction.CommunityWarningUpdated,
+        actorAdminId: adminId,
+        contentId: saved.id,
+        contentType: 'warning',
+        context,
+        reason: 'Community warning updated',
+        targetUserId: null,
+      });
+    }
+    return saved;
+  }
+
+  private async ensureCommunityProfile(
+    userId: string,
+  ): Promise<CommunityProfile> {
+    const [existing, safe_facets] = await Promise.all([
+      this.profiles.findOne({
+        where: { user_id: userId },
+      }),
+      this.getSafeFacets(userId),
+    ]);
+    if (existing) {
+      existing.safe_facets = safe_facets;
+      return this.profiles.save(existing);
+    }
+    return this.profiles.save(
+      this.profiles.create({
+        user_id: userId,
+        display_name: publicProfileName(userId),
+        safe_facets,
+      }),
+    );
+  }
+
+  private async getSafeFacets(
+    userId: string,
+  ): Promise<CommunitySafeProfileFacets> {
+    const profile = await this.skinProfiles.findOne({
+      where: { user_id: userId },
+    });
+    return buildCommunitySafeFacets(profile);
+  }
+
+  private async assertCanPostCommunityContent(userId: string) {
+    const eligibility = await this.getPostingEligibility(userId);
+    if (!eligibility.eligible) {
+      throw new ForbiddenException({
+        message: 'Community posting is not available yet',
+        reasons: eligibility.reasons,
+        eligibleAt: eligibility.eligibleAt,
+      });
+    }
+  }
+
+  private findActiveConsent(userId: string, consentType: UserConsentType) {
+    return this.consents.findOne({
+      where: {
+        user_id: userId,
+        consent_type: consentType,
+        consent_version: COMMUNITY_GUIDELINES_VERSION,
+        granted: true,
+        revoked_at: IsNull(),
+      },
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  private async hasRecentModerationAbuse(userId: string): Promise<boolean> {
+    const since = new Date(
+      Date.now() - COMMUNITY_ABUSE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const [statusCount, severeReportRows] = await Promise.all([
+      Promise.all([
+        this.routines.count({
+          where: {
+            author_user_id: userId,
+            moderation_status: In([
+              CommunityModerationStatus.Hidden,
+              CommunityModerationStatus.Rejected,
+            ]),
+            updated_at: MoreThan(since),
+          },
+        }),
+        this.reviews.count({
+          where: {
+            author_user_id: userId,
+            moderation_status: In([
+              CommunityModerationStatus.Hidden,
+              CommunityModerationStatus.Rejected,
+            ]),
+            updated_at: MoreThan(since),
+          },
+        }),
+      ]),
+      this.dataSource.query<Array<{ count: number | string }>>(
+        `
+          SELECT COUNT(*)::int AS count
+          FROM "community_reports" report
+          LEFT JOIN "community_routines" routine
+            ON report."content_type" = $1
+           AND report."content_id" = routine."id"
+          LEFT JOIN "community_reviews" review
+            ON report."content_type" = $2
+           AND report."content_id" = review."id"
+          WHERE report."reason" = ANY($3::varchar[])
+            AND report."created_at" > $4
+            AND (
+              routine."author_user_id" = $5
+              OR review."author_user_id" = $5
+            )
+        `,
+        [
+          CommunityContentType.Routine,
+          CommunityContentType.Review,
+          [...SEVERE_REPORT_REASONS],
+          since,
+          userId,
+        ],
+      ),
+    ]);
+    if (statusCount[0] + statusCount[1] >= COMMUNITY_ABUSE_STATUS_THRESHOLD) {
+      return true;
+    }
+
+    const severeReportCount = Number(severeReportRows[0]?.count ?? 0);
+    return severeReportCount >= COMMUNITY_ABUSE_SEVERE_REPORT_THRESHOLD;
+  }
+
+  private resolveClimateBucket(values: string[] | undefined): string | null {
+    const first = normalizeTags(values ?? [])[0];
+    return first ?? null;
+  }
+
+  private async loadOwnedProductMap(userId: string, ids: string[]) {
+    if (ids.length === 0) return new Map<string, InventoryProduct>();
+    const rows = await this.inventory.find({
+      where: { user_id: userId, id: In(ids) },
+    });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private async buildRoutineStepSnapshots(
+    userId: string,
+    steps: CreateCommunityRoutineDto['steps'],
+  ): Promise<CommunityRoutineStepSnapshot[]> {
+    const products = await this.loadOwnedProductMap(
+      userId,
+      steps.map((step) => step.productId).filter(Boolean) as string[],
+    );
+    return steps.map((step, index): CommunityRoutineStepSnapshot => {
+      const product = step.productId ? products.get(step.productId) : null;
+      if (step.productId && !product) {
+        throw new BadRequestException(
+          'Routine step product must be on your shelf',
+        );
+      }
+      if (!step.productId && !cleanText(step.productName, 255)) {
+        throw new BadRequestException(
+          'Goal playbook steps require product names or shelf products',
+        );
+      }
+      return {
+        stepOrder: index + 1,
+        slot: step.slot,
+        productId: product?.id ?? null,
+        productBrand: product?.brand ?? cleanText(step.productBrand, 255),
+        productName: product?.name ?? cleanText(step.productName, 255),
+        category: product?.category ?? step.category,
+        frequency: cleanText(step.frequency, 80),
+        notes: cleanText(step.notes, 500),
+      };
+    });
+  }
+
+  private async loadSteps(ids: string[]) {
+    if (ids.length === 0) return new Map<string, CommunityRoutineStep[]>();
+    const rows = await this.routineSteps.find({
+      select: {
+        routine_id: true,
+        step_order: true,
+        slot: true,
+        product_id: true,
+        product_brand: true,
+        product_name: true,
+        category: true,
+        frequency: true,
+        notes: true,
+      },
+      where: { routine_id: In(ids) },
+      order: { step_order: 'ASC' },
+    });
+    const map = new Map<string, CommunityRoutineStep[]>();
+    for (const row of rows) {
+      const items = map.get(row.routine_id);
+      if (items) {
+        items.push(row);
+      } else {
+        map.set(row.routine_id, [row]);
+      }
+    }
+    return map;
+  }
+
+  private async loadReviewContext(ids: string[]) {
+    if (ids.length === 0)
+      return new Map<string, CommunityReviewContextProduct[]>();
+    const rows = await this.reviewContext.find({
+      select: {
+        review_id: true,
+        product_id: true,
+        product_brand: true,
+        product_name: true,
+        category: true,
+      },
+      where: { review_id: In(ids) },
+    });
+    const map = new Map<string, CommunityReviewContextProduct[]>();
+    for (const row of rows) {
+      const items = map.get(row.review_id);
+      if (items) {
+        items.push(row);
+      } else {
+        map.set(row.review_id, [row]);
+      }
+    }
+    return map;
+  }
+
+  private async loadBookmarkedContentIds(
+    userId: string,
+    contentType: CommunityPublishedContentKind,
+    contentIds: string[],
+  ): Promise<Set<string>> {
+    const uniqueContentIds = Array.from(new Set(contentIds));
+    if (uniqueContentIds.length === 0) return new Set<string>();
+
+    const rows = await this.bookmarks.find({
+      select: { content_id: true },
+      where: {
+        user_id: userId,
+        content_type: contentType,
+        content_id: In(uniqueContentIds),
+      },
+    });
+
+    return new Set(rows.map((row) => row.content_id));
+  }
+
+  private async loadRoutinesById(
+    ids: string[],
+  ): Promise<Map<string, CommunityRoutine>> {
+    if (ids.length === 0) return new Map<string, CommunityRoutine>();
+    const rows = await this.routines.find({
+      where: { id: In(ids), withdrawn_at: IsNull() },
+    });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private async loadReviewsById(
+    ids: string[],
+  ): Promise<Map<string, CommunityReview>> {
+    if (ids.length === 0) return new Map<string, CommunityReview>();
+    const rows = await this.reviews.find({
+      where: { id: In(ids), withdrawn_at: IsNull() },
+    });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private async loadOutcomeVotesById(
+    ids: string[],
+  ): Promise<Map<string, CommunityOutcomeSignalVote>> {
+    if (ids.length === 0) {
+      return new Map<string, CommunityOutcomeSignalVote>();
+    }
+    const rows = await this.outcomeVotes.find({
+      where: { id: In(ids), withdrawn_at: IsNull() },
+    });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private matchScore(
+    viewer: CommunitySafeProfileFacets,
+    item: CommunitySafeProfileFacets,
+    tags: string[],
+    disclosureType: CommunityDisclosureType,
+    evidenceBoost = 0,
+  ) {
+    let score = evidenceBoost;
+    if (viewer.skinType && viewer.skinType === item.skinType) score += 25;
+    if (
+      viewer.sensitivityLevel &&
+      viewer.sensitivityLevel === item.sensitivityLevel
+    )
+      score += 15;
+    if (viewer.skinToneRange && viewer.skinToneRange === item.skinToneRange)
+      score += 10;
+    if (viewer.climateBucket && viewer.climateBucket === item.climateBucket)
+      score += 10;
+    if (viewer.routinePace && viewer.routinePace === item.routinePace)
+      score += 10;
+    const concernOverlap = tags.filter((tag) =>
+      viewer.concernTags.includes(tag),
+    ).length;
+    score += Math.min(25, concernOverlap * 8);
+    if (disclosureType === CommunityDisclosureType.Ordinary) score += 10;
+    if (
+      disclosureType === CommunityDisclosureType.Sponsored ||
+      disclosureType === CommunityDisclosureType.Affiliate ||
+      disclosureType === CommunityDisclosureType.BrandRep
+    )
+      score -= 30;
+    return Math.max(0, Math.min(100, score));
+  }
+
+  private relevanceReasons(
+    viewer: CommunitySafeProfileFacets,
+    item: CommunitySafeProfileFacets,
+    tags: string[],
+  ) {
+    const reasons: string[] = [];
+    if (viewer.skinType && viewer.skinType === item.skinType)
+      reasons.push('same skin type');
+    if (
+      viewer.sensitivityLevel &&
+      viewer.sensitivityLevel === item.sensitivityLevel
+    )
+      reasons.push('sensitivity match');
+    if (viewer.climateBucket && viewer.climateBucket === item.climateBucket)
+      reasons.push('similar climate');
+    if (tags.some((tag) => viewer.concernTags.includes(tag)))
+      reasons.push('shared concerns');
+    return reasons.length > 0 ? reasons : ['community evidence'];
+  }
+
+  private toRoutineResponse(
+    routine: CommunityRoutine,
+    steps: CommunityRoutineStep[],
+    viewer: CommunitySafeProfileFacets,
+    viewerUserId: string,
+    bookmarkedByViewer = false,
+  ) {
+    const tags = [
+      ...routine.concern_tags,
+      ...routine.goal_tags,
+      ...(routine.avoid_tags ?? []),
+      ...(routine.habit_tags ?? []),
+    ];
+    return {
+      id: routine.id,
+      type: CommunityContentType.Routine,
+      title: routine.title,
+      summary: routine.summary,
+      disclosureType: routine.disclosure_type,
+      moderationStatus: routine.moderation_status,
+      concernTags: routine.concern_tags,
+      goalTags: routine.goal_tags,
+      goalResult: routine.goal_result,
+      timeframe: routine.timeframe,
+      avoidTags: routine.avoid_tags ?? [],
+      habitTags: routine.habit_tags ?? [],
+      didNotWorkTags: routine.did_not_work_tags ?? [],
+      warningTags: routine.warning_tags ?? [],
+      safeFacets: routine.safe_facets,
+      safetyFlags: routine.safety_flags,
+      helpfulCount: routine.helpful_count,
+      notHelpfulCount: routine.not_helpful_count,
+      outcomeSignalCounts: this.defaultOutcomeSignalCounts(
+        routine.outcome_signal_counts,
+      ),
+      bookmarkedByViewer,
+      canSignalOutcome: routine.author_user_id !== viewerUserId,
+      canReportContent: routine.author_user_id !== viewerUserId,
+      matchScore: this.matchScore(
+        viewer,
+        routine.safe_facets,
+        tags,
+        routine.disclosure_type,
+      ),
+      relevanceReasons: this.relevanceReasons(
+        viewer,
+        routine.safe_facets,
+        tags,
+      ),
+      steps: steps.map((step) => this.toRoutineStepPublic(step)),
+      createdAt: routine.created_at.toISOString(),
+      updatedAt: routine.updated_at.toISOString(),
+    };
+  }
+
+  private toReviewResponse(
+    review: CommunityReview,
+    context: CommunityReviewContextProduct[],
+    viewer: CommunitySafeProfileFacets,
+    viewerUserId: string,
+    bookmarkedByViewer = false,
+  ) {
+    return {
+      id: review.id,
+      type: CommunityContentType.Review,
+      productBrand: review.product_brand,
+      productName: review.product_name,
+      productCategory: review.product_category,
+      disclosureType: review.disclosure_type,
+      usageDuration: review.usage_duration,
+      frequency: review.frequency,
+      routineContextUsage: review.routine_context_usage,
+      routineSlot: review.routine_slot,
+      skinResponse: review.skin_response,
+      overallRating: review.overall_rating,
+      effectivenessRating: review.effectiveness_rating,
+      irritationRating: review.irritation_rating,
+      textureRating: review.texture_rating,
+      valueRating: review.value_rating,
+      outcomes: review.outcomes,
+      repurchase: review.repurchase,
+      body: review.body,
+      moderationStatus: review.moderation_status,
+      safeFacets: review.safe_facets,
+      safetyFlags: review.safety_flags,
+      routineContext: context.map((item) => this.toReviewContextPublic(item)),
+      helpfulCount: review.helpful_count,
+      notHelpfulCount: review.not_helpful_count,
+      outcomeSignalCounts: this.defaultOutcomeSignalCounts(
+        review.outcome_signal_counts,
+      ),
+      bookmarkedByViewer,
+      canSignalOutcome: review.author_user_id !== viewerUserId,
+      canReportContent: review.author_user_id !== viewerUserId,
+      matchScore: this.matchScore(
+        viewer,
+        review.safe_facets,
+        review.outcomes,
+        review.disclosure_type,
+        this.reviewEvidenceBoost(review, context),
+      ),
+      relevanceReasons: [
+        ...this.relevanceReasons(viewer, review.safe_facets, review.outcomes),
+        ...this.reviewEvidenceReasons(review, context),
+      ],
+      createdAt: review.created_at.toISOString(),
+      updatedAt: review.updated_at.toISOString(),
+    };
+  }
+
+  private reviewEvidenceBoost(
+    review: CommunityReview,
+    context: CommunityReviewContextProduct[],
+  ) {
+    let score = 0;
+    if (review.overall_rating !== null) score += 4;
+    if (review.effectiveness_rating !== null) score += 4;
+    if (review.irritation_rating !== null) score += 4;
+    if (review.skin_response !== null) score += 4;
+    if (context.some((item) => item.product_name)) score += 6;
+    if (
+      review.routine_context_usage ===
+      CommunityReviewRoutineContextUsage.UsedAlone
+    ) {
+      score += 4;
+    }
+    if (review.helpful_count > review.not_helpful_count) {
+      score += Math.min(
+        8,
+        (review.helpful_count - review.not_helpful_count) * 2,
+      );
+    }
+    return score;
+  }
+
+  private defaultOutcomeSignalCounts(
+    counts: Partial<Record<CommunityOutcomeSignal, number>> | null | undefined,
+  ): Record<CommunityOutcomeSignal, number> {
+    return {
+      [CommunityOutcomeSignal.WorkedForMeToo]:
+        counts?.[CommunityOutcomeSignal.WorkedForMeToo] ?? 0,
+      [CommunityOutcomeSignal.WorkedWithChanges]:
+        counts?.[CommunityOutcomeSignal.WorkedWithChanges] ?? 0,
+      [CommunityOutcomeSignal.MixedResult]:
+        counts?.[CommunityOutcomeSignal.MixedResult] ?? 0,
+      [CommunityOutcomeSignal.DidNotWork]:
+        counts?.[CommunityOutcomeSignal.DidNotWork] ?? 0,
+      [CommunityOutcomeSignal.CausedIrritation]:
+        counts?.[CommunityOutcomeSignal.CausedIrritation] ?? 0,
+      [CommunityOutcomeSignal.NotRelevant]:
+        counts?.[CommunityOutcomeSignal.NotRelevant] ?? 0,
+    };
+  }
+
+  private addOutcomeSignalCounts(
+    target: Record<CommunityOutcomeSignal, number>,
+    source: Partial<Record<CommunityOutcomeSignal, number>> | null | undefined,
+  ) {
+    const normalized = this.defaultOutcomeSignalCounts(source);
+    Object.values(CommunityOutcomeSignal).forEach((signal) => {
+      target[signal] += normalized[signal];
+    });
+  }
+
+  private async toOutcomeSignalContext(
+    userId: string,
+    dto: CommunityOutcomeSignalDto,
+  ): Promise<CommunityOutcomeSignalContext> {
+    const followedParts = Array.from(new Set(dto.followedParts)).filter(
+      (part) => Object.values(CommunityOutcomeFollowedPart).includes(part),
+    );
+    const routineSlot =
+      dto.routineSlot &&
+      Object.values(CommunityReviewRoutineSlot).includes(dto.routineSlot)
+        ? dto.routineSlot
+        : null;
+    return {
+      sameGoal: dto.sameGoal,
+      trialDuration: Object.values(CommunityOutcomeTrialDuration).includes(
+        dto.trialDuration,
+      )
+        ? dto.trialDuration
+        : CommunityOutcomeTrialDuration.UnderTwoWeeks,
+      followedParts:
+        followedParts.length > 0
+          ? followedParts
+          : [CommunityOutcomeFollowedPart.Partial],
+      irritationLevel: Object.values(CommunityOutcomeIrritationLevel).includes(
+        dto.irritationLevel,
+      )
+        ? dto.irritationLevel
+        : CommunityOutcomeIrritationLevel.Mild,
+      routineSlot,
+      usedWithProducts: await this.buildOutcomeSignalProductContext(
+        userId,
+        dto.usedWithProducts ?? [],
+      ),
+    };
+  }
+
+  private async buildOutcomeSignalProductContext(
+    userId: string,
+    products: NonNullable<CommunityOutcomeSignalDto['usedWithProducts']>,
+  ): Promise<CommunityOutcomeSignalProductContext[]> {
+    const productIds = Array.from(
+      new Set(products.map((item) => item.productId).filter(Boolean)),
+    ) as string[];
+    const ownedProducts = await this.loadOwnedProductMap(userId, productIds);
+    return products.map((item) => {
+      const ownedProduct = item.productId
+        ? ownedProducts.get(item.productId)
+        : null;
+      if (item.productId && !ownedProduct) {
+        throw new BadRequestException(
+          'Result context products must be on your shelf',
+        );
+      }
+      if (!item.productId && !cleanText(item.productName, 255)) {
+        throw new BadRequestException(
+          'Result context products require product names or shelf products',
+        );
+      }
+      return {
+        productBrand:
+          ownedProduct?.brand ?? cleanText(item.productBrand, 255) ?? null,
+        productName:
+          ownedProduct?.name ?? cleanText(item.productName, 255) ?? null,
+        category:
+          ownedProduct?.category ?? cleanText(item.category, 40) ?? 'other',
+      };
+    });
+  }
+
+  private toOutcomeSignalProductContext(input: {
+    category: string | null | undefined;
+    productBrand: string | null | undefined;
+    productName: string | null | undefined;
+  }): CommunityOutcomeSignalProductContext {
+    return {
+      category: cleanText(input.category, 40) ?? 'other',
+      productBrand: cleanText(input.productBrand, 255),
+      productName: cleanText(input.productName, 255),
+    };
+  }
+
+  private parseOutcomeSignalFilter(
+    signal: string | undefined,
+  ): CommunityOutcomeSignal | undefined {
+    if (!signal) return undefined;
+    if (
+      Object.values(CommunityOutcomeSignal).includes(
+        signal as CommunityOutcomeSignal,
+      )
+    ) {
+      return signal as CommunityOutcomeSignal;
+    }
+    throw new BadRequestException('Unknown community result type');
+  }
+
+  private toReviewResultResponse(
+    vote: CommunityOutcomeSignalVote,
+    viewer: CommunitySafeProfileFacets,
+  ): CommunityReviewResultPublic {
+    const context = this.normalizeStoredOutcomeSignalContext(vote.context);
+    const noteModerationStatus =
+      vote.note_moderation_status ?? CommunityModerationStatus.Published;
+    return {
+      id: vote.id,
+      signal: vote.signal,
+      sameGoal: context.sameGoal,
+      trialDuration: context.trialDuration,
+      followedParts: context.followedParts,
+      irritationLevel: context.irritationLevel,
+      routineSlot: context.routineSlot,
+      usedWithProducts:
+        noteModerationStatus === CommunityModerationStatus.Published
+          ? context.usedWithProducts
+          : [],
+      note:
+        noteModerationStatus === CommunityModerationStatus.Published
+          ? vote.note
+          : null,
+      noteModerationStatus,
+      similarToViewer: this.isSimilarFacets(viewer, vote.safe_facets),
+      createdAt: vote.created_at.toISOString(),
+      updatedAt: vote.updated_at.toISOString(),
+    };
+  }
+
+  private normalizeStoredOutcomeSignalContext(
+    context: CommunityOutcomeSignalContext | null | undefined,
+  ): CommunityOutcomeSignalContext {
+    const value: Record<string, unknown> = isRecord(context) ? context : {};
+    const followedParts = Array.isArray(value.followedParts)
+      ? value.followedParts.filter(
+          (part: unknown): part is CommunityOutcomeFollowedPart =>
+            Object.values(CommunityOutcomeFollowedPart).includes(
+              part as CommunityOutcomeFollowedPart,
+            ),
+        )
+      : [];
+    return {
+      sameGoal: value.sameGoal === true,
+      trialDuration: Object.values(CommunityOutcomeTrialDuration).includes(
+        value.trialDuration as CommunityOutcomeTrialDuration,
+      )
+        ? (value.trialDuration as CommunityOutcomeTrialDuration)
+        : CommunityOutcomeTrialDuration.UnderTwoWeeks,
+      followedParts:
+        followedParts.length > 0
+          ? followedParts
+          : [CommunityOutcomeFollowedPart.Partial],
+      irritationLevel: Object.values(CommunityOutcomeIrritationLevel).includes(
+        value.irritationLevel as CommunityOutcomeIrritationLevel,
+      )
+        ? (value.irritationLevel as CommunityOutcomeIrritationLevel)
+        : CommunityOutcomeIrritationLevel.Mild,
+      routineSlot: Object.values(CommunityReviewRoutineSlot).includes(
+        value.routineSlot as CommunityReviewRoutineSlot,
+      )
+        ? (value.routineSlot as CommunityReviewRoutineSlot)
+        : null,
+      usedWithProducts: this.normalizeStoredOutcomeSignalProducts(
+        value.usedWithProducts,
+      ),
+    };
+  }
+
+  private normalizeStoredOutcomeSignalProducts(
+    products: unknown,
+  ): CommunityOutcomeSignalProductContext[] {
+    if (!Array.isArray(products)) return [];
+    return products
+      .map((item): CommunityOutcomeSignalProductContext | null => {
+        if (!isRecord(item)) return null;
+        const category =
+          typeof item.category === 'string' && item.category.trim()
+            ? item.category
+            : 'other';
+        return {
+          productBrand:
+            typeof item.productBrand === 'string' ? item.productBrand : null,
+          productName:
+            typeof item.productName === 'string' ? item.productName : null,
+          category,
+        };
+      })
+      .filter(
+        (item): item is CommunityOutcomeSignalProductContext => item !== null,
+      );
+  }
+
+  private averageRating(values: Array<number | null>): number | null {
+    const ratings = values.filter((value): value is number => value !== null);
+    if (ratings.length === 0) return null;
+    const average =
+      ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+    return Number(average.toFixed(1));
+  }
+
+  private topCounts(values: string[]) {
+    const counts = new Map<string, number>();
+    values.filter(Boolean).forEach((value) => {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+      .slice(0, 5);
+  }
+
+  private isSimilarFacets(
+    viewer: CommunitySafeProfileFacets,
+    candidate: CommunitySafeProfileFacets | null | undefined,
+  ) {
+    if (!candidate) return false;
+    return this.safeFacetSimilarityScore(viewer, candidate) >= 35;
+  }
+
+  private safeFacetSimilarityScore(
+    viewer: CommunitySafeProfileFacets,
+    candidate: CommunitySafeProfileFacets,
+  ) {
+    let score = 0;
+    if (viewer.skinType && viewer.skinType === candidate.skinType) score += 20;
+    if (
+      viewer.sensitivityLevel &&
+      viewer.sensitivityLevel === candidate.sensitivityLevel
+    ) {
+      score += 15;
+    }
+    if (
+      viewer.skinToneRange &&
+      viewer.skinToneRange === candidate.skinToneRange
+    ) {
+      score += 10;
+    }
+    if (
+      viewer.climateBucket &&
+      viewer.climateBucket === candidate.climateBucket
+    ) {
+      score += 10;
+    }
+    if (viewer.routinePace && viewer.routinePace === candidate.routinePace) {
+      score += 10;
+    }
+    const concernOverlap = candidate.concernTags.filter((tag) =>
+      viewer.concernTags.includes(tag),
+    ).length;
+    const goalOverlap = candidate.goalTags.filter((tag) =>
+      viewer.goalTags.includes(tag),
+    ).length;
+    return score + Math.min(25, concernOverlap * 8 + goalOverlap * 8);
+  }
+
+  private reviewEvidenceReasons(
+    review: CommunityReview,
+    context: CommunityReviewContextProduct[],
+  ) {
+    const reasons: string[] = [];
+    if (
+      review.overall_rating !== null &&
+      review.effectiveness_rating !== null &&
+      review.irritation_rating !== null
+    ) {
+      reasons.push('rated experience');
+    }
+    if (review.skin_response !== null) reasons.push('reported skin response');
+    if (context.some((item) => item.product_name)) {
+      reasons.push('named routine context');
+    }
+    if (
+      review.routine_context_usage ===
+      CommunityReviewRoutineContextUsage.UsedAlone
+    ) {
+      reasons.push('used alone');
+    }
+    return reasons;
+  }
+
+  private toRoutineStepPublic(
+    step: CommunityRoutineStep,
+  ): CommunityRoutineStepPublic {
+    return {
+      stepOrder: step.step_order,
+      slot: step.slot,
+      productBrand: step.product_brand,
+      productName: step.product_name,
+      category: step.category,
+      frequency: step.frequency,
+      notes: step.notes,
+    };
+  }
+
+  private toReviewContextPublic(
+    context: CommunityReviewContextProduct,
+  ): CommunityRoutineContextProductPublic {
+    return {
+      productBrand: context.product_brand,
+      productName: context.product_name,
+      category: context.category,
+    };
+  }
+
+  private buildPatterns(
+    facets: CommunitySafeProfileFacets,
+    routines: ReturnType<CommunityService['toRoutineResponse']>[],
+    reviews: ReturnType<CommunityService['toReviewResponse']>[],
+  ) {
+    const matched = [...routines, ...reviews].filter(
+      (item) => item.matchScore >= 40,
+    );
+    return [
+      {
+        id: 'similar-users',
+        title: 'Community evidence is ranked by similarity, not popularity',
+        body: `${matched.length} published items currently match your profile facets.`,
+      },
+      {
+        id: 'routine-context',
+        title: 'Reviews with clear usage context rank higher',
+        body: 'Ritora asks whether a product was used alone, with other products, or from memory so evidence stays honest.',
+      },
+      {
+        id: 'safe-facets',
+        title: 'Your private profile stays private',
+        body: `${facets.concernTags.length} concern tags are used without exposing exact location, email, photos, or medical history.`,
+      },
+    ];
+  }
+
+  private async createReport(
+    userId: string,
+    contentType: CommunityContentType,
+    contentId: string,
+    dto: CreateCommunityReportDto,
+  ) {
+    await this.assertActionLimit({
+      label: 'reports',
+      repository: this.reports,
+      userColumn: 'reporter_user_id',
+      userId,
+      maxPerDay: 20,
+    });
+    const report = await this.dataSource.transaction(async (manager) => {
+      const reportRepository = manager.getRepository(CommunityReport);
+      const existing = await reportRepository.findOne({
+        where: {
+          reporter_user_id: userId,
+          content_type: contentType,
+          content_id: contentId,
+          status: In([
+            CommunityReportStatus.Open,
+            CommunityReportStatus.Triaged,
+          ]),
+        },
+      });
+      if (existing) {
+        const shouldEscalate = SEVERE_REPORT_REASONS.has(dto.reason);
+        existing.reason = dto.reason;
+        existing.note = cleanText(dto.note, 1000) ?? existing.note;
+        if (shouldEscalate) {
+          existing.status = CommunityReportStatus.Open;
+        }
+        const saved = await reportRepository.save(existing);
+        if (shouldEscalate) {
+          await this.removeContentFromFeedsForSevereReport(
+            manager,
+            contentType,
+            contentId,
+            dto.reason,
+          );
+        }
+        return saved;
+      }
+
+      const existingReportCount = await reportRepository.count({
+        where: {
+          content_type: contentType,
+          content_id: contentId,
+          status: In([
+            CommunityReportStatus.Open,
+            CommunityReportStatus.Triaged,
+          ]),
+        },
+      });
+      const shouldEscalate =
+        SEVERE_REPORT_REASONS.has(dto.reason) ||
+        existingReportCount + 1 >= REPORT_ESCALATION_THRESHOLD;
+      const saved = await reportRepository.save(
+        reportRepository.create({
+          reporter_user_id: userId,
+          content_type: contentType,
+          content_id: contentId,
+          reason: dto.reason,
+          note: cleanText(dto.note, 1000),
+          status: shouldEscalate
+            ? CommunityReportStatus.Open
+            : CommunityReportStatus.Triaged,
+        }),
+      );
+      if (shouldEscalate) {
+        await this.removeContentFromFeedsForSevereReport(
+          manager,
+          contentType,
+          contentId,
+          dto.reason,
+        );
+      } else {
+        await this.recordDecision(manager, {
+          contentType,
+          contentId,
+          actorAdminId: null,
+          from: CommunityModerationStatus.Published,
+          to: CommunityModerationStatus.Published,
+          reason: `AI moderation triaged non-critical report: ${dto.reason}`,
+        });
+      }
+      return saved;
+    });
+    return this.toReportResponse(report);
+  }
+
+  private async findActiveReport(
+    userId: string,
+    contentType: CommunityContentType,
+    contentId: string,
+  ): Promise<CommunityReport | null> {
+    return this.reports.findOne({
+      where: {
+        reporter_user_id: userId,
+        content_type: contentType,
+        content_id: contentId,
+        status: In([CommunityReportStatus.Open, CommunityReportStatus.Triaged]),
+      },
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  private async vote(
+    userId: string,
+    contentType: CommunityContentType,
+    contentId: string,
+    vote: CommunityHelpfulnessVote,
+  ) {
+    await this.dataSource.query(
+      `
+        INSERT INTO "community_helpfulness_votes" (
+          "id", "user_id", "content_type", "content_id", "vote", "created_at"
+        )
+        VALUES ($1, $2, $3, $4, $5, now())
+        ON CONFLICT ("user_id", "content_type", "content_id")
+        DO UPDATE SET "vote" = EXCLUDED."vote"
+      `,
+      [ulid(), userId, contentType, contentId, vote],
+    );
+    await this.recountVotes(contentType, contentId);
+    return { vote };
+  }
+
+  private async signalOutcome(
+    userId: string,
+    contentType: CommunityContentType,
+    contentId: string,
+    dto: CommunityOutcomeSignalDto,
+    options: {
+      reviewedProduct?: CommunityOutcomeSignalProductContext | null;
+    } = {},
+  ) {
+    const safeFacetsPromise = this.getSafeFacets(userId);
+    const context = await this.toOutcomeSignalContext(userId, dto);
+    const [safeFacets, noteModeration] = await Promise.all([
+      safeFacetsPromise,
+      this.moderateOutcomeSignalNote({
+        contentType,
+        context,
+        dto,
+        reviewedProduct: options.reviewedProduct ?? null,
+      }),
+    ]);
+    await this.dataSource.query(
+      `
+        INSERT INTO "community_outcome_signal_votes" (
+          "id",
+          "user_id",
+          "content_type",
+          "content_id",
+          "signal",
+          "context",
+          "safe_facets",
+          "note",
+          "note_moderation_status",
+          "note_safety_flags",
+          "note_moderation_reason",
+          "withdrawn_at",
+          "withdrawn_by_user_id",
+          "created_at",
+          "updated_at"
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, now(), now())
+        ON CONFLICT ("user_id", "content_type", "content_id")
+        DO UPDATE SET
+          "signal" = EXCLUDED."signal",
+          "context" = EXCLUDED."context",
+          "safe_facets" = EXCLUDED."safe_facets",
+          "note" = EXCLUDED."note",
+          "note_moderation_status" = EXCLUDED."note_moderation_status",
+          "note_safety_flags" = EXCLUDED."note_safety_flags",
+          "note_moderation_reason" = EXCLUDED."note_moderation_reason",
+          "withdrawn_at" = NULL,
+          "withdrawn_by_user_id" = NULL,
+          "updated_at" = now()
+      `,
+      [
+        ulid(),
+        userId,
+        contentType,
+        contentId,
+        dto.signal,
+        context,
+        safeFacets,
+        noteModeration.note,
+        noteModeration.status,
+        noteModeration.flags,
+        noteModeration.reason,
+      ],
+    );
+    const outcomeSignalCounts = await this.recountOutcomeSignals(
+      contentType,
+      contentId,
+    );
+    return {
+      signal: dto.signal,
+      context,
+      noteModerationStatus: noteModeration.status,
+      outcomeSignalCounts,
+    };
+  }
+
+  private async moderateOutcomeSignalNote(input: {
+    contentType: CommunityContentType;
+    context: CommunityOutcomeSignalContext;
+    dto: CommunityOutcomeSignalDto;
+    reviewedProduct: CommunityOutcomeSignalProductContext | null;
+  }): Promise<{
+    flags: CommunitySafetyFlag[];
+    note: string | null;
+    reason: string | null;
+    status: CommunityModerationStatus;
+  }> {
+    const note = cleanText(input.dto.note, 500);
+    const productContextSteps = this.buildOutcomeSignalProductContextSteps(
+      input.reviewedProduct,
+      input.context,
+    );
+    const pairingFlags =
+      productContextSteps.length > 1
+        ? this.safety.scanRoutine(productContextSteps)
+        : [];
+    const noteFlags = note ? this.safety.scanText(note) : [];
+    const flags = [...noteFlags, ...pairingFlags];
+    if (!note && input.context.usedWithProducts.length === 0) {
+      return {
+        flags: [],
+        note: null,
+        reason: null,
+        status: CommunityModerationStatus.Published,
+      };
+    }
+
+    const moderation = await this.aiModeration.triage({
+      contentType: input.contentType,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      flags,
+      text: buildOutcomeSignalModerationText({
+        signal: input.dto.signal,
+        sameGoal: input.context.sameGoal,
+        trialDuration: input.context.trialDuration,
+        followedParts: input.context.followedParts,
+        irritationLevel: input.context.irritationLevel,
+        routineSlot: input.context.routineSlot,
+        reviewedProduct: input.reviewedProduct,
+        usedWithProducts: input.context.usedWithProducts,
+        note,
+      }),
+    });
+    const shouldRejectNote = flags.some((flag) =>
+      RESULT_NOTE_REJECTION_FLAG_CODES.has(flag.code),
+    );
+    const shouldQueueForReview = flags.some(
+      (flag) =>
+        flag.severity === CommunitySafetySeverity.High ||
+        flag.code === 'possible_undisclosed_sponsorship',
+    );
+
+    return {
+      flags,
+      note,
+      reason: this.automationDecisionReason(moderation.automation),
+      status: shouldRejectNote
+        ? CommunityModerationStatus.Rejected
+        : shouldQueueForReview
+          ? CommunityModerationStatus.PendingReview
+          : moderation.status,
+    };
+  }
+
+  private buildOutcomeSignalProductContextSteps(
+    reviewedProduct: CommunityOutcomeSignalProductContext | null,
+    context: CommunityOutcomeSignalContext,
+  ): CommunityRoutineStepSnapshot[] {
+    const slot = this.toRoutineSafetySlot(context.routineSlot);
+    return [
+      ...(reviewedProduct ? [reviewedProduct] : []),
+      ...context.usedWithProducts,
+    ].map((product, index) => ({
+      stepOrder: index + 1,
+      slot,
+      productId: null,
+      productBrand: product.productBrand,
+      productName: product.productName,
+      category: product.category,
+      frequency: null,
+      notes: null,
+    }));
+  }
+
+  private toRoutineSafetySlot(
+    slot: CommunityReviewRoutineSlot | null,
+  ): CommunityRoutineStepSnapshot['slot'] {
+    if (slot === CommunityReviewRoutineSlot.AM) return 'am';
+    if (slot === CommunityReviewRoutineSlot.PM) return 'pm';
+    return 'either';
+  }
+
+  private async recountOutcomeSignals(
+    contentType: CommunityContentType,
+    contentId: string,
+  ) {
+    const rows = await this.outcomeVotes
+      .createQueryBuilder('vote')
+      .select('vote.signal', 'signal')
+      .addSelect('COUNT(*)::int', 'count')
+      .where('vote.content_type = :contentType', { contentType })
+      .andWhere('vote.content_id = :contentId', { contentId })
+      .andWhere('vote.note_moderation_status = :status', {
+        status: CommunityModerationStatus.Published,
+      })
+      .andWhere('vote.withdrawn_at IS NULL')
+      .groupBy('vote.signal')
+      .getRawMany<{ signal: CommunityOutcomeSignal; count: number | string }>();
+    const counts = this.defaultOutcomeSignalCounts(
+      Object.fromEntries(rows.map((row) => [row.signal, Number(row.count)])),
+    );
+    if (contentType === CommunityContentType.Routine) {
+      await this.routines.update(contentId, {
+        outcome_signal_counts: counts,
+      });
+    } else {
+      await this.reviews.update(contentId, {
+        outcome_signal_counts: counts,
+      });
+    }
+    return counts;
+  }
+
+  private async recountVotes(
+    contentType: CommunityContentType,
+    contentId: string,
+  ) {
+    const rows = await this.votes
+      .createQueryBuilder('vote')
+      .select('vote.vote', 'vote')
+      .addSelect('COUNT(*)::int', 'count')
+      .where('vote.content_type = :contentType', { contentType })
+      .andWhere('vote.content_id = :contentId', { contentId })
+      .groupBy('vote.vote')
+      .getRawMany<{ vote: CommunityHelpfulnessVote; count: number | string }>();
+    const countFor = (targetVote: CommunityHelpfulnessVote) =>
+      Number(rows.find((row) => row.vote === targetVote)?.count ?? 0);
+    const helpful = countFor(CommunityHelpfulnessVote.Helpful);
+    const notHelpful = countFor(CommunityHelpfulnessVote.NotHelpful);
+    if (contentType === CommunityContentType.Routine) {
+      await this.routines.update(contentId, {
+        helpful_count: helpful,
+        not_helpful_count: notHelpful,
+      });
+    } else {
+      await this.reviews.update(contentId, {
+        helpful_count: helpful,
+        not_helpful_count: notHelpful,
+      });
+    }
+  }
+
+  private canRead(
+    item: Pick<
+      CommunityRoutine | CommunityReview,
+      'author_user_id' | 'moderation_status' | 'withdrawn_at'
+    >,
+    viewerUserId: string,
+  ) {
+    if (item.withdrawn_at) return false;
+    return (
+      item.moderation_status === CommunityModerationStatus.Published ||
+      item.author_user_id === viewerUserId
+    );
+  }
+
+  private isPubliclyVisibleContent(
+    item: Pick<
+      CommunityRoutine | CommunityReview,
+      'moderation_status' | 'withdrawn_at'
+    >,
+  ) {
+    return (
+      item.moderation_status === CommunityModerationStatus.Published &&
+      !item.withdrawn_at
+    );
+  }
+
+  private async findContent(contentId: string) {
+    const routine = await this.routines.findOne({ where: { id: contentId } });
+    if (routine) {
+      return {
+        type: CommunityContentType.Routine,
+        item: routine,
+        entity: CommunityRoutine,
+      };
+    }
+    const review = await this.reviews.findOne({ where: { id: contentId } });
+    if (review) {
+      return {
+        type: CommunityContentType.Review,
+        item: review,
+        entity: CommunityReview,
+      };
+    }
+    throw new NotFoundException('Community content not found');
+  }
+
+  async getAdminContentDetail(contentId: string) {
+    const content = await this.findContent(contentId);
+    const [reports, decisions, safetyScans] = await Promise.all([
+      this.reports.find({
+        where: { content_type: content.type, content_id: contentId },
+        order: { created_at: 'DESC' },
+      }),
+      this.decisions.find({
+        where: { content_type: content.type, content_id: contentId },
+        order: { created_at: 'DESC' },
+      }),
+      this.safetyScans.find({
+        where: { content_type: content.type, content_id: contentId },
+        order: { created_at: 'DESC' },
+      }),
+    ]);
+    const steps =
+      content.type === CommunityContentType.Routine
+        ? await this.routineSteps.find({
+            where: { routine_id: contentId },
+            order: { step_order: 'ASC' },
+          })
+        : [];
+    const reviewContext =
+      content.type === CommunityContentType.Review
+        ? await this.reviewContext.find({ where: { review_id: contentId } })
+        : [];
+    return {
+      item: this.toAdminContentItem(content.type, content.item),
+      content: content.item,
+      steps,
+      reviewContext,
+      reports: reports.map((report) => this.toReportResponse(report)),
+      decisions: decisions.map((decision) => ({
+        id: decision.id,
+        actorAdminId: decision.actor_admin_id,
+        fromStatus: decision.from_status,
+        toStatus: decision.to_status,
+        reason: decision.reason,
+        createdAt: decision.created_at.toISOString(),
+      })),
+      safetyScans: safetyScans.map((scan) => ({
+        id: scan.id,
+        result: scan.result,
+        createdAt: scan.created_at.toISOString(),
+      })),
+    };
+  }
+
+  private toAdminContentItem(
+    type: CommunityContentType,
+    item: CommunityRoutine | CommunityReview,
+  ) {
+    const title =
+      type === CommunityContentType.Routine
+        ? (item as CommunityRoutine).title
+        : `${(item as CommunityReview).product_brand} ${(item as CommunityReview).product_name}`;
+    return {
+      id: item.id,
+      type,
+      title,
+      editableText:
+        type === CommunityContentType.Routine
+          ? (item as CommunityRoutine).summary
+          : (item as CommunityReview).body,
+      status: item.moderation_status,
+      disclosureType: item.disclosure_type,
+      safetyFlags: item.safety_flags,
+      authorUserId: item.author_user_id,
+      assignedAdminId: item.assigned_admin_id,
+      createdAt: item.created_at.toISOString(),
+      updatedAt: item.updated_at.toISOString(),
+    };
+  }
+
+  private toSubmissionItem(
+    type: CommunityContentType.Routine,
+    item: CommunityRoutine,
+    relations: CommunityRoutineStep[],
+    moderationGuidance: CommunitySubmissionModerationGuidance | null,
+  ): ReturnType<CommunityService['toAdminContentItem']> & {
+    moderationGuidance: CommunitySubmissionModerationGuidance | null;
+    editableRoutine: ReturnType<
+      CommunityService['toEditableRoutineSubmission']
+    >;
+    editableReview: null;
+  };
+  private toSubmissionItem(
+    type: CommunityContentType.Review,
+    item: CommunityReview,
+    relations: CommunityReviewContextProduct[],
+    moderationGuidance: CommunitySubmissionModerationGuidance | null,
+  ): ReturnType<CommunityService['toAdminContentItem']> & {
+    moderationGuidance: CommunitySubmissionModerationGuidance | null;
+    editableRoutine: null;
+    editableReview: ReturnType<CommunityService['toEditableReviewSubmission']>;
+  };
+  private toSubmissionItem(
+    type: CommunityContentType,
+    item: CommunityRoutine | CommunityReview,
+    relations: CommunityRoutineStep[] | CommunityReviewContextProduct[],
+    moderationGuidance: CommunitySubmissionModerationGuidance | null,
+  ) {
+    const base = this.toAdminContentItem(type, item);
+    if (type === CommunityContentType.Routine) {
+      return {
+        ...base,
+        moderationGuidance,
+        editableRoutine: this.toEditableRoutineSubmission(
+          item as CommunityRoutine,
+          relations as CommunityRoutineStep[],
+        ),
+        editableReview: null,
+      };
+    }
+    return {
+      ...base,
+      moderationGuidance,
+      editableRoutine: null,
+      editableReview: this.toEditableReviewSubmission(
+        item as CommunityReview,
+        relations as CommunityReviewContextProduct[],
+      ),
+    };
+  }
+
+  private toResultSubmissionItem(
+    item: CommunityOutcomeSignalVote,
+    parentContent: CommunityResultParentContent | null,
+  ) {
+    const guidanceReason = this.cleanSubmissionGuidanceReason(
+      item.note_moderation_reason,
+    );
+    const guidanceSource: CommunitySubmissionModerationGuidance['source'] =
+      /^AI moderation\s+/i.test(item.note_moderation_reason ?? '')
+        ? 'ai'
+        : 'system';
+    return {
+      id: item.id,
+      type: COMMUNITY_RESULT_SUBMISSION_KIND,
+      title: parentContent?.title ?? '',
+      editableText: item.note,
+      status: item.note_moderation_status,
+      disclosureType: CommunityDisclosureType.Ordinary,
+      safetyFlags: item.note_safety_flags,
+      moderationGuidance: guidanceReason
+        ? {
+            reason: guidanceReason,
+            source: guidanceSource,
+            createdAt: item.updated_at.toISOString(),
+          }
+        : null,
+      editableRoutine: null,
+      editableReview: null,
+      parentContent,
+      resultSignal: item.signal,
+      authorUserId: item.user_id,
+      createdAt: item.created_at.toISOString(),
+      updatedAt: item.updated_at.toISOString(),
+    };
+  }
+
+  private toEditableRoutineSubmission(
+    routine: CommunityRoutine,
+    steps: CommunityRoutineStep[],
+  ) {
+    return {
+      title: routine.title,
+      summary: routine.summary,
+      disclosureType: routine.disclosure_type,
+      concernTags: routine.concern_tags ?? [],
+      goalTags: routine.goal_tags ?? [],
+      goalResult: routine.goal_result ?? null,
+      timeframe: routine.timeframe,
+      avoidTags: routine.avoid_tags ?? [],
+      habitTags: routine.habit_tags ?? [],
+      didNotWorkTags: routine.did_not_work_tags ?? [],
+      warningTags: routine.warning_tags ?? [],
+      steps: steps.map((step) => ({
+        slot: step.slot,
+        productId: step.product_id,
+        productBrand: step.product_brand,
+        productName: step.product_name,
+        category: step.category,
+        frequency: step.frequency,
+        notes: step.notes,
+      })),
+    };
+  }
+
+  private toEditableReviewSubmission(
+    review: CommunityReview,
+    context: CommunityReviewContextProduct[],
+  ) {
+    return {
+      productId: review.product_id,
+      productBrand: review.product_brand,
+      productName: review.product_name,
+      productCategory: review.product_category,
+      disclosureType: review.disclosure_type,
+      usageDuration: review.usage_duration,
+      frequency: review.frequency,
+      routineContextUsage: review.routine_context_usage,
+      routineSlot: review.routine_slot,
+      skinResponse: review.skin_response,
+      overallRating: review.overall_rating,
+      effectivenessRating: review.effectiveness_rating,
+      irritationRating: review.irritation_rating,
+      textureRating: review.texture_rating,
+      valueRating: review.value_rating,
+      outcomes: review.outcomes,
+      repurchase: review.repurchase,
+      routineContext: context.map((item) => ({
+        productId: item.product_id,
+        productBrand: item.product_brand,
+        productName: item.product_name,
+        category: item.category,
+      })),
+      body: review.body,
+    };
+  }
+
+  private queryAdminModerationRows<
+    T extends CommunityRoutine | CommunityReview,
+  >(
+    repository: Repository<T>,
+    contentType: CommunityContentType,
+    statuses: CommunityModerationStatus[],
+    query: AdminCommunityModerationQueryDto,
+  ): Promise<T[]> {
+    const alias =
+      contentType === CommunityContentType.Routine ? 'routine' : 'review';
+    const builder = repository
+      .createQueryBuilder(alias)
+      .where(`${alias}.moderation_status IN (:...statuses)`, { statuses })
+      .andWhere(`${alias}.withdrawn_at IS NULL`);
+
+    if (query.disclosureType) {
+      builder.andWhere(`${alias}.disclosure_type = :disclosureType`, {
+        disclosureType: query.disclosureType,
+      });
+    }
+    if (query.severity) {
+      builder.andWhere(`${alias}.safety_flags @> :severityFilter`, {
+        severityFilter: JSON.stringify([{ severity: query.severity }]),
+      });
+    }
+    if (query.assignedAdminId) {
+      if (query.assignedAdminId === 'unassigned') {
+        builder.andWhere(`${alias}.assigned_admin_id IS NULL`);
+      } else {
+        builder.andWhere(`${alias}.assigned_admin_id = :assignedAdminId`, {
+          assignedAdminId: query.assignedAdminId,
+        });
+      }
+    }
+    if (query.search?.trim()) {
+      const search = `%${query.search.trim().toLowerCase()}%`;
+      const searchableColumns =
+        contentType === CommunityContentType.Routine
+          ? [`${alias}.title`]
+          : [`${alias}.product_brand`, `${alias}.product_name`];
+      builder.andWhere(
+        `(${[
+          `${alias}.id ILIKE :search`,
+          `${alias}.author_user_id ILIKE :search`,
+          ...searchableColumns.map((column) => `${column} ILIKE :search`),
+        ].join(' OR ')})`,
+        { search },
+      );
+    }
+    if (query.reason) {
+      builder.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM "community_reports" report
+          WHERE report."content_type" = :reportContentType
+            AND report."content_id" = ${alias}."id"
+            AND report."reason" = :reportReason
+            AND report."status" = :reportStatus
+        )`,
+        {
+          reportContentType: contentType,
+          reportReason: query.reason,
+          reportStatus: CommunityReportStatus.Open,
+        },
+      );
+    }
+
+    return builder
+      .orderBy(`${alias}.updated_at`, 'DESC')
+      .take(DEFAULT_LIMIT)
+      .getMany();
+  }
+
+  private matchesAdminModerationFilters(
+    item: ReturnType<CommunityService['toAdminContentItem']>,
+    query: AdminCommunityModerationQueryDto,
+  ): boolean {
+    if (query.disclosureType && item.disclosureType !== query.disclosureType)
+      return false;
+    if (
+      query.severity &&
+      !item.safetyFlags.some((flag) => flag.severity === query.severity)
+    ) {
+      return false;
+    }
+    if (query.assignedAdminId) {
+      if (query.assignedAdminId === 'unassigned') {
+        if (item.assignedAdminId) return false;
+      } else if (item.assignedAdminId !== query.assignedAdminId) {
+        return false;
+      }
+    }
+    if (query.search) {
+      const needle = query.search.toLowerCase().trim();
+      const haystack =
+        `${item.title} ${item.authorUserId} ${item.id}`.toLowerCase();
+      if (!haystack.includes(needle)) return false;
+    }
+    return true;
+  }
+
+  private toReportResponse(report: CommunityReport) {
+    return {
+      id: report.id,
+      contentType: report.content_type,
+      contentId: report.content_id,
+      reason: report.reason,
+      note: report.note,
+      status: report.status,
+      createdAt: report.created_at.toISOString(),
+      updatedAt: report.updated_at.toISOString(),
+    };
+  }
+
+  private async toCommunitySettingsResponse(
+    settings: CommunitySettings | null,
+  ): Promise<CommunitySettingsResponse> {
+    const updatedByAdminId = settings?.updated_by_admin_id ?? null;
+    const updatedByAdmin = updatedByAdminId
+      ? await this.adminAccounts.findOne({
+          where: { id: updatedByAdminId },
+        })
+      : null;
+
+    return {
+      minimumAccountAgeDays:
+        settings?.minimum_account_age_days ??
+        DEFAULT_COMMUNITY_MIN_ACCOUNT_AGE_DAYS,
+      updatedAt: (
+        settings?.updated_at ??
+        settings?.created_at ??
+        new Date(0)
+      ).toISOString(),
+      updatedByAdminId,
+      updatedByAdminLabel: updatedByAdmin
+        ? this.toAdminDisplayLabel(updatedByAdmin)
+        : updatedByAdminId
+          ? 'Former admin'
+          : null,
+    };
+  }
+
+  private toAdminDisplayLabel(admin: Pick<AdminAccount, 'email' | 'name'>) {
+    const name = cleanText(admin.name, 120);
+    const email = cleanText(admin.email, 255);
+
+    if (name && email) return `${name} (${email})`;
+    return name ?? email ?? 'Admin';
+  }
+
+  private automationDecisionReason(
+    automation: CommunityModerationAutomationSnapshot,
+  ): string {
+    return automation.handledBy === 'admin'
+      ? `Automation escalated to admin: ${automation.reason}`
+      : `AI moderation ${automation.action}: ${automation.reason}`;
+  }
+
+  private async recordDecision(
+    manager: Pick<DataSource['manager'], 'getRepository'>,
+    input: {
+      contentType: CommunityContentType;
+      contentId: string;
+      actorAdminId: string | null;
+      from: CommunityModerationStatus;
+      to: CommunityModerationStatus;
+      reason: string;
+    },
+  ) {
+    await manager.getRepository(CommunityModerationDecision).save(
+      manager.getRepository(CommunityModerationDecision).create({
+        content_type: input.contentType,
+        content_id: input.contentId,
+        actor_admin_id: input.actorAdminId,
+        from_status: input.from,
+        to_status: input.to,
+        reason: input.reason,
+      }),
+    );
+  }
+
+  private async recordSafetyScan(
+    manager: Pick<DataSource['manager'], 'getRepository'>,
+    input: {
+      contentType: CommunityContentType;
+      contentId: string;
+      flags: CommunitySafetyFlag[];
+      status: CommunityModerationStatus;
+      scannedTextLength: number;
+      automation?: CommunityModerationAutomationSnapshot;
+    },
+  ) {
+    await manager.getRepository(CommunitySafetyScanResult).save(
+      manager.getRepository(CommunitySafetyScanResult).create({
+        content_type: input.contentType,
+        content_id: input.contentId,
+        result: {
+          flags: input.flags,
+          status: input.status,
+          scannedTextLength: input.scannedTextLength,
+          scannerVersion: 'deterministic-v2+ai-triage-v2',
+          automation: input.automation,
+        },
+      }),
+    );
+  }
+
+  private async assertActionLimit(input: {
+    label: string;
+    repository: {
+      count(options: { where: Record<string, unknown> }): Promise<number>;
+    };
+    userColumn: string;
+    userId: string;
+    maxPerDay: number;
+  }) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const count = await input.repository.count({
+      where: {
+        [input.userColumn]: input.userId,
+        created_at: MoreThan(since),
+      },
+    });
+    if (count >= input.maxPerDay) {
+      throw new BadRequestException(
+        `Too many community ${input.label} in the last 24 hours`,
+      );
+    }
+  }
+
+  private productMatchesReactionTrigger(
+    product: InventoryProduct,
+    triggers: string[],
+  ): boolean {
+    if (triggers.length === 0) return false;
+    const haystack = [
+      product.brand,
+      product.name,
+      product.category,
+      ...(product.identity?.inciIngredients ?? []),
+    ]
+      .join(' ')
+      .toLowerCase();
+    return triggers.some((trigger) => haystack.includes(trigger));
+  }
+
+  private stepRemovalReasonForProfile(
+    step: CommunityRoutineStep,
+    profile: SkinProfile | null,
+    routinePreferences: SkinProfile['routine_preferences'],
+    activeTolerances: SkinProfile['active_tolerances'],
+  ): string | null {
+    const category = step.category;
+    const frequency = (step.frequency ?? '').toLowerCase();
+    const activeCategories = new Set(['serum', 'exfoliant', 'treatment']);
+    if (!profile || !activeCategories.has(category)) return null;
+
+    const maxActiveNights = routinePreferences?.max_active_nights_per_week;
+    if (typeof maxActiveNights === 'number' && maxActiveNights <= 0) {
+      return 'Removed because your profile currently avoids leave-on active steps.';
+    }
+    if (
+      category === 'exfoliant' &&
+      (frequency.includes('daily') || frequency.includes('every day')) &&
+      (routinePreferences?.pace === 'cautious' || maxActiveNights === 1)
+    ) {
+      return 'Removed because daily exfoliation is too aggressive for your current routine pace.';
+    }
+    const lowTolerance = Object.entries(activeTolerances ?? {}).some(
+      ([active, value]) =>
+        frequency.includes(active.toLowerCase()) &&
+        ['low', 'none', 'avoid'].includes(
+          String(value?.tolerance ?? '').toLowerCase(),
+        ),
+    );
+    if (lowTolerance) {
+      return 'Removed because your active-tolerance profile flags this ingredient role as low tolerance.';
+    }
+    return null;
+  }
+
+  private productCompatibleForStep(
+    product: InventoryProduct,
+    step: CommunityRoutineStep,
+    routinePreferences: SkinProfile['routine_preferences'],
+  ): boolean {
+    if (String(product.category) !== step.category) return false;
+    const ingredients = product.identity?.inciIngredients ?? [];
+    const joined = ingredients.join(' ').toLowerCase();
+    if (step.category === 'sun-protection') {
+      const sunscreenText =
+        `${product.name} ${product.guidance?.steps?.join(' ') ?? ''} ${joined}`.toLowerCase();
+      if (
+        !/(spf|zinc oxide|titanium dioxide|avobenzone|uvinul|tinosorb|octocrylene|octisalate)/.test(
+          sunscreenText,
+        )
+      ) {
+        return false;
+      }
+      const preferredFilter = String(
+        routinePreferences?.sunscreen_filter ?? '',
+      ).toLowerCase();
+      if (preferredFilter === 'mineral') {
+        return /(zinc oxide|titanium dioxide)/.test(sunscreenText);
+      }
+      if (preferredFilter === 'chemical') {
+        return !/(zinc oxide|titanium dioxide)/.test(sunscreenText);
+      }
+    }
+    if (routinePreferences?.fragrance_free) {
+      const fragranceSignals = [
+        'fragrance',
+        'parfum',
+        'limonene',
+        'linalool',
+        'citral',
+        'geraniol',
+      ];
+      if (fragranceSignals.some((signal) => joined.includes(signal)))
+        return false;
+    }
+    return true;
+  }
+
+  private adaptationSwapReason(
+    step: CommunityRoutineStep,
+    target: InventoryProduct,
+  ): string {
+    if (step.category === 'sun-protection') {
+      return 'Mapped to an owned sunscreen-compatible product that preserves the protection role.';
+    }
+    const ingredientOverlap = (target.identity?.inciIngredients ?? []).some(
+      (ingredient) =>
+        (step.notes ?? '').toLowerCase().includes(ingredient.toLowerCase()),
+    );
+    return ingredientOverlap
+      ? 'Mapped to an owned product with a matching category and ingredient-role signal.'
+      : 'Mapped to the closest safe category match on your shelf.';
+  }
+
+  private async removeContentFromFeedsForSevereReport(
+    manager: Pick<DataSource['manager'], 'getRepository'>,
+    contentType: CommunityContentType,
+    contentId: string,
+    reason: CommunityReportReason,
+  ) {
+    const content =
+      contentType === CommunityContentType.Routine
+        ? await manager.getRepository(CommunityRoutine).findOne({
+            where: { id: contentId },
+          })
+        : await manager.getRepository(CommunityReview).findOne({
+            where: { id: contentId },
+          });
+    if (
+      !content ||
+      content.moderation_status !== CommunityModerationStatus.Published
+    ) {
+      return;
+    }
+    content.moderation_status = CommunityModerationStatus.PendingReview;
+    await manager
+      .getRepository(
+        contentType === CommunityContentType.Routine
+          ? CommunityRoutine
+          : CommunityReview,
+      )
+      .save(content);
+    await this.recordDecision(manager, {
+      contentType,
+      contentId,
+      actorAdminId: null,
+      from: CommunityModerationStatus.Published,
+      to: CommunityModerationStatus.PendingReview,
+      reason: `Auto-removed from ranking after severe report: ${reason}`,
+    });
+  }
+
+  private async writeCommunityAuditLog(input: {
+    action: AdminAuditAction;
+    actorAdminId: string;
+    contentId: string;
+    contentType: string;
+    context?: AdminCommunityAuditContext;
+    metadata?: Record<string, unknown>;
+    reason: string;
+    targetUserId: string | null;
+  }) {
+    await this.auditLogs.save(
+      this.auditLogs.create({
+        action: input.action,
+        actor_admin_id: input.actorAdminId,
+        actor_session_id: input.context?.sessionId ?? 'community-admin',
+        target_admin_id: null,
+        target_user_id: input.targetUserId,
+        reason: input.reason,
+        ip_address: input.context?.ip ?? null,
+        user_agent: input.context?.userAgent ?? null,
+        metadata: {
+          contentId: input.contentId,
+          contentType: input.contentType,
+          ...(input.metadata ?? {}),
+        },
+      }),
+    );
+  }
+
+  private async notifyModerationOutcome(
+    item: CommunityRoutine | CommunityReview,
+    contentType: CommunityContentType,
+    status: CommunityModerationStatus,
+  ) {
+    if (
+      ![
+        CommunityModerationStatus.Published,
+        CommunityModerationStatus.Hidden,
+        CommunityModerationStatus.Rejected,
+        CommunityModerationStatus.NeedsEdit,
+      ].includes(status)
+    ) {
+      return;
+    }
+    try {
+      await this.notifications.save(
+        this.notifications.create({
+          user_id: item.author_user_id,
+          kind: 'community_moderation',
+          title_key: 'community.notifications.moderation.title',
+          body_key: `community.notifications.moderation.${status}`,
+          severity:
+            status === CommunityModerationStatus.Published ? 'info' : 'warning',
+          dedupe_key: `community:${contentType}:${item.id}:${status}`,
+          deep_link: '/community?tab=submissions',
+          payload: null,
+        }),
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code !== '23505') {
+        throw error;
+      }
+      // Duplicate moderation notifications should not block the moderation action.
+    }
+  }
+}

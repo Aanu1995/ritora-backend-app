@@ -7,6 +7,9 @@ import {
   SMART_PICKS_COVERAGE_ROLES,
   smartPicksActiveTagLabel,
   smartPicksCoverageRoleLabel,
+  smartPicksStarterCoveredReason,
+  smartPicksStarterKitSummary,
+  smartPicksStarterWaitReason,
 } from './smart-picks-localization';
 
 describe('Smart Picks localization', () => {
@@ -108,5 +111,17 @@ describe('Smart Picks localization', () => {
         hint: 'Du har 2 produkter med signaler för vitamin C. Använd upp en innan du lägger till en till.',
       }),
     ]);
+  });
+
+  it('localizes starter-kit deterministic copy in Spanish', () => {
+    expect(smartPicksStarterKitSummary(0, 'es')).toBe(
+      'Empieza con lo esencial. Añade tratamiento al final.',
+    );
+    expect(smartPicksStarterCoveredReason('Daily SPF', 'es')).toBe(
+      'Ya tienes este paso inicial cubierto con Daily SPF.',
+    );
+    expect(smartPicksStarterWaitReason('treat', 'es')).toContain(
+      'todavía no necesita un producto de tratamiento',
+    );
   });
 });

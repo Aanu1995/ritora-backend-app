@@ -910,6 +910,7 @@ describe('AuthService', () => {
       );
 
       expect(result.accessToken).toBe('access-token-123');
+      expect(result.refreshToken).toMatch(/^01SESSION\.[a-f0-9]{64}$/);
       expect(result.preferredLanguage).toBe('en');
       expect(sessionsRepo.save).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalled();
@@ -1226,6 +1227,21 @@ describe('AuthService', () => {
       await service.logout(`01SESSION.${'b'.repeat(64)}`, asResponse(res));
 
       expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(res.clearCookie).toHaveBeenCalled();
+    });
+
+    it('revokes the current bearer session when no refresh cookie is available', async () => {
+      const res = mockRes();
+
+      await service.logoutSession('01USER', '01SESSION', asResponse(res));
+
+      expect(sessionsRepo.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: '01SESSION',
+          user_id: '01USER',
+        }),
+        expect.objectContaining({ revoked_at: expect.any(Date) }),
+      );
       expect(res.clearCookie).toHaveBeenCalled();
     });
   });

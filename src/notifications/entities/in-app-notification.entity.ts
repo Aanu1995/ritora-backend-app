@@ -17,13 +17,13 @@ export type NotificationKind =
   | 'insight_ready'
   | 'wrapped_ready'
   | 'analysis_failed'
-  | 'export_ready'
   | 'suggestion_ready'
   | 'slot_start'
   | 'recording_reminder'
   | 'product_nearing_expiry'
   | 'product_expired'
-  | 'smart_pick_ready';
+  | 'smart_pick_ready'
+  | 'community_moderation';
 
 export type NotificationSeverity = 'info' | 'warning' | 'critical';
 

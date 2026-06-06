@@ -6,6 +6,7 @@ import {
   SmartPicksGapKind,
   SmartPicksMode,
   SmartPicksProductPerformanceSignal,
+  SmartPicksSkinJournalSummary,
 } from '../smart-picks.types';
 
 type GoldenCoverageSlot = {
@@ -90,6 +91,7 @@ export type GoldenSmartPicksPersona = {
   activeProducts: readonly GoldenSmartPicksProduct[];
   allProducts: readonly GoldenSmartPicksProduct[];
   productPerformance: readonly GoldenSmartPicksPerformance[];
+  skinJournalSummary?: SmartPicksSkinJournalSummary | null;
   aiPlanResponse: GoldenPlanResponse;
   productPickResponse: GoldenProductResponse | null;
   expected: {
@@ -124,6 +126,38 @@ export const SMART_PICKS_GOLDEN_PERSONAS = [
     activeProducts: [],
     allProducts: [],
     productPerformance: [],
+    skinJournalSummary: {
+      entryCountLast90: 4,
+      usableAnalysisEntryCount: 4,
+      latestEntryDate: '2026-05-10',
+      latestSummary:
+        'Recent journal analysis continues to show visible post-breakout marks with no reaction signal.',
+      overallChangeFromPrevious: 'stable',
+      trendSignal: SmartPicksProductPerformanceSignal.NotImproving,
+      concernTrend: 'hyperpigmentation',
+      photoCheckpoints: 2,
+      photoInputImages: 6,
+      multiAnglePhotoCheckpoints: 2,
+      topConcerns: [
+        {
+          concern: 'hyperpigmentation',
+          severity: 'moderate',
+          confidence: 0.84,
+          changeFromPrevious: 'stable',
+          locations: ['cheeks'],
+        },
+        {
+          concern: 'uneven_tone',
+          severity: 'mild',
+          confidence: 0.72,
+          changeFromPrevious: 'stable',
+          locations: ['cheeks', 'jawline'],
+        },
+      ],
+      reactionSignalCount: 0,
+      barrierCompromiseCount: 0,
+      doctorFollowUpRecommended: false,
+    },
     aiPlanResponse: {
       coverage: {
         slots: [
@@ -535,7 +569,7 @@ export const SMART_PICKS_GOLDEN_PERSONAS = [
     },
     productPickResponse: null,
     expected: {
-      coverageRoles: ['cleanse', 'moisturise', 'spf', 'peptide', 'retinoid'],
+      coverageRoles: ['cleanse', 'moisturise', 'spf', 'peptide'],
       priorityGapKeys: [],
       considerGapKeys: ['peptide-or-barrier-support-serum'],
       blockedSafetyGapCount: 1,

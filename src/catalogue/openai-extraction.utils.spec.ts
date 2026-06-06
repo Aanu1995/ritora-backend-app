@@ -94,6 +94,23 @@ describe('openai extraction utils', () => {
     expect(result?.data.guidance?.quantity).toBe(Quantity.TwoToThreeDrops);
   });
 
+  it('keeps important timing words in concise guidance steps', () => {
+    const result = toExtractionResult(
+      {
+        guidance: {
+          steps: [
+            'Apply a generous amount as the last skincare step each morning',
+          ],
+        },
+      },
+      {},
+    );
+
+    expect(result?.data.guidance?.steps).toEqual([
+      'Apply a generous amount as the last skincare step each morning',
+    ]);
+  });
+
   it('normalizes benefits and suited-for values from noisy label sections', () => {
     const result = toExtractionResult(
       {

@@ -104,6 +104,22 @@ describe('SmartPicksGenerationQueueService', () => {
     );
   });
 
+  it('destroys the SQS client on module shutdown', () => {
+    const service = buildService(repo<SmartPickGenerationJob>(), {
+      SMART_PICKS_QUEUE_DRIVER: 'sqs',
+      SMART_PICKS_SQS_QUEUE_URL:
+        'https://sqs.eu-north-1.amazonaws.com/123/smart-picks',
+    });
+    const destroy = jest.fn();
+    (service as unknown as { sqsClient: { destroy: jest.Mock } }).sqsClient = {
+      destroy,
+    };
+
+    service.onModuleDestroy();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('wakes SQS dispatch when the matching active job is still queued', async () => {
     jest.useFakeTimers();
     const activeJob = job({

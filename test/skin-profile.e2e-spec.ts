@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, MockMailService, truncateTables } from './test-setup';
+import { closeTestApp, createTestApp, MockMailService } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
 
@@ -41,8 +41,7 @@ describe('Skin Profile (e2e)', () => {
   });
 
   afterAll(async () => {
-    await truncateTables(app);
-    await app.close();
+    await closeTestApp(app);
   });
 
   function authGet(path: string) {

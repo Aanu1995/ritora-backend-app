@@ -4,12 +4,14 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
 import { AccountDeletionStatus } from './dto/account-deletion-response.dto';
+import { GoogleIdTokenVerifierService } from './oauth/google-id-token-verifier.service';
 
 const mockAuthService = () => ({
   register: jest.fn(),
   login: jest.fn(),
   loginWithGoogle: jest.fn(),
   loginWithApple: jest.fn(),
+  recordOAuthFailureForMonitoring: jest.fn(),
   refreshTokens: jest.fn(),
   verifyEmail: jest.fn(),
   resendVerification: jest.fn(),
@@ -18,6 +20,7 @@ const mockAuthService = () => ({
   getMe: jest.fn(),
   getSessions: jest.fn(),
   logout: jest.fn(),
+  logoutSession: jest.fn(),
   logoutAll: jest.fn(),
   clearRefreshCookie: jest.fn(),
   exportData: jest.fn(),
@@ -61,10 +64,12 @@ const asResponse = (response: MockResponse): Response =>
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: ReturnType<typeof mockAuthService>;
+  let googleIdTokenVerifier: { verify: jest.Mock };
   const cookieName = 'custom_refresh';
 
   beforeEach(async () => {
     authService = mockAuthService();
+    googleIdTokenVerifier = { verify: jest.fn() };
     const configValues: Record<string, unknown> = {
       CORS_ORIGINS: 'http://localhost:3000',
       WEB_APP_URL: 'http://localhost:3000',
@@ -78,6 +83,10 @@ describe('AuthController', () => {
       controllers: [AuthController],
       providers: [
         { provide: AuthService, useValue: authService },
+        {
+          provide: GoogleIdTokenVerifierService,
+          useValue: googleIdTokenVerifier,
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -125,6 +134,7 @@ describe('AuthController', () => {
     const authResponse = {
       accessToken: 'tok',
       user: { id: '01', preferredLanguage: 'sv' },
+      refreshToken: '01SESSION.secret',
     };
     authService.login.mockResolvedValue(authResponse);
 
@@ -134,7 +144,11 @@ describe('AuthController', () => {
       asRequest(mockReq()),
     );
 
-    expect(result).toEqual(authResponse);
+    expect(result).toEqual({
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+    });
+    expect('refreshToken' in result).toBe(false);
     expect(res.cookie).toHaveBeenCalledWith(
       'NEXT_LOCALE',
       'sv',
@@ -143,6 +157,32 @@ describe('AuthController', () => {
         path: '/',
       }),
     );
+  });
+
+  it('mobile login returns a refresh token in the response body', async () => {
+    const res = mockRes();
+    const authResponse = {
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+      refreshToken: '01SESSION.secret',
+    };
+    authService.login.mockResolvedValue(authResponse);
+
+    const result = await controller.loginMobile(
+      { email: 'test@example.com', password: 'Password1' },
+      asResponse(res),
+      asRequest(mockReq()),
+    );
+
+    expect(result).toEqual(authResponse);
+    expect(authService.login).toHaveBeenCalledWith(
+      'test@example.com',
+      'Password1',
+      res,
+      '127.0.0.1',
+      'TestAgent',
+    );
+    expect(result.refreshToken).toBe('01SESSION.secret');
   });
 
   it('google callback creates a session and redirects to post-login', async () => {
@@ -207,6 +247,90 @@ describe('AuthController', () => {
     expect(res.redirect).toHaveBeenCalledWith(
       'http://localhost:3000/post-login',
     );
+  });
+
+  it('mobile google sign-in verifies the id token and returns a mobile session', async () => {
+    const res = mockRes();
+    const authResponse = {
+      accessToken: 'tok',
+      user: { id: '01', preferredLanguage: 'sv' },
+      refreshToken: '01SESSION.secret',
+    };
+    const profile = {
+      provider: 'google',
+      providerSubject: 'google-subject',
+      email: 'test@gmail.com',
+      emailVerified: true,
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isEmailAuthoritative: true,
+    };
+    googleIdTokenVerifier.verify.mockResolvedValue(profile);
+    authService.loginWithGoogle.mockResolvedValue(authResponse);
+
+    const result = await controller.loginWithGoogleMobile(
+      {
+        idToken: 'google-id-token',
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      },
+      asResponse(res),
+      asRequest(mockReq()),
+    );
+
+    expect(googleIdTokenVerifier.verify).toHaveBeenCalledWith(
+      'google-id-token',
+    );
+    expect(authService.loginWithGoogle).toHaveBeenCalledWith(
+      profile,
+      {
+        preferredLanguage: 'sv',
+        termsAccepted: true,
+        privacyPolicyAccepted: true,
+      },
+      res,
+      '127.0.0.1',
+      'TestAgent',
+    );
+    expect(res.cookie).toHaveBeenCalledWith(
+      'NEXT_LOCALE',
+      'sv',
+      expect.objectContaining({
+        httpOnly: false,
+        path: '/',
+      }),
+    );
+    expect(result).toEqual(authResponse);
+    expect(result.refreshToken).toBe('01SESSION.secret');
+  });
+
+  it('mobile google sign-in records invalid token failures for monitoring', async () => {
+    const res = mockRes();
+    const error = new Error('Invalid Google sign-in token');
+    googleIdTokenVerifier.verify.mockRejectedValue(error);
+
+    await expect(
+      controller.loginWithGoogleMobile(
+        {
+          idToken: 'invalid-google-id-token',
+          preferredLanguage: 'en',
+          termsAccepted: true,
+          privacyPolicyAccepted: true,
+        },
+        asResponse(res),
+        asRequest(mockReq()),
+      ),
+    ).rejects.toThrow(error);
+
+    expect(authService.recordOAuthFailureForMonitoring).toHaveBeenCalledWith(
+      'google',
+      {
+        ip: '127.0.0.1',
+        reason: 'invalid_id_token',
+      },
+    );
+    expect(authService.loginWithGoogle).not.toHaveBeenCalled();
   });
 
   it('apple callback creates a session and redirects to post-login', async () => {
@@ -330,27 +454,36 @@ describe('AuthController', () => {
 
     const result = await controller.logout(
       'sv',
+      '01USER',
+      '01SESSION',
       asRequest(mockReq({ cookies: { [cookieName]: '01SESSION.secret' } })),
       asResponse(res),
     );
 
     expect(result.message).toBe('Du har loggats ut');
     expect(authService.logout).toHaveBeenCalledWith('01SESSION.secret', res);
+    expect(authService.logoutSession).not.toHaveBeenCalled();
   });
 
-  it('logout clears the refresh cookie even when no token is present', async () => {
+  it('logout revokes the bearer session when no refresh cookie is present', async () => {
     const res = mockRes();
-    authService.clearRefreshCookie.mockImplementation(() => undefined);
+    authService.logoutSession.mockResolvedValue(undefined);
 
     const result = await controller.logout(
       'sv',
+      '01USER',
+      '01SESSION',
       asRequest(mockReq()),
       asResponse(res),
     );
 
     expect(result.message).toBe('Du har loggats ut');
     expect(authService.logout).not.toHaveBeenCalled();
-    expect(authService.clearRefreshCookie).toHaveBeenCalledWith(res);
+    expect(authService.logoutSession).toHaveBeenCalledWith(
+      '01USER',
+      '01SESSION',
+      res,
+    );
   });
 
   it('refresh reads the configured refresh cookie name', async () => {
@@ -379,6 +512,32 @@ describe('AuthController', () => {
         httpOnly: false,
         path: '/',
       }),
+    );
+  });
+
+  it('refresh accepts the mobile refresh token body and returns the rotated token', async () => {
+    const res = mockRes();
+    authService.refreshTokens.mockResolvedValue({
+      accessToken: 'refreshed',
+      refreshToken: '01SESSION.rotated',
+      preferredLanguage: 'sv',
+    });
+
+    const result = await controller.refresh(
+      asRequest(mockReq()),
+      asResponse(res),
+      { refreshToken: '01SESSION.secret' },
+    );
+
+    expect(result).toEqual({
+      accessToken: 'refreshed',
+      refreshToken: '01SESSION.rotated',
+    });
+    expect(authService.refreshTokens).toHaveBeenCalledWith(
+      '01SESSION.secret',
+      res,
+      '127.0.0.1',
+      'TestAgent',
     );
   });
 

@@ -3,6 +3,7 @@ export const AdminAiCostFeatureFilter = {
   DailySuggestions: 'daily_suggestions',
   JournalAnalysis: 'journal_analysis',
   JournalInsights: 'journal_insights',
+  IngredientAnalysis: 'ingredient_analysis',
   QuickCheck: 'quick_check',
   SmartPicks: 'smart_picks',
 } as const;

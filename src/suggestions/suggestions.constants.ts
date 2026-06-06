@@ -169,6 +169,8 @@ export type SuggestionObservabilityEventKind =
   | 'on_demand_duplicate_request'
   | 'on_demand_retry_requested'
   | 'generation_completed'
+  | 'generation_context_loaded'
+  | 'generation_context_threshold_exceeded'
   | 'generation_failed'
   | 'generation_fallback'
   | 'job_recovered'
@@ -206,9 +208,9 @@ export const SUGGESTION_SCHEDULER_BATCH_SIZE = 500;
 export const RECORDING_REMINDER_DELAY_MINUTES = 30;
 export const RECORDING_REMINDER_RETRY_NEXT_MORNING_HOURS = 8;
 
-export const SUGGESTION_PROMPT_VERSION = '2026-05-06.v1';
+export const SUGGESTION_PROMPT_VERSION = '2026-06-05.v6';
 export const SUGGESTION_AI_CONSENT_VERSION = '2026-05-04.v1';
-export const SUGGESTION_SAFETY_POLICY_VERSION = '2026-05-04.production.v1';
+export const SUGGESTION_SAFETY_POLICY_VERSION = '2026-06-02.production.v1';
 export const SUGGESTION_SAFETY_POLICY_REVIEWED_AT = '2026-05-04';
 
 export const SUGGESTION_AI_DAILY_USER_GENERATION_LIMIT = 12;
@@ -217,6 +219,7 @@ export const SUGGESTION_AI_DAILY_USER_COST_LIMIT_USD = 1.5;
 export const SUGGESTION_ON_DEMAND_DAILY_USER_LIMIT = 5;
 export const SUGGESTION_ON_DEMAND_COOLDOWN_MINUTES = 2;
 export const SUGGESTION_CONSERVATIVE_RESTART_AFTER_DAYS = 14;
+export const SUGGESTION_REACTION_SKIP_PAUSE_DAYS = 3;
 
 export const SUGGESTION_CONTEXT_CACHE_RETENTION_DAYS = 30;
 export const SUGGESTION_GENERATION_CONTEXT_RETENTION_DAYS = 90;
@@ -225,7 +228,6 @@ export const SUGGESTION_RETENTION_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export const SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT = 10;
 export const SUGGESTION_HISTORY_PAGE_MAX_LIMIT = 50;
-export const SUGGESTION_HISTORY_EXPORT_MAX_ROWS = 5000;
 
 export enum SuggestionEvidenceSourceId {
   AadSunscreenSelection = 'aad_sunscreen_selection',

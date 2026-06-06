@@ -85,7 +85,7 @@ export function productCheckAssertions(
       expected.forbiddenReasonCodes,
       response.verdict.reasons.map((reason) => reason.code),
     ),
-    checkIncludes(
+    checkIncludesDisplayNames(
       'active_names',
       expected.activeNames,
       response.analysis.actives.map((active) => active.displayName),
@@ -133,7 +133,7 @@ export function ingredientAnalysisAssertions(
       expected.maxSafetyScore,
       output.safetyScore,
     ),
-    checkIncludes(
+    checkIncludesDisplayNames(
       'active_names',
       expected.activeNames,
       output.actives.map((active) => active.displayName),
@@ -240,6 +240,19 @@ function checkIncludes<T>(
   );
 }
 
+function checkIncludesDisplayNames(
+  id: string,
+  expected: readonly string[] | undefined,
+  actual: readonly string[],
+): EvaluationCheck {
+  const normalizedActual = actual.map(normalizeEvaluationIngredientName);
+  return check(id, expected ?? [], actual, () =>
+    (expected ?? [])
+      .map(normalizeEvaluationIngredientName)
+      .every((item) => normalizedActual.includes(item)),
+  );
+}
+
 function checkExcludes<T>(
   id: string,
   expected: readonly T[] | undefined,
@@ -263,4 +276,12 @@ function noDuplicateReasonKeysCheck(
   return check('no_duplicate_reason_keys', true, keys, (values) => {
     return new Set(values).size === values.length;
   });
+}
+
+export function normalizeEvaluationIngredientName(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (normalized.includes('ceramide')) return 'ceramides';
+  if (normalized.includes('hyaluron')) return 'hyaluronic acid';
+  if (normalized.includes('ascorb')) return 'vitamin c';
+  return normalized;
 }

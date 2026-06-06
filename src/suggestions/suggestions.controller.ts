@@ -9,11 +9,10 @@ import {
   Post,
   Query,
   Req,
-  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request, Response } from 'express';
+import type { Request } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { readTimeZoneHeaderFromRequest } from '../common/timezone/timezone-header.utils';
 import { User } from '../users/entities/user.entity';
@@ -153,27 +152,6 @@ export class SuggestionsController {
       requestTimeZone(request),
       query,
     );
-  }
-
-  @Get('history/export')
-  @ApiOperation({ summary: 'CSV export for all matching suggestion history' })
-  async exportHistory(
-    @CurrentUser() user: User,
-    @Req() request: Request,
-    @Query() query: SuggestionHistoryListQueryDto,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<string> {
-    const file = await this.suggestionsService.exportHistoryCsv(
-      user,
-      requestTimeZone(request),
-      query,
-    );
-    response.setHeader('Content-Type', file.contentType);
-    response.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${file.fileName}"`,
-    );
-    return file.body;
   }
 
   @Get('history/:date')

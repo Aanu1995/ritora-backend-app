@@ -201,6 +201,10 @@ describe('ProductCheckService', () => {
       ],
       skinProfile,
       language: 'en',
+      tracking: {
+        source: 'quick_check',
+        userId: 'user-1',
+      },
       withExplanations: true,
     });
     expect(inventoryRepository.find).toHaveBeenCalledWith({

@@ -161,10 +161,6 @@ const GENERIC_PUSH_COPY: Record<
       title: 'Photo analysis hit a snag',
       body: 'Tap to retry. Your photo is safe.',
     },
-    export_ready: {
-      title: 'Your data export is ready',
-      body: 'Tap to download.',
-    },
     suggestion_ready: {
       title: 'Your routine is ready',
       body: 'Take a look at the steps before you apply.',
@@ -207,10 +203,6 @@ const GENERIC_PUSH_COPY: Record<
       title: 'Något gick snett med bildanalysen',
       body: 'Tryck för att försöka igen. Din bild är säker.',
     },
-    export_ready: {
-      title: 'Din dataexport är klar',
-      body: 'Tryck för att ladda ner.',
-    },
     suggestion_ready: {
       title: 'Din rutin är klar',
       body: 'Titta på stegen innan du applicerar.',
@@ -222,6 +214,48 @@ const GENERIC_PUSH_COPY: Record<
     recording_reminder: {
       title: 'Hur gick det?',
       body: 'Ta 10 sekunder och logga vad du applicerade.',
+    },
+  },
+  es: {
+    photo_reminder: {
+      title: 'Hora de la foto de hoy',
+      body: 'Tómala con luz constante, en la misma ventana cada día.',
+    },
+    reaction_detected: {
+      title: 'Pausamos tu rutina',
+      body: 'Tu foto de hoy muestra cambios. Activamos el modo barrera mientras tu piel se calma.',
+    },
+    simplification_started: {
+      title: 'Tu rutina es más sencilla hoy',
+      body: 'El modo barrera está activado. Puedes volver cuando quieras.',
+    },
+    doctor_referral: {
+      title: 'Vale la pena consultar a un dermatólogo',
+      body: 'Hay un patrón que vuelve a aparecer. Un especialista podría ayudar.',
+    },
+    insight_ready: {
+      title: 'Hay un nuevo insight listo',
+      body: 'Tus fotos están contando una historia tranquila.',
+    },
+    wrapped_ready: {
+      title: 'Tu semana de piel está lista',
+      body: 'Pequeños avances, huecos honestos y algo para probar después.',
+    },
+    analysis_failed: {
+      title: 'El análisis de la foto tuvo un problema',
+      body: 'Toca para intentarlo de nuevo. Tu foto está segura.',
+    },
+    suggestion_ready: {
+      title: 'Tu rutina está lista',
+      body: 'Revisa los pasos antes de aplicarla.',
+    },
+    slot_start: {
+      title: 'Hora de tu rutina',
+      body: 'Los pasos están listos. Toca para aplicar y marcar cada uno.',
+    },
+    recording_reminder: {
+      title: '¿Cómo fue?',
+      body: 'Tómate 10 segundos para registrar lo que aplicaste.',
     },
   },
 };
@@ -1031,7 +1065,11 @@ function buildProductExpiryPushCopy(
   const productName =
     getPayloadString(payload.payload, 'productName') ??
     getPayloadString(payload.payload, 'name') ??
-    (language === 'sv' ? 'En produkt' : 'A product');
+    (language === 'sv'
+      ? 'En produkt'
+      : language === 'es'
+        ? 'Un producto'
+        : 'A product');
   const expiresDate = formatExpiryDate(
     getPayloadString(payload.payload, 'expiresAt'),
     language,
@@ -1039,27 +1077,45 @@ function buildProductExpiryPushCopy(
   const daysUntilExpiry = getPayloadNumber(payload.payload, 'daysUntilExpiry');
 
   if (payload.kind === 'product_expired') {
-    return language === 'sv'
-      ? {
-          title: 'Produkt har gått ut',
-          body: `${productName} gick ut den ${expiresDate}.`,
-        }
-      : {
-          title: 'Product expired',
-          body: `${productName} expired on ${expiresDate}.`,
-        };
+    if (language === 'sv') {
+      return {
+        title: 'Produkt har gått ut',
+        body: `${productName} gick ut den ${expiresDate}.`,
+      };
+    }
+
+    if (language === 'es') {
+      return {
+        title: 'Producto caducado',
+        body: `${productName} caducó el ${expiresDate}.`,
+      };
+    }
+
+    return {
+      title: 'Product expired',
+      body: `${productName} expired on ${expiresDate}.`,
+    };
   }
 
   if (daysUntilExpiry === null) {
-    return language === 'sv'
-      ? {
-          title: 'Produkt nära utgång',
-          body: `${productName} går ut den ${expiresDate}.`,
-        }
-      : {
-          title: 'Product close to expiry',
-          body: `${productName} expires on ${expiresDate}.`,
-        };
+    if (language === 'sv') {
+      return {
+        title: 'Produkt nära utgång',
+        body: `${productName} går ut den ${expiresDate}.`,
+      };
+    }
+
+    if (language === 'es') {
+      return {
+        title: 'Producto cerca de caducar',
+        body: `${productName} caduca el ${expiresDate}.`,
+      };
+    }
+
+    return {
+      title: 'Product close to expiry',
+      body: `${productName} expires on ${expiresDate}.`,
+    };
   }
 
   if (language === 'sv') {
@@ -1067,6 +1123,14 @@ function buildProductExpiryPushCopy(
     return {
       title: 'Produkt nära utgång',
       body: `${productName} går ut om ${daysUntilExpiry} ${dayLabel}, den ${expiresDate}.`,
+    };
+  }
+
+  if (language === 'es') {
+    const dayLabel = daysUntilExpiry === 1 ? 'día' : 'días';
+    return {
+      title: 'Producto cerca de caducar',
+      body: `${productName} caduca en ${daysUntilExpiry} ${dayLabel}, el ${expiresDate}.`,
     };
   }
 
@@ -1095,13 +1159,19 @@ function getPayloadNumber(
 
 function formatExpiryDate(value: string | null, language: AppLanguage): string {
   if (!value) {
-    return language === 'sv' ? 'ett okänt datum' : 'an unknown date';
+    if (language === 'sv') return 'ett okänt datum';
+    if (language === 'es') return 'una fecha desconocida';
+    return 'an unknown date';
   }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return language === 'sv' ? 'ett okänt datum' : 'an unknown date';
+    if (language === 'sv') return 'ett okänt datum';
+    if (language === 'es') return 'una fecha desconocida';
+    return 'an unknown date';
   }
-  return new Intl.DateTimeFormat(language === 'sv' ? 'sv-SE' : 'en-US', {
+  const locale =
+    language === 'sv' ? 'sv-SE' : language === 'es' ? 'es-ES' : 'en-US';
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
     timeZone: 'UTC',
   }).format(parsed);

@@ -20,7 +20,9 @@ import {
 } from '../../environment-intelligence/environment-intelligence.constants';
 import {
   assessProductDataQuality,
+  isPreferredTimeCompatibleWithDaypart,
   scoreProductForSuggestion,
+  SuggestionProductGoalFitReason,
 } from './suggestion-product-intelligence';
 
 describe('suggestion product intelligence', () => {
@@ -93,6 +95,53 @@ describe('suggestion product intelligence', () => {
       quality: 'verified',
       warnings: [],
     });
+  });
+
+  it('treats user-selected product timing as a slot constraint', () => {
+    const eveningProduct = productWithData({
+      category: ProductCategory.Serum,
+      inciIngredients: ['Niacinamide', 'Glycerin'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Evening,
+    });
+
+    const morningScore = scoreProductForSuggestion(eveningProduct, {
+      daypart: 'morning',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'high',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+    const eveningScore = scoreProductForSuggestion(eveningProduct, {
+      daypart: 'evening',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'high',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(
+      isPreferredTimeCompatibleWithDaypart(
+        PreferredTimeOfDay.Evening,
+        'morning',
+      ),
+    ).toBe(false);
+    expect(
+      isPreferredTimeCompatibleWithDaypart(PreferredTimeOfDay.Morning, 'noon'),
+    ).toBe(true);
+    expect(morningScore.cautionReasons).toContain(
+      'preferred time of day does not match this slot',
+    );
+    expect(eveningScore.suitabilityReasons).toContain(
+      'matches preferred time of day',
+    );
+    expect(eveningScore.suitabilityScore).toBeGreaterThan(
+      morningScore.suitabilityScore,
+    );
   });
 
   it('trusts matched ingredient intelligence even when source confirmation date is absent', () => {
@@ -188,6 +237,119 @@ describe('suggestion product intelligence', () => {
       expect.arrayContaining(['dry air can make exfoliation feel harsher']),
     );
   });
+
+  it('uses current goals, reaction skips, substitutions, recent suggestions, and expiry in ranking', () => {
+    const product = productWithData({
+      category: ProductCategory.Serum,
+      inciIngredients: ['Niacinamide', 'Glycerin'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    });
+    product.effective_expires_at = new Date('2026-05-03T00:00:00.000Z');
+
+    const score = scoreProductForSuggestion(product, {
+      daypart: 'morning',
+      primaryGoal: 'acne control',
+      secondaryGoals: ['barrier support'],
+      sensitivityLevel: 'high',
+      recentUseCount: 2,
+      adherenceCount: 2,
+      reactionSkipCount: 1,
+      substitutionCount: 1,
+      recentSameDaypartSuggestionCount: 1,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+      targetDate: '2026-05-04',
+    });
+
+    expect(score.suitabilityReasons).toEqual(
+      expect.arrayContaining([
+        SuggestionProductGoalFitReason.SecondarySelectedGoal,
+      ]),
+    );
+    expect(score.suitabilityReasons).not.toContain('recently applied by user');
+    expect(score.cautionReasons).toEqual(
+      expect.arrayContaining([
+        'recently substituted by user',
+        'recent reaction-related skip by user',
+        'recent same-daypart repeat',
+        'product may be expired',
+      ]),
+    );
+  });
+
+  it('does not let prior adherence suppress the recent-suggestion caution', () => {
+    const product = productWithData({
+      category: ProductCategory.Moisturizer,
+      inciIngredients: ['Glycerin', 'Ceramide NP'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    });
+
+    const score = scoreProductForSuggestion(product, {
+      daypart: 'morning',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'medium',
+      recentUseCount: 3,
+      adherenceCount: 3,
+      recentSameDaypartSuggestionCount: 3,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(score.cautionReasons).toContain('recent same-daypart repeat');
+  });
+
+  it('treats the skin profile main goal as a strong product-fit signal beyond literal word overlap', () => {
+    const sunscreen = productWithData({
+      category: ProductCategory.SunProtection,
+      inciIngredients: ['Zinc Oxide'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      benefits: ['daily UV protection'],
+      name: 'Mineral SPF 50',
+    });
+    const genericSerum = productWithData({
+      category: ProductCategory.Serum,
+      inciIngredients: ['Water'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      benefits: ['lightweight feel'],
+      name: 'Simple Water Serum',
+    });
+
+    const sunscreenScore = scoreProductForSuggestion(sunscreen, {
+      daypart: 'morning',
+      primaryGoal: 'fade dark marks',
+      secondaryGoals: ['redness'],
+      sensitivityLevel: 'mid',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+    const genericScore = scoreProductForSuggestion(genericSerum, {
+      daypart: 'morning',
+      primaryGoal: 'fade dark marks',
+      secondaryGoals: ['redness'],
+      sensitivityLevel: 'mid',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(sunscreenScore.suitabilityReasons).toEqual(
+      expect.arrayContaining([
+        SuggestionProductGoalFitReason.PrimarySelectedGoal,
+      ]),
+    );
+    expect(sunscreenScore.suitabilityScore).toBeGreaterThan(
+      genericScore.suitabilityScore,
+    );
+  });
 });
 
 function scoringOptions(input: {
@@ -239,18 +401,20 @@ function productWithData(input: {
   inciIngredients: string[];
   inciLastConfirmedAt: string | null;
   preferredTimeOfDay: PreferredTimeOfDay | null;
+  benefits?: string[];
+  name?: string;
 }): InventoryProduct {
   return {
     id: 'product-1',
     user_id: 'user-1',
     brand: 'Ava Lab',
-    name: 'Barrier Serum',
+    name: input.name ?? 'Barrier Serum',
     category: input.category,
     status: ShelfStatus.Active,
     identity: {
       inciIngredients: input.inciIngredients,
       inciLastConfirmedAt: input.inciLastConfirmedAt,
-      benefits: ['barrier support'],
+      benefits: input.benefits ?? ['barrier support'],
       suitedFor: [],
     },
     guidance: {

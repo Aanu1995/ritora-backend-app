@@ -15,13 +15,13 @@ import {
   NOTIFICATION_KIND_TEMPLATE,
   NOTIFICATION_KINDS_WITHOUT_LIST_UNSUBSCRIBE,
   NOTIFICATION_PARTIALS,
-  NOTIFICATION_SUPPORT_EMAIL,
   NotificationEmailKind,
   RESEND_CLIENT,
 } from './mail.constants';
 import { MailUnsubscribeTokenService } from './mail-unsubscribe-token.service';
 
 type VerificationTemplateContext = {
+  htmlLang: AppLanguage;
   firstName: string;
   verificationUrl: string;
   logoUrl: string;
@@ -37,6 +37,7 @@ type VerificationTemplateContext = {
 };
 
 type PasswordResetTemplateContext = {
+  htmlLang: AppLanguage;
   firstName: string;
   resetUrl: string;
   logoUrl: string;
@@ -58,6 +59,7 @@ type AccountDeletionTimelineStep = {
 };
 
 type AccountDeletionActionTemplateContext = {
+  htmlLang: AppLanguage;
   firstName: string;
   actionUrl: string;
   logoUrl: string;
@@ -76,6 +78,7 @@ type AccountDeletionActionTemplateContext = {
 };
 
 type NotificationBaseContext = {
+  htmlLang: AppLanguage;
   firstName: string;
   logoUrl: string;
   manageUrl: string;
@@ -218,6 +221,7 @@ export class MailService {
   private readonly apiPublicUrl: string;
   private readonly authFrom: string;
   private readonly notificationFrom: string;
+  private readonly supportEmail: string;
   private readonly apiKey: string;
   private readonly templateDir = join(__dirname, 'templates');
   private readonly templateCache = new Map<
@@ -238,6 +242,9 @@ export class MailService {
       this.webAppUrl;
     this.apiPublicUrl = this.resolveApiPublicUrl();
     this.apiKey = this.configService.getOrThrow<string>('RESEND_API_KEY');
+    this.supportEmail = this.configService
+      .getOrThrow<string>('SUPPORT_EMAIL')
+      .trim();
     const authMailFrom = this.configService.getOrThrow<string>('MAIL_FROM');
     const notificationMailFrom =
       this.configService.get<string>('NOTIFICATION_MAIL_FROM')?.trim() ||
@@ -253,31 +260,66 @@ export class MailService {
     language: AppLanguage,
   ): Promise<void> {
     const safeFirstName = safeHtmlText(firstName);
+    const translateValues = {
+      firstName: safeFirstName,
+      supportEmail: this.supportEmail,
+    };
     const verificationUrl = this.buildFrontendPathActionUrl(
       'verify-email',
       token,
     );
     const html = await this.renderTemplate(MailTemplateName.Verification, {
+      htmlLang: language,
       firstName: safeFirstName,
       verificationUrl,
       logoUrl: EMAIL_LOGO_URL,
-      previewText: translate(language, 'mail.verification.previewText'),
-      title: translate(language, 'mail.verification.title', {
-        firstName: safeFirstName,
-      }),
-      intro: translate(language, 'mail.verification.intro'),
-      ctaLabel: translate(language, 'mail.verification.ctaLabel'),
-      expiryNote: translate(language, 'mail.verification.expiry'),
-      fallbackIntro: translate(language, 'mail.verification.fallbackIntro'),
-      ignoreNote: translate(language, 'mail.verification.ignore'),
-      footerLineOne: translate(language, 'mail.verification.footerLineOne'),
-      footerLineTwo: translate(language, 'mail.verification.footerLineTwo'),
+      previewText: translate(
+        language,
+        'mail.verification.previewText',
+        translateValues,
+      ),
+      title: translate(language, 'mail.verification.title', translateValues),
+      intro: translate(language, 'mail.verification.intro', translateValues),
+      ctaLabel: translate(
+        language,
+        'mail.verification.ctaLabel',
+        translateValues,
+      ),
+      expiryNote: translate(
+        language,
+        'mail.verification.expiry',
+        translateValues,
+      ),
+      fallbackIntro: translate(
+        language,
+        'mail.verification.fallbackIntro',
+        translateValues,
+      ),
+      ignoreNote: translate(
+        language,
+        'mail.verification.ignore',
+        translateValues,
+      ),
+      footerLineOne: translate(
+        language,
+        'mail.verification.footerLineOne',
+        translateValues,
+      ),
+      footerLineTwo: translate(
+        language,
+        'mail.verification.footerLineTwo',
+        translateValues,
+      ),
     });
 
     await this.sendEmail({
       from: this.authFrom,
       to: email,
-      subject: translate(language, 'mail.subject.verification'),
+      subject: translate(
+        language,
+        'mail.subject.verification',
+        translateValues,
+      ),
       html,
     });
   }
@@ -289,31 +331,63 @@ export class MailService {
     language: AppLanguage,
   ): Promise<void> {
     const safeFirstName = safeHtmlText(firstName);
+    const translateValues = {
+      firstName: safeFirstName,
+      supportEmail: this.supportEmail,
+    };
     const resetUrl = this.buildFrontendPathActionUrl('reset-password', token);
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
+      htmlLang: language,
       firstName: safeFirstName,
       resetUrl,
       logoUrl: EMAIL_LOGO_URL,
-      previewText: translate(language, 'mail.passwordReset.previewText'),
-      title: translate(language, 'mail.passwordReset.title'),
-      intro: translate(language, 'mail.passwordReset.intro', {
-        firstName: safeFirstName,
-      }),
-      ctaLabel: translate(language, 'mail.passwordReset.ctaLabel'),
-      expiryNote: translate(language, 'mail.passwordReset.expiry'),
-      fallbackIntro: translate(language, 'mail.passwordReset.fallbackIntro'),
+      previewText: translate(
+        language,
+        'mail.passwordReset.previewText',
+        translateValues,
+      ),
+      title: translate(language, 'mail.passwordReset.title', translateValues),
+      intro: translate(language, 'mail.passwordReset.intro', translateValues),
+      ctaLabel: translate(
+        language,
+        'mail.passwordReset.ctaLabel',
+        translateValues,
+      ),
+      expiryNote: translate(
+        language,
+        'mail.passwordReset.expiry',
+        translateValues,
+      ),
+      fallbackIntro: translate(
+        language,
+        'mail.passwordReset.fallbackIntro',
+        translateValues,
+      ),
       unexpectedTitle: translate(
         language,
         'mail.passwordReset.unexpectedTitle',
+        translateValues,
       ),
-      unexpectedBody: translate(language, 'mail.passwordReset.unexpectedBody'),
-      footerLine: translate(language, 'mail.passwordReset.footerLine'),
+      unexpectedBody: translate(
+        language,
+        'mail.passwordReset.unexpectedBody',
+        translateValues,
+      ),
+      footerLine: translate(
+        language,
+        'mail.passwordReset.footerLine',
+        translateValues,
+      ),
     });
 
     await this.sendEmail({
       from: this.authFrom,
       to: email,
-      subject: translate(language, 'mail.subject.passwordReset'),
+      subject: translate(
+        language,
+        'mail.subject.passwordReset',
+        translateValues,
+      ),
       html,
     });
   }
@@ -325,34 +399,63 @@ export class MailService {
     language: AppLanguage,
   ): Promise<void> {
     const safeInvitedByName = safeHtmlText(invitedByName, 'Ritora');
+    const translateValues = {
+      invitedByName: safeInvitedByName,
+      supportEmail: this.supportEmail,
+    };
     const inviteUrl = this.buildAdminPathActionUrl('reset-password', token);
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
+      htmlLang: language,
       firstName: safeInvitedByName,
       resetUrl: inviteUrl,
       logoUrl: EMAIL_LOGO_URL,
-      previewText: translate(language, 'mail.adminInvitation.previewText'),
-      title: translate(language, 'mail.adminInvitation.title'),
-      intro: translate(language, 'mail.adminInvitation.intro', {
-        invitedByName: safeInvitedByName,
-      }),
-      ctaLabel: translate(language, 'mail.adminInvitation.ctaLabel'),
-      expiryNote: translate(language, 'mail.adminInvitation.expiry'),
-      fallbackIntro: translate(language, 'mail.passwordReset.fallbackIntro'),
+      previewText: translate(
+        language,
+        'mail.adminInvitation.previewText',
+        translateValues,
+      ),
+      title: translate(language, 'mail.adminInvitation.title', translateValues),
+      intro: translate(language, 'mail.adminInvitation.intro', translateValues),
+      ctaLabel: translate(
+        language,
+        'mail.adminInvitation.ctaLabel',
+        translateValues,
+      ),
+      expiryNote: translate(
+        language,
+        'mail.adminInvitation.expiry',
+        translateValues,
+      ),
+      fallbackIntro: translate(
+        language,
+        'mail.passwordReset.fallbackIntro',
+        translateValues,
+      ),
       unexpectedTitle: translate(
         language,
         'mail.adminInvitation.unexpectedTitle',
+        translateValues,
       ),
       unexpectedBody: translate(
         language,
         'mail.adminInvitation.unexpectedBody',
+        translateValues,
       ),
-      footerLine: translate(language, 'mail.adminInvitation.footerLine'),
+      footerLine: translate(
+        language,
+        'mail.adminInvitation.footerLine',
+        translateValues,
+      ),
     });
 
     await this.sendEmail({
       from: this.authFrom,
       to: email,
-      subject: translate(language, 'mail.subject.adminInvitation'),
+      subject: translate(
+        language,
+        'mail.subject.adminInvitation',
+        translateValues,
+      ),
       html,
     });
   }
@@ -364,33 +467,77 @@ export class MailService {
     language: AppLanguage,
   ): Promise<void> {
     const safeName = safeHtmlText(name);
+    const translateValues = {
+      firstName: safeName,
+      supportEmail: this.supportEmail,
+    };
     const resetUrl = this.buildAdminPathActionUrl('reset-password', token);
     const html = await this.renderTemplate(MailTemplateName.PasswordReset, {
+      htmlLang: language,
       firstName: safeName,
       resetUrl,
       logoUrl: EMAIL_LOGO_URL,
-      previewText: translate(language, 'mail.adminPasswordReset.previewText'),
-      title: translate(language, 'mail.adminPasswordReset.title'),
-      intro: translate(language, 'mail.adminPasswordReset.intro', {
-        firstName: safeName,
-      }),
-      ctaLabel: translate(language, 'mail.adminPasswordReset.ctaLabel'),
-      expiryNote: translate(language, 'mail.passwordReset.expiry'),
-      fallbackIntro: translate(language, 'mail.passwordReset.fallbackIntro'),
+      previewText: translate(
+        language,
+        'mail.adminPasswordReset.previewText',
+        translateValues,
+      ),
+      title: translate(
+        language,
+        'mail.adminPasswordReset.title',
+        translateValues,
+      ),
+      intro: translate(
+        language,
+        'mail.adminPasswordReset.intro',
+        translateValues,
+      ),
+      ctaLabel: translate(
+        language,
+        'mail.adminPasswordReset.ctaLabel',
+        translateValues,
+      ),
+      expiryNote: translate(
+        language,
+        'mail.passwordReset.expiry',
+        translateValues,
+      ),
+      fallbackIntro: translate(
+        language,
+        'mail.passwordReset.fallbackIntro',
+        translateValues,
+      ),
       unexpectedTitle: translate(
         language,
         'mail.passwordReset.unexpectedTitle',
+        translateValues,
       ),
-      unexpectedBody: translate(language, 'mail.passwordReset.unexpectedBody'),
-      footerLine: translate(language, 'mail.adminPasswordReset.footerLine'),
+      unexpectedBody: translate(
+        language,
+        'mail.passwordReset.unexpectedBody',
+        translateValues,
+      ),
+      footerLine: translate(
+        language,
+        'mail.adminPasswordReset.footerLine',
+        translateValues,
+      ),
     });
 
     await this.sendEmail({
       from: this.authFrom,
       to: email,
-      subject: translate(language, 'mail.subject.adminPasswordReset'),
+      subject: translate(
+        language,
+        'mail.subject.adminPasswordReset',
+        translateValues,
+      ),
       html,
     });
+  }
+
+  buildAdminPasswordResetUrl(token: string): string {
+    return this.buildAdminPathActionUrl('reset-password', token);
   }
 
   async sendAdminAccountMonitoringAlertEmail(input: {
@@ -578,6 +725,7 @@ export class MailService {
     const stringPayload = extractStringValues(payload);
     const translateValues: Record<string, string | number> = {
       firstName: safeFirstName,
+      supportEmail: this.supportEmail,
       ...stringPayload,
     };
     const daypartSlot = resolveDaypartSlot(payload, language);
@@ -607,12 +755,17 @@ export class MailService {
       : undefined;
 
     const baseContext: NotificationBaseContext = {
+      htmlLang: language,
       firstName: safeFirstName,
       logoUrl: EMAIL_LOGO_URL,
       manageUrl: safeManageUrl,
       manageLabel: translate(language, 'mail.notification.shared.manageLabel'),
-      supportEmail: NOTIFICATION_SUPPORT_EMAIL,
-      supportLine: translate(language, 'mail.notification.shared.supportLine'),
+      supportEmail: this.supportEmail,
+      supportLine: translate(
+        language,
+        'mail.notification.shared.supportLine',
+        translateValues,
+      ),
       unsubscribeUrl: safeUnsubscribeUrl,
       unsubscribeLabel: includeUnsubscribe
         ? translate(language, `mail.notification.${kind}.unsubscribeLabel`)
@@ -935,7 +1088,7 @@ export class MailService {
 
   private buildListUnsubscribeHeaders(unsubscribeUrl: string): EmailHeaders {
     return {
-      'List-Unsubscribe': `<${unsubscribeUrl}>, <mailto:${NOTIFICATION_SUPPORT_EMAIL}?subject=unsubscribe>`,
+      'List-Unsubscribe': `<${unsubscribeUrl}>, <mailto:${this.supportEmail}?subject=unsubscribe>`,
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
     };
   }
@@ -963,74 +1116,71 @@ export class MailService {
     sectionItemKeys: Array<[string, string | null]>;
     ignoreNoteKey?: string;
   }): Promise<void> {
+    const values = {
+      ...input.values,
+      supportEmail: this.supportEmail,
+    };
     const sectionItems: AccountDeletionTimelineStep[] =
       input.sectionItemKeys.map(([titleKey, bodyKey], index) => ({
         marker:
           input.sectionStyle === 'timeline' ? String(index + 1) : '&#10003;',
-        title: translate(input.language, titleKey, input.values),
-        body: bodyKey ? translate(input.language, bodyKey, input.values) : '',
+        title: translate(input.language, titleKey, values),
+        body: bodyKey ? translate(input.language, bodyKey, values) : '',
       }));
 
     const html = await this.renderTemplate(input.templateName, {
+      htmlLang: input.language,
       firstName: input.firstName,
       actionUrl: escapeExpression(input.actionUrl),
       logoUrl: EMAIL_LOGO_URL,
       previewText: translate(
         input.language,
         `${input.translationBase}.previewText`,
-        input.values,
+        values,
       ),
       badgeLabel: translate(
         input.language,
         `${input.translationBase}.badgeLabel`,
-        input.values,
+        values,
       ),
       title: translate(
         input.language,
         `${input.translationBase}.title`,
-        input.values,
+        values,
       ),
       intro: translate(
         input.language,
         `${input.translationBase}.intro`,
-        input.values,
+        values,
       ),
       ctaLabel: translate(
         input.language,
         `${input.translationBase}.ctaLabel`,
-        input.values,
+        values,
       ),
-      sectionTitle: translate(
-        input.language,
-        input.sectionTitleKey,
-        input.values,
-      ),
+      sectionTitle: translate(input.language, input.sectionTitleKey, values),
       sectionItems,
       sectionStyle: input.sectionStyle,
-      note: translate(
-        input.language,
-        `${input.translationBase}.note`,
-        input.values,
-      ),
+      note: translate(input.language, `${input.translationBase}.note`, values),
       fallbackIntro: translate(
         input.language,
         `${input.translationBase}.fallbackIntro`,
-        input.values,
+        values,
       ),
       ignoreNote: input.ignoreNoteKey
-        ? translate(input.language, input.ignoreNoteKey, input.values)
+        ? translate(input.language, input.ignoreNoteKey, values)
         : undefined,
       footerLine: translate(
         input.language,
         `${input.translationBase}.footerLine`,
-        input.values,
+        values,
       ),
     });
 
     await this.sendEmail({
       from: this.authFrom,
       to: input.email,
-      subject: translate(input.language, input.subjectKey, input.values),
+      subject: translate(input.language, input.subjectKey, values),
       html,
     });
   }
@@ -1242,12 +1392,17 @@ export class MailService {
 }
 
 function fallbackFirstName(language: AppLanguage): string {
+  if (language === 'es') {
+    return 'ahí';
+  }
+
   return language === 'sv' ? 'du' : 'there';
 }
 
 const EMAIL_DATE_LOCALE: Record<AppLanguage, string> = {
   en: 'en-GB',
   sv: 'sv-SE',
+  es: 'es-ES',
 };
 
 /**

@@ -36,16 +36,18 @@ import { platformGlobalRestrictionInternalNoteTransformer } from '../platform-co
 import { canonicalizeEmailForIdentity } from '../users/users.service.utils';
 import {
   AnalysisJobStatusValue,
+  AnalysisFeedbackVoteValue,
   AnalysisStatusValue,
-  ExportStatusValue,
   InsightGenerationStatusValue,
 } from '../skin-journal/skin-journal.constants';
+import { SkinJournalAnalysisFeedback } from '../skin-journal/entities/skin-journal-analysis-feedback.entity';
 import { SmartPicksGenerationJobStatus } from '../smart-picks/smart-picks.types';
 import {
   SuggestionGenerationJobStatus,
   SuggestionGenerationStatus,
 } from '../suggestions/suggestions.constants';
 import { User } from '../users/entities/user.entity';
+import { IngredientProductAnalysisJobStatus } from '../ingredients/entities/ingredient-product-analysis-job.entity';
 import {
   AccountMonitoringEvent,
   AccountMonitoringEventType,
@@ -81,6 +83,11 @@ import {
   type AdminOverviewResponse,
   type AdminPlatformGlobalRestrictionListResponse,
   type AdminPlatformGlobalRestrictionResponse,
+  type AdminSkinJournalAnalysisFeedbackCountResponse,
+  type AdminSkinJournalAnalysisFeedbackCoverageResponse,
+  type AdminSkinJournalAnalysisFeedbackItemResponse,
+  type AdminSkinJournalAnalysisFeedbackReportResponse,
+  type AdminSkinJournalAnalysisFeedbackSummaryResponse,
   AdminUserAccountStatus,
   type AdminUserDetailResponse,
   type AdminUserListQuery,
@@ -110,6 +117,9 @@ import {
   AdminAccountMonitoringSeverity,
   AdminAccountMonitoringSignalType,
   AdminAccountMonitoringStatus,
+  encryptedAccountMonitoringInternalNoteTransformer,
+  encryptedAccountMonitoringLatestSignalTransformer,
+  encryptedAccountMonitoringResolutionNoteTransformer,
 } from './entities/admin-account-monitoring-flag.entity';
 import {
   ADMIN_ACCOUNT_MONITORING_SETTINGS_ID,
@@ -125,6 +135,8 @@ import {
   AdminOperationalIncident,
   AdminOperationalIncidentSeverity,
   AdminOperationalIncidentStatus,
+  encryptedIncidentDescriptionTransformer,
+  encryptedIncidentResolutionTransformer,
 } from './entities/admin-operational-incident.entity';
 import {
   AdminNotification,
@@ -271,6 +283,10 @@ const ADMIN_OPERATIONAL_INCIDENTS_MAX_LIMIT = 50;
 const ADMIN_OPERATIONAL_INCIDENT_TITLE_MAX_LENGTH = 160;
 const ADMIN_OPERATIONAL_INCIDENT_DESCRIPTION_MAX_LENGTH = 1000;
 const ADMIN_OPERATIONS_WORK_ITEM_LIMIT = 20;
+const ADMIN_ANALYSIS_FEEDBACK_WINDOW_DAYS = 30;
+const ADMIN_ANALYSIS_FEEDBACK_REVIEW_MIN_RESPONSES = 10;
+const ADMIN_ANALYSIS_FEEDBACK_REVIEW_HELPFUL_RATE = 70;
+const ADMIN_ANALYSIS_FEEDBACK_RECENT_LIMIT = 25;
 const ADMIN_ACCOUNT_MONITORING_DEFAULT_LIMIT = 10;
 const ADMIN_ACCOUNT_MONITORING_MAX_LIMIT = 50;
 const ADMIN_ACCOUNT_MONITORING_SUMMARY_MAX_LENGTH = 160;
@@ -306,6 +322,7 @@ const ENDPOINT_WARNING_ERROR_RATE = 1;
 const ENDPOINT_CRITICAL_ERROR_RATE = 5;
 const ENDPOINT_WARNING_P95_MS = 500;
 const ENDPOINT_CRITICAL_P95_MS = 1000;
+const BACKEND_API_HEALTH_WINDOW_MINUTES = 15;
 const USER_API_HEALTH_WINDOW_MINUTES = 15;
 const DATABASE_WARNING_LATENCY_MS = 250;
 const DATABASE_CRITICAL_LATENCY_MS = 1000;
@@ -343,6 +360,17 @@ const JOB_HEALTH_CONFIGS: readonly JobHealthConfig[] = [
     label: 'Daily suggestions',
     tableName: 'suggestion_generation_jobs',
   },
+  {
+    activeStatuses: [
+      IngredientProductAnalysisJobStatus.Queued,
+      IngredientProductAnalysisJobStatus.Sent,
+      IngredientProductAnalysisJobStatus.Running,
+    ],
+    failedStatus: IngredientProductAnalysisJobStatus.Failed,
+    id: 'ingredient-analysis',
+    label: 'Ingredient analysis',
+    tableName: 'ingredient_product_analysis_jobs',
+  },
 ];
 
 const ADMIN_AI_COST_FEATURES = [
@@ -350,6 +378,7 @@ const ADMIN_AI_COST_FEATURES = [
   AdminAiCostFeatureFilter.JournalInsights,
   AdminAiCostFeatureFilter.DailySuggestions,
   AdminAiCostFeatureFilter.QuickCheck,
+  AdminAiCostFeatureFilter.IngredientAnalysis,
   AdminAiCostFeatureFilter.SmartPicks,
 ] as const satisfies readonly AdminAiCostMetricFeature[];
 
@@ -449,6 +478,30 @@ const ADMIN_AI_COST_ROLLUP_SQL: Record<
             AND quick_checks.ai_estimated_cost_usd IS NOT NULL
           GROUP BY quick_checks.user_id
         `,
+  [AdminAiCostFeatureFilter.IngredientAnalysis]: (
+    joinCandidateUsers,
+    requireUserId,
+  ) => `
+          SELECT
+            ingredient_usage.user_id,
+            'ingredient_analysis' AS feature,
+            COALESCE(SUM(ingredient_usage.ai_estimated_cost_usd), 0)::float AS month_to_date_cost_usd,
+            COALESCE(
+              SUM(ingredient_usage.ai_estimated_cost_usd) FILTER (
+                WHERE ingredient_usage.occurred_at >= bounds.today_start
+                  AND ingredient_usage.occurred_at < bounds.tomorrow_start
+              ),
+              0
+            )::float AS today_cost_usd
+          FROM ingredient_analysis_ai_usage_metrics ingredient_usage
+          ${joinCandidateUsers('ingredient_usage')}
+          CROSS JOIN bounds
+          WHERE ingredient_usage.occurred_at >= bounds.since_month
+            ${requireUserId('ingredient_usage')}
+            AND ingredient_usage.status = 'completed'
+            AND ingredient_usage.ai_estimated_cost_usd IS NOT NULL
+          GROUP BY ingredient_usage.user_id
+        `,
   [AdminAiCostFeatureFilter.SmartPicks]: (
     joinCandidateUsers,
     requireUserId,
@@ -511,6 +564,13 @@ function toNumber(value: unknown): number {
   return 0;
 }
 
+function toRate(part: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+  return Math.round((part / total) * 1000) / 10;
+}
+
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined) {
     return null;
@@ -548,7 +608,7 @@ function toNullableString(value: unknown): string | null {
   return text || null;
 }
 
-function toNullableRestrictionText(
+function toNullableEncryptedString(
   value: unknown,
   transformer: ValueTransformer,
 ): string | null {
@@ -569,6 +629,20 @@ function toNullableRestrictionText(
   } catch {
     return null;
   }
+}
+
+function toDecryptedStringValue(
+  value: unknown,
+  transformer: ValueTransformer,
+): string {
+  return toNullableEncryptedString(value, transformer) ?? '';
+}
+
+function toNullableRestrictionText(
+  value: unknown,
+  transformer: ValueTransformer,
+): string | null {
+  return toNullableEncryptedString(value, transformer);
 }
 
 function toBooleanValue(value: unknown): boolean {
@@ -993,7 +1067,7 @@ export class AdminService {
             (
               SELECT COUNT(*)
               FROM suggestion_instances
-              WHERE generation_status = $13
+              WHERE generation_status = $12
             )::int AS suggestion_failed_count,
             product_event_counts.routine_users,
             (
@@ -1021,11 +1095,6 @@ export class AdminService {
             )::int AS active_restrictions,
             (
               SELECT COUNT(*)
-              FROM skin_journal_export_jobs
-              WHERE status = $5
-            )::int AS failed_export_count,
-            (
-              SELECT COUNT(*)
               FROM user_data_access_logs, bounds
               WHERE created_at >= bounds.since_day
                 AND event_type = 'data_accessed'
@@ -1033,22 +1102,22 @@ export class AdminService {
             (
               SELECT COUNT(*)
               FROM skin_journal_entries
-              WHERE analysis_status = $6
+              WHERE analysis_status = $5
             )::int AS analysis_completed_count,
             (
               SELECT COUNT(*)
               FROM skin_journal_entries
-              WHERE analysis_status = $7
+              WHERE analysis_status = $6
             )::int AS analysis_failed_count,
             (
               SELECT COUNT(*)
               FROM skin_journal_insight_generation_runs
-              WHERE status = $16
+              WHERE status = $15
             )::int AS insight_completed_count,
             (
               SELECT COUNT(*)
               FROM skin_journal_insight_generation_runs
-              WHERE status = $17
+              WHERE status = $16
             )::int AS insight_failed_count,
             (
               SELECT COALESCE(SUM(analysis_estimated_cost_usd), 0)
@@ -1114,13 +1183,38 @@ export class AdminService {
             )::float AS product_check_ai_cost_mtd,
             (
               SELECT COUNT(*)
+              FROM ingredient_analysis_ai_usage_metrics
+              WHERE status = 'completed'
+            )::int AS ingredient_analysis_completed_count,
+            (
+              SELECT COUNT(*)
+              FROM ingredient_analysis_ai_usage_metrics
+              WHERE status = 'failed'
+            )::int AS ingredient_analysis_failed_count,
+            (
+              SELECT COALESCE(SUM(ai_estimated_cost_usd), 0)
+              FROM ingredient_analysis_ai_usage_metrics, bounds
+              WHERE occurred_at >= bounds.today_start
+                AND occurred_at < bounds.tomorrow_start
+                AND status = 'completed'
+                AND ai_estimated_cost_usd IS NOT NULL
+            )::float AS ingredient_analysis_ai_cost_today,
+            (
+              SELECT COALESCE(SUM(ai_estimated_cost_usd), 0)
+              FROM ingredient_analysis_ai_usage_metrics, bounds
+              WHERE occurred_at >= bounds.since_month
+                AND status = 'completed'
+                AND ai_estimated_cost_usd IS NOT NULL
+            )::float AS ingredient_analysis_ai_cost_mtd,
+            (
+              SELECT COUNT(*)
               FROM smart_pick_generation_jobs
-              WHERE status = $14
+              WHERE status = $13
             )::int AS smart_pick_completed_count,
             (
               SELECT COUNT(*)
               FROM smart_pick_generation_jobs
-              WHERE status = $15
+              WHERE status = $14
             )::int AS smart_pick_failed_count,
             (
               SELECT COALESCE(SUM(cost_usd), 0)
@@ -1348,7 +1442,6 @@ export class AdminService {
         sinceDay,
         sinceMonth,
         SuggestionGenerationStatus.Ready,
-        ExportStatusValue.Failed,
         AnalysisStatusValue.Completed,
         AnalysisStatusValue.Failed,
         sinceThirtyDays,
@@ -1451,6 +1544,8 @@ export class AdminService {
             COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'journal_insights'), 0)::float AS journal_insights_cost_today,
             COALESCE(SUM(month_to_date_cost_usd) FILTER (WHERE feature = 'quick_check'), 0)::float AS quick_check_cost_mtd,
             COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'quick_check'), 0)::float AS quick_check_cost_today,
+            COALESCE(SUM(month_to_date_cost_usd) FILTER (WHERE feature = 'ingredient_analysis'), 0)::float AS ingredient_analysis_cost_mtd,
+            COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'ingredient_analysis'), 0)::float AS ingredient_analysis_cost_today,
             COALESCE(SUM(month_to_date_cost_usd) FILTER (WHERE feature = 'smart_picks'), 0)::float AS smart_picks_cost_mtd,
             COALESCE(SUM(today_cost_usd) FILTER (WHERE feature = 'smart_picks'), 0)::float AS smart_picks_cost_today
           FROM feature_rollups
@@ -1472,6 +1567,8 @@ export class AdminService {
           rollup.journal_insights_cost_today,
           rollup.quick_check_cost_mtd,
           rollup.quick_check_cost_today,
+          rollup.ingredient_analysis_cost_mtd,
+          rollup.ingredient_analysis_cost_today,
           rollup.smart_picks_cost_mtd,
           rollup.smart_picks_cost_today
         FROM rollup
@@ -1704,15 +1801,9 @@ export class AdminService {
           ) AS latest_suggestion_at,
           (
             SELECT COUNT(*)
-            FROM skin_journal_export_jobs
-            WHERE skin_journal_export_jobs.user_id = users.id
-              AND skin_journal_export_jobs.status = $4
-          )::int AS failed_export_count,
-          (
-            SELECT COUNT(*)
             FROM user_data_access_logs
             WHERE user_data_access_logs.user_id = users.id
-              AND user_data_access_logs.created_at >= $5
+              AND user_data_access_logs.created_at >= $4
               AND user_data_access_logs.event_type = 'data_accessed'
           )::int AS sensitive_access_events_24h
         FROM users
@@ -1729,7 +1820,6 @@ export class AdminService {
         userId,
         AnalysisStatusValue.Completed,
         AnalysisStatusValue.Failed,
-        ExportStatusValue.Failed,
         sinceDay,
       ],
     );
@@ -1759,7 +1849,6 @@ export class AdminService {
       },
       recentAuditLogs: recentAuditLogs.logs,
       safety: {
-        failedExportCount: toNumber(row.failed_export_count),
         sensitiveAccessEvents24h: toNumber(row.sensitive_access_events_24h),
       },
     };
@@ -2980,6 +3069,139 @@ export class AdminService {
     };
   }
 
+  async getSkinJournalAnalysisFeedbackReport(
+    now = new Date(),
+  ): Promise<AdminSkinJournalAnalysisFeedbackReportResponse> {
+    const since = new Date(
+      now.getTime() - ADMIN_ANALYSIS_FEEDBACK_WINDOW_DAYS * DAY_MS,
+    );
+    const feedbackRepository = this.dataSource.getRepository(
+      SkinJournalAnalysisFeedback,
+    );
+    const queryRows = (
+      sql: string,
+      parameters?: unknown[],
+    ): Promise<QueryRow[]> => this.dataSource.query(sql, parameters);
+    const [
+      windowRows,
+      allTimeRows,
+      reasonRows,
+      readingLabelRows,
+      interpretationVersionRows,
+      coverageRows,
+      recentFeedback,
+    ] = await Promise.all([
+      queryRows(
+        `
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE vote = $2)::int AS helpful,
+            COUNT(*) FILTER (WHERE vote = $3)::int AS not_helpful
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1
+        `,
+        [
+          since,
+          AnalysisFeedbackVoteValue.Helpful,
+          AnalysisFeedbackVoteValue.NotHelpful,
+        ],
+      ),
+      queryRows(
+        `
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE vote = $1)::int AS helpful,
+            COUNT(*) FILTER (WHERE vote = $2)::int AS not_helpful
+          FROM skin_journal_analysis_feedback
+        `,
+        [
+          AnalysisFeedbackVoteValue.Helpful,
+          AnalysisFeedbackVoteValue.NotHelpful,
+        ],
+      ),
+      queryRows(
+        `
+          SELECT reason AS id, COALESCE(reason, 'No reason') AS label, COUNT(*)::int AS count
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1 AND vote = $2
+          GROUP BY reason
+          ORDER BY count DESC, label ASC
+        `,
+        [since, AnalysisFeedbackVoteValue.NotHelpful],
+      ),
+      queryRows(
+        `
+          SELECT
+            reading_label AS id,
+            COALESCE(reading_label, 'unknown') AS label,
+            COUNT(*)::int AS count
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1
+          GROUP BY reading_label
+          ORDER BY count DESC, label ASC
+        `,
+        [since],
+      ),
+      queryRows(
+        `
+          SELECT
+            interpretation_version AS id,
+            COALESCE(interpretation_version, 'unknown') AS label,
+            COUNT(*)::int AS count
+          FROM skin_journal_analysis_feedback
+          WHERE created_at >= $1
+          GROUP BY interpretation_version
+          ORDER BY count DESC, label ASC
+        `,
+        [since],
+      ),
+      queryRows(
+        `
+          SELECT
+            COUNT(*) FILTER (WHERE analysis_feedback_submitted = true)::int AS analyses_with_feedback,
+            COUNT(*) FILTER (WHERE analysis_feedback_submitted = false)::int AS analyses_without_feedback
+          FROM skin_journal_entries
+          WHERE analysis_interpretation IS NOT NULL
+            AND analysis_completed_at >= $1
+        `,
+        [since],
+      ),
+      feedbackRepository.find({
+        order: { created_at: 'DESC' },
+        take: ADMIN_ANALYSIS_FEEDBACK_RECENT_LIMIT,
+      }),
+    ]);
+    const windowSummary = this.toAnalysisFeedbackSummary(windowRows[0]);
+    const allTimeSummary = this.toAnalysisFeedbackSummary(allTimeRows[0]);
+
+    return {
+      allTime: allTimeSummary,
+      coverage: this.toAnalysisFeedbackCoverage(coverageRows[0]),
+      generatedAt: now.toISOString(),
+      interpretationVersions: this.toAnalysisFeedbackCounts(
+        interpretationVersionRows,
+        windowSummary.total,
+      ),
+      readingLabels: this.toAnalysisFeedbackCounts(
+        readingLabelRows,
+        windowSummary.total,
+      ),
+      reasons: this.toAnalysisFeedbackCounts(
+        reasonRows,
+        windowSummary.notHelpful,
+      ),
+      recentFeedback: recentFeedback.map((feedback) =>
+        this.toSkinJournalAnalysisFeedbackResponse(feedback),
+      ),
+      reviewThreshold: {
+        helpfulRate: ADMIN_ANALYSIS_FEEDBACK_REVIEW_HELPFUL_RATE,
+        minResponses: ADMIN_ANALYSIS_FEEDBACK_REVIEW_MIN_RESPONSES,
+      },
+      window: windowSummary,
+      windowDays: ADMIN_ANALYSIS_FEEDBACK_WINDOW_DAYS,
+    };
+  }
+
   async listOperationalIncidents(
     query: AdminOperationalIncidentListQuery = {},
   ): Promise<AdminOperationalIncidentListResponse> {
@@ -3660,6 +3882,24 @@ export class AdminService {
               )
             )::int AS oldest_queued_age_seconds
           FROM suggestion_generation_jobs
+
+          UNION ALL
+
+          SELECT
+            3 AS sort_order,
+            'ingredient-analysis' AS id,
+            'Ingredient analysis' AS label,
+            COUNT(*) FILTER (WHERE status = ANY($8::text[]))::int AS queued,
+            COUNT(*) FILTER (WHERE status = $9)::int AS failed,
+            FLOOR(
+              EXTRACT(
+                EPOCH FROM (
+                  $7::timestamptz -
+                  MIN(run_after) FILTER (WHERE status = ANY($8::text[]))
+                )
+              )
+            )::int AS oldest_queued_age_seconds
+          FROM ingredient_product_analysis_jobs
         ) job_health
         ORDER BY sort_order
       `,
@@ -3671,6 +3911,8 @@ export class AdminService {
           [...JOB_HEALTH_CONFIGS[2].activeStatuses],
           JOB_HEALTH_CONFIGS[2].failedStatus,
           now,
+          [...JOB_HEALTH_CONFIGS[3].activeStatuses],
+          JOB_HEALTH_CONFIGS[3].failedStatus,
         ],
       ),
     );
@@ -3728,9 +3970,14 @@ export class AdminService {
       row.product_check_reviewed_count,
     );
     const productCheckFailedCount = toNumber(row.product_check_failed_count);
+    const ingredientAnalysisCompletedCount = toNumber(
+      row.ingredient_analysis_completed_count,
+    );
+    const ingredientAnalysisFailedCount = toNumber(
+      row.ingredient_analysis_failed_count,
+    );
     const smartPickCompletedCount = toNumber(row.smart_pick_completed_count);
     const smartPickFailedCount = toNumber(row.smart_pick_failed_count);
-    const failedExportCount = toNumber(row.failed_export_count);
     const pendingDeletionCount = toNumber(row.pending_deletion_count);
     const sensitiveAccessEvents24h = toNumber(row.sensitive_access_events_24h);
     const activeRestrictions = toNumber(row.active_restrictions);
@@ -3739,12 +3986,14 @@ export class AdminService {
       suggestionReadyCount +
       insightCompletedCount +
       productCheckReviewedCount +
+      ingredientAnalysisCompletedCount +
       smartPickCompletedCount;
     const aiFailedCount =
       analysisFailedCount +
       suggestionFailedCount +
       insightFailedCount +
       productCheckFailedCount +
+      ingredientAnalysisFailedCount +
       smartPickFailedCount;
     const aiTotalCount = aiSuccessfulCount + aiFailedCount;
     const todayAiCostUsd =
@@ -3752,15 +4001,16 @@ export class AdminService {
       toNumber(row.suggestion_ai_cost_today) +
       toNumber(row.journal_insights_ai_cost_today) +
       toNumber(row.product_check_ai_cost_today) +
+      toNumber(row.ingredient_analysis_ai_cost_today) +
       toNumber(row.smart_pick_ai_cost_today);
     const monthToDateAiCostUsd =
       toNumber(row.journal_ai_cost_mtd) +
       toNumber(row.suggestion_ai_cost_mtd) +
       toNumber(row.journal_insights_ai_cost_mtd) +
       toNumber(row.product_check_ai_cost_mtd) +
+      toNumber(row.ingredient_analysis_ai_cost_mtd) +
       toNumber(row.smart_pick_ai_cost_mtd);
     const alerts = this.buildAlerts({
-      failedExportCount,
       jobHealth,
       pendingDeletionCount,
     });
@@ -3928,6 +4178,16 @@ export class AdminService {
           ),
         },
         {
+          id: 'ingredient_analysis',
+          label: 'Ingredient analysis',
+          todayCostUsd: toNumber(row.ingredient_analysis_ai_cost_today),
+          monthToDateCostUsd: toNumber(row.ingredient_analysis_ai_cost_mtd),
+          successRate: percentage(
+            ingredientAnalysisCompletedCount,
+            ingredientAnalysisCompletedCount + ingredientAnalysisFailedCount,
+          ),
+        },
+        {
           id: 'smart_picks',
           label: 'Smart Picks',
           todayCostUsd: toNumber(row.smart_pick_ai_cost_today),
@@ -3971,19 +4231,21 @@ export class AdminService {
           id: 'quick_check_ai_cost',
           source: AdminMetricSource.Table,
         },
+        {
+          id: 'ingredient_analysis_ai_cost',
+          source: AdminMetricSource.Table,
+        },
       ],
       alerts,
       jobHealth,
       compliance: {
         pendingDeletionCount,
-        failedExportCount,
         sensitiveAccessEvents24h,
       },
     };
   }
 
   private buildAlerts(input: {
-    failedExportCount: number;
     jobHealth: AdminOverviewResponse['jobHealth'];
     pendingDeletionCount: number;
   }): AdminOverviewResponse['alerts'] {
@@ -4001,15 +4263,6 @@ export class AdminService {
             ? 'Analysis queue delayed'
             : `${delayedJob.label} queue delayed`,
         description: `${delayedJob.label} has ${delayedJob.queued} queued and ${delayedJob.failed} failed jobs.`,
-      });
-    }
-
-    if (input.failedExportCount > 0) {
-      alerts.push({
-        id: 'failed-journal-exports',
-        severity: AdminAlertSeverity.Critical,
-        title: 'Journal exports failing',
-        description: `${input.failedExportCount} journal export jobs need review.`,
       });
     }
 
@@ -4039,21 +4292,15 @@ export class AdminService {
           )::int AS pending_deletion_count,
           (
             SELECT COUNT(*)
-            FROM skin_journal_export_jobs
-            WHERE status = $1
-          )::int AS failed_export_count,
-          (
-            SELECT COUNT(*)
             FROM user_data_access_logs
-            WHERE created_at >= $2
+            WHERE created_at >= $1
               AND event_type = 'data_accessed'
           )::int AS sensitive_access_events_24h
       `,
-      [ExportStatusValue.Failed, sinceDay],
+      [sinceDay],
     );
 
     return {
-      failedExportCount: toNumber(row.failed_export_count),
       pendingDeletionCount: toNumber(row.pending_deletion_count),
       sensitiveAccessEvents24h: toNumber(row.sensitive_access_events_24h),
     };
@@ -4063,23 +4310,11 @@ export class AdminService {
     now: Date,
   ): Promise<AdminOperationsMonitoringResponse['backendHealth']> {
     const checkedAt = now.toISOString();
-    const [database, userTraffic] = await Promise.all([
+    const [api, database, userTraffic] = await Promise.all([
+      this.getBackendApiHealthComponent(now, checkedAt),
       this.getDatabaseHealthComponent(checkedAt),
       this.getUserApiTrafficHealthComponent(now, checkedAt),
     ]);
-    const api: AdminOperationsMonitoringResponse['backendHealth']['components'][number] =
-      {
-        checkedAt,
-        errorRate: null,
-        id: 'api',
-        label: 'Backend API',
-        latencyMs: null,
-        message: 'The Ritora API process responded to admin monitoring.',
-        p95LatencyMs: null,
-        requestCount: null,
-        status: AdminJobStatus.Healthy,
-        windowMinutes: null,
-      };
     const components = [api, database, userTraffic];
 
     return {
@@ -4089,6 +4324,82 @@ export class AdminService {
         components.map((component) => component.status),
       ),
     };
+  }
+
+  private async getBackendApiHealthComponent(
+    now: Date,
+    checkedAt: string,
+  ): Promise<
+    AdminOperationsMonitoringResponse['backendHealth']['components'][number]
+  > {
+    const since = new Date(
+      now.getTime() - BACKEND_API_HEALTH_WINDOW_MINUTES * 60 * 1000,
+    );
+
+    try {
+      const row = await this.queryOne(
+        `
+          SELECT
+            COUNT(*)::int AS request_count,
+            COALESCE(
+              ROUND(
+                (
+                  SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END)::numeric
+                  / NULLIF(COUNT(*), 0)
+                ) * 100,
+                2
+              ),
+              0
+            )::float AS error_rate,
+            COALESCE(
+              percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms),
+              0
+            )::int AS p95_latency_ms
+          FROM http_request_metrics
+          WHERE occurred_at >= $1
+            AND route NOT LIKE '/health%'
+            AND route NOT LIKE '/api/v1/health%'
+        `,
+        [since],
+      );
+      const requestCount = toNumber(row.request_count);
+      const errorRate = toNumber(row.error_rate);
+      const p95LatencyMs = toNumber(row.p95_latency_ms);
+      const status =
+        requestCount === 0
+          ? AdminJobStatus.Healthy
+          : resolveEndpointStatus(errorRate, p95LatencyMs);
+
+      return {
+        checkedAt,
+        errorRate,
+        id: 'api',
+        label: 'Backend API',
+        latencyMs: null,
+        message:
+          requestCount === 0
+            ? 'The Ritora API process responded; no recent request telemetry has been recorded.'
+            : 'The Ritora API process responded and recent request telemetry is being observed.',
+        p95LatencyMs,
+        requestCount,
+        status,
+        windowMinutes: BACKEND_API_HEALTH_WINDOW_MINUTES,
+      };
+    } catch {
+      return {
+        checkedAt,
+        errorRate: null,
+        id: 'api',
+        label: 'Backend API',
+        latencyMs: null,
+        message:
+          'The Ritora API process responded, but telemetry is unavailable.',
+        p95LatencyMs: null,
+        requestCount: null,
+        status: AdminJobStatus.Warning,
+        windowMinutes: BACKEND_API_HEALTH_WINDOW_MINUTES,
+      };
+    }
   }
 
   private async getDatabaseHealthComponent(
@@ -4292,21 +4603,25 @@ export class AdminService {
             UNION ALL
 
             SELECT
-              'journal-export' AS type,
-              'Journal export' AS label,
-              exports.id,
-              exports.user_id,
+              'ingredient-analysis' AS type,
+              'Ingredient analysis' AS label,
+              jobs.id,
+              jobs.user_id,
               users.email AS user_email,
-              exports.status::text AS status,
-              NULL::int AS attempt_count,
-              NULL::timestamptz AS run_after,
-              NULL::text AS last_error,
-              exports.created_at,
-              exports.created_at AS updated_at,
-              'critical' AS severity
-            FROM skin_journal_export_jobs exports
-            LEFT JOIN users ON users.id = exports.user_id
-            WHERE exports.status = $8
+              jobs.status::text AS status,
+              jobs.attempt_count,
+              jobs.run_after,
+              jobs.last_error,
+              jobs.created_at,
+              jobs.updated_at,
+              CASE
+                WHEN jobs.status = $8 THEN 'critical'
+                ELSE 'warning'
+              END AS severity
+            FROM ingredient_product_analysis_jobs jobs
+            LEFT JOIN users ON users.id = jobs.user_id
+            WHERE jobs.status = $8
+              OR (jobs.status = ANY($9::text[]) AND jobs.run_after <= $3)
 
             UNION ALL
 
@@ -4323,7 +4638,7 @@ export class AdminService {
               users.created_at,
               users.updated_at,
               CASE
-                WHEN users.account_deletion_scheduled_for <= $9 THEN 'critical'
+                WHEN users.account_deletion_scheduled_for <= $10 THEN 'critical'
                 ELSE 'warning'
               END AS severity
             FROM users
@@ -4337,7 +4652,7 @@ export class AdminService {
             END,
             work_items.run_after ASC NULLS LAST,
             work_items.updated_at DESC NULLS LAST
-          LIMIT $10
+          LIMIT $11
         `,
         [
           AnalysisJobStatusValue.Failed,
@@ -4358,7 +4673,12 @@ export class AdminService {
             SuggestionGenerationJobStatus.Queued,
             SuggestionGenerationJobStatus.Running,
           ],
-          ExportStatusValue.Failed,
+          IngredientProductAnalysisJobStatus.Failed,
+          [
+            IngredientProductAnalysisJobStatus.Queued,
+            IngredientProductAnalysisJobStatus.Sent,
+            IngredientProductAnalysisJobStatus.Running,
+          ],
           now,
           ADMIN_OPERATIONS_WORK_ITEM_LIMIT,
         ],
@@ -4446,6 +4766,71 @@ export class AdminService {
     };
   }
 
+  private toAnalysisFeedbackSummary(
+    row: QueryRow | undefined,
+  ): AdminSkinJournalAnalysisFeedbackSummaryResponse {
+    const total = toNumber(row?.total);
+    const helpful = toNumber(row?.helpful);
+    const notHelpful = toNumber(row?.not_helpful);
+    const helpfulRate = toRate(helpful, total);
+
+    return {
+      helpful,
+      helpfulRate,
+      needsReview:
+        total >= ADMIN_ANALYSIS_FEEDBACK_REVIEW_MIN_RESPONSES &&
+        helpfulRate < ADMIN_ANALYSIS_FEEDBACK_REVIEW_HELPFUL_RATE,
+      notHelpful,
+      notHelpfulRate: toRate(notHelpful, total),
+      total,
+    };
+  }
+
+  private toAnalysisFeedbackCoverage(
+    row: QueryRow | undefined,
+  ): AdminSkinJournalAnalysisFeedbackCoverageResponse {
+    const analysesWithFeedback = toNumber(row?.analyses_with_feedback);
+    const analysesWithoutFeedback = toNumber(row?.analyses_without_feedback);
+    const total = analysesWithFeedback + analysesWithoutFeedback;
+
+    return {
+      analysesWithFeedback,
+      analysesWithoutFeedback,
+      feedbackRate: toRate(analysesWithFeedback, total),
+    };
+  }
+
+  private toAnalysisFeedbackCounts(
+    rows: QueryRow[],
+    total: number,
+  ): AdminSkinJournalAnalysisFeedbackCountResponse[] {
+    return rows.map((row) => {
+      const count = toNumber(row.count);
+
+      return {
+        count,
+        id: toNullableString(row.id),
+        label: toStringValue(row.label),
+        rate: toRate(count, total),
+      };
+    });
+  }
+
+  private toSkinJournalAnalysisFeedbackResponse(
+    feedback: SkinJournalAnalysisFeedback,
+  ): AdminSkinJournalAnalysisFeedbackItemResponse {
+    return {
+      concernKeys: feedback.concern_keys,
+      createdAt: toIsoString(feedback.created_at),
+      interpretationVersion: feedback.interpretation_version,
+      note: feedback.note,
+      readingLabel: feedback.reading_label,
+      reason: feedback.reason,
+      updatedAt: toIsoString(feedback.updated_at),
+      vote: feedback.vote,
+    };
+  }
+
   private toOperationalIncidentResponse(
     incident: AdminOperationalIncident,
     admins: ReadonlyMap<string, AdminOperationalIncidentActor>,
@@ -4464,9 +4849,15 @@ export class AdminService {
         name: createdBy?.name ?? '',
       },
       createdByAdminId: incident.created_by_admin_id,
-      description: toStringValue(incident.description),
+      description: toDecryptedStringValue(
+        incident.description,
+        encryptedIncidentDescriptionTransformer,
+      ),
       id: toStringValue(incident.id),
-      resolutionSummary: toNullableString(incident.resolution_summary),
+      resolutionSummary: toNullableEncryptedString(
+        incident.resolution_summary,
+        encryptedIncidentResolutionTransformer,
+      ),
       resolvedAt: toNullableIso(incident.resolved_at),
       resolvedBy: resolvedByAdminId
         ? {
@@ -4977,6 +5368,13 @@ export class AdminService {
           FROM product_check_ai_review_metrics
           WHERE user_id = $1
           UNION ALL
+          SELECT id, occurred_at, 'ingredient_analysis_ai_usage' AS event_type,
+            'ingredient_analysis_ai_usage_metrics' AS source_type,
+            'Ingredient analysis AI cost was recorded.' AS summary,
+            jsonb_build_object('source', source, 'operation', operation, 'costUsd', COALESCE(ai_estimated_cost_usd, 0)::float, 'status', status) AS metadata
+          FROM ingredient_analysis_ai_usage_metrics
+          WHERE user_id = $1
+          UNION ALL
           SELECT id, generated_at AS occurred_at, 'smart_picks_snapshot' AS event_type,
             'smart_pick_snapshots' AS source_type,
             'Smart Picks snapshot cost was recorded.' AS summary,
@@ -5080,6 +5478,10 @@ export class AdminService {
             FROM product_check_ai_review_metrics
             WHERE user_id IS NOT NULL AND occurred_at >= $1
             UNION ALL
+            SELECT user_id, occurred_at, COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
+            FROM ingredient_analysis_ai_usage_metrics
+            WHERE user_id IS NOT NULL AND occurred_at >= $1 AND status = 'completed'
+            UNION ALL
             SELECT user_id, generated_at AS occurred_at,
               COALESCE(ai_estimated_cost_usd, 0)::float AS cost_usd
             FROM smart_pick_snapshots
@@ -5107,6 +5509,10 @@ export class AdminService {
             SELECT user_id, updated_at AS occurred_at, 0::float AS cost_usd
             FROM smart_pick_generation_jobs
             WHERE user_id IS NOT NULL AND updated_at >= $1 AND status = 'failed'
+            UNION ALL
+            SELECT user_id, occurred_at, 0::float AS cost_usd
+            FROM ingredient_analysis_ai_usage_metrics
+            WHERE user_id IS NOT NULL AND occurred_at >= $1 AND status = 'failed'
           ),
           auth_pressure_events AS (
             SELECT user_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS latest_at
@@ -5641,10 +6047,19 @@ export class AdminService {
       },
       createdByAdminId: toStringValue(row.created_by_admin_id),
       id: toStringValue(row.id),
-      internalNote: toNullableString(row.internal_note),
-      latestSignal: toNullableString(row.latest_signal),
+      internalNote: toNullableEncryptedString(
+        row.internal_note,
+        encryptedAccountMonitoringInternalNoteTransformer,
+      ),
+      latestSignal: toNullableEncryptedString(
+        row.latest_signal,
+        encryptedAccountMonitoringLatestSignalTransformer,
+      ),
       nextReviewAt: toNullableIso(row.next_review_at),
-      resolutionNote: toNullableString(row.resolution_note),
+      resolutionNote: toNullableEncryptedString(
+        row.resolution_note,
+        encryptedAccountMonitoringResolutionNoteTransformer,
+      ),
       resolvedAt: toNullableIso(row.resolved_at),
       resolvedBy: resolvedByAdminId
         ? {
@@ -5699,10 +6114,19 @@ export class AdminService {
       },
       createdByAdminId: flag.created_by_admin_id,
       id: flag.id,
-      internalNote: flag.internal_note,
-      latestSignal: flag.latest_signal,
+      internalNote: toNullableEncryptedString(
+        flag.internal_note,
+        encryptedAccountMonitoringInternalNoteTransformer,
+      ),
+      latestSignal: toNullableEncryptedString(
+        flag.latest_signal,
+        encryptedAccountMonitoringLatestSignalTransformer,
+      ),
       nextReviewAt: toNullableIso(flag.next_review_at),
-      resolutionNote: flag.resolution_note,
+      resolutionNote: toNullableEncryptedString(
+        flag.resolution_note,
+        encryptedAccountMonitoringResolutionNoteTransformer,
+      ),
       resolvedAt: toNullableIso(flag.resolved_at),
       resolvedBy: resolvedByAdminId
         ? (actors[resolvedByAdminId] ?? null)
@@ -5745,10 +6169,19 @@ export class AdminService {
       },
       createdByAdminId: flag.created_by_admin_id,
       id: flag.id,
-      internalNote: flag.internal_note,
-      latestSignal: flag.latest_signal,
+      internalNote: toNullableEncryptedString(
+        flag.internal_note,
+        encryptedAccountMonitoringInternalNoteTransformer,
+      ),
+      latestSignal: toNullableEncryptedString(
+        flag.latest_signal,
+        encryptedAccountMonitoringLatestSignalTransformer,
+      ),
       nextReviewAt: toNullableIso(flag.next_review_at),
-      resolutionNote: flag.resolution_note,
+      resolutionNote: toNullableEncryptedString(
+        flag.resolution_note,
+        encryptedAccountMonitoringResolutionNoteTransformer,
+      ),
       resolvedAt: toNullableIso(flag.resolved_at),
       resolvedBy: resolvedByAdminId
         ? (actors[resolvedByAdminId] ?? null)
@@ -5932,6 +6365,12 @@ export class AdminService {
           label: 'Quick Check',
           monthToDateCostUsd: toNumber(row.quick_check_cost_mtd),
           todayCostUsd: toNumber(row.quick_check_cost_today),
+        },
+        {
+          id: 'ingredient_analysis',
+          label: 'Ingredient analysis',
+          monthToDateCostUsd: toNumber(row.ingredient_analysis_cost_mtd),
+          todayCostUsd: toNumber(row.ingredient_analysis_cost_today),
         },
         {
           id: 'smart_picks',

@@ -124,6 +124,25 @@ describe('SkinJournalInsightQueueService', () => {
     );
   });
 
+  it('destroys the SQS client on module shutdown', () => {
+    const service = new SkinJournalInsightQueueService(
+      repo() as never,
+      config({
+        SKIN_JOURNAL_INSIGHT_QUEUE_DRIVER: 'sqs',
+        SKIN_JOURNAL_INSIGHT_SQS_QUEUE_URL:
+          'https://sqs.eu-west-1.amazonaws.com/123/skin-journal-insights',
+      }),
+    );
+    const destroy = jest.fn();
+    (service as unknown as { sqsClient: { destroy: jest.Mock } }).sqsClient = {
+      destroy,
+    };
+
+    service.onModuleDestroy();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('coalesces active user jobs instead of creating duplicate expensive work', async () => {
     const jobs = repo();
     const activeJob = {

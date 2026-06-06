@@ -1,11 +1,11 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import {
+  closeTestApp,
   createCompletedSkinProfile,
   createTestApp,
   createTestInventoryProduct,
   MockMailService,
-  truncateTables,
 } from './test-setup';
 
 const ORIGIN = 'http://localhost:3000';
@@ -107,12 +107,7 @@ describe('Schedule (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (!app) {
-      return;
-    }
-
-    await truncateTables(app);
-    await app.close();
+    await closeTestApp(app);
   });
 
   function authGet(path: string, timeZone?: string) {

@@ -64,9 +64,9 @@ describe('SuggestionRetentionService', () => {
     });
     expect(environmentLocationRepo.delete).toHaveBeenCalled();
     expect(queryBuilder.set).toHaveBeenCalledWith({
-      ai_explanation: null,
-      generation_context: null,
-      request_context: null,
+      ai_explanation: expect.any(Function),
+      generation_context: expect.any(Function),
+      request_context: expect.any(Function),
     });
     expect(observability.record).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -77,6 +77,52 @@ describe('SuggestionRetentionService', () => {
           environmentSnapshotsDeleted: 2,
           environmentLocationCachesDeleted: 1,
         },
+      }),
+    );
+  });
+
+  it('purges user-scoped suggestion data and clears persisted AI payload fields', async () => {
+    await expect(service.purgeUserSuggestionData('user-1')).resolves.toEqual({
+      contextCachesDeleted: 2,
+      gapActionsDeleted: 0,
+      reactionOverridesDeleted: 1,
+      reminderSnoozesDeleted: 1,
+      environmentSnapshotsDeleted: 2,
+      environmentLocationCachesDeleted: 1,
+      suggestionFieldsCleared: 3,
+    });
+
+    expect(cacheRepo.delete).toHaveBeenCalledWith({ user_id: 'user-1' });
+    expect(gapActionRepo.delete).toHaveBeenCalledWith({ user_id: 'user-1' });
+    expect(overrideRepo.delete).toHaveBeenCalledWith({ user_id: 'user-1' });
+    expect(reminderSnoozeRepo.delete).toHaveBeenCalledWith({
+      user_id: 'user-1',
+    });
+    expect(environmentLocationRepo.delete).toHaveBeenCalledWith({
+      user_id: 'user-1',
+    });
+    expect(environmentSnapshotRepo.delete).toHaveBeenCalledWith({
+      user_id: 'user-1',
+    });
+    expect(queryBuilder.set).toHaveBeenCalledWith({
+      ai_explanation: expect.any(Function),
+      generation_context: expect.any(Function),
+      request_context: expect.any(Function),
+      gap_recommendations: expect.any(Function),
+      safety_flags: expect.any(Function),
+      ai_error: expect.any(Function),
+    });
+    expect(queryBuilder.where).toHaveBeenCalledWith('user_id = :userId', {
+      userId: 'user-1',
+    });
+    expect(observability.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'retention_purged',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          userScopedPurge: true,
+          suggestionFieldsCleared: 3,
+        }),
       }),
     );
   });

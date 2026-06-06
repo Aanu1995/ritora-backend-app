@@ -12,6 +12,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -72,7 +73,7 @@ type LocalSignedPhoto = {
 };
 
 @Injectable()
-export class SkinJournalPhotoStorageService {
+export class SkinJournalPhotoStorageService implements OnModuleDestroy {
   private readonly logger = new Logger(SkinJournalPhotoStorageService.name);
   private readonly s3Client: S3Client;
 
@@ -80,6 +81,10 @@ export class SkinJournalPhotoStorageService {
     this.s3Client = new S3Client({
       region: this.config.getOrThrow<string>('AWS_REGION'),
     });
+  }
+
+  onModuleDestroy(): void {
+    this.s3Client.destroy?.();
   }
 
   async storePhoto(params: {

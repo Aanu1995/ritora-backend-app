@@ -6,8 +6,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { CataloguePhotoStorageService } from '../src/catalogue/catalogue-photo-storage.service';
-import { IngredientCatalogService } from '../src/ingredients/ingredient-catalog.service';
-import { IngredientsSeeder } from '../src/ingredients/seed/ingredients-seeder';
+import { assertDestructiveTestDatabaseResetAllowed } from '../src/common/utils/destructive-database-guard';
 import { MailService } from '../src/mail/mail.service';
 import {
   ApplicationMethod,
@@ -26,6 +25,8 @@ type TestAppProviderOverride = {
 export class MockMailService {
   verificationTokens = new Map<string, string>();
   resetTokens = new Map<string, string>();
+  adminInvitationTokens = new Map<string, string>();
+  adminResetTokens = new Map<string, string>();
   deletionConfirmTokens = new Map<string, string>();
   deletionCancelTokens = new Map<string, string>();
   deletionCancelledCounts = new Map<string, number>();
@@ -44,6 +45,26 @@ export class MockMailService {
     _firstName: string,
   ): Promise<void> {
     this.resetTokens.set(email, token);
+  }
+
+  async sendAdminInvitationEmail(
+    email: string,
+    token: string,
+    _invitedByName: string,
+  ): Promise<void> {
+    this.adminInvitationTokens.set(email, token);
+  }
+
+  async sendAdminPasswordResetEmail(
+    email: string,
+    token: string,
+    _name: string,
+  ): Promise<void> {
+    this.adminResetTokens.set(email, token);
+  }
+
+  buildAdminPasswordResetUrl(token: string): string {
+    return `http://localhost:3002/reset-password/${encodeURIComponent(token)}`;
   }
 
   async sendAccountDeletionConfirmationEmail(
@@ -78,6 +99,14 @@ export class MockMailService {
     return this.resetTokens.get(email);
   }
 
+  getAdminInvitationToken(email: string): string | undefined {
+    return this.adminInvitationTokens.get(email);
+  }
+
+  getAdminResetToken(email: string): string | undefined {
+    return this.adminResetTokens.get(email);
+  }
+
   getDeletionConfirmToken(email: string): string | undefined {
     return this.deletionConfirmTokens.get(email);
   }
@@ -93,6 +122,8 @@ export class MockMailService {
   clear(): void {
     this.verificationTokens.clear();
     this.resetTokens.clear();
+    this.adminInvitationTokens.clear();
+    this.adminResetTokens.clear();
     this.deletionConfirmTokens.clear();
     this.deletionCancelTokens.clear();
     this.deletionCancelledCounts.clear();
@@ -143,40 +174,33 @@ export async function createTestApp(
   }
 
   const moduleFixture = await moduleBuilder.compile();
-
   const app = moduleFixture.createNestApplication();
-  const configService = app.get(ConfigService);
-  configureApp(app, configService);
 
-  // E2E tests run against a real Postgres database. Apply pending migrations
-  // before Nest lifecycle hooks run so boot-time catalogue refreshes see the
-  // same schema CI and local developers expect.
-  const dataSource = app.get(DataSource);
-  if (!dataSource.isInitialized) {
-    await dataSource.initialize();
+  try {
+    const configService = app.get(ConfigService);
+    configureApp(app, configService);
+
+    // E2E tests run against a real Postgres database. Apply pending migrations
+    // before Nest lifecycle hooks run so boot-time catalogue refreshes see the
+    // same schema CI and local developers expect.
+    const dataSource = app.get(DataSource);
+    if (!dataSource.isInitialized) {
+      await dataSource.initialize();
+    }
+    await dataSource.runMigrations({ transaction: 'each' });
+
+    await app.init();
+
+    await truncateTables(app);
+
+    return app;
+  } catch (error) {
+    await app.close().catch(() => {
+      // Surface the original setup failure; close errors here are secondary.
+    });
+    throw error;
   }
-  await dataSource.runMigrations({ transaction: 'each' });
-
-  await app.init();
-
-  //
-  // Seed + refresh the ingredient catalogue now that the app is up. These
-  // mirror what `IngredientsModule.onApplicationBootstrap` does at
-  // production startup — idempotent upsert + in-memory cache reload.
-  const seeder = app.get(IngredientsSeeder);
-  await seeder.run();
-  const catalog = app.get(IngredientCatalogService);
-  await catalog.refresh();
-
-  return app;
 }
-
-const INGREDIENT_REFERENCE_TABLES = new Set([
-  'ingredient_entries',
-  'ingredient_aliases',
-  'ingredient_category_patterns',
-  'ingredient_conflict_rules',
-]);
 
 const TRUNCATE_TABLES_LOCK_KEY = 'ritora:e2e:truncate-tables';
 const TRUNCATE_LOCK_TIMEOUT_MS = 5000;
@@ -207,13 +231,13 @@ function delay(ms: number): Promise<void> {
 
 export async function truncateTables(app: INestApplication): Promise<void> {
   const dataSource = app.get(DataSource);
+  assertDestructiveTestDatabaseResetAllowed({
+    databaseName: dataSource.options.database,
+    operation: 'E2E truncateTables',
+  });
   const entities = dataSource.entityMetadatas;
 
-  // Ingredient catalogue rows are reference data — seeded once per test
-  // boot via IngredientsSeeder. Truncating them between tests would force
-  // a re-seed every time and doesn't match user-data semantics.
   const tableNames = entities
-    .filter((e) => !INGREDIENT_REFERENCE_TABLES.has(e.tableName))
     .map((e) => `"${e.tableName}"`)
     .sort()
     .join(', ');
@@ -264,6 +288,52 @@ export async function truncateTables(app: INestApplication): Promise<void> {
         await queryRunner.release();
       }
     }
+  }
+}
+
+function unknownErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+export async function closeTestApp(
+  app: INestApplication | null | undefined,
+): Promise<void> {
+  if (!app) {
+    return;
+  }
+
+  let cleanupError: unknown;
+  try {
+    await truncateTables(app);
+  } catch (error) {
+    cleanupError = error;
+  }
+
+  let closeError: unknown;
+  try {
+    await app.close();
+  } catch (error) {
+    closeError = error;
+  }
+
+  if (cleanupError && closeError) {
+    throw new Error(
+      `E2E cleanup and app close both failed. Cleanup: ${unknownErrorMessage(
+        cleanupError,
+      )}. Close: ${unknownErrorMessage(closeError)}.`,
+    );
+  }
+
+  if (cleanupError) {
+    throw toError(cleanupError);
+  }
+
+  if (closeError) {
+    throw toError(closeError);
   }
 }
 

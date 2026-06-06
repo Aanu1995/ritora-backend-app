@@ -23,14 +23,16 @@ import { RoutineSimplificationEvent } from './entities/routine-simplification-ev
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
-import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
+import { SkinJournalAnalysisFeedback } from './entities/skin-journal-analysis-feedback.entity';
 import { SkinJournalInsightInteraction } from './entities/skin-journal-insight-interaction.entity';
 import { SkinJournalInsightGenerationRun } from './entities/skin-journal-insight-generation-run.entity';
 import { SkinJournalInsightJob } from './entities/skin-journal-insight-job.entity';
 import { SkinJournalInsightState } from './entities/skin-journal-insight-state.entity';
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
+import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { RoutineStep } from '../schedule/entities/routine-step.entity';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
 import { SkinJournalPhotoInterpretationService } from './services/skin-journal-photo-interpretation.service';
 import { SkinJournalAnalysisQueueService } from './services/skin-journal-analysis-queue.service';
@@ -47,7 +49,6 @@ import {
   AnalysisFailureCodeValue,
   AnalysisObservations,
   SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
-  SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS,
 } from './skin-journal.constants';
 import { SkinJournalService } from './skin-journal.service';
 import { todayInTimeZone } from './skin-journal.utils';
@@ -93,6 +94,9 @@ function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
     analysis_status: 'skipped',
     analysis_observations: null,
     analysis_interpretation: null,
+    analysis_feedback_submitted: false,
+    analysis_feedback_submitted_at: null,
+    analysis_feedback_interpretation_version: null,
     analysis_concern_keys: [],
     has_reaction_signal: false,
     needs_retake: false,
@@ -169,6 +173,50 @@ function analysisRunResult(
   };
 }
 
+function analyzedObservations(
+  overrides: Partial<AnalysisObservations> = {},
+): AnalysisObservations {
+  return {
+    schema_version: '1.1',
+    model_version: 'test-model',
+    image_quality: {
+      face_detected: true,
+      lighting_quality: 'good',
+      framing_quality: 'good',
+      blur_detected: false,
+      issues: [],
+      quality_score: 0.9,
+      needs_retake: false,
+      excluded_from_trends_reason: null,
+    },
+    detected_concerns: [
+      {
+        concern: 'acne',
+        severity: 'moderate',
+        locations: ['chin'],
+        confidence: 0.78,
+      },
+    ],
+    reaction_signals: {
+      reaction_detected: false,
+      reaction_severity: 'none',
+      indicators: [],
+      confidence: 0.1,
+    },
+    barrier_signs: { barrier_compromise: false, indicators: [] },
+    overall_assessment: 'Visible breakout activity.',
+    overall_change_from_previous: 'unknown',
+    user_visible_message: 'Visible breakout activity.',
+    safety_flags: {
+      urgent_review_recommended: false,
+      doctor_follow_up_recommended: false,
+      reasons: [],
+    },
+    should_flag_for_doctor: false,
+    ...overrides,
+  };
+}
+
 function insightInputSignature(entries: SkinJournalEntry[]): string {
   const payload = [...entries]
     .sort((left, right) => left.entry_date.localeCompare(right.entry_date))
@@ -195,6 +243,10 @@ function insightInputSignature(entries: SkinJournalEntry[]): string {
       complaint_note: item.complaint_note,
     }));
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function expectNotificationDedupeKey(kind: string) {
+  return expect.stringMatching(new RegExp(`^${kind}:[a-f0-9]{32}$`));
 }
 
 const COMPLETE_CHECK_IN_BODY = {
@@ -281,13 +333,15 @@ describe('SkinJournalService', () => {
   let events: ReturnType<typeof repo>;
   let insights: ReturnType<typeof repo>;
   let insightInteractions: ReturnType<typeof repo>;
+  let analysisFeedback: ReturnType<typeof repo>;
   let applicationLogs: ReturnType<typeof repo>;
+  let inventoryProducts: ReturnType<typeof repo>;
+  let routineSteps: ReturnType<typeof repo>;
   let insightRuns: ReturnType<typeof repo>;
   let insightStates: ReturnType<typeof repo>;
   let wrapped: ReturnType<typeof repo>;
   let simplifications: ReturnType<typeof repo>;
   let consents: ReturnType<typeof repo>;
-  let exportsRepo: ReturnType<typeof repo>;
   let accountMonitoringEvents: ReturnType<typeof repo>;
   let skinProfiles: ReturnType<typeof repo>;
   const photoStorage = {
@@ -316,8 +370,8 @@ describe('SkinJournalService', () => {
         'journal.analysis.interpretation.stableBaseline.guidance',
       ],
       caveat_keys: ['journal.analysis.interpretation.caveats.notDiagnosis'],
-      source_ids: [],
-      sources: [],
+      source_ids: [] as string[],
+      sources: [] as unknown[],
       generated_at: '2026-05-01T08:00:00.000Z',
     })),
   };
@@ -423,13 +477,15 @@ describe('SkinJournalService', () => {
     events = repo();
     insights = repo();
     insightInteractions = repo();
+    analysisFeedback = repo();
     applicationLogs = repo();
+    inventoryProducts = repo();
+    routineSteps = repo();
     insightRuns = repo();
     insightStates = repo();
     wrapped = repo();
     simplifications = repo();
     consents = repo();
-    exportsRepo = repo();
     skinProfiles = repo();
     entries.manager.transaction.mockImplementation(
       async (
@@ -441,6 +497,7 @@ describe('SkinJournalService', () => {
           getRepository: (entity: unknown) => {
             if (entity === SkinJournalEntry) return entries;
             if (entity === SkinJournalEntryPhoto) return entryPhotos;
+            if (entity === SkinJournalAnalysisFeedback) return analysisFeedback;
             throw new Error('Unexpected transactional repository');
           },
         }),
@@ -480,6 +537,20 @@ describe('SkinJournalService', () => {
       }),
     );
     photoInterpretation.interpret.mockClear();
+    photoInterpretation.interpret.mockImplementation(() => ({
+      version: '1.0',
+      code: 'stable_baseline',
+      severity: 'info',
+      summary_key: 'journal.analysis.interpretation.stableBaseline.summary',
+      summary_values: {},
+      guidance_keys: [
+        'journal.analysis.interpretation.stableBaseline.guidance',
+      ],
+      caveat_keys: ['journal.analysis.interpretation.caveats.notDiagnosis'],
+      source_ids: [] as string[],
+      sources: [] as unknown[],
+      generated_at: '2026-05-01T08:00:00.000Z',
+    }));
     analysisQueue.enqueueAnalysisJob.mockClear();
     analysisQueue.cancelActiveJobsForEntry.mockClear();
     analysisQueue.cancelJob.mockClear();
@@ -519,8 +590,20 @@ describe('SkinJournalService', () => {
           useValue: insightInteractions,
         },
         {
+          provide: getRepositoryToken(SkinJournalAnalysisFeedback),
+          useValue: analysisFeedback,
+        },
+        {
           provide: getRepositoryToken(ApplicationLog),
           useValue: applicationLogs,
+        },
+        {
+          provide: getRepositoryToken(InventoryProduct),
+          useValue: inventoryProducts,
+        },
+        {
+          provide: getRepositoryToken(RoutineStep),
+          useValue: routineSteps,
         },
         {
           provide: getRepositoryToken(SkinJournalInsightGenerationRun),
@@ -534,10 +617,6 @@ describe('SkinJournalService', () => {
         {
           provide: getRepositoryToken(RoutineSimplificationEvent),
           useValue: simplifications,
-        },
-        {
-          provide: getRepositoryToken(SkinJournalExportJob),
-          useValue: exportsRepo,
         },
         { provide: getRepositoryToken(UserConsent), useValue: consents },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfiles },
@@ -767,6 +846,173 @@ describe('SkinJournalService', () => {
         sun_exposure_today: COMPLETE_CHECK_IN_BODY.sun_exposure_today,
         sweat_exercise_today: COMPLETE_CHECK_IN_BODY.sweat_exercise_today,
         cycle_marker: COMPLETE_CHECK_IN_BODY.cycle_marker,
+      }),
+    );
+    expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
+      'user-1',
+    );
+  });
+
+  it('records helpfulness feedback for the current analysis interpretation', async () => {
+    const analyzedEntry = entry({
+      photo_object_key: 'skin-journal/user-1/entry-1/photo.webp',
+      analysis_status: 'completed',
+      analysis_observations: analyzedObservations(),
+      analysis_interpretation: {
+        version: '1.1',
+        code: 'acne_progress_timing',
+        severity: 'info',
+        summary_key:
+          'journal.analysis.interpretation.acneProgressTiming.summary',
+        summary_values: {},
+        guidance_keys: [],
+        caveat_keys: [],
+        source_ids: [],
+        sources: [],
+        generated_at: '2026-05-01T08:00:00.000Z',
+        reading_quality: {
+          visual_label: 'useful',
+          trend_label: 'limited',
+          reason_keys: [],
+        },
+        concern_guidance: [],
+      },
+    });
+    entries.findOne.mockResolvedValue(analyzedEntry);
+    analysisFeedback.save.mockImplementation(async (feedback) => ({
+      ...feedback,
+      created_at: new Date('2026-05-01T08:00:00.000Z'),
+      updated_at: new Date('2026-05-01T08:00:00.000Z'),
+    }));
+
+    await expect(
+      service.recordAnalysisFeedback('user-1', 'entry-1', {
+        note: 'This needed more context.',
+        reason: 'too_generic',
+        vote: 'not_helpful',
+      }),
+    ).resolves.toMatchObject({
+      vote: 'not_helpful',
+      reason: 'too_generic',
+      note: 'This needed more context.',
+      interpretation_version: '1.1',
+      reading_label: 'useful',
+    });
+
+    expect(analysisFeedback.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vote: 'not_helpful',
+        reason: 'too_generic',
+        note: 'This needed more context.',
+        interpretation_version: '1.1',
+        reading_label: 'useful',
+        concern_keys: ['acne'],
+      }),
+    );
+    expect(analysisFeedback.findOne).not.toHaveBeenCalled();
+    expect(analysisFeedback.save).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        entry_id: expect.any(String),
+        user_id: expect.any(String),
+      }),
+    );
+    expect(entries.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'entry-1',
+        analysis_feedback_submitted: true,
+        analysis_feedback_submitted_at: expect.any(Date),
+        analysis_feedback_interpretation_version: '1.1',
+      }),
+    );
+  });
+
+  it('requires a reason for not helpful analysis feedback', async () => {
+    await expect(
+      service.recordAnalysisFeedback('user-1', 'entry-1', {
+        vote: 'not_helpful',
+      }),
+    ).rejects.toThrow('Not helpful analysis feedback requires a reason');
+  });
+
+  it('reinterprets an old analysis payload without rerunning external photo AI', async () => {
+    const oldEntry = entry({
+      photo_object_key: 'skin-journal/user-1/entry-1/photo.webp',
+      analysis_status: 'completed',
+      analysis_observations: analyzedObservations(),
+      analysis_interpretation: {
+        version: '1.0',
+        code: 'stable_baseline',
+        severity: 'info',
+        summary_key: 'journal.analysis.interpretation.stableBaseline.summary',
+        summary_values: {},
+        guidance_keys: [],
+        caveat_keys: [],
+        source_ids: [],
+        sources: [],
+        generated_at: '2026-04-01T08:00:00.000Z',
+      },
+      ratings: {
+        breakouts: 5,
+        oiliness: 3,
+        dryness: 1,
+        redness: 1,
+        texture: 2,
+        irritation: 1,
+        sensitivity: 1,
+      },
+      overall_feel: 'bad',
+      sleep_band: '5to7h',
+      stress_today: 'high',
+      sun_exposure_today: 'none',
+      sweat_exercise_today: false,
+      cycle_marker: 'dont_track',
+    });
+    entries.findOne.mockResolvedValue(oldEntry);
+    entries.save.mockImplementation(async (saved) => saved);
+    photoInterpretation.interpret.mockReturnValue({
+      version: '1.1',
+      code: 'acne_progress_timing',
+      severity: 'info',
+      summary_key: 'journal.analysis.interpretation.acneProgressTiming.summary',
+      summary_values: {},
+      guidance_keys: [
+        'journal.analysis.interpretation.acneProgressTiming.guidance',
+      ],
+      caveat_keys: ['journal.analysis.interpretation.caveats.notDiagnosis'],
+      source_ids: ['aad_acne_skin_care_tips'],
+      sources: [],
+      generated_at: '2026-05-01T08:00:00.000Z',
+      reading_quality: {
+        visual_label: 'useful',
+        trend_label: 'limited',
+        reason_keys: [],
+      },
+      concern_guidance: [],
+    } as ReturnType<SkinJournalPhotoInterpretationService['interpret']>);
+
+    await expect(
+      service.reinterpretAnalysis('user-1', 'entry-1'),
+    ).resolves.toMatchObject({
+      id: 'entry-1',
+      analysis_interpretation: expect.objectContaining({
+        version: '1.1',
+      }),
+      analysis_summary:
+        'journal.analysis.interpretation.acneProgressTiming.summary',
+    });
+
+    expect(analysis.analyze).not.toHaveBeenCalled();
+    expect(photoInterpretation.interpret).toHaveBeenCalledWith(
+      oldEntry.analysis_observations,
+      expect.any(Date),
+      expect.objectContaining({
+        routineContext: expect.objectContaining({
+          recent_check_ins: expect.arrayContaining([
+            expect.objectContaining({
+              ratings: expect.objectContaining({ breakouts: 5 }),
+            }),
+          ]),
+        }),
       }),
     );
     expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
@@ -1254,55 +1500,6 @@ describe('SkinJournalService', () => {
       1,
       'skin-journal/user-1/entry-1/photo.webp',
     );
-  });
-
-  it('stores export jobs without expiring photo URLs and signs photos on response', async () => {
-    entries.find.mockResolvedValue([
-      entry({ photo_object_key: 'skin-journal/user-1/entry-1/photo.webp' }),
-    ]);
-    exportsRepo.save.mockImplementation(async (data) => ({
-      id: 'export-1',
-      created_at: new Date('2026-04-29T00:00:00.000Z'),
-      ...data,
-    }));
-
-    const result = await service.createExport('user-1', {
-      from: '2026-04-01',
-      to: '2026-04-30',
-    });
-
-    expect(result.status).toBe('ready');
-    expect(result.payload?.entries[0].photo_url).toContain(
-      `https://signed.example.com/${SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS}/`,
-    );
-    const savedJob = exportsRepo.save.mock.calls[0]?.[0] as
-      | Partial<SkinJournalExportJob>
-      | undefined;
-    expect(savedJob?.payload?.entries[0].photo_object_key).toBe(
-      'skin-journal/user-1/entry-1/photo.webp',
-    );
-    expect(savedJob?.payload?.entries[0].photo_url).toBeNull();
-
-    exportsRepo.findOne.mockResolvedValue({
-      id: 'export-1',
-      user_id: 'user-1',
-      range_from: '2026-04-01',
-      range_to: '2026-04-30',
-      status: 'ready',
-      payload: savedJob?.payload ?? null,
-      error: null,
-      created_at: new Date('2026-04-29T00:00:00.000Z'),
-    });
-
-    const fetched = await service.getExport('user-1', 'export-1');
-    expect(fetched.payload?.entries[0].photo_url).toContain(
-      `https://signed.example.com/${SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS}/`,
-    );
-    expect(photoStorage.getSignedUrl).toHaveBeenCalledWith(
-      'skin-journal/user-1/entry-1/photo.webp',
-      { ttlSeconds: SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS },
-    );
-    expect(dataAccess.recordDataAccess).toHaveBeenCalled();
   });
 
   it('filters events by the related journal entry date range', async () => {
@@ -2078,6 +2275,72 @@ describe('SkinJournalService', () => {
         ],
       },
     });
+    routineSteps.find.mockResolvedValue([
+      {
+        inventory_product_id: 'inventory-1',
+        step_label: 'treatment',
+        optional: false,
+        is_specialist_locked: false,
+        slot: { user_id: 'user-1', deleted_at: null },
+        product: {
+          id: 'inventory-1',
+          brand: 'Test',
+          name: 'Retinol Serum',
+          category: 'serum',
+        },
+      },
+    ]);
+    inventoryProducts.find.mockResolvedValue([
+      {
+        id: 'inventory-1',
+        user_id: 'user-1',
+        brand: 'Test',
+        name: 'Retinol Serum',
+        category: 'serum',
+        opened_at: new Date('2026-04-08T18:00:00.000Z'),
+        identity: {
+          inciIngredients: ['retinol', 'squalane', 'glycerin'],
+        },
+        guidance: { cautions: ['Use only at night'] },
+        user_fields: { preferredTimeOfDay: 'evening' },
+      },
+      {
+        id: 'inventory-2',
+        user_id: 'user-1',
+        brand: 'Test',
+        name: 'Rich Balm',
+        category: 'moisturizer',
+        opened_at: null,
+        identity: {
+          inciIngredients: ['petrolatum', 'shea butter'],
+        },
+        guidance: { cautions: [] },
+        user_fields: { preferredTimeOfDay: 'either' },
+      },
+    ]);
+    applicationLogs.find.mockResolvedValue([
+      {
+        target_date: '2026-04-09',
+        daypart: 'evening',
+        applied_at: new Date('2026-04-09T20:00:00.000Z'),
+        items: [
+          {
+            status: 'skipped',
+            inventory_product_id: 'inventory-1',
+            substituted_with_product_id: null,
+            product_brand_snapshot: 'Test',
+            product_name_snapshot: 'Retinol Serum',
+            step_label: 'treatment',
+            product: {
+              brand: 'Test',
+              name: 'Retinol Serum',
+              category: 'serum',
+            },
+            substituted_with_product: null,
+          },
+        ],
+      },
+    ]);
 
     await service.runAnalysis(current.id, 'user-1');
 
@@ -2110,6 +2373,55 @@ describe('SkinJournalService', () => {
           complaint_note: 'Burning feeling near cheeks',
           is_pre_routine: true,
         }),
+        routineContext: expect.objectContaining({
+          active_shelf_products: expect.arrayContaining([
+            expect.objectContaining({
+              product_id: 'inventory-1',
+              brand: 'Test',
+              name: 'Retinol Serum',
+              category: 'serum',
+              preferred_time: 'evening',
+              opened_at: '2026-04-08T18:00:00.000Z',
+              ingredient_preview: ['retinol', 'squalane', 'glycerin'],
+            }),
+            expect.objectContaining({
+              product_id: 'inventory-2',
+              name: 'Rich Balm',
+              category: 'moisturizer',
+              preferred_time: 'either',
+            }),
+          ]),
+          routine_products: expect.arrayContaining([
+            expect.objectContaining({
+              product_id: 'inventory-1',
+              brand: 'Test',
+              name: 'Retinol Serum',
+              category: 'serum',
+              step_label: 'treatment',
+            }),
+          ]),
+          recent_applications: expect.arrayContaining([
+            expect.objectContaining({
+              target_date: '2026-04-09',
+              daypart: 'evening',
+              items: expect.arrayContaining([
+                expect.objectContaining({
+                  status: 'skipped',
+                  product_id: 'inventory-1',
+                  name: 'Retinol Serum',
+                  category: 'serum',
+                }),
+              ]),
+            }),
+          ]),
+          recent_check_ins: expect.arrayContaining([
+            expect.objectContaining({
+              entry_date: '2026-04-10',
+              sleep_band: '5to7h',
+              stress_today: 'high',
+            }),
+          ]),
+        }),
       }),
     );
     const call = analysis.analyze.mock.calls.at(-1)?.[0] as {
@@ -2127,6 +2439,34 @@ describe('SkinJournalService', () => {
           fitzpatrick_phototype: 'V',
         }),
         recentChange: current.recent_change,
+        routineContext: expect.objectContaining({
+          routine_products: [
+            expect.objectContaining({
+              product_id: 'inventory-1',
+              name: 'Retinol Serum',
+              step_label: 'treatment',
+            }),
+          ],
+          recent_applications: [
+            expect.objectContaining({
+              target_date: '2026-04-09',
+              items: [
+                expect.objectContaining({
+                  status: 'skipped',
+                  name: 'Retinol Serum',
+                }),
+              ],
+            }),
+          ],
+          recent_check_ins: expect.arrayContaining([
+            expect.objectContaining({
+              entry_date: '2026-04-10',
+              ratings: { redness: 4, irritation: 3, sensitivity: 4 },
+              stress_today: 'high',
+              complaint_note: 'Burning feeling near cheeks',
+            }),
+          ]),
+        }),
       }),
     );
   });
@@ -2712,7 +3052,85 @@ describe('SkinJournalService', () => {
       'Schema validation failed',
     );
     expect(notifications.dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'analysis_failed' }),
+      expect.objectContaining({
+        kind: 'analysis_failed',
+        dedupeKey: expectNotificationDedupeKey('analysis_failed'),
+      }),
+    );
+  });
+
+  it('deduplicates reaction and simplification notifications by their source event', async () => {
+    const current = entry({
+      id: 'entry-reaction',
+      entry_date: '2026-04-10',
+      photo_object_key: 'skin-journal/user-1/entry-reaction/photo.webp',
+      analysis_status: 'pending',
+    });
+    entries.findOne.mockResolvedValue(current);
+    entries.find.mockResolvedValue([current]);
+    events.findOne.mockResolvedValue(null);
+    analysis.analyze.mockResolvedValueOnce(
+      analysisRunResult(
+        analyzedObservations({
+          reaction_signals: {
+            reaction_detected: true,
+            reaction_severity: 'moderate',
+            indicators: ['redness_spike'],
+            confidence: 0.8,
+          },
+          barrier_signs: { barrier_compromise: true, indicators: [] },
+          should_flag_for_doctor: false,
+        }),
+      ),
+    );
+
+    await service.runAnalysis('entry-reaction', 'user-1');
+
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'reaction_detected',
+        dedupeKey: expectNotificationDedupeKey('reaction_detected'),
+      }),
+    );
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'simplification_started',
+        dedupeKey: expectNotificationDedupeKey('simplification_started'),
+      }),
+    );
+  });
+
+  it('deduplicates insight-ready notifications by the created insight batch', async () => {
+    const current = entry({
+      id: 'entry-current',
+      entry_date: '2026-04-10',
+      analysis_status: 'completed',
+      analysis_summary: 'Looks stable.',
+    });
+    entries.find.mockResolvedValue([current]);
+    insights.findOne.mockResolvedValue(null);
+    insights.save.mockImplementation(async (data) => ({
+      id: 'insight-created',
+      generated_at: new Date('2026-04-10T09:00:00.000Z'),
+      seen_at: null,
+      dismissed_at: null,
+      ...data,
+    }));
+
+    await service.processInsightJob({
+      user_id: 'user-1',
+      trigger: 'scheduled_refresh',
+      locale: 'en',
+      input_signature: insightInputSignature([current]),
+      attempt_count: 1,
+      max_attempts: 5,
+    } as SkinJournalInsightJob);
+
+    expect(notifications.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'insight_ready',
+        dedupeKey: expectNotificationDedupeKey('insight_ready'),
+      }),
     );
   });
 

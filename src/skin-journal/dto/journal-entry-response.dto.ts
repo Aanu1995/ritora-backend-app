@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { SkinJournalEntry } from '../entities/skin-journal-entry.entity';
+import { SkinJournalAnalysisFeedback } from '../entities/skin-journal-analysis-feedback.entity';
+import { AnalysisFeedbackResponseDto } from './analysis-feedback.dto';
 import type {
   AnalysisComparisonReference,
   AnalysisObservations,
@@ -118,6 +120,15 @@ export class JournalEntryResponseDto {
   analysis_interpretation: PhotoAnalysisInterpretation | null;
 
   @ApiProperty({ required: false, nullable: true })
+  analysis_feedback: AnalysisFeedbackResponseDto | null;
+
+  @ApiProperty()
+  analysis_feedback_submitted: boolean;
+
+  @ApiProperty({ required: false, nullable: true })
+  analysis_feedback_submitted_at: Date | null;
+
+  @ApiProperty({ required: false, nullable: true })
   analysis_summary: string | null;
 
   @ApiProperty({ required: false, nullable: true })
@@ -172,6 +183,7 @@ export class JournalEntryResponseDto {
     entry: SkinJournalEntry,
     photoUrl: string | null,
     photos: JournalEntryPhotoResponseDto[] = [],
+    analysisFeedback: SkinJournalAnalysisFeedback | null = null,
   ): JournalEntryResponseDto {
     const dto = new JournalEntryResponseDto();
     dto.id = entry.id;
@@ -202,6 +214,12 @@ export class JournalEntryResponseDto {
       entry.analysis_observations?.comparison_reference ?? null;
     dto.photo_reference_quality = buildPhotoReferenceQuality(entry);
     dto.analysis_interpretation = entry.analysis_interpretation;
+    dto.analysis_feedback = matchingAnalysisFeedback(entry, analysisFeedback);
+    dto.analysis_feedback_submitted =
+      isFeedbackSubmittedForCurrentAnalysis(entry);
+    dto.analysis_feedback_submitted_at = dto.analysis_feedback_submitted
+      ? entry.analysis_feedback_submitted_at
+      : null;
     dto.analysis_summary = entry.analysis_summary;
     dto.analysis_model = entry.analysis_model;
     dto.analysis_version = entry.analysis_version;
@@ -223,4 +241,36 @@ export class JournalEntryResponseDto {
     dto.updated_at = entry.updated_at;
     return dto;
   }
+}
+
+function isFeedbackSubmittedForCurrentAnalysis(
+  entry: SkinJournalEntry,
+): boolean {
+  if (!entry.analysis_feedback_submitted || !entry.analysis_interpretation) {
+    return false;
+  }
+  const currentVersion = entry.analysis_interpretation.version ?? null;
+  return (
+    !!currentVersion &&
+    entry.analysis_feedback_interpretation_version === currentVersion
+  );
+}
+
+function matchingAnalysisFeedback(
+  entry: SkinJournalEntry,
+  feedback: SkinJournalAnalysisFeedback | null,
+): AnalysisFeedbackResponseDto | null {
+  if (!feedback) {
+    return null;
+  }
+  const version = entry.analysis_interpretation?.version ?? null;
+  if (!version) {
+    return null;
+  }
+  if (feedback.interpretation_version) {
+    return feedback.interpretation_version === version
+      ? AnalysisFeedbackResponseDto.fromEntity(feedback)
+      : null;
+  }
+  return AnalysisFeedbackResponseDto.fromEntity(feedback);
 }

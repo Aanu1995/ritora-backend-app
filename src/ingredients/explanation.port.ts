@@ -1,10 +1,12 @@
 import type { AppLanguage } from '../common/i18n/i18n';
 import type { AnalysisSeverity } from './ingredients.types';
+import type { IngredientAnalysisAiTrackingContext } from './ingredient-analysis-ai-usage-metrics';
 
 export const EXPLANATION_PORT = 'EXPLANATION_PORT';
 
 export type ExplanationInput = {
   language: AppLanguage;
+  tracking?: IngredientAnalysisAiTrackingContext;
   conflicts: Array<{
     id: string;
     code: string;

@@ -10,9 +10,14 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
+import {
+  MAX_INCI_INGREDIENT_NAME_LENGTH,
+  MAX_INCI_INGREDIENTS_PER_PRODUCT,
+} from '../../common/constants/product-ingredient-limits';
 import {
   ApplicationMethod,
   DataProvenance,
@@ -68,7 +73,9 @@ export class CreateCatalogueIdentityDto {
   suitedFor!: string[];
 
   @IsArray()
+  @ArrayMaxSize(MAX_INCI_INGREDIENTS_PER_PRODUCT)
   @IsString({ each: true })
+  @MaxLength(MAX_INCI_INGREDIENT_NAME_LENGTH, { each: true })
   inciIngredients!: string[];
 
   @EmptyStringToNull()

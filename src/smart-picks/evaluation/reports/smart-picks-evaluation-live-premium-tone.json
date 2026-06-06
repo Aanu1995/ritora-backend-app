@@ -1,0 +1,172 @@
+{
+  "generatedAt": "2026-05-29T02:32:56.143Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "smart-picks-ai-first-v2-journal-summary",
+  "totalCases": 1,
+  "passedCases": 1,
+  "reviewCases": 0,
+  "failedCases": 0,
+  "gate": {
+    "passed": true,
+    "blockers": []
+  },
+  "driftHash": "ce0bef636c08f668209d390d00eea98190f10aa6bfbf321cfb1408b6fb0bbfb1",
+  "cases": [
+    {
+      "id": "refine_full_shelf_premium_tone_australia_optional_support",
+      "mode": "refine",
+      "countryCode": "AU",
+      "budgetTier": "premium",
+      "primaryGoal": "keep dark marks fading while avoiding irritation",
+      "status": "passed",
+      "score": 1,
+      "checks": [
+        {
+          "id": "coverage_roles",
+          "passed": true,
+          "expected": "Coverage roles match the persona expectation: [\"cleanse\",\"moisturise\",\"spf\",\"dark-spot-treatment\",\"antioxidant\",\"exfoliation-mask\"]",
+          "actual": "{\"actual\":[\"antioxidant\",\"barrier-support\",\"cleanse\",\"dark-spot-treatment\",\"exfoliation-mask\",\"hydrate\",\"moisturise\",\"retinoid\",\"spf\"],\"missing\":[]}"
+        },
+        {
+          "id": "priority_gaps",
+          "passed": true,
+          "expected": "Priority gap concepts match the persona expectation: []",
+          "actual": "{\"actual\":[],\"missing\":[]}"
+        },
+        {
+          "id": "consider_gaps",
+          "passed": true,
+          "expected": "Worth-considering gap concepts match the persona expectation: [\"vitamin-c-antioxidant-serum\",\"gentle-resurfacing-mask\"]",
+          "actual": "{\"actual\":[\"gentle-resurfacing-mask-or-peel\",\"antioxidant-serum\",\"low-strength-retinoid-serum\"],\"missing\":[]}"
+        },
+        {
+          "id": "minimum_consider_gap_count",
+          "passed": true,
+          "expected": "Worth-considering gap count meets the persona minimum: at least 2",
+          "actual": "3"
+        },
+        {
+          "id": "blocked_safety_count",
+          "passed": true,
+          "expected": "Safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_pregnancy_safety_count",
+          "passed": true,
+          "expected": "Pregnancy safety-blocked gap count does not exceed the persona expectation: at most 0",
+          "actual": "0"
+        },
+        {
+          "id": "blocked_replacement_evidence_count",
+          "passed": true,
+          "expected": "Replacement evidence guardrail blocked unbacked replacement attempts: recorded for monitoring",
+          "actual": "0"
+        },
+        {
+          "id": "accepted_product_pick_count",
+          "passed": true,
+          "expected": "Product-pick count matches generated gaps: 3",
+          "actual": "3"
+        },
+        {
+          "id": "product_pick_keys",
+          "passed": true,
+          "expected": "Product picks exist for every expected gap concept: [\"vitamin-c-antioxidant-serum\",\"gentle-resurfacing-mask\"]",
+          "actual": "{\"actual\":[\"gentle-resurfacing-mask-or-peel\",\"antioxidant-serum\",\"low-strength-retinoid-serum\"],\"missing\":[]}"
+        }
+      ],
+      "planDiagnostics": {
+        "rawCoverageSlotCount": 6,
+        "acceptedCoverageSlotCount": 9,
+        "invalidCoverageSlotCount": 0,
+        "rawGapCount": 2,
+        "acceptedGapCount": 3,
+        "acceptedPriorityGapCount": 0,
+        "acceptedConsiderGapCount": 3,
+        "invalidGapCount": 0,
+        "blockedOwnedGapCount": 0,
+        "blockedSafetyGapCount": 0,
+        "blockedPregnancySafetyGapCount": 0,
+        "blockedReplacementEvidenceGapCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "missingPlan": false,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 2065,
+        "outputTokens": 6005,
+        "totalTokens": 8070,
+        "estimatedCostUsd": 0.003913
+      },
+      "productDiagnostics": {
+        "requestedGapCount": 3,
+        "rawGapCount": 3,
+        "acceptedPickCount": 3,
+        "blockedOwnedCount": 0,
+        "blockedBudgetCount": 0,
+        "blockedSafetyCount": 0,
+        "invalidPickCount": 0,
+        "missingPickCount": 0,
+        "providerFailed": false,
+        "providerSkippedReason": null,
+        "model": "gpt-5.4-mini",
+        "inputTokens": 6866,
+        "outputTokens": 25004,
+        "totalTokens": 31870,
+        "estimatedCostUsd": 0.016031999999999998
+      },
+      "coverageRoles": [
+        "cleanse",
+        "moisturise",
+        "spf",
+        "dark-spot-treatment",
+        "antioxidant",
+        "retinoid",
+        "hydrate",
+        "barrier-support",
+        "exfoliation-mask"
+      ],
+      "priorityGapKeys": [],
+      "considerGapKeys": [
+        "gentle-resurfacing-mask-or-peel",
+        "antioxidant-serum",
+        "low-strength-retinoid-serum"
+      ],
+      "productPicks": [
+        {
+          "normalizedKey": "gentle-resurfacing-mask-or-peel",
+          "brand": "Dr. Dennis Gross",
+          "productName": "Alpha Beta Universal Daily Peel",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Best fit for a low-frequency peel that can smooth texture and support dark-mark fading without turning the routine into a daily exfoliation step."
+        },
+        {
+          "normalizedKey": "antioxidant-serum",
+          "brand": "Kiehl's",
+          "productName": "Clearly Corrective Dark Spot Solution",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "Good add-on for dark marks; targets pigment with a gentler feel than many pure vitamin C serums."
+        },
+        {
+          "normalizedKey": "low-strength-retinoid-serum",
+          "brand": "Medik8",
+          "productName": "Crystal Retinal 1",
+          "budgetTier": "premium",
+          "sellerNameCount": 3,
+          "alternativeCount": 2,
+          "recommendationRankReason": "A careful first retinoid choice for lingering marks and mild texture; helpful if you want a support step, not a must-have."
+        }
+      ],
+      "manualReviewChecklist": [
+        "Does the output avoid inventing urgent gaps when core products are present?",
+        "Are optional products still suggested when they could help the goal?",
+        "Does the plan respect the premium budget without talking about budget in the reason?",
+        "Does the coverage meter match the tone goal instead of a generic eight-slot routine?"
+      ]
+    }
+  ]
+}

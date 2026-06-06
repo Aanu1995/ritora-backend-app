@@ -1,7 +1,7 @@
 import { SkinJournalEntry } from '../entities/skin-journal-entry.entity';
 import { JournalEntryResponseDto } from './journal-entry-response.dto';
 
-function entry(): SkinJournalEntry {
+function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
   return {
     id: 'entry-1',
     user_id: 'user-1',
@@ -41,6 +41,9 @@ function entry(): SkinJournalEntry {
       sources: [],
       generated_at: '2026-05-01T08:00:00.000Z',
     },
+    analysis_feedback_submitted: false,
+    analysis_feedback_submitted_at: null,
+    analysis_feedback_interpretation_version: null,
     analysis_concern_keys: [],
     has_reaction_signal: false,
     needs_retake: false,
@@ -63,6 +66,7 @@ function entry(): SkinJournalEntry {
     updated_at: new Date('2026-04-29T00:00:00.000Z'),
     user: undefined as never,
     generateId: jest.fn(),
+    ...overrides,
   };
 }
 
@@ -85,5 +89,40 @@ describe('JournalEntryResponseDto', () => {
     expect(dto.analysis_total_tokens).toBe(1100);
     expect(dto.analysis_estimated_cost_usd).toBe(0.0065);
     expect(dto.analysis_error_code).toBeNull();
+    expect(dto.analysis_feedback_submitted).toBe(false);
+    expect(dto.analysis_feedback_submitted_at).toBeNull();
+  });
+
+  it('exposes a typed feedback-submitted flag only for the current interpretation', () => {
+    const submittedAt = new Date('2026-05-27T08:00:00.000Z');
+    const dto = JournalEntryResponseDto.fromEntity(
+      entry({
+        analysis_feedback_submitted: true,
+        analysis_feedback_submitted_at: submittedAt,
+        analysis_feedback_interpretation_version: '1.0',
+      }),
+      'https://signed.example.com/photo.webp',
+    );
+
+    expect(dto.analysis_feedback_submitted).toBe(true);
+    expect(dto.analysis_feedback_submitted_at).toBe(submittedAt);
+  });
+
+  it('does not treat older interpretation feedback as submitted for the current analysis', () => {
+    const dto = JournalEntryResponseDto.fromEntity(
+      entry({
+        analysis_feedback_submitted: true,
+        analysis_feedback_submitted_at: new Date('2026-05-27T08:00:00.000Z'),
+        analysis_feedback_interpretation_version: '1.0',
+        analysis_interpretation: {
+          ...entry().analysis_interpretation!,
+          version: '1.1',
+        },
+      }),
+      'https://signed.example.com/photo.webp',
+    );
+
+    expect(dto.analysis_feedback_submitted).toBe(false);
+    expect(dto.analysis_feedback_submitted_at).toBeNull();
   });
 });
