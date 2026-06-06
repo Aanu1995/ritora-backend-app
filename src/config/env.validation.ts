@@ -143,6 +143,20 @@ function validateCookieSettings(
   }
 
   if (env.NODE_ENV === 'production') {
+    if (env.DATABASE_SSL !== true) {
+      const databaseHost =
+        typeof env.DATABASE_HOST === 'string' ? env.DATABASE_HOST.trim() : '';
+      const isPrivateDatabaseHost =
+        databaseHost === 'localhost' ||
+        databaseHost.startsWith('10.') ||
+        databaseHost.startsWith('192.168.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(databaseHost);
+
+      if (!isPrivateDatabaseHost) {
+        return helpers.error('any.invalid');
+      }
+    }
+
     if (
       typeof env.MAIL_FROM === 'string' &&
       typeof env.NOTIFICATION_MAIL_FROM === 'string' &&
@@ -215,7 +229,7 @@ export const envValidationSchema = Joi.object({
   DATABASE_PASSWORD: environmentSecret,
   DATABASE_SSL: Joi.when('NODE_ENV', {
     is: 'production',
-    then: Joi.boolean().valid(true).required(),
+    then: Joi.boolean().required(),
     otherwise: Joi.boolean().required(),
   }),
   DATABASE_LOGGING: Joi.boolean().required(),

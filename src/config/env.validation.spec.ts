@@ -269,6 +269,31 @@ describe('envValidationSchema', () => {
     expect(result.value.DATABASE_SSL_REJECT_UNAUTHORIZED).toBe(true);
   });
 
+  it('allows production database SSL to be disabled for private database hosts', () => {
+    const result = validateEnv(
+      productionEnv({
+        DATABASE_HOST: '10.10.0.5',
+        DATABASE_SSL: false,
+        DATABASE_SSL_REJECT_UNAUTHORIZED: false,
+      }),
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.DATABASE_SSL).toBe(false);
+  });
+
+  it('rejects disabled production database SSL for public database hosts', () => {
+    const result = validateEnv(
+      productionEnv({
+        DATABASE_HOST: 'db.example.com',
+        DATABASE_SSL: false,
+        DATABASE_SSL_REJECT_UNAUTHORIZED: false,
+      }),
+    );
+
+    expect(result.error).toBeDefined();
+  });
+
   it('requires Web Push VAPID credentials in production', () => {
     const result = validateEnv(
       productionEnv({

@@ -73,6 +73,8 @@ Production validation requires:
 
 - `WEB_APP_URL` to be HTTPS
 - `API_PUBLIC_URL` to be HTTPS and include the API prefix, for example `https://api.example.com/api/v1`
+- `DATABASE_SSL=true` for public managed database hosts, or `DATABASE_SSL=false`
+  only when `DATABASE_HOST` is a private network host such as `10.x.x.x`
 - `COOKIE_SECURE=true`
 - non-empty strong JWT secrets
 - a stable `MAIL_UNSUBSCRIBE_SECRET` with at least 32 characters

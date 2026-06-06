@@ -1,0 +1,91 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Verify build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HETZNER_BACKEND_SSH_KEY }}
+          SSH_HOST: ${{ secrets.HETZNER_BACKEND_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/ritora_backend
+          chmod 600 ~/.ssh/ritora_backend
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload release
+        env:
+          SSH_HOST: ${{ secrets.HETZNER_BACKEND_HOST }}
+          SSH_USER: ${{ secrets.HETZNER_BACKEND_USER }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          : "${SSH_USER:=deploy}"
+          ssh -i ~/.ssh/ritora_backend "$SSH_USER@$SSH_HOST" \
+            "mkdir -p /opt/ritora/backend/releases/$RELEASE"
+          tar \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            --exclude='coverage' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            -czf - . | ssh -i ~/.ssh/ritora_backend "$SSH_USER@$SSH_HOST" \
+              "tar -xzf - -C /opt/ritora/backend/releases/$RELEASE"
+
+      - name: Install, migrate, and restart
+        env:
+          SSH_HOST: ${{ secrets.HETZNER_BACKEND_HOST }}
+          SSH_USER: ${{ secrets.HETZNER_BACKEND_USER }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          : "${SSH_USER:=deploy}"
+          ssh -i ~/.ssh/ritora_backend "$SSH_USER@$SSH_HOST" "RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          release_dir="/opt/ritora/backend/releases/$RELEASE"
+          cd "$release_dir"
+
+          npm ci
+          npm run build
+
+          set -a
+          . /etc/ritora/backend.env
+          set +a
+
+          NODE_ENV=production npm run migration:run
+          npm prune --omit=dev
+
+          ln -sfn "$release_dir" /opt/ritora/backend/current
+          sudo -n systemctl restart ritora-backend
+          sudo -n systemctl is-active --quiet ritora-backend
+
+          sleep 2
+          curl -fsS "http://127.0.0.1:${API_PORT:-3001}/api/v1/health" >/dev/null
+          REMOTE
