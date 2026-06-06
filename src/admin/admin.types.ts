@@ -294,7 +294,6 @@ export type AdminOverviewResponse = {
   }>;
   compliance: {
     pendingDeletionCount: number;
-    failedExportCount: number;
     sensitiveAccessEvents24h: number;
   };
 };
@@ -459,7 +458,6 @@ export type AdminUserDetailResponse = AdminUserResponse & {
     totalSessionCount: number;
   };
   safety: {
-    failedExportCount: number;
     sensitiveAccessEvents24h: number;
   };
   recentAuditLogs: AdminAuditLogResponse[];

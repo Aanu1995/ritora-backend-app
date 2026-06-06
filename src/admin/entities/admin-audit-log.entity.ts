@@ -27,7 +27,6 @@ export enum AdminAuditAction {
   OperationalIncidentResolved = 'operational_incident_resolved',
   PlatformGlobalRestrictionEnabled = 'platform_global_restriction_enabled',
   PlatformGlobalRestrictionDisabled = 'platform_global_restriction_disabled',
-  SkinJournalAnalysisFeedbackExported = 'skin_journal_analysis_feedback_exported',
   SupportFeedbackCreated = 'support_feedback_created',
   SupportFeedbackUpdated = 'support_feedback_updated',
   SupportFeedbackNoteCreated = 'support_feedback_note_created',

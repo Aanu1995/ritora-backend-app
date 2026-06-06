@@ -9,11 +9,10 @@ import {
   Post,
   Query,
   Req,
-  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { Request, Response } from 'express';
+import { Request } from 'express';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { normalizeLanguage } from '../common/i18n/i18n';
@@ -39,7 +38,6 @@ import {
   CreateOperationalIncidentDto,
   ResolveOperationalIncidentDto,
 } from './dto/admin-operational-incident.dto';
-import { AdminAnalysisFeedbackExportDto } from './dto/admin-analysis-feedback-export.dto';
 import {
   AdminAccountMonitoringTimelineQueryDto,
   AdminAccountMonitoringListQueryDto,
@@ -449,31 +447,6 @@ export class AdminController {
   @Get('skin-journal/analysis-feedback')
   getSkinJournalAnalysisFeedbackReport(): Promise<AdminSkinJournalAnalysisFeedbackReportResponse> {
     return this.adminService.getSkinJournalAnalysisFeedbackReport();
-  }
-
-  @Post('skin-journal/analysis-feedback/export.csv')
-  @UseGuards(AdminJwtAuthGuard, OriginCheckGuard, AdminRootGuard)
-  async exportSkinJournalAnalysisFeedbackCsv(
-    @CurrentUser() user: AdminAuthenticatedUser,
-    @Body() dto: AdminAnalysisFeedbackExportDto,
-    @Req() req: Request,
-    @Res() res: Response,
-  ): Promise<void> {
-    const csv = await this.adminService.exportSkinJournalAnalysisFeedbackCsv(
-      user,
-      {
-        ip: req.ip,
-        reason: dto.reason,
-        sessionId: user.sessionId,
-        userAgent: getHeaderValue(req.headers, 'user-agent'),
-      },
-    );
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="skin-journal-analysis-feedback.csv"',
-    );
-    res.send(csv);
   }
 
   @Get('operations/incidents')

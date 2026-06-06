@@ -228,7 +228,6 @@ export const SUGGESTION_RETENTION_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export const SUGGESTION_HISTORY_PAGE_DEFAULT_LIMIT = 10;
 export const SUGGESTION_HISTORY_PAGE_MAX_LIMIT = 50;
-export const SUGGESTION_HISTORY_EXPORT_MAX_ROWS = 5000;
 
 export enum SuggestionEvidenceSourceId {
   AadSunscreenSelection = 'aad_sunscreen_selection',

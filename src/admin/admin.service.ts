@@ -38,7 +38,6 @@ import {
   AnalysisJobStatusValue,
   AnalysisFeedbackVoteValue,
   AnalysisStatusValue,
-  ExportStatusValue,
   InsightGenerationStatusValue,
 } from '../skin-journal/skin-journal.constants';
 import { SkinJournalAnalysisFeedback } from '../skin-journal/entities/skin-journal-analysis-feedback.entity';
@@ -288,7 +287,6 @@ const ADMIN_ANALYSIS_FEEDBACK_WINDOW_DAYS = 30;
 const ADMIN_ANALYSIS_FEEDBACK_REVIEW_MIN_RESPONSES = 10;
 const ADMIN_ANALYSIS_FEEDBACK_REVIEW_HELPFUL_RATE = 70;
 const ADMIN_ANALYSIS_FEEDBACK_RECENT_LIMIT = 25;
-const ADMIN_ANALYSIS_FEEDBACK_EXPORT_LIMIT = 5000;
 const ADMIN_ACCOUNT_MONITORING_DEFAULT_LIMIT = 10;
 const ADMIN_ACCOUNT_MONITORING_MAX_LIMIT = 50;
 const ADMIN_ACCOUNT_MONITORING_SUMMARY_MAX_LENGTH = 160;
@@ -571,27 +569,6 @@ function toRate(part: number, total: number): number {
     return 0;
   }
   return Math.round((part / total) * 1000) / 10;
-}
-
-function csvValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return '';
-  }
-  const rawText =
-    typeof value === 'string'
-      ? value
-      : typeof value === 'number' ||
-          typeof value === 'boolean' ||
-          typeof value === 'bigint'
-        ? value.toString()
-        : value instanceof Date
-          ? value.toISOString()
-          : (JSON.stringify(value) ?? '');
-  const text = /^[\s]*[=+\-@]/.test(rawText) ? `'${rawText}` : rawText;
-  if (!/[",\n\r]/.test(text)) {
-    return text;
-  }
-  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -1090,7 +1067,7 @@ export class AdminService {
             (
               SELECT COUNT(*)
               FROM suggestion_instances
-              WHERE generation_status = $13
+              WHERE generation_status = $12
             )::int AS suggestion_failed_count,
             product_event_counts.routine_users,
             (
@@ -1118,11 +1095,6 @@ export class AdminService {
             )::int AS active_restrictions,
             (
               SELECT COUNT(*)
-              FROM skin_journal_export_jobs
-              WHERE status = $5
-            )::int AS failed_export_count,
-            (
-              SELECT COUNT(*)
               FROM user_data_access_logs, bounds
               WHERE created_at >= bounds.since_day
                 AND event_type = 'data_accessed'
@@ -1130,22 +1102,22 @@ export class AdminService {
             (
               SELECT COUNT(*)
               FROM skin_journal_entries
-              WHERE analysis_status = $6
+              WHERE analysis_status = $5
             )::int AS analysis_completed_count,
             (
               SELECT COUNT(*)
               FROM skin_journal_entries
-              WHERE analysis_status = $7
+              WHERE analysis_status = $6
             )::int AS analysis_failed_count,
             (
               SELECT COUNT(*)
               FROM skin_journal_insight_generation_runs
-              WHERE status = $16
+              WHERE status = $15
             )::int AS insight_completed_count,
             (
               SELECT COUNT(*)
               FROM skin_journal_insight_generation_runs
-              WHERE status = $17
+              WHERE status = $16
             )::int AS insight_failed_count,
             (
               SELECT COALESCE(SUM(analysis_estimated_cost_usd), 0)
@@ -1237,12 +1209,12 @@ export class AdminService {
             (
               SELECT COUNT(*)
               FROM smart_pick_generation_jobs
-              WHERE status = $14
+              WHERE status = $13
             )::int AS smart_pick_completed_count,
             (
               SELECT COUNT(*)
               FROM smart_pick_generation_jobs
-              WHERE status = $15
+              WHERE status = $14
             )::int AS smart_pick_failed_count,
             (
               SELECT COALESCE(SUM(cost_usd), 0)
@@ -1470,7 +1442,6 @@ export class AdminService {
         sinceDay,
         sinceMonth,
         SuggestionGenerationStatus.Ready,
-        ExportStatusValue.Failed,
         AnalysisStatusValue.Completed,
         AnalysisStatusValue.Failed,
         sinceThirtyDays,
@@ -1830,15 +1801,9 @@ export class AdminService {
           ) AS latest_suggestion_at,
           (
             SELECT COUNT(*)
-            FROM skin_journal_export_jobs
-            WHERE skin_journal_export_jobs.user_id = users.id
-              AND skin_journal_export_jobs.status = $4
-          )::int AS failed_export_count,
-          (
-            SELECT COUNT(*)
             FROM user_data_access_logs
             WHERE user_data_access_logs.user_id = users.id
-              AND user_data_access_logs.created_at >= $5
+              AND user_data_access_logs.created_at >= $4
               AND user_data_access_logs.event_type = 'data_accessed'
           )::int AS sensitive_access_events_24h
         FROM users
@@ -1855,7 +1820,6 @@ export class AdminService {
         userId,
         AnalysisStatusValue.Completed,
         AnalysisStatusValue.Failed,
-        ExportStatusValue.Failed,
         sinceDay,
       ],
     );
@@ -1885,7 +1849,6 @@ export class AdminService {
       },
       recentAuditLogs: recentAuditLogs.logs,
       safety: {
-        failedExportCount: toNumber(row.failed_export_count),
         sensitiveAccessEvents24h: toNumber(row.sensitive_access_events_24h),
       },
     };
@@ -3239,55 +3202,6 @@ export class AdminService {
     };
   }
 
-  async exportSkinJournalAnalysisFeedbackCsv(
-    actor: AdminAuthenticatedUser,
-    context: AdminUserAuditContext,
-  ): Promise<string> {
-    const reason = this.normalizeAuditReason(context.reason);
-    const feedbackRepository = this.dataSource.getRepository(
-      SkinJournalAnalysisFeedback,
-    );
-    const auditLogsRepository = this.dataSource.getRepository(AdminAuditLog);
-    const feedback = await feedbackRepository.find({
-      order: { created_at: 'DESC' },
-      take: ADMIN_ANALYSIS_FEEDBACK_EXPORT_LIMIT,
-    });
-    const headers = [
-      'vote',
-      'reason',
-      'note',
-      'interpretation_version',
-      'reading_label',
-      'concern_keys',
-      'created_at',
-      'updated_at',
-    ];
-    const rows = feedback.map((row) => [
-      row.vote,
-      row.reason,
-      row.note,
-      row.interpretation_version,
-      row.reading_label,
-      row.concern_keys.join('; '),
-      toIsoString(row.created_at),
-      toIsoString(row.updated_at),
-    ]);
-    await this.writeUserAuditLog(auditLogsRepository, {
-      action: AdminAuditAction.SkinJournalAnalysisFeedbackExported,
-      actor,
-      context: { ...context, reason },
-      metadata: {
-        exportedRows: feedback.length,
-        maxRows: ADMIN_ANALYSIS_FEEDBACK_EXPORT_LIMIT,
-      },
-      targetUserId: null,
-    });
-
-    return [headers, ...rows]
-      .map((row) => row.map(csvValue).join(','))
-      .join('\n');
-  }
-
   async listOperationalIncidents(
     query: AdminOperationalIncidentListQuery = {},
   ): Promise<AdminOperationalIncidentListResponse> {
@@ -4064,7 +3978,6 @@ export class AdminService {
     );
     const smartPickCompletedCount = toNumber(row.smart_pick_completed_count);
     const smartPickFailedCount = toNumber(row.smart_pick_failed_count);
-    const failedExportCount = toNumber(row.failed_export_count);
     const pendingDeletionCount = toNumber(row.pending_deletion_count);
     const sensitiveAccessEvents24h = toNumber(row.sensitive_access_events_24h);
     const activeRestrictions = toNumber(row.active_restrictions);
@@ -4098,7 +4011,6 @@ export class AdminService {
       toNumber(row.ingredient_analysis_ai_cost_mtd) +
       toNumber(row.smart_pick_ai_cost_mtd);
     const alerts = this.buildAlerts({
-      failedExportCount,
       jobHealth,
       pendingDeletionCount,
     });
@@ -4328,14 +4240,12 @@ export class AdminService {
       jobHealth,
       compliance: {
         pendingDeletionCount,
-        failedExportCount,
         sensitiveAccessEvents24h,
       },
     };
   }
 
   private buildAlerts(input: {
-    failedExportCount: number;
     jobHealth: AdminOverviewResponse['jobHealth'];
     pendingDeletionCount: number;
   }): AdminOverviewResponse['alerts'] {
@@ -4353,15 +4263,6 @@ export class AdminService {
             ? 'Analysis queue delayed'
             : `${delayedJob.label} queue delayed`,
         description: `${delayedJob.label} has ${delayedJob.queued} queued and ${delayedJob.failed} failed jobs.`,
-      });
-    }
-
-    if (input.failedExportCount > 0) {
-      alerts.push({
-        id: 'failed-journal-exports',
-        severity: AdminAlertSeverity.Critical,
-        title: 'Journal exports failing',
-        description: `${input.failedExportCount} journal export jobs need review.`,
       });
     }
 
@@ -4391,21 +4292,15 @@ export class AdminService {
           )::int AS pending_deletion_count,
           (
             SELECT COUNT(*)
-            FROM skin_journal_export_jobs
-            WHERE status = $1
-          )::int AS failed_export_count,
-          (
-            SELECT COUNT(*)
             FROM user_data_access_logs
-            WHERE created_at >= $2
+            WHERE created_at >= $1
               AND event_type = 'data_accessed'
           )::int AS sensitive_access_events_24h
       `,
-      [ExportStatusValue.Failed, sinceDay],
+      [sinceDay],
     );
 
     return {
-      failedExportCount: toNumber(row.failed_export_count),
       pendingDeletionCount: toNumber(row.pending_deletion_count),
       sensitiveAccessEvents24h: toNumber(row.sensitive_access_events_24h),
     };
@@ -4731,25 +4626,6 @@ export class AdminService {
             UNION ALL
 
             SELECT
-              'journal-export' AS type,
-              'Journal export' AS label,
-              exports.id,
-              exports.user_id,
-              users.email AS user_email,
-              exports.status::text AS status,
-              NULL::int AS attempt_count,
-              NULL::timestamptz AS run_after,
-              NULL::text AS last_error,
-              exports.created_at,
-              exports.created_at AS updated_at,
-              'critical' AS severity
-            FROM skin_journal_export_jobs exports
-            LEFT JOIN users ON users.id = exports.user_id
-            WHERE exports.status = $10
-
-            UNION ALL
-
-            SELECT
               'account-deletion' AS type,
               'Account deletion' AS label,
               users.id,
@@ -4762,7 +4638,7 @@ export class AdminService {
               users.created_at,
               users.updated_at,
               CASE
-                WHEN users.account_deletion_scheduled_for <= $11 THEN 'critical'
+                WHEN users.account_deletion_scheduled_for <= $10 THEN 'critical'
                 ELSE 'warning'
               END AS severity
             FROM users
@@ -4776,7 +4652,7 @@ export class AdminService {
             END,
             work_items.run_after ASC NULLS LAST,
             work_items.updated_at DESC NULLS LAST
-          LIMIT $12
+          LIMIT $11
         `,
         [
           AnalysisJobStatusValue.Failed,
@@ -4803,7 +4679,6 @@ export class AdminService {
             IngredientProductAnalysisJobStatus.Sent,
             IngredientProductAnalysisJobStatus.Running,
           ],
-          ExportStatusValue.Failed,
           now,
           ADMIN_OPERATIONS_WORK_ITEM_LIMIT,
         ],

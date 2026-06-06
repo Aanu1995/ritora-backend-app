@@ -6,8 +6,6 @@ import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { User } from '../../users/entities/user.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
-import { SUGGESTION_HISTORY_EXPORT_MAX_ROWS } from '../suggestions.constants';
-import { SuggestionHistoryExportService } from './suggestion-history-export.service';
 import { SuggestionHistoryReader } from './suggestion-history-reader.service';
 
 describe('SuggestionHistoryReader', () => {
@@ -26,13 +24,6 @@ describe('SuggestionHistoryReader', () => {
     journalEntryRepo,
     cataloguePhotoStorageService,
   );
-  const exporter = new SuggestionHistoryExportService(
-    suggestionRepo,
-    slotRepo,
-    applicationLogRepo,
-    journalEntryRepo,
-  );
-
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useRealTimers();
@@ -407,88 +398,6 @@ describe('SuggestionHistoryReader', () => {
     );
   });
 
-  it('exports every matching history row while ignoring frontend pagination', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-05-04T10:00:00.000Z'));
-    historyQueryBuilder.getRawMany.mockResolvedValue([
-      {
-        suggestion_id: 'suggestion-2',
-        target_date: '2026-05-03',
-        target_time: '20:00',
-      },
-      {
-        suggestion_id: 'suggestion-1',
-        target_date: '2026-05-02',
-        target_time: '08:00',
-      },
-    ]);
-    suggestionRepo.find.mockResolvedValue([
-      historySuggestion({
-        id: 'suggestion-2',
-        targetDate: '2026-05-03',
-        targetTime: '20:00',
-        daypart: 'evening',
-        mode: 'manual',
-      }),
-      historySuggestion({
-        id: 'suggestion-1',
-        targetDate: '2026-05-02',
-        targetTime: '08:00',
-        daypart: 'evening',
-        mode: 'mixed',
-      }),
-    ]);
-    applicationLogRepo.find.mockResolvedValue([
-      {
-        id: 'log-1',
-        suggestion_instance_id: 'suggestion-2',
-        applied_at: new Date('2026-05-03T20:05:00.000Z'),
-        has_been_edited: true,
-        general_notes: 'Handled gently.',
-        items: [
-          {
-            step_order: 0,
-            status: 'substituted',
-            product_brand_snapshot: 'Ava Lab',
-            product_name_snapshot: 'Original serum',
-            substitution_reason: 'Finished original.',
-            applied_at: new Date('2026-05-03T20:06:00.000Z'),
-          },
-        ],
-      } as unknown as ApplicationLog,
-    ]);
-    slotRepo.findBy.mockResolvedValue([]);
-    journalEntryRepo.find.mockResolvedValue([
-      {
-        id: 'journal-1',
-        entry_date: '2026-05-03',
-        photo_object_key: 'skin-journal/user-1/journal-1/photo.webp',
-        overall_feel: 'good',
-        has_reaction_signal: false,
-        analysis_observations: null,
-      } as SkinJournalEntry,
-    ]);
-
-    const file = await exporter.exportCsv(
-      { id: 'user-1', time_zone: 'UTC' } as User,
-      null,
-      {
-        range: '30d',
-        daypart: 'evening',
-        cursor: 'this-cursor-is-from-the-visible-page',
-        limit: 1,
-      },
-    );
-
-    expect(historyQueryBuilder.limit).toHaveBeenCalledWith(
-      SUGGESTION_HISTORY_EXPORT_MAX_ROWS + 1,
-    );
-    expect(file.fileName).toBe('ritora-history-2026-04-04-to-2026-05-03.csv');
-    expect(file.body).toContain('suggestion-2');
-    expect(file.body).toContain('suggestion-1');
-    expect(file.body).toContain('journal-1');
-    expect(file.body).toContain('Finished original.');
-    expect(file.body).not.toContain('this-cursor-is-from-the-visible-page');
-  });
 });
 
 function repo<T extends ObjectLiteral>() {

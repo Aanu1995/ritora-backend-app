@@ -5,7 +5,6 @@ import type { InsightAction } from '../insights/insight-types';
 const INSIGHT_ACTION_KINDS = [
   'view_entries',
   'open_compare',
-  'open_export',
   'open_product',
   'open_today_upload',
   'dismiss',

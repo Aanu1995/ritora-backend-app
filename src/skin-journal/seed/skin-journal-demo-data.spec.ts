@@ -52,7 +52,6 @@ describe('buildSkinJournalDemoData', () => {
         'doctor_referral',
         'insight_ready',
         'analysis_failed',
-        'export_ready',
       ]),
     );
     expect(

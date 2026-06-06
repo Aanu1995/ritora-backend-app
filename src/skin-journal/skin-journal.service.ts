@@ -62,7 +62,6 @@ import { SkinJournalInsightState } from './entities/skin-journal-insight-state.e
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import { SkinJournalAnalysisJob } from './entities/skin-journal-analysis-job.entity';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
-import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalPhotoStorageService } from './services/skin-journal-photo-storage.service';
 import { SkinJournalAnalysisService } from './services/skin-journal-analysis.service';
 import { classifyAnalysisFailure } from './services/skin-journal-analysis-errors';
@@ -83,10 +82,6 @@ import {
   AnalysisFeedbackResponseDto,
   RecordAnalysisFeedbackDto,
 } from './dto/analysis-feedback.dto';
-import {
-  CreateJournalExportDto,
-  JournalExportResponseDto,
-} from './dto/export-journal.dto';
 import {
   CalendarDayDto,
   CalendarDayState,
@@ -157,7 +152,6 @@ import {
   AnalysisSkinContext,
   CompareDeltaBullet,
   CompareDeltaSeverity,
-  ExportStatusValue,
   InsightGenerationStatusValue,
   PhotoReferenceQualityReason,
 } from './skin-journal.constants';
@@ -183,7 +177,6 @@ import {
   toExportEntryRecord,
   toExportEventRecord,
   toExportInsightRecord,
-  toExportResponse,
   toExportSimplificationRecord,
   toWrappedExportRecord,
   toWrappedResponseDto,
@@ -414,8 +407,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly wrapped: Repository<SkinJournalWrapped>,
     @InjectRepository(RoutineSimplificationEvent)
     private readonly simplifications: Repository<RoutineSimplificationEvent>,
-    @InjectRepository(SkinJournalExportJob)
-    private readonly exportJobs: Repository<SkinJournalExportJob>,
     @InjectRepository(UserConsent)
     private readonly consents: Repository<UserConsent>,
     @InjectRepository(SkinProfile)
@@ -3665,45 +3656,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async createExport(
-    userId: string,
-    dto: CreateJournalExportDto,
-  ): Promise<JournalExportResponseDto> {
-    this.validateDateRange(dto.from, dto.to);
-    await this.recordDataAccess(
-      userId,
-      UserDataAccessPurpose.SkinJournalExport,
-    );
-
-    const payload = await this.buildExportPayload(userId, dto.from, dto.to);
-
-    const jobEntity = this.exportJobs.create({
-      user_id: userId,
-      range_from: dto.from,
-      range_to: dto.to,
-      status: ExportStatusValue.Ready,
-      payload,
-      error: null,
-    });
-    const job = await this.exportJobs.save(jobEntity);
-
-    await this.dispatchNotification({
-      userId,
-      kind: 'export_ready',
-      titleKey: NOTIFICATION_KEYS.exportReadyTitle,
-      bodyKey: NOTIFICATION_KEYS.exportReadyBody,
-      payload: { job_id: job.id, from: dto.from, to: dto.to },
-      deepLink: `/journal/export/${job.id}`,
-      dedupeKey: buildSkinJournalNotificationDedupeKey('export_ready', [
-        job.id,
-      ]),
-    });
-
-    return toExportResponse(job, (objectKey, options) =>
-      this.photoStorage.getSignedUrl(objectKey, options),
-    );
-  }
-
   async exportAllDataForAccount(
     userId: string,
   ): Promise<SkinJournalExportPayload> {
@@ -3733,23 +3685,6 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     for (const objectKey of objectKeys) {
       await this.deletePhotoForAccountDeletion(objectKey, userId);
     }
-  }
-
-  async getExport(
-    userId: string,
-    jobId: string,
-  ): Promise<JournalExportResponseDto> {
-    const job = await this.exportJobs.findOne({
-      where: { id: jobId, user_id: userId },
-    });
-    if (!job) throw new NotFoundException('Export job not found');
-    await this.recordDataAccess(
-      userId,
-      UserDataAccessPurpose.SkinJournalExport,
-    );
-    return toExportResponse(job, (objectKey, options) =>
-      this.photoStorage.getSignedUrl(objectKey, options),
-    );
   }
 
   private async findPreviousPhotoEntry(

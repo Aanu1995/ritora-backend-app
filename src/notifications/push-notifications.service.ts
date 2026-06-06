@@ -161,10 +161,6 @@ const GENERIC_PUSH_COPY: Record<
       title: 'Photo analysis hit a snag',
       body: 'Tap to retry. Your photo is safe.',
     },
-    export_ready: {
-      title: 'Your data export is ready',
-      body: 'Tap to download.',
-    },
     suggestion_ready: {
       title: 'Your routine is ready',
       body: 'Take a look at the steps before you apply.',
@@ -207,10 +203,6 @@ const GENERIC_PUSH_COPY: Record<
       title: 'Något gick snett med bildanalysen',
       body: 'Tryck för att försöka igen. Din bild är säker.',
     },
-    export_ready: {
-      title: 'Din dataexport är klar',
-      body: 'Tryck för att ladda ner.',
-    },
     suggestion_ready: {
       title: 'Din rutin är klar',
       body: 'Titta på stegen innan du applicerar.',
@@ -252,10 +244,6 @@ const GENERIC_PUSH_COPY: Record<
     analysis_failed: {
       title: 'El análisis de la foto tuvo un problema',
       body: 'Toca para intentarlo de nuevo. Tu foto está segura.',
-    },
-    export_ready: {
-      title: 'Tu exportación de datos está lista',
-      body: 'Toca para descargarla.',
     },
     suggestion_ready: {
       title: 'Tu rutina está lista',

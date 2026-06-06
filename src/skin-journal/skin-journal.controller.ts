@@ -43,10 +43,6 @@ import { WrappedResponseDto } from './dto/wrapped-response.dto';
 import { PhotoDatesResponseDto } from './dto/photo-dates-response.dto';
 import { PhotoFiltersResponseDto } from './dto/photo-filters-response.dto';
 import { PhotoPageResponseDto } from './dto/photo-page-response.dto';
-import {
-  CreateJournalExportDto,
-  JournalExportResponseDto,
-} from './dto/export-journal.dto';
 import { StartSimplificationDto } from './dto/start-simplification.dto';
 import type { Angle, EventKind, InsightWindow } from './skin-journal.constants';
 import {
@@ -425,23 +421,6 @@ export class SkinJournalController {
     return this.service.getInsightOperations(operationsToken);
   }
 
-  @Post('export')
-  @ApiOkResponse({ type: JournalExportResponseDto })
-  async createExport(
-    @CurrentUser('id') userId: string,
-    @Body() dto: CreateJournalExportDto,
-  ) {
-    return this.service.createExport(userId, dto);
-  }
-
-  @Get('export/:jobId')
-  @ApiOkResponse({ type: JournalExportResponseDto })
-  async getExport(
-    @CurrentUser('id') userId: string,
-    @Param('jobId') jobId: string,
-  ) {
-    return this.service.getExport(userId, jobId);
-  }
 }
 
 function normalizeUploadedPhotoAngles(

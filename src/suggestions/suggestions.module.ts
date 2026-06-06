@@ -40,7 +40,6 @@ import { SuggestionGenerationContextService } from './services/suggestion-genera
 import { SuggestionGenerationPersistenceService } from './services/suggestion-generation-persistence.service';
 import { SuggestionGenerationService } from './services/suggestion-generation.service';
 import { SuggestionGenerationWorker } from './services/suggestion-generation-worker.service';
-import { SuggestionHistoryExportService } from './services/suggestion-history-export.service';
 import { SuggestionHistoryReader } from './services/suggestion-history-reader.service';
 import { SuggestionObservabilityAlertService } from './services/suggestion-observability-alert.service';
 import { SuggestionObservabilityService } from './services/suggestion-observability.service';
@@ -95,7 +94,6 @@ import { SuggestionsController } from './suggestions.controller';
   providers: [
     SuggestionsService,
     SuggestionHistoryReader,
-    SuggestionHistoryExportService,
     SuggestionAiGenerator,
     SuggestionAiUsageGuard,
     SuggestionConsentService,

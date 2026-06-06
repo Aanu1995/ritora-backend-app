@@ -180,14 +180,6 @@ export type RestoreStrategy = 'full' | 'phased';
 
 export type ReactionSeverity = 'none' | 'mild' | 'moderate' | 'severe';
 
-export const ExportStatusValue = {
-  Ready: 'ready',
-  Failed: 'failed',
-} as const;
-
-export type ExportStatus =
-  (typeof ExportStatusValue)[keyof typeof ExportStatusValue];
-
 export const AnalysisJobStatusValue = {
   Queued: 'queued',
   Sent: 'sent',

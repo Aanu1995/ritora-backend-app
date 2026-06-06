@@ -56,12 +56,6 @@ describe('AdminController', () => {
     expect(getRouteGuards('getOperationsMonitoring')).not.toContain(
       AdminRootGuard,
     );
-    expect(getRouteGuards('exportSkinJournalAnalysisFeedbackCsv')).toContain(
-      AdminRootGuard,
-    );
-    expect(getRouteGuards('exportSkinJournalAnalysisFeedbackCsv')).toContain(
-      OriginCheckGuard,
-    );
     expect(getRouteGuards('listAiCostByUsers')).not.toContain(AdminRootGuard);
     expect(getRouteGuards('listAccountMonitoringFlags')).not.toContain(
       AdminRootGuard,
@@ -541,7 +535,6 @@ describe('AdminController', () => {
           status: 'healthy',
         },
         compliance: {
-          failedExportCount: 0,
           pendingDeletionCount: 0,
           sensitiveAccessEvents24h: 0,
         },
@@ -560,7 +553,6 @@ describe('AdminController', () => {
         status: 'healthy',
       },
       compliance: {
-        failedExportCount: 0,
         pendingDeletionCount: 0,
         sensitiveAccessEvents24h: 0,
       },
@@ -1033,45 +1025,4 @@ describe('AdminController', () => {
     );
   });
 
-  it('exports skin journal feedback csv with root audit context and reason', async () => {
-    const service = {
-      exportSkinJournalAnalysisFeedbackCsv: jest.fn(async () => 'vote,reason'),
-    } as unknown as AdminService;
-    const authService = {} as unknown as AdminAuthService;
-    const controller = new AdminController(service, authService);
-    const response = {
-      send: jest.fn(),
-      setHeader: jest.fn(),
-    };
-    const user = {
-      email: 'owner@ritora.app',
-      id: 'admin-root',
-      name: 'Root Admin',
-      role: AdminAccountRole.Root,
-      sessionId: 'session-1',
-      status: AdminAccountStatus.Active,
-    };
-    const request = {
-      headers: { 'user-agent': 'Jest' },
-      ip: '127.0.0.1',
-    };
-
-    await controller.exportSkinJournalAnalysisFeedbackCsv(
-      user,
-      { reason: 'Quality review export' },
-      request as never,
-      response as never,
-    );
-
-    expect(service.exportSkinJournalAnalysisFeedbackCsv).toHaveBeenCalledWith(
-      user,
-      {
-        ip: '127.0.0.1',
-        reason: 'Quality review export',
-        sessionId: 'session-1',
-        userAgent: 'Jest',
-      },
-    );
-    expect(response.send).toHaveBeenCalledWith('vote,reason');
-  });
 });

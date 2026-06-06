@@ -23,7 +23,6 @@ import { RoutineSimplificationEvent } from './entities/routine-simplification-ev
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { SkinJournalEntryPhoto } from './entities/skin-journal-entry-photo.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
-import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import { SkinJournalAnalysisFeedback } from './entities/skin-journal-analysis-feedback.entity';
 import { SkinJournalInsightInteraction } from './entities/skin-journal-insight-interaction.entity';
@@ -50,7 +49,6 @@ import {
   AnalysisFailureCodeValue,
   AnalysisObservations,
   SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION,
-  SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS,
 } from './skin-journal.constants';
 import { SkinJournalService } from './skin-journal.service';
 import { todayInTimeZone } from './skin-journal.utils';
@@ -344,7 +342,6 @@ describe('SkinJournalService', () => {
   let wrapped: ReturnType<typeof repo>;
   let simplifications: ReturnType<typeof repo>;
   let consents: ReturnType<typeof repo>;
-  let exportsRepo: ReturnType<typeof repo>;
   let accountMonitoringEvents: ReturnType<typeof repo>;
   let skinProfiles: ReturnType<typeof repo>;
   const photoStorage = {
@@ -489,7 +486,6 @@ describe('SkinJournalService', () => {
     wrapped = repo();
     simplifications = repo();
     consents = repo();
-    exportsRepo = repo();
     skinProfiles = repo();
     entries.manager.transaction.mockImplementation(
       async (
@@ -621,10 +617,6 @@ describe('SkinJournalService', () => {
         {
           provide: getRepositoryToken(RoutineSimplificationEvent),
           useValue: simplifications,
-        },
-        {
-          provide: getRepositoryToken(SkinJournalExportJob),
-          useValue: exportsRepo,
         },
         { provide: getRepositoryToken(UserConsent), useValue: consents },
         { provide: getRepositoryToken(SkinProfile), useValue: skinProfiles },
@@ -1508,61 +1500,6 @@ describe('SkinJournalService', () => {
       1,
       'skin-journal/user-1/entry-1/photo.webp',
     );
-  });
-
-  it('stores export jobs without expiring photo URLs and signs photos on response', async () => {
-    entries.find.mockResolvedValue([
-      entry({ photo_object_key: 'skin-journal/user-1/entry-1/photo.webp' }),
-    ]);
-    exportsRepo.save.mockImplementation(async (data) => ({
-      id: 'export-1',
-      created_at: new Date('2026-04-29T00:00:00.000Z'),
-      ...data,
-    }));
-
-    const result = await service.createExport('user-1', {
-      from: '2026-04-01',
-      to: '2026-04-30',
-    });
-
-    expect(result.status).toBe('ready');
-    expect(notifications.dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'export_ready',
-        dedupeKey: expectNotificationDedupeKey('export_ready'),
-      }),
-    );
-    expect(result.payload?.entries[0].photo_url).toContain(
-      `https://signed.example.com/${SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS}/`,
-    );
-    const savedJob = exportsRepo.save.mock.calls[0]?.[0] as
-      | Partial<SkinJournalExportJob>
-      | undefined;
-    expect(savedJob?.payload?.entries[0].photo_object_key).toBe(
-      'skin-journal/user-1/entry-1/photo.webp',
-    );
-    expect(savedJob?.payload?.entries[0].photo_url).toBeNull();
-
-    exportsRepo.findOne.mockResolvedValue({
-      id: 'export-1',
-      user_id: 'user-1',
-      range_from: '2026-04-01',
-      range_to: '2026-04-30',
-      status: 'ready',
-      payload: savedJob?.payload ?? null,
-      error: null,
-      created_at: new Date('2026-04-29T00:00:00.000Z'),
-    });
-
-    const fetched = await service.getExport('user-1', 'export-1');
-    expect(fetched.payload?.entries[0].photo_url).toContain(
-      `https://signed.example.com/${SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS}/`,
-    );
-    expect(photoStorage.getSignedUrl).toHaveBeenCalledWith(
-      'skin-journal/user-1/entry-1/photo.webp',
-      { ttlSeconds: SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS },
-    );
-    expect(dataAccess.recordDataAccess).toHaveBeenCalled();
   });
 
   it('filters events by the related journal entry date range', async () => {

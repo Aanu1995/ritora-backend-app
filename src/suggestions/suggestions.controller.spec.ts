@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Request } from 'express';
 import { User } from '../users/entities/user.entity';
 import { UserConsentType } from '../users/user-consent.constants';
 import { SuggestionConsentService } from './services/suggestion-consent.service';
@@ -12,7 +12,6 @@ describe('SuggestionsController', () => {
   const service = {
     getTodaysSuggestion: jest.fn(),
     getHistory: jest.fn(),
-    exportHistoryCsv: jest.fn(),
     getHistoryDay: jest.fn(),
     getSuggestion: jest.fn(),
     regenerateSuggestion: jest.fn(),
@@ -58,18 +57,6 @@ describe('SuggestionsController', () => {
 
     await controller.getTodaysSuggestion(user(), request);
     await controller.getHistory(user(), request, { daypart: 'morning' });
-    service.exportHistoryCsv.mockResolvedValue({
-      fileName: 'ritora-history-2026-04-27-to-2026-05-03.csv',
-      contentType: 'text/csv; charset=utf-8',
-      body: 'Date\n',
-    });
-    const response = responseMock();
-    await controller.exportHistory(
-      user(),
-      request,
-      { daypart: 'morning' },
-      response,
-    );
     await controller.getHistoryDay(user(), request, '2026-05-03');
 
     expect(service.getTodaysSuggestion).toHaveBeenCalledWith(
@@ -80,19 +67,6 @@ describe('SuggestionsController', () => {
       user(),
       'Europe/Stockholm',
       { daypart: 'morning' },
-    );
-    expect(service.exportHistoryCsv).toHaveBeenCalledWith(
-      user(),
-      'Europe/Stockholm',
-      { daypart: 'morning' },
-    );
-    expect(response.setHeader).toHaveBeenCalledWith(
-      'Content-Type',
-      'text/csv; charset=utf-8',
-    );
-    expect(response.setHeader).toHaveBeenCalledWith(
-      'Content-Disposition',
-      'attachment; filename="ritora-history-2026-04-27-to-2026-05-03.csv"',
     );
     expect(service.getHistoryDay).toHaveBeenCalledWith(
       user(),
@@ -344,10 +318,4 @@ function requestWithTimeZone(
       name === headerName ? value : undefined,
     ),
   } as unknown as Request;
-}
-
-function responseMock(): Response {
-  return {
-    setHeader: jest.fn(),
-  } as unknown as Response;
 }

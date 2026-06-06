@@ -220,6 +220,16 @@ describe('SmartPicksAiGenerator', () => {
     expect(systemPrompt).toContain(
       'Do not invent review counts, clinical claims, or guaranteed results',
     );
+    expect(systemPrompt).toContain(
+      'Decision inputs: use only the supplied Smart Picks context',
+    );
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain(
+      'A valid pick must match the gap ingredientOrCategory, gapKind, safety context, budget tier, and shelf compatibility.',
+    );
+    expect(systemPrompt).toContain(
+      'Do not infer missing user facts, medical facts, product ownership, seller availability, or product performance.',
+    );
     expect(systemPrompt).not.toMatch(/\bYou are a dermatologist\b/i);
     expect(userPrompt).toContain('Do not return purchase URLs, prices');
     expect(userPrompt).toContain('optional reputable seller names only');
@@ -256,10 +266,22 @@ describe('SmartPicksAiGenerator', () => {
       'For priority gaps, explain why this product matters now.',
     );
     expect(userPrompt).toContain(
-      'For worth-considering gaps, explain why it may help but is not essential.',
+      'For priority=consider gaps, explain the specific profile, history, budget, environment, or tolerance signal that supports it.',
     );
     expect(userPrompt).toContain(
       'For goal-focused gaps, infer the most specific evidence-aligned product category',
+    );
+    expect(userPrompt).toContain(
+      'Product pick decision hierarchy: safety and user dislikes first, then gap requirement, skin goal, budget tier, shelf compatibility, product performance history, location/access, and reputation.',
+    );
+    expect(userPrompt).toContain(
+      'A product pick must directly satisfy the gap ingredientOrCategory and gapKind',
+    );
+    expect(userPrompt).toContain(
+      'Do not answer an azelaic-acid gap with a generic brightening serum or a replacement gap with an add-on.',
+    );
+    expect(userPrompt).toContain(
+      'priority=consider can be returned only when it has a specific tie to the profile, history, budget, environment, or tolerance data shown above.',
     );
     expect(userPrompt).not.toContain('retailer');
     expect(userPrompt).not.toContain('availability');
@@ -267,7 +289,7 @@ describe('SmartPicksAiGenerator', () => {
     expect(userPrompt).toContain('Skin Journal analysis summary');
     expect(userPrompt).toContain('usageDaysLast90');
     expect(userPrompt).toContain(
-      'For replacement gaps, recommend a true replacement',
+      'For replacement gaps, recommend a product that can replace the owned product role in the routine.',
     );
     expect(userPrompt).toContain(
       'Photo and journal trends are decision support, not clinical proof',
@@ -423,8 +445,27 @@ describe('SmartPicksAiGenerator', () => {
     expect(systemPrompt).toContain(
       'AI-first Smart Picks coverage and gap analyst',
     );
+    expect(systemPrompt).toContain(
+      'Coverage means owned active products that already answer a role for this user',
+    );
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain(
+      'A valid gap must have a concrete ingredient/product-category lane, a priority, a gapKind, sourceIds, and a reason tied to the supplied context.',
+    );
+    expect(systemPrompt).toContain(
+      'gaps mean missing purchase lanes that have evidence in the supplied context',
+    );
     expect(userPrompt).toContain(
       'Decide the coverage meter and purchase gaps from the full context',
+    );
+    expect(userPrompt).toContain(
+      'Decision hierarchy for coverage and gaps: safety and user dislikes, current active shelf, Smart Picks mode, primary goal, current concerns, journal/photo trend summaries, product performance, environment, budget.',
+    );
+    expect(userPrompt).toContain(
+      'Coverage state definitions: filled=an active shelf product id matches the role by category, name, or ingredient list; missing-priority=essential missing role for this Smart Picks mode; missing=non-essential support role with explicit support from supplied data.',
+    );
+    expect(userPrompt).toContain(
+      'Priority definitions: priority=needed to make starter/refine advice coherent for the user goal or safety; consider=helpful secondary lane with explicit support from profile, history, environment, budget, or tolerance.',
     );
     expect(userPrompt).toContain('Product performance summary');
     expect(userPrompt).toContain('Skin Journal analysis summary');
@@ -439,22 +480,22 @@ describe('SmartPicksAiGenerator', () => {
       'Use goal-primary and goal-support only when no specific allowed role describes the need',
     );
     expect(userPrompt).toContain(
-      'When a starter user has no active products, cleanser, moisturizer, and sunscreen are priority gaps unless the profile clearly says one is unsuitable',
+      'When a starter user has no active products, cleanser, moisturizer, and sunscreen are priority gaps unless profile, safety, or preference data says one is unsuitable',
     );
     expect(userPrompt).toContain(
-      'For premium or luxury budgets, include two worth-considering lanes when two safe, useful supports exist',
+      'For premium or luxury budgets, include two consider lanes only when two supports are not blocked by supplied safety/preference context',
     );
     expect(userPrompt).toContain(
-      'For starter mode with no active products and a real goal beyond basic maintenance, aim for four priority essentials or goal steps plus two worth-considering supports when safe',
+      'For starter mode with no active products and a goal beyond maintenance, aim for cleanser, moisturizer, sunscreen, and one goal lane as priority gaps when each fits the supplied profile',
     );
     expect(userPrompt).toContain(
-      'Worth-considering lanes still need concrete product categories',
+      'Priority=consider lanes still need concrete product categories',
     );
     expect(userPrompt).toContain(
       'Use the goal examples as examples, not a closed list',
     );
     expect(userPrompt).toContain(
-      'For pigment or uneven-tone goals, an antioxidant serum should usually be considered before more niche optional steps',
+      'For pigment or uneven-tone goals, consider an antioxidant serum before more niche optional steps unless already owned, blocked by safety, or disliked.',
     );
   });
 
@@ -2570,11 +2611,30 @@ describe('SmartPicksAiGenerator', () => {
     expect(systemPrompt).toContain(
       'dermatologist-informed starter-kit treatment assessor',
     );
+    expect(systemPrompt).toContain(
+      'Decision inputs: use the supplied starter context only.',
+    );
+    expect(systemPrompt).toContain('Hard rules:');
+    expect(systemPrompt).toContain(
+      'A treatment is allowed only when the supplied profile goal or concerns identify a treatment lane and the supplied safety/preference context does not block that lane.',
+    );
+    expect(systemPrompt).toContain(
+      'Do not infer a diagnosis, urgency, medication plan, or product ownership that is not shown.',
+    );
     expect(requestBody.temperature).toBe(0);
     expect(systemPrompt).not.toMatch(/\bYou are a dermatologist\b/i);
     expect(userPrompt).toContain('Starter treatment assessment');
     expect(userPrompt).toContain('Product performance summary');
     expect(userPrompt).toContain('Skin Journal analysis summary');
+    expect(userPrompt).toContain(
+      'Starter treatment decision hierarchy: safety and dislikes, active tolerance, basic routine readiness, primary goal, current concerns, journal/photo summaries, product performance history.',
+    );
+    expect(userPrompt).toContain(
+      'Return shouldRecommend=false when the user needs only cleanser, moisturizer, and sunscreen first',
+    );
+    expect(userPrompt).toContain(
+      'Return shouldRecommend=true only when the selected lane is not blocked by dislikes, reaction triggers, pregnancy context, prescribed-active overlap, or dermatologist-care context.',
+    );
     expect(userPrompt).not.toContain('user-1');
   });
 

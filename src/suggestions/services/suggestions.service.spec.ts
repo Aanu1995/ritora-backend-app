@@ -21,7 +21,6 @@ import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.e
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { SuggestionStep } from '../entities/suggestion-step.entity';
 import { SuggestionAiUsageGuard } from './suggestion-ai-usage-guard.service';
-import { SuggestionHistoryExportService } from './suggestion-history-export.service';
 import { SuggestionHistoryReader } from './suggestion-history-reader.service';
 import { SuggestionObservabilityService } from './suggestion-observability.service';
 import { SuggestionRegenerationService } from './suggestion-regeneration.service';
@@ -41,9 +40,6 @@ describe('SuggestionsService', () => {
     getHistory: jest.fn(),
     getHistoryDay: jest.fn(),
   } as unknown as jest.Mocked<SuggestionHistoryReader>;
-  const historyExporter = {
-    exportCsv: jest.fn(),
-  } as unknown as jest.Mocked<SuggestionHistoryExportService>;
   const usageGuard = {
     evaluateRegeneration: jest.fn(),
   } as unknown as jest.Mocked<SuggestionAiUsageGuard>;
@@ -84,7 +80,6 @@ describe('SuggestionsService', () => {
     preferenceRepo,
     skinProfileRepo,
     historyReader,
-    historyExporter,
     regenerationService,
     reactionService,
     todayActionService,
@@ -752,22 +747,12 @@ describe('SuggestionsService', () => {
     );
     await service.getHistory(user(), null, {});
     await service.getHistoryDay(user(), null, '2026-04-28');
-    historyExporter.exportCsv.mockResolvedValue({
-      fileName: 'ritora-history.csv',
-      contentType: 'text/csv; charset=utf-8',
-      body: 'Date\n',
-    });
-    await service.exportHistoryCsv(user(), null, { mode: 'mixed' });
-
     expect(historyReader.getHistory).toHaveBeenCalledWith(user(), null, {});
     expect(historyReader.getHistoryDay).toHaveBeenCalledWith(
       user(),
       null,
       '2026-04-28',
     );
-    expect(historyExporter.exportCsv).toHaveBeenCalledWith(user(), null, {
-      mode: 'mixed',
-    });
   });
 });
 

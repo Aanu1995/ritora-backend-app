@@ -1,18 +1,12 @@
-import { SkinJournalExportJob } from './entities/skin-journal-export-job.entity';
 import { SkinJournalWrapped } from './entities/skin-journal-wrapped.entity';
 import { SkinJournalEntry } from './entities/skin-journal-entry.entity';
 import { RoutineSimplificationEvent } from './entities/routine-simplification-event.entity';
 import { SkinJournalEvent } from './entities/skin-journal-event.entity';
 import { SkinJournalInsight } from './entities/skin-journal-insight.entity';
 import {
-  SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS,
-  type SkinJournalExportPayload,
-} from './skin-journal.constants';
-import {
   toExportEntryRecord,
   toExportEventRecord,
   toExportInsightRecord,
-  toExportResponse,
   toExportSimplificationRecord,
   toWrappedExportRecord,
   toWrappedResponseDto,
@@ -25,41 +19,6 @@ describe('skin journal export mapper', () => {
 
   beforeEach(() => {
     resolvePhotoUrl.mockClear();
-  });
-
-  it('keeps export records durable and signs photos only on response', () => {
-    const payload: SkinJournalExportPayload = {
-      generated_at: '2026-04-30T10:00:00.000Z',
-      from: '2026-04-01',
-      to: '2026-04-30',
-      entries: [
-        {
-          id: 'entry-1',
-          photo_object_key: 'skin-journal/user-1/entry-1/photo.webp',
-          photo_url: null,
-        },
-      ],
-      events: [],
-      insights: [],
-      wrapped: [],
-      simplifications: [],
-    };
-    const job = {
-      id: 'export-1',
-      status: 'ready',
-      range_from: '2026-04-01',
-      range_to: '2026-04-30',
-      payload,
-      error: null,
-      created_at: new Date('2026-04-30T10:00:00.000Z'),
-    } as SkinJournalExportJob;
-
-    const response = toExportResponse(job, resolvePhotoUrl);
-
-    expect(response.payload?.entries[0].photo_url).toBe(
-      `signed:${SKIN_JOURNAL_EXPORT_SIGNED_URL_TTL_SECONDS}:skin-journal/user-1/entry-1/photo.webp`,
-    );
-    expect(payload.entries[0].photo_url).toBeNull();
   });
 
   it('stores object keys in entry export records', () => {

@@ -35,7 +35,6 @@ export enum UserDataAccessPurpose {
   RecommendationAnalysis = 'recommendation_analysis',
   SkinJournalRead = 'skin_journal_read',
   SkinPhotoAnalysis = 'skin_photo_analysis',
-  SkinJournalExport = 'skin_journal_export',
   SkinJournalInsight = 'skin_journal_insight',
   SkinJournalSimplification = 'skin_journal_simplification',
   AccountExport = 'account_export',

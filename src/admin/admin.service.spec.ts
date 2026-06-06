@@ -411,7 +411,6 @@ describe('AdminService', () => {
           active_restrictions: '4',
           daily_active_users: '90',
           daily_checkin_users: '124',
-          failed_export_count: '2',
           journal_ai_cost_mtd: '7.4',
           journal_ai_cost_today: '1.2',
           journal_users: '520',
@@ -551,7 +550,7 @@ describe('AdminService', () => {
       activeRestrictions: 4,
       activationRate: 61,
       aiSuccessRate: 98,
-      criticalAlerts: 2,
+      criticalAlerts: 1,
       dailyActiveUsers: 90,
       dailyCheckInRate: 10,
       monthToDateAiCostUsd: 20.6,
@@ -766,10 +765,6 @@ describe('AdminService', () => {
           severity: 'critical',
           title: 'Analysis queue delayed',
         }),
-        expect.objectContaining({
-          severity: 'critical',
-          title: 'Journal exports failing',
-        }),
       ]),
     );
     expect(result.alerts).not.toEqual(
@@ -778,7 +773,6 @@ describe('AdminService', () => {
       ]),
     );
     expect(result.compliance).toEqual({
-      failedExportCount: 2,
       pendingDeletionCount: 1,
       sensitiveAccessEvents24h: 3,
     });
@@ -1263,7 +1257,6 @@ describe('AdminService', () => {
           created_at: '2026-05-01T10:00:00.000Z',
           email: 'jane@example.com',
           email_verified: true,
-          failed_export_count: '0',
           first_name: 'Jane',
           has_skin_profile: true,
           id: '01USER',
@@ -1315,7 +1308,6 @@ describe('AdminService', () => {
       '01USER',
       'completed',
       'failed',
-      'failed',
       expect.any(Date),
     ]);
     expect(result.activity).toEqual({
@@ -1330,7 +1322,6 @@ describe('AdminService', () => {
       totalSessionCount: 3,
     });
     expect(result.safety).toEqual({
-      failedExportCount: 0,
       sensitiveAccessEvents24h: 1,
     });
     expect(result.restrictionInternalNote).toBe(
@@ -2355,7 +2346,6 @@ describe('AdminService', () => {
       ])
       .mockResolvedValueOnce([
         {
-          failed_export_count: '1',
           pending_deletion_count: '2',
           sensitive_access_events_24h: '3',
         },
@@ -2413,7 +2403,6 @@ describe('AdminService', () => {
       ]),
     );
     expect(result.compliance).toEqual({
-      failedExportCount: 1,
       pendingDeletionCount: 2,
       sensitiveAccessEvents24h: 3,
     });
@@ -3159,90 +3148,4 @@ describe('AdminService', () => {
     expect(result.recentFeedback[0]).not.toHaveProperty('entryId');
   });
 
-  it('exports anonymous formula-safe skin journal analysis feedback as csv and audits the download', async () => {
-    const auditCreate = jest.fn(
-      (value: Partial<AdminAuditLog>) => value as AdminAuditLog,
-    );
-    const service = new AdminService(
-      createAdminDataSourceMock({
-        auditLogsRepository: { create: auditCreate },
-        analysisFeedbackRepository: {
-          find: jest.fn(async () => [
-            {
-              concern_keys: ['acne', 'hyperpigmentation'],
-              created_at: new Date('2026-05-27T08:00:00.000Z'),
-              generateId: jest.fn(),
-              id: 'feedback-1',
-              interpretation_version: '1.1',
-              note: '=IMPORTXML("https://example.com")',
-              reading_label: 'useful',
-              reason: 'too_generic',
-              updated_at: new Date('2026-05-27T08:05:00.000Z'),
-              vote: 'not_helpful',
-            } as unknown as SkinJournalAnalysisFeedback,
-          ]),
-        },
-      }),
-    );
-
-    const csv = await service.exportSkinJournalAnalysisFeedbackCsv(
-      {
-        email: 'owner@ritora.app',
-        id: 'admin-root',
-        name: 'Root Admin',
-        role: AdminAccountRole.Root,
-        sessionId: 'admin-session',
-        status: AdminAccountStatus.Active,
-      },
-      {
-        reason: 'Export anonymous feedback for model quality review',
-        sessionId: 'admin-session',
-      },
-    );
-
-    expect(csv).toContain('vote,reason,note');
-    expect(csv).not.toContain('id,user_id,entry_id');
-    expect(csv).not.toContain('feedback-1');
-    expect(csv).not.toContain('user-1');
-    expect(csv).not.toContain('entry-1');
-    expect(csv).toContain(
-      'not_helpful,too_generic,"\'=IMPORTXML(""https://example.com"")",1.1,useful,acne; hyperpigmentation',
-    );
-    expect(auditCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: AdminAuditAction.SkinJournalAnalysisFeedbackExported,
-        reason: 'Export anonymous feedback for model quality review',
-        target_user_id: null,
-      }),
-    );
-  });
-
-  it('rejects analysis feedback csv exports without an audit reason', async () => {
-    const feedbackFind = jest.fn(async () => []);
-    const service = new AdminService(
-      createAdminDataSourceMock({
-        analysisFeedbackRepository: {
-          find: feedbackFind,
-        },
-      }),
-    );
-
-    await expect(
-      service.exportSkinJournalAnalysisFeedbackCsv(
-        {
-          email: 'owner@ritora.app',
-          id: 'admin-root',
-          name: 'Root Admin',
-          role: AdminAccountRole.Root,
-          sessionId: 'admin-session',
-          status: AdminAccountStatus.Active,
-        },
-        {
-          reason: '   ',
-          sessionId: 'admin-session',
-        },
-      ),
-    ).rejects.toThrow('Admin audit reason is required');
-    expect(feedbackFind).not.toHaveBeenCalled();
-  });
 });
