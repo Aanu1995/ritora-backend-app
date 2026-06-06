@@ -620,7 +620,7 @@ describe('SkinProfileService', () => {
 
   describe('computeCompleteness', () => {
     it('weights completed essentials as the required foundation', () => {
-      expect(service.computeCompleteness(fakeProfile())).toBe(74);
+      expect(service.computeCompleteness(fakeProfile())).toBe(67);
     });
 
     it('counts location separately from water context completeness', () => {
@@ -637,8 +637,8 @@ describe('SkinProfileService', () => {
         },
       });
 
-      expect(service.computeCompleteness(withoutLocation)).toBe(70);
-      expect(service.computeCompleteness(withLocationOnly)).toBe(74);
+      expect(service.computeCompleteness(withoutLocation)).toBe(62);
+      expect(service.computeCompleteness(withLocationOnly)).toBe(67);
     });
 
     it('keeps water context inside the essential score', () => {
@@ -649,7 +649,7 @@ describe('SkinProfileService', () => {
         },
       });
 
-      expect(service.computeCompleteness(withWaterContext)).toBe(74);
+      expect(service.computeCompleteness(withWaterContext)).toBe(67);
     });
 
     it('reaches full completeness when all applicable profile sections are filled', () => {
@@ -658,6 +658,7 @@ describe('SkinProfileService', () => {
           retinoids: { tolerance: 'tolerates_well' },
         },
         reaction_history: {
+          has_known_reactions: true,
           entries: [{ trigger: 'Salicylic acid' }],
         },
         lifestyle_context: {
@@ -706,6 +707,7 @@ describe('SkinProfileService', () => {
           retinoids: { tolerance: 'tolerates_well' },
         },
         reaction_history: {
+          has_known_reactions: true,
           entries: [{ trigger: 'Salicylic acid' }],
         },
         lifestyle_context: {

@@ -77,8 +77,11 @@ describe('skin profile completion helpers', () => {
     ).toBe(false);
   });
 
-  it('does not penalize a profile when no reaction history is known', () => {
-    expect(computeSkinProfileCompleteness(completeProfile())).toBe(70);
+  it('does not count unanswered reaction history as complete', () => {
+    expect(computeSkinProfileCompleteness(completeProfile())).toBe(62);
+  });
+
+  it('counts known reaction history only when at least one reaction is logged', () => {
     expect(
       computeSkinProfileCompleteness(
         completeProfile({
@@ -88,6 +91,7 @@ describe('skin profile completion helpers', () => {
             retinoids: { tolerance: 'tolerates_well' },
           },
           reaction_history: {
+            has_known_reactions: true,
             entries: [{ trigger: 'Retinoid' }],
           },
           pregnancy_status: 'not_pregnant',
@@ -109,6 +113,10 @@ describe('skin profile completion helpers', () => {
         completeProfile({
           country_code: 'SE',
           city: null,
+          reaction_history: {
+            has_known_reactions: false,
+            entries: [],
+          },
         }),
       ),
     ).toBe(74);
