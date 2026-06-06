@@ -81,7 +81,7 @@ Production validation requires:
 - `INGREDIENT_ANALYSIS_QUEUE_DRIVER=sqs` with a non-empty HTTPS `INGREDIENT_ANALYSIS_SQS_QUEUE_URL`
 - `SMART_PICKS_QUEUE_DRIVER=sqs` with a non-empty HTTPS `SMART_PICKS_SQS_QUEUE_URL`
 - a valid `MAIL_FROM` for auth emails
-- a valid `NOTIFICATION_MAIL_FROM` for notification emails, different from `MAIL_FROM`
+- a valid `NOTIFICATION_MAIL_FROM` for notification emails
 - a valid `SUPPORT_EMAIL` for support links in email copy
 - valid `CORS_ORIGINS` when configured
 

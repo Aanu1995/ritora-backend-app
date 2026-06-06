@@ -157,15 +157,6 @@ function validateCookieSettings(
       }
     }
 
-    if (
-      typeof env.MAIL_FROM === 'string' &&
-      typeof env.NOTIFICATION_MAIL_FROM === 'string' &&
-      env.MAIL_FROM.trim().toLowerCase() ===
-        env.NOTIFICATION_MAIL_FROM.trim().toLowerCase()
-    ) {
-      return helpers.error('any.invalid');
-    }
-
     const configuredOrigins =
       typeof env.CORS_ORIGINS === 'string' && env.CORS_ORIGINS.trim().length > 0
         ? env.CORS_ORIGINS

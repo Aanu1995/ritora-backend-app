@@ -376,7 +376,7 @@ describe('envValidationSchema', () => {
     expect(result.error?.message).toContain('SUPPORT_EMAIL');
   });
 
-  it('requires a separate notification email sender in production', () => {
+  it('requires a notification email sender in production', () => {
     const missingResult = validateEnv(
       productionEnv({
         NOTIFICATION_MAIL_FROM: '',
@@ -384,12 +384,12 @@ describe('envValidationSchema', () => {
     );
     expect(missingResult.error?.message).toContain('NOTIFICATION_MAIL_FROM');
 
-    const duplicateResult = validateEnv(
+    const sharedSenderResult = validateEnv(
       productionEnv({
         NOTIFICATION_MAIL_FROM: 'noreply@ritora.com',
       }),
     );
-    expect(duplicateResult.error).toBeDefined();
+    expect(sharedSenderResult.error).toBeUndefined();
   });
 
   it('requires a public HTTPS API URL for production email unsubscribe links', () => {
