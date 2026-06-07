@@ -53,6 +53,7 @@ import { UserRestrictionCapability } from '../users/user-restrictions';
 import { PlatformGlobalRestrictionCapability } from '../platform-controls/platform-global-restrictions';
 import { AccountMonitoringEvent } from '../users/entities/account-monitoring-event.entity';
 import { SkinJournalAnalysisFeedback } from '../skin-journal/entities/skin-journal-analysis-feedback.entity';
+import { SuggestionGenerationStatus } from '../suggestions/suggestions.constants';
 
 type RepositoryMock = Record<string, unknown>;
 
@@ -786,6 +787,14 @@ describe('AdminService', () => {
     expect(metricsSql).toContain('ingredient_analysis_ai_usage_metrics');
     expect(metricsSql).toContain('skin_journal_insight_generation_runs');
     expect(metricsSql).toContain("event_type = 'data_accessed'");
+    expect(metricsSql).toContain('$7::timestamptz AS since_thirty_days');
+    expect(metricsSql).toContain('$8::timestamptz AS today_start');
+    expect(metricsSql).toContain('$9::timestamptz AS trend_start');
+    expect(metricsSql).toContain('$10::timestamptz AS tomorrow_start');
+    expect(metricsSql).toContain('$11::timestamptz AS now_at');
+    const metricsParams = query.mock.calls[0]?.[1] ?? [];
+    expect(metricsParams[10]).toBeInstanceOf(Date);
+    expect(metricsParams[11]).toBe(SuggestionGenerationStatus.Failed);
     expect(metricsSql).not.toContain(
       "FROM product_analytics_events\n              WHERE event_type = 'skin_profile_created'",
     );
@@ -3147,5 +3156,4 @@ describe('AdminService', () => {
     expect(result.recentFeedback[0]).not.toHaveProperty('userId');
     expect(result.recentFeedback[0]).not.toHaveProperty('entryId');
   });
-
 });
