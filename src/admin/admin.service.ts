@@ -955,11 +955,11 @@ export class AdminService {
             $1::timestamptz AS since_week,
             $2::timestamptz AS since_day,
             $3::timestamptz AS since_month,
-            $8::timestamptz AS since_thirty_days,
-            $9::timestamptz AS today_start,
-            $10::timestamptz AS trend_start,
-            $11::timestamptz AS tomorrow_start,
-            $12::timestamptz AS now_at
+            $7::timestamptz AS since_thirty_days,
+            $8::timestamptz AS today_start,
+            $9::timestamptz AS trend_start,
+            $10::timestamptz AS tomorrow_start,
+            $11::timestamptz AS now_at
         ),
         product_event_counts AS (
           SELECT
