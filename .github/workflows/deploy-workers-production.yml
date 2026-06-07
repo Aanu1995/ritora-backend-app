@@ -1,0 +1,94 @@
+name: Deploy Workers Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: workers-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Verify build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HETZNER_WORKERS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.HETZNER_WORKERS_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/ritora_workers
+          chmod 600 ~/.ssh/ritora_workers
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload release
+        env:
+          SSH_HOST: ${{ secrets.HETZNER_WORKERS_HOST }}
+          SSH_USER: ${{ secrets.HETZNER_WORKERS_USER }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          : "${SSH_USER:=deploy}"
+          ssh -i ~/.ssh/ritora_workers "$SSH_USER@$SSH_HOST" \
+            "mkdir -p /opt/ritora/workers/releases/$RELEASE"
+          tar \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            --exclude='coverage' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            -czf - . | ssh -i ~/.ssh/ritora_workers "$SSH_USER@$SSH_HOST" \
+              "tar -xzf - -C /opt/ritora/workers/releases/$RELEASE"
+
+      - name: Install, build, and restart
+        env:
+          SSH_HOST: ${{ secrets.HETZNER_WORKERS_HOST }}
+          SSH_USER: ${{ secrets.HETZNER_WORKERS_USER }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          : "${SSH_USER:=deploy}"
+          ssh -i ~/.ssh/ritora_workers "$SSH_USER@$SSH_HOST" "RELEASE='$RELEASE' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          release_dir="/opt/ritora/workers/releases/$RELEASE"
+          cd "$release_dir"
+
+          npm ci
+          npm run build
+          npm prune --omit=dev
+
+          ln -sfn "$release_dir" /opt/ritora/workers/current
+          sudo -n systemctl restart ritora-workers
+
+          for attempt in {1..30}; do
+            if sudo -n systemctl is-active --quiet ritora-workers; then
+              sleep 5
+              sudo -n systemctl is-active --quiet ritora-workers
+              exit 0
+            fi
+            sleep 2
+          done
+
+          sudo -n systemctl status ritora-workers || true
+          journalctl -u ritora-workers -n 120 --no-pager || true
+          exit 1
+          REMOTE

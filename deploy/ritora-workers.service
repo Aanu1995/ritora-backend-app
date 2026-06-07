@@ -1,0 +1,26 @@
+[Unit]
+Description=Ritora Background Workers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/ritora/workers/current
+EnvironmentFile=/etc/ritora/workers.env
+ExecStart=/usr/bin/node dist/scripts/start-workers.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+SyslogIdentifier=ritora-workers
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/ritora/workers
+
+[Install]
+WantedBy=multi-user.target
