@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { MailModule } from '../mail/mail.module';
 import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
@@ -28,6 +29,7 @@ import { PushNotificationsService } from './push-notifications.service';
       UserNotificationPreference,
       User,
       SkinJournalEntry,
+      ApplicationLog,
       InventoryProduct,
     ]),
   ],

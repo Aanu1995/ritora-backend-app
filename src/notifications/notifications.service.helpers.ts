@@ -1,6 +1,7 @@
 import {
   Between,
   In,
+  IsNull,
   LessThan,
   LessThanOrEqual,
   MoreThan,
@@ -152,6 +153,7 @@ export async function runScheduledNotificationSweep(
     dispatch: (
       params: DispatchNotificationParams,
     ) => Promise<InAppNotification | null>;
+    shouldSkip?: (scheduled: ScheduledNotification) => Promise<boolean>;
   },
   now: Date,
 ): Promise<{ sent: number; failed: number }> {
@@ -174,6 +176,17 @@ export async function runScheduledNotificationSweep(
       continue;
     }
     try {
+      if (params.shouldSkip && (await params.shouldSkip(scheduled))) {
+        await params.scheduledNotifications.update(
+          { id: scheduled.id },
+          {
+            status: ScheduledNotificationStatusValue.Cancelled,
+            last_error: null,
+            locked_at: null,
+          },
+        );
+        continue;
+      }
       await params.dispatch({
         userId: scheduled.user_id,
         kind: scheduled.kind,
@@ -516,10 +529,14 @@ async function maybeDispatchPhotoReminder(
     return;
   }
   const localDate = todayInTimeZone(timeZone, now);
-  const existingEntryCount = await params.entries.count({
-    where: { user_id: pref.user_id, entry_date: localDate },
+  const existingPhotoEntryCount = await params.entries.count({
+    where: {
+      user_id: pref.user_id,
+      entry_date: localDate,
+      photo_object_key: Not(IsNull()),
+    },
   });
-  if (existingEntryCount > 0) {
+  if (existingPhotoEntryCount > 0) {
     return;
   }
   const localReminderWindow = localDayUtcRange(localDate, timeZone);

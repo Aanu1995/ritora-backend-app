@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { MailUnsubscribeTokenService } from '../mail/mail-unsubscribe-token.service';
 import { MailService } from '../mail/mail.service';
@@ -113,6 +114,7 @@ describe('NotificationsService', () => {
   let preferences: ReturnType<typeof repo>;
   let users: ReturnType<typeof repo>;
   let entries: ReturnType<typeof repo>;
+  let applicationLogs: ReturnType<typeof repo>;
   let inventoryProducts: ReturnType<typeof repo>;
   let notificationQb: ReturnType<typeof notificationQueryBuilder>;
   const mailService = { sendNotificationEmail: jest.fn() };
@@ -134,6 +136,7 @@ describe('NotificationsService', () => {
     preferences = repo();
     users = repo();
     entries = repo();
+    applicationLogs = repo();
     inventoryProducts = repo();
     mailService.sendNotificationEmail.mockClear();
     mailService.sendNotificationEmail.mockResolvedValue(undefined);
@@ -164,6 +167,10 @@ describe('NotificationsService', () => {
         },
         { provide: getRepositoryToken(User), useValue: users },
         { provide: getRepositoryToken(SkinJournalEntry), useValue: entries },
+        {
+          provide: getRepositoryToken(ApplicationLog),
+          useValue: applicationLogs,
+        },
         {
           provide: getRepositoryToken(InventoryProduct),
           useValue: inventoryProducts,
@@ -1121,6 +1128,79 @@ describe('NotificationsService', () => {
     );
   });
 
+  it('cancels delayed routine reminders once the suggestion was recorded', async () => {
+    scheduledNotifications.find.mockResolvedValue([
+      {
+        id: 'scheduled-1',
+        user_id: 'user-1',
+        kind: 'slot_start',
+        title_key: 'notificationsPage.kinds.slot_start.title',
+        body_key: 'notificationsPage.kinds.slot_start.body',
+        severity: 'info',
+        payload: { suggestionId: 'suggestion-1', slotId: 'slot-1' },
+        deep_link: '/todays-suggestion',
+        dedupe_key: 'slot_start:suggestion-1',
+        attempt_count: 0,
+      },
+    ]);
+    applicationLogs.exists.mockResolvedValue(true);
+
+    const result = await service.runScheduledNotificationSweep(
+      new Date('2026-04-30T06:00:00.000Z'),
+    );
+
+    expect(result).toEqual({ sent: 0, failed: 0 });
+    expect(applicationLogs.exists).toHaveBeenCalledWith({
+      where: {
+        user_id: 'user-1',
+        suggestion_instance_id: 'suggestion-1',
+      },
+    });
+    expect(scheduledNotifications.update).toHaveBeenCalledWith(
+      { id: 'scheduled-1' },
+      { status: 'cancelled', last_error: null, locked_at: null },
+    );
+    expect(notifications.save).not.toHaveBeenCalled();
+    expect(preferences.findOne).not.toHaveBeenCalled();
+  });
+
+  it('cancels delayed photo reminders once the user uploaded that day', async () => {
+    scheduledNotifications.find.mockResolvedValue([
+      {
+        id: 'scheduled-1',
+        user_id: 'user-1',
+        kind: 'photo_reminder',
+        title_key: 'skinJournal.notifications.photoReminder.title',
+        body_key: 'skinJournal.notifications.photoReminder.body',
+        severity: 'info',
+        payload: { entry_date: '2026-04-29' },
+        deep_link: '/journal/upload',
+        dedupe_key: 'photo_reminder:2026-04-29',
+        attempt_count: 0,
+      },
+    ]);
+    entries.exists.mockResolvedValue(true);
+
+    const result = await service.runScheduledNotificationSweep(
+      new Date('2026-04-30T06:00:00.000Z'),
+    );
+
+    expect(result).toEqual({ sent: 0, failed: 0 });
+    expect(entries.exists).toHaveBeenCalledWith({
+      where: {
+        user_id: 'user-1',
+        entry_date: '2026-04-29',
+        photo_object_key: expect.objectContaining({ _type: 'not' }),
+      },
+    });
+    expect(scheduledNotifications.update).toHaveBeenCalledWith(
+      { id: 'scheduled-1' },
+      { status: 'cancelled', last_error: null, locked_at: null },
+    );
+    expect(notifications.save).not.toHaveBeenCalled();
+    expect(preferences.findOne).not.toHaveBeenCalled();
+  });
+
   it('does not dispatch a delayed notification when another worker already claimed it', async () => {
     scheduledNotifications.find.mockResolvedValue([
       {
@@ -1195,6 +1275,13 @@ describe('NotificationsService', () => {
 
     await service.runPhotoReminderSweep(new Date('2026-04-29T08:05:00.000Z'));
 
+    expect(entries.count).toHaveBeenCalledWith({
+      where: {
+        user_id: 'user-1',
+        entry_date: '2026-04-29',
+        photo_object_key: expect.objectContaining({ _type: 'not' }),
+      },
+    });
     expect(notifications.save).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'photo_reminder',

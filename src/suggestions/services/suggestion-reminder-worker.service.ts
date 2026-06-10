@@ -151,6 +151,7 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       if (activeBreakUserIds.has(suggestion.user_id)) continue;
+      if (loggedSuggestionIds.has(suggestion.id)) continue;
       const user = usersById.get(suggestion.user_id);
       if (!user) continue;
       const timeZone = resolveEffectiveTimeZone(user.time_zone, null);
@@ -181,10 +182,7 @@ export class SuggestionReminderWorker implements OnModuleInit, OnModuleDestroy {
       const reminderInstant = new Date(
         slotInstant.getTime() + RECORDING_REMINDER_DELAY_MINUTES * 60_000,
       );
-      if (
-        isDueBeforeEndOfNextDay(now, reminderInstant) &&
-        !loggedSuggestionIds.has(suggestion.id)
-      ) {
+      if (isDueBeforeEndOfNextDay(now, reminderInstant)) {
         const dispatched = await this.notifications.dispatch({
           userId: user.id,
           kind: 'recording_reminder',
