@@ -49,6 +49,10 @@ function isEncryptedJsonEnvelope(
   );
 }
 
+function isBlankString(value: string): boolean {
+  return value.trim() === '';
+}
+
 function encryptionKeyId(): string {
   return process.env.SKIN_PROFILE_FIELD_ENCRYPTION_KEY_ID?.trim() || 'primary';
 }
@@ -129,6 +133,10 @@ export function encryptedJsonFieldTransformer<T>(
         return emptyValue;
       }
 
+      if (typeof value === 'string' && isBlankString(value)) {
+        return emptyValue;
+      }
+
       if (!isEncryptedJsonEnvelope(value)) {
         throw new Error(`Unencrypted skin profile JSON field ${field}`);
       }
@@ -170,8 +178,12 @@ export function encryptedNullableStringFieldTransformer(
 ): ValueTransformer {
   return {
     to(value: string | null | undefined) {
-      if (value === null || value === undefined || value === '') {
-        return value ?? null;
+      if (
+        value === null ||
+        value === undefined ||
+        (typeof value === 'string' && isBlankString(value))
+      ) {
+        return null;
       }
 
       if (decodeEncryptedString(value)) {
@@ -186,6 +198,10 @@ export function encryptedNullableStringFieldTransformer(
       }
 
       if (typeof value !== 'string') {
+        return null;
+      }
+
+      if (isBlankString(value)) {
         return null;
       }
 
@@ -210,7 +226,11 @@ export function encryptedBooleanFieldTransformer(
       }
 
       const resolvedValue =
-        typeof value === 'string' ? value === 'true' : (value ?? defaultValue);
+        typeof value === 'string'
+          ? isBlankString(value)
+            ? defaultValue
+            : value === 'true'
+          : (value ?? defaultValue);
 
       return encodeEncryptedString(
         encryptPlaintext(String(resolvedValue), field),
@@ -222,6 +242,10 @@ export function encryptedBooleanFieldTransformer(
       }
 
       if (typeof value !== 'string') {
+        return defaultValue;
+      }
+
+      if (isBlankString(value)) {
         return defaultValue;
       }
 

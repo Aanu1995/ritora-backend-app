@@ -50,6 +50,13 @@ describe('skin profile field encryption', () => {
     expect(encryptedNullableStringTransformer.from(stored)).toBe('pregnant');
   });
 
+  it('normalizes empty nullable string fields to null', () => {
+    expect(encryptedNullableStringTransformer.to('')).toBeNull();
+    expect(encryptedNullableStringTransformer.from('')).toBeNull();
+    expect(encryptedNullableStringTransformer.to('   ')).toBeNull();
+    expect(encryptedNullableStringTransformer.from('   ')).toBeNull();
+  });
+
   it('encrypts empty json values so defaults do not remain plaintext', () => {
     const transformer = encryptedJsonFieldTransformer<Record<string, unknown>>(
       'skin_profiles.test_context',
@@ -60,6 +67,8 @@ describe('skin profile field encryption', () => {
 
     expect(stored).toMatchObject({ __ritora_encrypted: true });
     expect(transformer.from(stored)).toEqual({});
+    expect(transformer.from('')).toEqual({});
+    expect(transformer.from('   ')).toEqual({});
   });
 
   it('encrypts and decrypts json array fields', () => {
@@ -85,6 +94,9 @@ describe('skin profile field encryption', () => {
     expect(typeof stored).toBe('string');
     expect(stored).not.toBe('false');
     expect(transformer.from(stored)).toBe(false);
+    expect(transformer.from(transformer.to(''))).toBe(true);
+    expect(transformer.from('')).toBe(true);
+    expect(transformer.from('   ')).toBe(true);
   });
 
   it('rejects plaintext values read from encrypted fields', () => {
