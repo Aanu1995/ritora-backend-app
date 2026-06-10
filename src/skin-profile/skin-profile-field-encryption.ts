@@ -171,7 +171,7 @@ export function encryptedNullableStringFieldTransformer(
   return {
     to(value: string | null | undefined) {
       if (value === null || value === undefined || value === '') {
-        return value ?? null;
+        return null;
       }
 
       if (decodeEncryptedString(value)) {
@@ -186,6 +186,10 @@ export function encryptedNullableStringFieldTransformer(
       }
 
       if (typeof value !== 'string') {
+        return null;
+      }
+
+      if (value === '') {
         return null;
       }
 

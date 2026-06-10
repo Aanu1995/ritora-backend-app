@@ -50,6 +50,11 @@ describe('skin profile field encryption', () => {
     expect(encryptedNullableStringTransformer.from(stored)).toBe('pregnant');
   });
 
+  it('normalizes empty nullable string fields to null', () => {
+    expect(encryptedNullableStringTransformer.to('')).toBeNull();
+    expect(encryptedNullableStringTransformer.from('')).toBeNull();
+  });
+
   it('encrypts empty json values so defaults do not remain plaintext', () => {
     const transformer = encryptedJsonFieldTransformer<Record<string, unknown>>(
       'skin_profiles.test_context',
