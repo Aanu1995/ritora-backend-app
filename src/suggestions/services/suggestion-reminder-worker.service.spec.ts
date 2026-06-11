@@ -145,6 +145,30 @@ describe('SuggestionReminderWorker', () => {
     expect(notifications.dispatch).not.toHaveBeenCalled();
   });
 
+  it('suppresses slot and recording reminders once the suggestion was recorded', async () => {
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'suggestion-1',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    applicationLogRepo.find.mockResolvedValue([
+      { suggestion_instance_id: 'suggestion-1' } as ApplicationLog,
+    ]);
+
+    const result = await worker.runOnce();
+
+    expect(result).toEqual({ slotStart: 0, recordingReminder: 0 });
+    expect(notifications.dispatch).not.toHaveBeenCalled();
+  });
+
   it('does not send scheduled reminders after the schedule slot was deleted', async () => {
     suggestionRepo.find.mockResolvedValue([
       {

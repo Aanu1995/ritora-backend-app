@@ -7,7 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
 import {
   NOTIFICATION_KIND_TEMPLATE,
@@ -19,6 +19,7 @@ import { PlatformGlobalRestrictionCapability } from '../platform-controls/platfo
 import { normalizeLanguage } from '../common/i18n/i18n';
 import { type PaginatedResult } from '../common/utils/cursor-pagination';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { SkinJournalEntry } from '../skin-journal/entities/skin-journal-entry.entity';
 import { SKIN_JOURNAL_REMINDER_DEFAULT_TIME } from '../skin-journal/skin-journal.constants';
 import { User } from '../users/entities/user.entity';
@@ -101,6 +102,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     private readonly users: Repository<User>,
     @InjectRepository(SkinJournalEntry)
     private readonly entries: Repository<SkinJournalEntry>,
+    @InjectRepository(ApplicationLog)
+    private readonly applicationLogs: Repository<ApplicationLog>,
     @InjectRepository(InventoryProduct)
     private readonly inventoryProducts: Repository<InventoryProduct>,
     private readonly mailService: MailService,
@@ -383,6 +386,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     return runScheduledNotificationSweep(
       {
         scheduledNotifications: this.scheduledNotifications,
+        shouldSkip: (scheduled) =>
+          this.shouldSkipScheduledNotification(scheduled),
         dispatch: (params) => this.dispatch(params),
       },
       now,
@@ -668,6 +673,61 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
       },
     });
   }
+
+  private async shouldSkipScheduledNotification(
+    scheduled: ScheduledNotification,
+  ): Promise<boolean> {
+    if (
+      scheduled.kind === 'slot_start' ||
+      scheduled.kind === 'recording_reminder'
+    ) {
+      const suggestionId =
+        scheduledPayloadString(scheduled.payload, 'suggestionId') ??
+        dedupeSuffix(scheduled.dedupe_key, `${scheduled.kind}:`);
+      if (!suggestionId) return false;
+      return this.applicationLogs.exists({
+        where: {
+          user_id: scheduled.user_id,
+          suggestion_instance_id: suggestionId,
+        },
+      });
+    }
+
+    if (scheduled.kind === 'photo_reminder') {
+      const entryDate =
+        scheduledPayloadString(scheduled.payload, 'entry_date') ??
+        dedupeSuffix(scheduled.dedupe_key, 'photo_reminder:');
+      if (!entryDate) return false;
+      return this.entries.exists({
+        where: {
+          user_id: scheduled.user_id,
+          entry_date: entryDate,
+          photo_object_key: Not(IsNull()),
+        },
+      });
+    }
+
+    return false;
+  }
+}
+
+function scheduledPayloadString(
+  payload: Record<string, unknown> | null | undefined,
+  key: string,
+): string | null {
+  const value = payload?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function dedupeSuffix(
+  dedupeKey: string | null | undefined,
+  prefix: string,
+): string | null {
+  if (!dedupeKey?.startsWith(prefix)) {
+    return null;
+  }
+  const suffix = dedupeKey.slice(prefix.length);
+  return suffix.length > 0 ? suffix : null;
 }
 
 function applyEmailUnsubscribePreference(
