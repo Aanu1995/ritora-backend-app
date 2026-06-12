@@ -85,6 +85,12 @@ const PREGNANCY_CAUTION_TAGS = [
   'tretinoin',
 ] as const;
 
+const BASIC_ROUTINE_CATEGORIES = new Set<ProductCategory>([
+  ProductCategory.Cleanser,
+  ProductCategory.Moisturizer,
+  ProductCategory.SunProtection,
+]);
+
 const MEDICAL_CLAIM_PATTERN =
   /\b(diagnose|diagnosed|diagnosis|cure|cures|cured|curing|prescribe|prescribes|prescribed|prescription|treat|treats|treated|treating)\b/i;
 
@@ -278,6 +284,7 @@ export function runTodaysSuggestionHardChecks(
     checkMedicalClaims(output),
     checkExpectedProductIds(evaluationCase, output),
     checkExpectedAnyProductIds(evaluationCase, output),
+    checkSelectedCategoryCoverage(evaluationCase, output),
     checkExpectedGapKeywords(evaluationCase, output),
     checkExpectedSafetyKeywords(evaluationCase, output),
     checkPreferredTimeCompatibility(evaluationCase, output),
@@ -1200,6 +1207,51 @@ function checkExpectedAnyProductIds(
   );
 }
 
+function checkSelectedCategoryCoverage(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures: string[] = [];
+  const productById = productScoresById(evaluationCase);
+  const selectedCategories = new Set(
+    output.steps
+      .map((step) => selectedStepCategory(step, productById))
+      .filter((category): category is ProductCategory => Boolean(category)),
+  );
+  const nonBasicCategories = [...selectedCategories].filter(
+    (category) => !BASIC_ROUTINE_CATEGORIES.has(category),
+  );
+  const minNonBasic = evaluationCase.expected.minSelectedNonBasicCategoryCount;
+  if (
+    typeof minNonBasic === 'number' &&
+    nonBasicCategories.length < minNonBasic
+  ) {
+    failures.push(
+      `Expected at least ${minNonBasic} selected categor${
+        minNonBasic === 1 ? 'y' : 'ies'
+      } outside cleanser/moisturizer/sun-protection, got ${
+        nonBasicCategories.length
+      }. Selected categories: ${[...selectedCategories].join(', ') || 'none'}.`,
+    );
+  }
+  const minDistinct = evaluationCase.expected.minSelectedDistinctCategoryCount;
+  if (
+    typeof minDistinct === 'number' &&
+    selectedCategories.size < minDistinct
+  ) {
+    failures.push(
+      `Expected at least ${minDistinct} distinct selected categories, got ${selectedCategories.size}. Selected categories: ${
+        [...selectedCategories].join(', ') || 'none'
+      }.`,
+    );
+  }
+  return makeCheck(
+    'selected_category_coverage',
+    'Broad-shelf cases do not collapse into the same basic categories.',
+    failures,
+  );
+}
+
 function checkExpectedGapKeywords(
   evaluationCase: TodaysSuggestionEvaluationCase,
   output: SuggestionGenerationOutput,
@@ -1401,6 +1453,19 @@ function productForStep(
 ): SuggestionProductScore | null {
   return step.inventoryProductId
     ? (products.get(step.inventoryProductId) ?? null)
+    : null;
+}
+
+function selectedStepCategory(
+  step: SuggestionGenerationStepOutput,
+  products: Map<string, SuggestionProductScore>,
+): ProductCategory | null {
+  const product = productForStep(step, products);
+  if (product) return product.category;
+  return Object.values(ProductCategory).includes(
+    step.stepLabel as ProductCategory,
+  )
+    ? (step.stepLabel as ProductCategory)
     : null;
 }
 

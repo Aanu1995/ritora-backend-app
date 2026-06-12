@@ -171,6 +171,94 @@ describe("Today's Suggestion evaluation hard checks", () => {
     expect(failedCheckIds(evaluationCase, output)).toContain('min_step_count');
   });
 
+  it('fails broad-shelf outputs that collapse into basic categories only', () => {
+    const evaluationCase = goldenCase('twelve_product_dark_spots_morning');
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          productId: 'cleanser-1',
+          productName: 'Soft Cream Cleanser',
+          label: ProductCategory.Cleanser,
+        }),
+        step({
+          order: 1,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+        step({
+          order: 2,
+          productId: 'spf-1',
+          productName: 'Daily SPF 50',
+          label: ProductCategory.SunProtection,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'selected_category_coverage',
+    );
+  });
+
+  it('passes broad-shelf category coverage with an owned toner category', () => {
+    const evaluationCase = goldenCase('twelve_product_dark_spots_morning');
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          productId: 'soothing-toner-1',
+          productName: 'Soothing Toner',
+          label: ProductCategory.Toner,
+        }),
+        step({
+          order: 1,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+        step({
+          order: 2,
+          productId: 'spf-1',
+          productName: 'Daily SPF 50',
+          label: ProductCategory.SunProtection,
+        }),
+      ],
+    });
+
+    expect(
+      runTodaysSuggestionHardChecks(evaluationCase, output).find(
+        (check) => check.id === 'selected_category_coverage',
+      ),
+    ).toEqual(expect.objectContaining({ passed: true }));
+  });
+
+  it('passes broad-shelf category coverage with an owned mask category', () => {
+    const evaluationCase = goldenCase('twelve_product_acne_evening');
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          productId: 'clay-mask-1',
+          productName: 'Calm Clay Mask',
+          label: ProductCategory.Mask,
+        }),
+        step({
+          order: 1,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+      ],
+    });
+
+    expect(
+      runTodaysSuggestionHardChecks(evaluationCase, output).find(
+        (check) => check.id === 'selected_category_coverage',
+      ),
+    ).toEqual(expect.objectContaining({ passed: true }));
+  });
+
   it('fails products used outside their shelf preferred time', () => {
     const evaluationCase = goldenCase('twelve_product_dark_spots_morning');
     const output = baseOutput({

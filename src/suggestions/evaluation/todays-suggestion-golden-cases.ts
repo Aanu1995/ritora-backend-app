@@ -58,6 +58,8 @@ export type TodaysSuggestionEvaluationExpectations = {
   minStepCount?: number;
   maxStepCount?: number;
   maxStrongActiveCount?: number;
+  minSelectedNonBasicCategoryCount?: number;
+  minSelectedDistinctCategoryCount?: number;
   requiredProductIds?: readonly string[];
   requiredAnyProductIds?: readonly (readonly string[])[];
   forbiddenProductIds?: readonly string[];
@@ -609,7 +611,9 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
       ),
       expected: {
         requiresSpfProtection: true,
-        requiredProductIds: ['cleanser-1', 'moisturizer-1', 'spf-1'],
+        requiredProductIds: ['spf-1'],
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 3,
         forbiddenProductIds: ['bha-1', 'retinoid-1'],
         maxStepCount: 4,
       },
@@ -658,10 +662,8 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
         minStepCount: 3,
         maxStepCount: 5,
         requiredProductIds: ['spf-1'],
-        requiredAnyProductIds: [
-          ['azelaic-1', 'niacinamide-1'],
-          ['moisturizer-1', 'hydrating-serum-1'],
-        ],
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 3,
         forbiddenProductIds: [
           'retinoid-1',
           'bha-1',
@@ -713,8 +715,8 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
         minStepCount: 2,
         maxStepCount: 4,
         maxStrongActiveCount: 1,
-        requiredProductIds: ['moisturizer-1'],
-        requiredAnyProductIds: [['azelaic-1', 'niacinamide-1', 'benzoyl-1']],
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 2,
         forbiddenProductIds: ['aha-1', 'mask-fragrance-1'],
       },
       manualReviewChecklist: [
@@ -755,12 +757,117 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
         minStepCount: 2,
         maxStepCount: 4,
         maxStrongActiveCount: 1,
-        requiredProductIds: ['moisturizer-1'],
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 2,
         forbiddenProductIds: ['bha-1', 'mask-fragrance-1'],
       },
       manualReviewChecklist: [
         'Does texture support stay gradual instead of stacking exfoliants?',
         'Does it explain why recently used actives are delayed if they are skipped?',
+      ],
+    }),
+    buildCase({
+      id: 'moderate_broad_shelf_evening_no_cooldown',
+      title:
+        'Moderate broad evening shelf does not collapse to cleanser and moisturizer',
+      riskFocus: [
+        'large_shelf_selection',
+        'moderate_pace',
+        'unnecessary_basic_only_repeat',
+      ],
+      profile: profile({
+        primaryGoal: 'improve congestion and uneven tone while staying steady',
+        currentConcerns: ['clogged pores', 'dark spots', 'uneven texture'],
+        activeTolerances: {
+          bha: { tolerance: 'medium' },
+          retinoid: { tolerance: 'medium' },
+          benzoyl_peroxide: { tolerance: 'medium' },
+        },
+        routinePreferences: {
+          pace: 'steady',
+          max_active_nights_per_week: 3,
+          pm_minutes: 12,
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:30',
+      products: twelveProductAcneShelf(),
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'moisturizer-1',
+          'spf-1',
+        ]),
+        application('2026-05-16', SuggestionDaypart.Evening, [
+          'cleanser-1',
+          'moisturizer-1',
+        ]),
+        application('2026-05-15', SuggestionDaypart.Evening, [
+          'niacinamide-1',
+          'moisturizer-1',
+        ]),
+      ],
+      expected: {
+        minStepCount: 2,
+        maxStepCount: 4,
+        maxStrongActiveCount: 1,
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 2,
+        forbiddenProductIds: ['spf-1', 'mask-fragrance-1'],
+      },
+      manualReviewChecklist: [
+        'Does a moderate no-reaction evening avoid unnecessary basic-only repetition?',
+        'Does it choose from eligible shelf data without stacking multiple strong actives?',
+      ],
+    }),
+    buildCase({
+      id: 'non_serum_categories_evening',
+      title: 'Evening shelf can choose uploaded non-serum support categories',
+      riskFocus: [
+        'category_open_selection',
+        'uploaded_product_categories',
+        'unnecessary_basic_only_repeat',
+      ],
+      profile: profile({
+        primaryGoal: 'keep skin comfortable while reducing visible oiliness',
+        currentConcerns: ['oiliness', 'tightness after cleansing', 'dullness'],
+        routinePreferences: {
+          pace: 'steady',
+          pm_minutes: 10,
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:15',
+      products: [
+        cleanser(),
+        moisturizer(),
+        sunscreen(),
+        soothingToner(),
+        barrierEssence(),
+        clayMask(),
+        lipBalm(),
+      ],
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'moisturizer-1',
+          'spf-1',
+        ]),
+        application('2026-05-16', SuggestionDaypart.Evening, [
+          'cleanser-1',
+          'moisturizer-1',
+        ]),
+      ],
+      expected: {
+        minStepCount: 2,
+        maxStepCount: 4,
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 2,
+        forbiddenProductIds: ['spf-1'],
+      },
+      manualReviewChecklist: [
+        'Does it consider uploaded support categories without forcing serum, treatment, or exfoliant paths?',
+        'Does it avoid basic-only repetition when a compatible uploaded category fits the evening?',
       ],
     }),
     buildCase({

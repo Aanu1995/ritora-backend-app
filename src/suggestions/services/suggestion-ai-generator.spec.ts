@@ -813,7 +813,7 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
-  it('adds a compatible non-strong goal support step when OpenAI returns only basics', async () => {
+  it('does not deterministically add a goal-support product when OpenAI returns only basics', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -885,14 +885,9 @@ describe('SuggestionAiGenerator', () => {
     const result = await generator.generate(inputs);
 
     expect(result.metadata.provider).toBe('openai');
-    expect(result.steps).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ inventoryProductId: 'serum-1' }),
-      ]),
-    );
+    expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
-      'serum-1',
       'moisturizer-1',
     ]);
   });
@@ -1481,7 +1476,7 @@ describe('SuggestionAiGenerator', () => {
     ]);
   });
 
-  it('removes an AI product without current selection evidence instead of falling back', async () => {
+  it('keeps an AI-selected owned product when no safety or timing rule blocks it', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -1543,6 +1538,7 @@ describe('SuggestionAiGenerator', () => {
       'cleanser-1',
       'moisturizer-1',
       'spf-1',
+      'mask-1',
     ]);
   });
 
@@ -1696,6 +1692,7 @@ describe('SuggestionAiGenerator', () => {
     expect(result.metadata.provider).toBe('openai');
     expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'mask-1',
       'spf-1',
     ]);
     expect(result.steps).not.toEqual(
@@ -1776,6 +1773,7 @@ describe('SuggestionAiGenerator', () => {
       'cleanser-1',
       'moisturizer-1',
       'spf-1',
+      'mask-1',
     ]);
   });
 
@@ -1799,7 +1797,11 @@ describe('SuggestionAiGenerator', () => {
                   },
                   steps: [
                     aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
-                    aiProductStep(1, 'serum-1', ProductCategory.Serum),
+                    aiProductStep(
+                      1,
+                      'history-serum-only',
+                      ProductCategory.Serum,
+                    ),
                     aiProductStep(
                       2,
                       'moisturizer-1',
@@ -1827,9 +1829,9 @@ describe('SuggestionAiGenerator', () => {
     const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
     addStableSameDaypartRepeatMemory(inputs);
     inputs.contextSummary.appliedProductHistory?.products.push({
-      productId: 'serum-1',
+      productId: 'history-serum-only',
       brand: 'Ava Lab',
-      name: 'Niacinamide Serum',
+      name: 'Old Niacinamide Serum',
       category: ProductCategory.Serum,
       stepLabel: ProductCategory.Serum,
       sourceTypes: ['user_added'],
@@ -1853,7 +1855,7 @@ describe('SuggestionAiGenerator', () => {
     ]);
   });
 
-  it('keeps deterministic fallback based on current selection evidence', async () => {
+  it('keeps deterministic fallback data-led instead of basic-only', async () => {
     const generator = new SuggestionAiGenerator({
       get: jest.fn().mockReturnValue(null),
     } as unknown as ConfigService);
@@ -1864,6 +1866,7 @@ describe('SuggestionAiGenerator', () => {
 
     expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
       'cleanser-1',
+      'serum-1',
       'moisturizer-1',
       'spf-1',
     ]);
@@ -2549,7 +2552,7 @@ describe('SuggestionAiGenerator', () => {
         }),
       ]),
     );
-    expect(result.steps).not.toEqual(
+    expect(result.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ inventoryProductId: 'serum-1' }),
       ]),

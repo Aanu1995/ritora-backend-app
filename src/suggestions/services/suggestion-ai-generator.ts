@@ -577,12 +577,9 @@ function repairRecoverableMissingSteps(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionGenerationStepOutput[] {
-  return repairMissingGoalSupportStep(
+  return repairMissingOnDemandMoisturizer(
     inputs,
-    repairMissingOnDemandMoisturizer(
-      inputs,
-      repairMissingOwnedDaytimeSpf(inputs, steps),
-    ),
+    repairMissingOwnedDaytimeSpf(inputs, steps),
   );
 }
 
@@ -707,14 +704,6 @@ function shouldRemoveStepForHardSafetyRecovery(
         score?.preferredTimeOfDay,
         inputs.daypart,
       );
-    case 'overlayered_minimal_routine':
-      return score
-        ? [
-            ProductCategory.Serum,
-            ProductCategory.Treatment,
-            ProductCategory.Exfoliant,
-          ].includes(score.category)
-        : false;
     case 'skipped_product_returned_as_step':
       return isSkippedProductReturnedAsStep(step);
     default:
@@ -783,160 +772,6 @@ function repairMissingOnDemandMoisturizer(
   return moisturizerStep
     ? orderBaselineSteps([...steps, moisturizerStep])
     : steps;
-}
-
-function repairMissingGoalSupportStep(
-  inputs: SuggestionGenerationInputs,
-  steps: SuggestionGenerationStepOutput[],
-): SuggestionGenerationStepOutput[] {
-  if (!shouldRepairMissingGoalSupport(inputs, steps)) return steps;
-  const existingProductIds = new Set(
-    steps
-      .map((step) => step.inventoryProductId)
-      .filter((productId): productId is string => Boolean(productId)),
-  );
-  const candidate = resolveSuggestionProductScores(inputs)
-    .filter((score) => !existingProductIds.has(score.productId))
-    .filter((score) => hasCurrentSelectionEvidence(inputs, score.productId))
-    .filter((score) =>
-      isPreferredTimeCompatibleWithDaypart(
-        score.preferredTimeOfDay,
-        inputs.daypart,
-      ),
-    )
-    .filter((score) => !hasStrongActive(score))
-    .filter((score) => isGoalSupportProduct(inputs, score))
-    .filter((score) => score.dataQuality !== 'insufficient')
-    .sort(compareGoalSupportProducts(inputs))[0];
-  if (!candidate) return steps;
-
-  const context = buildAssemblyContext(inputs);
-  const repaired = resolveRawStep(
-    {
-      stepOrder: steps.length,
-      routineStepId: null,
-      inventoryProductId: candidate.productId,
-      stepLabel: candidate.category,
-      explanation:
-        'Supports your current skin goal without adding a strong active.',
-      provenance: SuggestionStepProvenance.AiAdded,
-    },
-    steps.length,
-    context,
-  );
-  if (!repaired) return steps;
-  return orderBaselineSteps([...steps, repaired]);
-}
-
-function shouldRepairMissingGoalSupport(
-  inputs: SuggestionGenerationInputs,
-  steps: SuggestionGenerationStepOutput[],
-): boolean {
-  if (inputs.requestSource !== SuggestionRequestSource.Scheduled) return false;
-  if (steps.length === 0 || steps.length >= 4) return false;
-  if (prefersMinimalRoutine(inputs)) return false;
-  if (
-    inputs.contextSummary.reaction.hasSignal ||
-    inputs.contextSummary.reaction.barrierCompromised ||
-    inputs.contextSummary.routineBreak.recentlyResumed ||
-    inputs.contextSummary.applicationPatterns.conservativeRestart
-  ) {
-    return false;
-  }
-  const selectedScores = selectedProductScores(inputs, steps);
-  if (selectedScores.some((score) => isGoalSupportProduct(inputs, score))) {
-    return false;
-  }
-  return hasGoalNeedingShelfSupport(inputs);
-}
-
-function hasGoalNeedingShelfSupport(
-  inputs: SuggestionGenerationInputs,
-): boolean {
-  return /(acne|breakout|clogged|spot|dark mark|hyperpigmentation|uneven tone|pigment|texture|pores?)/i.test(
-    goalSupportText(inputs),
-  );
-}
-
-function isGoalSupportProduct(
-  inputs: SuggestionGenerationInputs,
-  score: SuggestionContextSummary['productScores'][number],
-): boolean {
-  if (
-    [
-      ProductCategory.Cleanser,
-      ProductCategory.Moisturizer,
-      ProductCategory.SunProtection,
-      ProductCategory.LipCare,
-    ].includes(score.category)
-  ) {
-    return false;
-  }
-  return goalSupportRank(inputs, score) > 0;
-}
-
-function compareGoalSupportProducts(inputs: SuggestionGenerationInputs) {
-  return (
-    left: SuggestionContextSummary['productScores'][number],
-    right: SuggestionContextSummary['productScores'][number],
-  ): number => {
-    const rankDelta =
-      goalSupportRank(inputs, right) - goalSupportRank(inputs, left);
-    return rankDelta || right.suitabilityScore - left.suitabilityScore;
-  };
-}
-
-function goalSupportRank(
-  inputs: SuggestionGenerationInputs,
-  score: SuggestionContextSummary['productScores'][number],
-): number {
-  const text = goalSupportText(inputs);
-  const tags = score.activeTags.map((tag) => tag.toLowerCase());
-  if (
-    /(acne|breakout|clogged)/i.test(text) &&
-    tags.some((tag) => /niacinamide|azelaic|azelaic_acid|acne|zinc/.test(tag))
-  ) {
-    return 4;
-  }
-  if (
-    /(dark mark|hyperpigmentation|uneven tone|pigment|spot)/i.test(text) &&
-    tags.some((tag) =>
-      /niacinamide|azelaic|azelaic_acid|vitamin_c|pigment/.test(tag),
-    )
-  ) {
-    return 4;
-  }
-  if (
-    /(texture|pores?)/i.test(text) &&
-    tags.some((tag) =>
-      /niacinamide|azelaic|azelaic_acid|pha|humectant|hydrating/.test(tag),
-    )
-  ) {
-    return 3;
-  }
-  return score.suitabilityReasons.some((reason) =>
-    /primary selected goal|secondary selected goal/i.test(reason),
-  )
-    ? 2
-    : 0;
-}
-
-function goalSupportText(inputs: SuggestionGenerationInputs): string {
-  return JSON.stringify([
-    inputs.skinProfile?.primary_goal ?? '',
-    inputs.skinProfile?.current_concerns ?? [],
-    inputs.contextSummary.skinProfile.primaryGoal ?? '',
-    inputs.contextSummary.skinProfile.activeConcerns,
-    inputs.contextSummary.goalSignals?.mainGoal ?? '',
-    inputs.contextSummary.goalSignals?.primaryGoal ?? '',
-    inputs.contextSummary.goalSignals?.selectedGoals ?? [],
-    inputs.contextSummary.goalSignals?.secondaryGoals.map(
-      (goal) => goal.concern,
-    ) ?? [],
-    inputs.contextSummary.journalSignals?.detectedConcerns.map(
-      (concern) => concern.concern,
-    ) ?? [],
-  ]);
 }
 
 function orderGeneratedSteps(
@@ -1356,18 +1191,6 @@ function resolveHardSafetyFallbackReason(
   ) {
     return 'missing_barrier_moisturizer';
   }
-  if (
-    prefersMinimalRoutine(inputs) &&
-    selectedScores.some((score) =>
-      [
-        ProductCategory.Serum,
-        ProductCategory.Treatment,
-        ProductCategory.Exfoliant,
-      ].includes(score.category),
-    )
-  ) {
-    return 'overlayered_minimal_routine';
-  }
   if (hasUnsupportedAiProductSelectionStep(inputs, steps)) {
     return 'unsupported_product_selection';
   }
@@ -1582,26 +1405,6 @@ function requiresBarrierMoisturizer(
       inputs.contextSummary.routineBreak.recentlyResumed ? 'restart' : '',
     ]),
   );
-}
-
-function prefersMinimalRoutine(inputs: SuggestionGenerationInputs): boolean {
-  const preferences = inputs.skinProfile?.routine_preferences;
-  if (preferences?.pace === 'minimal') return true;
-  if (
-    inputs.daypart === SuggestionDaypart.Morning &&
-    typeof preferences?.am_minutes === 'number' &&
-    preferences.am_minutes <= 5
-  ) {
-    return true;
-  }
-  if (
-    inputs.daypart === SuggestionDaypart.Evening &&
-    typeof preferences?.pm_minutes === 'number' &&
-    preferences.pm_minutes <= 5
-  ) {
-    return true;
-  }
-  return false;
 }
 
 function filterContextualGapRecommendations(
