@@ -24,7 +24,7 @@ type AccountSelectionRow = {
   slot_count: string;
 };
 
-type SlotEvaluationResult = {
+export type SlotEvaluationResult = {
   targetDate: string;
   targetDay: DayOfWeek;
   slotIdHash: string;
@@ -56,7 +56,7 @@ type DayEvaluationResult = {
   slots: SlotEvaluationResult[];
 };
 
-type DiversitySummary = {
+export type DiversitySummary = {
   evaluatedDays: number;
   evaluatedSlots: number;
   distinctSelectedProductCount: number;
@@ -155,6 +155,7 @@ async function runAccountEvaluation(): Promise<number> {
       );
     }
     const failed = results.filter((result) => result.failures.length > 0);
+    const diversity = buildDiversitySummary(results);
     console.log(
       JSON.stringify(
         {
@@ -164,17 +165,29 @@ async function runAccountEvaluation(): Promise<number> {
           evaluatedDays: days.length,
           evaluatedSlots: results.length,
           failedSlots: failed.length,
-          diversity: buildDiversitySummary(results),
+          diversity,
           days,
         },
         null,
         2,
       ),
     );
-    return failed.length > 0 ? 1 : 0;
+    return exitCodeForAccountSuggestionEvaluation({
+      failedSlotCount: failed.length,
+      diversityWarnings: diversity.warnings,
+    });
   } finally {
     await app.close();
   }
+}
+
+export function exitCodeForAccountSuggestionEvaluation(input: {
+  failedSlotCount: number;
+  diversityWarnings: readonly string[];
+}): number {
+  return input.failedSlotCount > 0 || input.diversityWarnings.length > 0
+    ? 1
+    : 0;
 }
 
 async function evaluateSlot(input: {
@@ -377,7 +390,7 @@ function evaluationJob(
   } as unknown as SuggestionGenerationJob;
 }
 
-function buildDiversitySummary(
+export function buildDiversitySummary(
   results: readonly SlotEvaluationResult[],
 ): DiversitySummary {
   const productCategoryByHash = new Map<string, string | null>();
@@ -419,10 +432,7 @@ function buildDiversitySummary(
     .sort((left, right) => left.daypart.localeCompare(right.daypart));
 
   const slotPatternSummaries = [
-    ...groupBy(
-      results,
-      (result) => `${result.slotIdHash}:${result.slotTime}:${result.daypart}`,
-    ),
+    ...groupBy(results, (result) => `${result.slotTime}:${result.daypart}`),
   ]
     .map(([slotKey, slotResults]) => ({
       slotKey,

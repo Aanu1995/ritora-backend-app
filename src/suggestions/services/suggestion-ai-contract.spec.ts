@@ -63,7 +63,19 @@ describe('suggestion AI contract', () => {
     expect(SYSTEM_PROMPT).toContain('Retinoid caution');
     expect(SYSTEM_PROMPT).toContain('Daytime SPF');
     expect(SYSTEM_PROMPT).toContain('Evening sunscreen gaps');
-    expect(SYSTEM_PROMPT).toContain('Minimal/beginner routines');
+    expect(SYSTEM_PROMPT).toContain('Concise routines');
+    expect(SYSTEM_PROMPT).toContain(
+      'Concise means fewer total steps, not a category ban.',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not default to cleanser, moisturizer, and SPF',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not restrict consideration to a fixed category list',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'any owned product category may be selected',
+    );
     expect(SYSTEM_PROMPT).toContain('Caution copy');
     expect(SYSTEM_PROMPT).toContain('Word "only"');
     expect(SYSTEM_PROMPT).toContain('explicit decision inputs only');
@@ -78,6 +90,16 @@ describe('suggestion AI contract', () => {
     );
     expect(SYSTEM_PROMPT).toContain(
       'Do not choose a product merely because it appeared in previous suggestions or routines.',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not assume an uploaded product category is less relevant',
+    );
+    expect(SYSTEM_PROMPT).toContain('do not return a basic-only plan');
+    expect(SYSTEM_PROMPT).toContain(
+      'Select the best-fitting compatible product from any category',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not repeat the same basic product set by default',
     );
     expect(SYSTEM_PROMPT).toContain('Gap recommendations');
     expect(SYSTEM_PROMPT).toContain('JSON output');

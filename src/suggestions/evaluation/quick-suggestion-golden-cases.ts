@@ -30,6 +30,8 @@ import {
 export const QUICK_SUGGESTION_NO_STEP_CASE_ID = 'quick_no_extra_step_needed';
 export const QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID =
   'quick_plain_skip_does_not_suppress_spf';
+export const QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID =
+  'quick_category_open_non_serum_evening';
 
 const TARGET_DATE = '2026-05-29';
 
@@ -41,6 +43,7 @@ export const QUICK_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluationC
         SuggestionRequestSource.OnDemand,
     ),
     buildPlainSkipDoesNotSuppressSpfCase(),
+    buildCategoryOpenEveningCase(),
     buildNoExtraStepNeededCase(),
   ];
 
@@ -183,12 +186,185 @@ function buildNoExtraStepNeededCase(): TodaysSuggestionEvaluationCase {
   };
 }
 
+function buildCategoryOpenEveningCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'quick_refresh',
+    intensity: 'minimal',
+    note: 'My skin feels oily but tight after commuting. I have five minutes before bed and want one useful quick step.',
+    activityAt: null,
+    requestedAt: '2026-05-29T20:15:00.000Z',
+  };
+  const products = [
+    productWithPreferredTime({
+      id: 'quick-cleanser-1',
+      name: 'Soft Cream Cleanser',
+      category: ProductCategory.Cleanser,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['cleanser', 'gentle'],
+      ingredients: ['water', 'glycerin', 'cocamidopropyl betaine'],
+      description: 'Gentle cream cleanser.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-moisturizer-1',
+      name: 'Barrier Cream',
+      category: ProductCategory.Moisturizer,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['ceramide', 'barrier'],
+      ingredients: ['water', 'glycerin', 'ceramide np', 'panthenol'],
+      description: 'Barrier-support moisturizer.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-spf-1',
+      name: 'Morning SPF 50',
+      category: ProductCategory.SunProtection,
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    }),
+    productWithPreferredTime({
+      id: 'quick-toner-1',
+      name: 'Soothing Toner',
+      category: ProductCategory.Toner,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['soothing', 'panthenol'],
+      ingredients: ['water', 'panthenol', 'allantoin'],
+      description: 'Light soothing toner.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-essence-1',
+      name: 'Barrier Essence',
+      category: ProductCategory.Essence,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['barrier', 'hydrating'],
+      ingredients: ['glycerin', 'beta-glucan', 'panthenol'],
+      description: 'Hydrating barrier essence.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-mask-1',
+      name: 'Calm Clay Mask',
+      category: ProductCategory.Mask,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['oil-control', 'mask'],
+      ingredients: ['kaolin', 'glycerin'],
+      description: 'Oil-control clay mask.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-lip-1',
+      name: 'Comfort Lip Balm',
+      category: ProductCategory.LipCare,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['lip-care', 'barrier'],
+      ingredients: ['petrolatum', 'shea butter'],
+      description: 'Comfort lip balm.',
+    }),
+  ];
+  const profile = skinProfile();
+  profile.primary_goal = 'stay comfortable while reducing visible oiliness';
+  profile.current_concerns = ['oiliness', 'tightness', 'dullness'];
+  profile.routine_preferences = {
+    pace: 'minimal',
+    am_minutes: 5,
+    pm_minutes: 5,
+  };
+  const contextSummary = buildContextSummary({
+    cacheKey: QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID,
+    requestContext,
+    profile,
+    products,
+    targetTime: '20:15',
+    daypart: SuggestionDaypart.Evening,
+    productScoreOverrides: {
+      'quick-cleanser-1': {
+        suitabilityScore: 72,
+        suitabilityReasons: [
+          'Compatible with evening, but the request says tightness and asks for one useful quick step before bed.',
+        ],
+      },
+      'quick-moisturizer-1': {
+        suitabilityScore: 78,
+        suitabilityReasons: [
+          'Compatible with tightness, but other owned support products are more specific to the right-now request.',
+        ],
+      },
+      'quick-toner-1': {
+        suitabilityScore: 94,
+        suitabilityReasons: [
+          'Owned soothing toner fits tightness and dullness as a quick one-step support product.',
+        ],
+      },
+      'quick-essence-1': {
+        suitabilityScore: 92,
+        suitabilityReasons: [
+          'Owned barrier essence fits tightness and comfort without requiring a full routine.',
+        ],
+      },
+      'quick-mask-1': {
+        suitabilityScore: 88,
+        suitabilityReasons: [
+          'Owned clay mask fits visible oiliness, but it is less quick than leave-on support.',
+        ],
+      },
+      'quick-lip-1': {
+        suitabilityScore: 65,
+        suitabilityReasons: [
+          'Owned lip balm is compatible but does not address the face comfort request.',
+        ],
+      },
+    },
+  });
+
+  return {
+    id: QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID,
+    title:
+      'Quick evening suggestion can use uploaded non-serum support categories',
+    riskFocus: [
+      'on_demand',
+      'category_open_selection',
+      'unnecessary_basic_only_repeat',
+    ],
+    manualReviewChecklist: [
+      'Does it answer the right-now request without forcing a full routine?',
+      'Does it consider uploaded toner, essence, mask, or lip-care categories when compatible?',
+      'Does it avoid cleanser/moisturizer/SPF-only collapse without inventing products?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      minStepCount: 1,
+      maxStepCount: 3,
+      minSelectedNonBasicCategoryCount: 1,
+      forbiddenProductIds: ['quick-spf-1'],
+    },
+    inputs: {
+      language: 'en',
+      slotId: null,
+      requestSource: SuggestionRequestSource.OnDemand,
+      requestContext,
+      scheduledSlotContext: null,
+      targetDate: TARGET_DATE,
+      targetTime: '20:15',
+      daypart: SuggestionDaypart.Evening,
+      skinProfile: profile,
+      shelfActiveProducts: products,
+      shelfFinishedProductIds: [],
+      routineSteps: [],
+      recentJournalEntries: [],
+      recentApplications: [],
+      contextSummary,
+      environmentSnapshotId: null,
+      aiPersonalizationAllowed: true,
+      aiPersonalizationBlockedReason: null,
+    },
+  };
+}
+
 function productWithPreferredTime(input: {
   id: string;
   name: string;
   category: ProductCategory;
   preferredTimeOfDay: PreferredTimeOfDay;
+  tags?: string[];
+  ingredients?: string[];
+  description?: string;
 }): InventoryProduct {
+  const tags = input.tags ?? ['spf'];
   const product = new InventoryProduct();
   product.id = input.id;
   product.user_id = 'quick-eval-user';
@@ -212,10 +388,10 @@ function productWithPreferredTime(input: {
     barcode: null,
     imageUrls: [],
     sizeMl: null,
-    description: 'Broad-spectrum daily sunscreen.',
-    benefits: ['spf'],
-    suitedFor: ['daily protection'],
-    inciIngredients: ['zinc oxide'],
+    description: input.description ?? 'Broad-spectrum daily sunscreen.',
+    benefits: tags,
+    suitedFor: tags,
+    inciIngredients: input.ingredients ?? ['zinc oxide'],
     inciLastConfirmedAt: '2026-05-01',
   };
   product.guidance = {
@@ -293,15 +469,24 @@ function buildContextSummary(input: {
   cacheKey?: string;
   requestContext: SuggestionRequestContextJson;
   profile: SkinProfile;
-  product: InventoryProduct;
+  product?: InventoryProduct;
+  products?: readonly InventoryProduct[];
   targetTime?: string;
   daypart?: SuggestionDaypart;
   recentApplications?: ApplicationLog[];
   skippedByCategory?: Record<string, number>;
   suitabilityReasons?: string[];
+  productScoreOverrides?: Record<
+    string,
+    {
+      suitabilityScore?: number;
+      suitabilityReasons?: string[];
+    }
+  >;
 }): SuggestionContextSummary {
   const targetTime = input.targetTime ?? '20:30';
   const daypart = input.daypart ?? SuggestionDaypart.Evening;
+  const products = input.products ?? (input.product ? [input.product] : []);
   return {
     cacheKey: input.cacheKey ?? 'quick-eval-no-extra-step',
     builtAt: `2026-05-29T${targetTime}:00.000Z`,
@@ -370,28 +555,35 @@ function buildContextSummary(input: {
       lastPausedUntil: null,
     },
     environment: null,
-    productScores: [
-      {
-        productId: input.product.id,
-        brand: input.product.brand,
-        name: input.product.name,
-        category: input.product.category,
+    productScores: products.map((product) => {
+      const override = input.productScoreOverrides?.[product.id];
+      return {
+        productId: product.id,
+        brand: product.brand,
+        name: product.name,
+        category: product.category,
         preferredTimeOfDay:
-          input.product.user_fields?.preferredTimeOfDay ??
-          PreferredTimeOfDay.Either,
-        activeTags: ['spf'],
-        suitabilityScore: 92,
-        suitabilityReasons: input.suitabilityReasons ?? [
-          'Good daytime sunscreen, but not needed indoors tonight.',
-        ],
+          product.user_fields?.preferredTimeOfDay ?? PreferredTimeOfDay.Either,
+        activeTags: product.identity?.benefits ?? [],
+        suitabilityScore:
+          override?.suitabilityScore ??
+          (product.category === ProductCategory.SunProtection ? 92 : 86),
+        suitabilityReasons:
+          override?.suitabilityReasons ??
+          (input.suitabilityReasons && product.id === input.product?.id
+            ? input.suitabilityReasons
+            : defaultSuitabilityReasons(product)),
         cautionReasons: [],
         waitMinutes: null,
         inciQuality: 'available',
         dataQuality: 'verified',
         dataQualityWarnings: [],
-        evidenceSourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
-      },
-    ],
+        evidenceSourceIds:
+          product.category === ProductCategory.SunProtection
+            ? [SuggestionEvidenceSourceId.AadSunscreenSelection]
+            : [SuggestionEvidenceSourceId.MayoDrySkinCare],
+      };
+    }),
     applicationPatterns: {
       days: 0,
       daysSinceLastApplication: null,
@@ -421,13 +613,25 @@ function buildContextSummary(input: {
       recentSameDaypartFingerprints: [],
       recentlySuggestedProductIds: [],
       exactRepeatCountByFingerprint: {},
-      skippedProducts: input.skippedByCategory ? { [input.product.id]: 1 } : {},
+      skippedProducts:
+        input.skippedByCategory && input.product
+          ? { [input.product.id]: 1 }
+          : {},
       substitutedProducts: {},
       adheredProducts: {},
       editedLogCount: 0,
       offShelfUseCount: 0,
     },
   };
+}
+
+function defaultSuitabilityReasons(product: InventoryProduct): string[] {
+  if (product.category === ProductCategory.SunProtection) {
+    return ['Good daytime sunscreen, but not needed indoors tonight.'];
+  }
+  return [
+    `${product.name} is an owned active shelf product compatible with this quick request.`,
+  ];
 }
 
 function applicationLog(input: {

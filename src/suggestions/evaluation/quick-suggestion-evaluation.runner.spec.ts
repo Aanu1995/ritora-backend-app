@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import {
+  QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID,
   QUICK_SUGGESTION_GOLDEN_CASES,
   QUICK_SUGGESTION_NO_STEP_CASE_ID,
   QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
@@ -47,6 +48,12 @@ describe('Quick Suggestion evaluation runner', () => {
       QUICK_SUGGESTION_GOLDEN_CASES.some(
         (evaluationCase) =>
           evaluationCase.id === QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
+      ),
+    ).toBe(true);
+    expect(
+      QUICK_SUGGESTION_GOLDEN_CASES.some(
+        (evaluationCase) =>
+          evaluationCase.id === QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID,
       ),
     ).toBe(true);
   });
@@ -131,6 +138,44 @@ describe('Quick Suggestion evaluation runner', () => {
         }),
       ]),
     );
+  });
+
+  it('fails category-open quick suggestions that collapse to basic categories only', () => {
+    const evaluationCase = categoryOpenCase();
+
+    const checks = runQuickSuggestionHardChecks(
+      evaluationCase,
+      quickOutput({
+        steps: [
+          quickStep(0, 'quick-cleanser-1', ProductCategory.Cleanser),
+          quickStep(1, 'quick-moisturizer-1', ProductCategory.Moisturizer),
+        ],
+      }),
+    );
+
+    expect(checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'selected_category_coverage',
+          passed: false,
+        }),
+      ]),
+    );
+  });
+
+  it('passes category-open quick suggestions with an owned uploaded support category', () => {
+    const evaluationCase = categoryOpenCase();
+
+    const checks = runQuickSuggestionHardChecks(
+      evaluationCase,
+      quickOutput({
+        steps: [quickStep(0, 'quick-toner-1', ProductCategory.Toner)],
+      }),
+    );
+
+    expect(
+      checks.find((check) => check.id === 'selected_category_coverage'),
+    ).toEqual(expect.objectContaining({ passed: true }));
   });
 
   it('passes a zero-step quick suggestion that clearly says nothing is needed now', async () => {
@@ -415,6 +460,12 @@ describe('Quick Suggestion evaluation runner', () => {
       'Skipped/explanation copy may reference owned products',
     );
     expect(systemPrompt).toContain(
+      'compatible owned products outside cleanser/moisturizer/sun-protection',
+    );
+    expect(systemPrompt).toContain(
+      'toner, essence, mask, and lip-care can be valid',
+    );
+    expect(systemPrompt).toContain(
       'add a routine step merely to avoid an empty result',
     );
     expect(result).toEqual({
@@ -457,6 +508,38 @@ function plainSkipCase() {
   );
   expect(evaluationCase).toBeDefined();
   return evaluationCase!;
+}
+
+function categoryOpenCase() {
+  const evaluationCase = QUICK_SUGGESTION_GOLDEN_CASES.find(
+    (candidate) => candidate.id === QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID,
+  );
+  expect(evaluationCase).toBeDefined();
+  return evaluationCase!;
+}
+
+function quickStep(
+  stepOrder: number,
+  inventoryProductId: string,
+  stepLabel: ProductCategory,
+) {
+  return {
+    stepOrder,
+    routineStepId: null,
+    inventoryProductId,
+    productBrand: 'Ava Lab',
+    productName: inventoryProductId,
+    stepLabel,
+    customLabel: null,
+    applicationMethod: null,
+    quantity: null,
+    waitAfterMinutes: null,
+    explanation: 'Use this owned product now.',
+    routineNote: null,
+    provenance: SuggestionStepProvenance.AiAdded,
+    chips: [],
+    safetyWarnings: [],
+  };
 }
 
 function passingJudge() {
