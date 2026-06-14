@@ -154,8 +154,21 @@ import {
   CompareDeltaSeverity,
   InsightGenerationStatusValue,
   PhotoReferenceQualityReason,
+  type ReactionReportSeverity,
   type ReactionReportPayload,
+  type ReactionReportSymptom,
+  type RecoveryTriggerSource,
+  RecoveryPhaseValue,
+  RecoveryReturnStepValue,
+  RecoveryTriggerSourceValue,
 } from './skin-journal.constants';
+import {
+  buildRecoveryModeStart,
+  buildPhotoAnalysisRecoveryModeStart,
+  normalizeRecoveryTriggerSymptoms,
+  shouldStartRecoveryModeFromReactionReport,
+  type RecoveryModeStart,
+} from './recovery-mode.policy';
 import {
   buildAnalysisComparisonReference,
   buildPhotoReferenceQuality,
@@ -294,6 +307,21 @@ type StoredAnglePhoto = {
   exif_stripped: boolean;
 };
 
+type SimplificationRecoveryMetadata = {
+  recoveryTriggerSource?: RecoveryTriggerSource;
+  recoveryTriggerSymptoms?: ReactionReportSymptom[];
+  recoveryTriggerSeverity?: ReactionReportSeverity | null;
+  recoveryActiveOveruse?: boolean;
+  recoveryReviewAfter?: Date | null;
+  recoveryExitEligibleAt?: Date | null;
+};
+
+type StartSimplificationParams = SimplificationRecoveryMetadata & {
+  userId: string;
+  triggeredByEventId: string | null;
+  reason: string;
+};
+
 const SKIN_PROGRESS_CONSENT = UserConsentType.SkinProgressProcessing;
 const NOTIFICATION_KEYS = {
   analysisFailedTitle: 'skinJournal.notifications.analysisFailed.title',
@@ -326,6 +354,17 @@ const ANALYSIS_CONCERN_SET: ReadonlySet<AnalysisConcern> =
   new Set<AnalysisConcern>(ANALYSIS_CONCERNS);
 const ANALYSIS_CONTEXT_MAX_TEXT_LENGTH = 500;
 const ANALYSIS_CONTEXT_MAX_ITEMS = 12;
+const RECOVERY_SEVERITY_RANK: Record<ReactionReportSeverity, number> = {
+  mild: 1,
+  moderate: 2,
+  severe: 3,
+};
+const RECOVERY_SOURCE_RANK: Record<RecoveryTriggerSource, number> = {
+  [RecoveryTriggerSourceValue.Unknown]: 0,
+  [RecoveryTriggerSourceValue.Manual]: 1,
+  [RecoveryTriggerSourceValue.PhotoAnalysis]: 2,
+  [RecoveryTriggerSourceValue.ReactionReport]: 3,
+};
 const CHECK_IN_REQUIRED_FIELDS = {
   overallFeel: 'overall_feel',
   ratings: 'ratings',
@@ -962,6 +1001,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         'check_in_updated',
       );
     }
+    await this.maybeStartRecoveryModeFromReactionReport(params.userId, saved);
     this.scheduleSmartPicksPreparation(params.userId);
 
     return this.buildEntryResponse(
@@ -3577,24 +3617,54 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     return SimplificationResponseDto.fromEntity(evt);
   }
 
-  async startSimplification(params: {
-    userId: string;
-    triggeredByEventId: string | null;
-    reason: string;
-  }): Promise<SimplificationResponseDto> {
+  async startSimplification(
+    params: StartSimplificationParams,
+  ): Promise<SimplificationResponseDto> {
     const existing = await this.simplifications.findOne({
       where: { user_id: params.userId, ended_at: IsNull() },
     });
     if (existing) {
-      return SimplificationResponseDto.fromEntity(existing);
+      const upgraded = applyRecoveryMetadataToExistingSimplification(
+        existing,
+        params,
+      );
+      if (!upgraded) {
+        return SimplificationResponseDto.fromEntity(existing);
+      }
+
+      const saved = await this.simplifications.save(existing);
+      await this.recordDataAccess(
+        params.userId,
+        UserDataAccessPurpose.SkinJournalSimplification,
+        UserDataAccessActorType.System,
+      );
+      return SimplificationResponseDto.fromEntity(saved);
     }
+    const triggerSymptoms = normalizeRecoveryTriggerSymptoms(
+      params.recoveryTriggerSymptoms ?? [],
+    );
+    const recoverySource =
+      params.recoveryTriggerSource ?? RecoveryTriggerSourceValue.Manual;
+    const usesPhasedRecovery = shouldUsePhasedRecoveryStrategy(
+      params,
+      triggerSymptoms,
+      recoverySource,
+    );
     const event = this.simplifications.create({
       user_id: params.userId,
       triggered_by_event_id: params.triggeredByEventId,
       simplification_mode: 'barrier_repair',
+      recovery_phase: RecoveryPhaseValue.Stabilize,
+      recovery_trigger_source: recoverySource,
+      recovery_trigger_symptoms: triggerSymptoms,
+      recovery_trigger_severity: params.recoveryTriggerSeverity ?? null,
+      recovery_active_overuse: params.recoveryActiveOveruse ?? false,
+      recovery_review_after: params.recoveryReviewAfter ?? null,
+      recovery_exit_eligible_at: params.recoveryExitEligibleAt ?? null,
+      recovery_return_step: RecoveryReturnStepValue.NotStarted,
       reason: params.reason,
       original_schedule_snapshot: null,
-      restore_strategy: 'full',
+      restore_strategy: usesPhasedRecovery ? 'phased' : 'full',
     });
     const saved = await this.simplifications.save(event);
     await this.recordDataAccess(
@@ -4260,11 +4330,17 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       ) {
         const hadActiveSimplification =
           await this.hasActiveSimplification(userId);
+        const recoveryStart = buildPhotoAnalysisRecoveryModeStart(
+          obs.reaction_signals.reaction_severity === 'severe'
+            ? 'severe'
+            : 'moderate',
+        );
         const simplification = await this.startSimplification({
           userId,
           triggeredByEventId: event.id,
           reason:
             'Journal-only barrier-repair safety state triggered by moderate or severe reaction signals.',
+          ...simplificationRecoveryMetadata(recoveryStart),
         });
         if (!hadActiveSimplification) {
           await this.dispatchNotification({
@@ -4314,6 +4390,28 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       where: { user_id: userId, ended_at: IsNull() },
     });
     return !!existing;
+  }
+
+  private async maybeStartRecoveryModeFromReactionReport(
+    userId: string,
+    entry: SkinJournalEntry,
+  ): Promise<void> {
+    const reactionReport = reactionReportWithSymptoms(entry);
+    if (
+      !reactionReport ||
+      !shouldStartRecoveryModeFromReactionReport(reactionReport)
+    ) {
+      return;
+    }
+
+    const recoveryStart = buildRecoveryModeStart(reactionReport);
+    await this.startSimplification({
+      userId,
+      triggeredByEventId: null,
+      reason:
+        'User-reported barrier symptoms started Recovery Mode with a phased return.',
+      ...simplificationRecoveryMetadata(recoveryStart),
+    });
   }
 
   private async markInsightsAfterJournalChange(
@@ -4891,6 +4989,140 @@ function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: unknown }).code === '23505';
 }
 
+function applyRecoveryMetadataToExistingSimplification(
+  event: RoutineSimplificationEvent,
+  params: SimplificationRecoveryMetadata,
+): boolean {
+  const triggerSymptoms = normalizeRecoveryTriggerSymptoms(
+    params.recoveryTriggerSymptoms ?? [],
+  );
+  const hasRecoveryMetadata =
+    params.recoveryTriggerSource !== undefined ||
+    triggerSymptoms.length > 0 ||
+    params.recoveryTriggerSeverity !== undefined ||
+    params.recoveryActiveOveruse === true ||
+    params.recoveryReviewAfter !== undefined ||
+    params.recoveryExitEligibleAt !== undefined;
+
+  if (!hasRecoveryMetadata) {
+    return false;
+  }
+
+  let changed = false;
+  if (
+    params.recoveryTriggerSource &&
+    RECOVERY_SOURCE_RANK[params.recoveryTriggerSource] >
+      RECOVERY_SOURCE_RANK[
+        event.recovery_trigger_source ?? RecoveryTriggerSourceValue.Unknown
+      ]
+  ) {
+    event.recovery_trigger_source = params.recoveryTriggerSource;
+    changed = true;
+  }
+
+  const mergedSymptoms = mergeRecoverySymptoms(
+    event.recovery_trigger_symptoms,
+    triggerSymptoms,
+  );
+  if (!sameStringArray(event.recovery_trigger_symptoms ?? [], mergedSymptoms)) {
+    event.recovery_trigger_symptoms = mergedSymptoms;
+    changed = true;
+  }
+
+  if (
+    params.recoveryTriggerSeverity &&
+    isMoreSevere(
+      params.recoveryTriggerSeverity,
+      event.recovery_trigger_severity,
+    )
+  ) {
+    event.recovery_trigger_severity = params.recoveryTriggerSeverity;
+    changed = true;
+  }
+
+  if (params.recoveryActiveOveruse && !event.recovery_active_overuse) {
+    event.recovery_active_overuse = true;
+    changed = true;
+  }
+
+  if (
+    params.recoveryReviewAfter &&
+    (!event.recovery_review_after ||
+      params.recoveryReviewAfter < event.recovery_review_after)
+  ) {
+    event.recovery_review_after = params.recoveryReviewAfter;
+    changed = true;
+  }
+
+  if (
+    params.recoveryExitEligibleAt &&
+    (!event.recovery_exit_eligible_at ||
+      params.recoveryExitEligibleAt > event.recovery_exit_eligible_at)
+  ) {
+    event.recovery_exit_eligible_at = params.recoveryExitEligibleAt;
+    changed = true;
+  }
+
+  if (event.restore_strategy !== 'phased') {
+    event.restore_strategy = 'phased';
+    changed = true;
+  }
+
+  return changed;
+}
+
+function simplificationRecoveryMetadata(
+  recoveryStart: RecoveryModeStart,
+): SimplificationRecoveryMetadata {
+  return {
+    recoveryTriggerSource: recoveryStart.trigger_source,
+    recoveryTriggerSymptoms: recoveryStart.trigger_symptoms,
+    recoveryTriggerSeverity: recoveryStart.trigger_severity,
+    recoveryActiveOveruse: recoveryStart.active_overuse,
+    recoveryReviewAfter: recoveryStart.review_after,
+    recoveryExitEligibleAt: recoveryStart.exit_eligible_at,
+  };
+}
+
+function shouldUsePhasedRecoveryStrategy(
+  params: SimplificationRecoveryMetadata,
+  triggerSymptoms: readonly ReactionReportSymptom[],
+  recoverySource: RecoveryTriggerSource,
+): boolean {
+  return (
+    triggerSymptoms.length > 0 ||
+    params.recoveryActiveOveruse === true ||
+    params.recoveryTriggerSeverity === 'moderate' ||
+    params.recoveryTriggerSeverity === 'severe' ||
+    recoverySource === RecoveryTriggerSourceValue.ReactionReport ||
+    recoverySource === RecoveryTriggerSourceValue.PhotoAnalysis
+  );
+}
+
+function mergeRecoverySymptoms(
+  current: readonly ReactionReportSymptom[] | null | undefined,
+  incoming: readonly ReactionReportSymptom[],
+): ReactionReportSymptom[] {
+  return Array.from(new Set([...(current ?? []), ...incoming]));
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]) {
+  return (
+    left.length === right.length &&
+    left.every((item, index) => item === right[index])
+  );
+}
+
+function isMoreSevere(
+  incoming: ReactionReportSeverity,
+  current: ReactionReportSeverity | null,
+): boolean {
+  return (
+    !current ||
+    RECOVERY_SEVERITY_RANK[incoming] > RECOVERY_SEVERITY_RANK[current]
+  );
+}
+
 function sanitizeContextText(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -4999,7 +5231,13 @@ function entryHasReactionReportSymptoms(entry: SkinJournalEntry): boolean {
 function reactionReportWithSymptoms(
   entry: SkinJournalEntry,
 ): ReactionReportPayload | null {
-  return entry.reaction_report?.symptoms?.length ? entry.reaction_report : null;
+  const report = entry.reaction_report;
+  if (!report) {
+    return null;
+  }
+  return report.symptoms.length > 0 || (report.red_flags?.length ?? 0) > 0
+    ? report
+    : null;
 }
 
 function dateOnlyDaysBefore(dateOnly: string, days: number): string {

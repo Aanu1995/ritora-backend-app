@@ -10,7 +10,9 @@ import {
   Min,
 } from 'class-validator';
 import {
+  ProductIntroductionStatus,
   ProductCategory,
+  ShelfIntroductionStatusFilter,
   ShelfSort,
   ShelfStatFilter,
 } from '../../shelf/shelf.types';
@@ -18,6 +20,7 @@ import {
   PRODUCT_CATEGORY_VALUES,
   DEFAULT_SHELF_PAGE_SIZE,
   MAX_SHELF_PAGE_SIZE,
+  SHELF_INTRODUCTION_STATUS_FILTER_VALUES,
 } from '../../shelf/shelf.constants';
 import {
   EmptyStringToDefault,
@@ -39,6 +42,13 @@ export class InventoryListQueryDto {
   @IsOptional()
   @IsIn(CATEGORY_QUERY_VALUES)
   category: ProductCategory | 'all' = 'all';
+
+  @EmptyStringToDefault(ShelfIntroductionStatusFilter.All)
+  @IsOptional()
+  @IsIn(SHELF_INTRODUCTION_STATUS_FILTER_VALUES)
+  introductionStatus?:
+    | ProductIntroductionStatus
+    | ShelfIntroductionStatusFilter = ShelfIntroductionStatusFilter.All;
 
   @IsOptional()
   @IsString()

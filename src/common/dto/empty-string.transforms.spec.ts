@@ -8,6 +8,7 @@ import { CreateInventoryProductDto } from '../../inventory/dto/create-inventory-
 import { NotificationListQueryDto } from '../../notifications/dto/notification-list-query.dto';
 import { NOTIFICATION_PAGE_DEFAULT_LIMIT } from '../../notifications/notifications.constants';
 import {
+  ShelfIntroductionStatusFilter,
   ProductCategory,
   ShelfSort,
   ShelfStatFilter,
@@ -65,6 +66,7 @@ describe('empty-string DTO transforms', () => {
     const shelf = plainToInstance(InventoryListQueryDto, {
       stat: '',
       category: '',
+      introductionStatus: '',
       sort: '',
       cursor: '',
       limit: '',
@@ -81,6 +83,7 @@ describe('empty-string DTO transforms', () => {
     expect(notifications.limit).toBe(NOTIFICATION_PAGE_DEFAULT_LIMIT);
     expect(shelf.stat).toBe(ShelfStatFilter.All);
     expect(shelf.category).toBe('all');
+    expect(shelf.introductionStatus).toBe(ShelfIntroductionStatusFilter.All);
     expect(shelf.sort).toBe(ShelfSort.RecentlyAdded);
     expect(shelf.cursor).toBeUndefined();
     expect(shelf.limit).toBe(DEFAULT_SHELF_PAGE_SIZE);
@@ -361,6 +364,7 @@ describe('empty-string DTO transforms', () => {
       },
       status: '',
       provenance: '',
+      introductionStatus: '',
     });
 
     const errors = await validate(dto, validationOptions);
@@ -380,5 +384,6 @@ describe('empty-string DTO transforms', () => {
     expect(dto.userFields.preferredTimeOfDay).toBeNull();
     expect(dto.status).toBeNull();
     expect(dto.provenance).toBeNull();
+    expect(dto.introductionStatus).toBeNull();
   });
 });

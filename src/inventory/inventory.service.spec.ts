@@ -18,6 +18,7 @@ import { InventoryService } from './inventory.service';
 import { InventoryProduct } from './entities/inventory-product.entity';
 import {
   DataProvenance,
+  ProductIntroductionStatus,
   ProductCategory,
   ShelfSort,
   ShelfStatFilter,
@@ -123,6 +124,9 @@ function createEntity(
     expires_at: null,
     period_after_opening_months: 12,
     effective_expires_at: null,
+    introduction_status: null,
+    introduction_started_at: null,
+    introduction_status_updated_at: null,
     identity: snapshot.identity,
     guidance: snapshot.guidance,
     manufacturer: snapshot.manufacturer,
@@ -263,6 +267,7 @@ describe('InventoryService', () => {
   });
 
   it('creates an inventory product with normalized snapshot fields', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-14T08:00:00.000Z'));
     const draft = createSnapshot({
       manufacturer: {
         ...createSnapshot().manufacturer,
@@ -270,6 +275,9 @@ describe('InventoryService', () => {
       },
     });
     const saved = createEntity('inventory-1', {
+      introduction_status: ProductIntroductionStatus.Week1,
+      introduction_started_at: new Date('2026-06-14T08:00:00.000Z'),
+      introduction_status_updated_at: new Date('2026-06-14T08:00:00.000Z'),
       manufacturer: {
         ...createSnapshot().manufacturer,
         brand: 'CeraVe',
@@ -278,7 +286,10 @@ describe('InventoryService', () => {
 
     repo.save.mockResolvedValue(saved);
 
-    const result = await service.create('user-1', draft as never);
+    const result = await service.create('user-1', {
+      ...draft,
+      introductionStatus: ProductIntroductionStatus.Week1,
+    } as never);
     const createPayload = repo.create.mock.calls[0]?.[0] as
       | Partial<InventoryProduct>
       | undefined;
@@ -287,6 +298,15 @@ describe('InventoryService', () => {
     expect(createPayload?.user_id).toBe('user-1');
     expect(createPayload?.status).toBe(ShelfStatus.Active);
     expect(createPayload?.provenance).toBe(DataProvenance.PhotoLookup);
+    expect(createPayload?.introduction_status).toBe(
+      ProductIntroductionStatus.Week1,
+    );
+    expect(createPayload?.introduction_started_at?.toISOString()).toBe(
+      '2026-06-14T08:00:00.000Z',
+    );
+    expect(createPayload?.introduction_status_updated_at?.toISOString()).toBe(
+      '2026-06-14T08:00:00.000Z',
+    );
     expect(createPayload?.search_document).toContain('cerave');
     expect(createPayload?.manufacturer?.brand).toBe('CeraVe');
     expect(
@@ -302,6 +322,95 @@ describe('InventoryService', () => {
       ingredientProductAnalysisPreparation.scheduleForProduct,
     ).toHaveBeenCalledWith('user-1', 'inventory-1');
     expect(result.id).toBe('inventory-1');
+    expect(result.introduction).toEqual({
+      status: ProductIntroductionStatus.Week1,
+      startedAt: '2026-06-14T08:00:00.000Z',
+      statusUpdatedAt: '2026-06-14T08:00:00.000Z',
+    });
+  });
+
+  it('defaults omitted product introduction status to tolerated for existing clients', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-14T08:00:00.000Z'));
+    const saved = createEntity('inventory-1', {
+      introduction_status: ProductIntroductionStatus.Tolerated,
+      introduction_started_at: new Date('2026-06-14T08:00:00.000Z'),
+      introduction_status_updated_at: new Date('2026-06-14T08:00:00.000Z'),
+    });
+    repo.save.mockResolvedValue(saved);
+
+    const result = await service.create('user-1', createSnapshot() as never);
+    const createPayload = repo.create.mock.calls[0]?.[0] as
+      | Partial<InventoryProduct>
+      | undefined;
+
+    expect(createPayload?.introduction_status).toBe(
+      ProductIntroductionStatus.Tolerated,
+    );
+    expect(result.introduction?.status).toBe(
+      ProductIntroductionStatus.Tolerated,
+    );
+  });
+
+  it('updates a product introduction lifecycle without changing product facts', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-21T08:00:00.000Z'));
+    const product = createEntity('inventory-1', {
+      introduction_status: ProductIntroductionStatus.PatchTesting,
+      introduction_started_at: new Date('2026-06-14T08:00:00.000Z'),
+      introduction_status_updated_at: new Date('2026-06-14T08:00:00.000Z'),
+    });
+    repo.findOne.mockResolvedValue(product);
+    repo.save.mockImplementation(async (value) => value as InventoryProduct);
+
+    const result = await service.updateIntroduction('user-1', 'inventory-1', {
+      status: ProductIntroductionStatus.Week1,
+    });
+
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'inventory-1',
+        brand: product.brand,
+        name: product.name,
+        introduction_status: ProductIntroductionStatus.Week1,
+        introduction_started_at: new Date('2026-06-14T08:00:00.000Z'),
+        introduction_status_updated_at: new Date('2026-06-21T08:00:00.000Z'),
+      }),
+    );
+    expect(result.introduction?.status).toBe(ProductIntroductionStatus.Week1);
+  });
+
+  it('allows multiple products to be introduced without an active-trial guard', async () => {
+    const product = createEntity('inventory-2', {
+      introduction_status: ProductIntroductionStatus.New,
+      introduction_started_at: new Date('2026-06-14T08:00:00.000Z'),
+      introduction_status_updated_at: new Date('2026-06-14T08:00:00.000Z'),
+    });
+    repo.findOne.mockResolvedValue(product);
+    repo.save.mockImplementation(async (value) => value as InventoryProduct);
+
+    const result = await service.updateIntroduction('user-1', 'inventory-2', {
+      status: ProductIntroductionStatus.Week1,
+    });
+
+    expect(repo.count).not.toHaveBeenCalled();
+    expect(repo.save).toHaveBeenCalled();
+    expect(result.introduction?.status).toBe(ProductIntroductionStatus.Week1);
+  });
+
+  it('updates paused product introduction without extra read guards', async () => {
+    const product = createEntity('inventory-1', {
+      introduction_status: ProductIntroductionStatus.Week1,
+      introduction_started_at: new Date('2026-06-14T08:00:00.000Z'),
+      introduction_status_updated_at: new Date('2026-06-14T08:00:00.000Z'),
+    });
+    repo.findOne.mockResolvedValue(product);
+    repo.save.mockImplementation(async (value) => value as InventoryProduct);
+
+    const result = await service.updateIntroduction('user-1', 'inventory-1', {
+      status: ProductIntroductionStatus.Paused,
+    });
+
+    expect(repo.count).not.toHaveBeenCalled();
+    expect(result.introduction?.status).toBe(ProductIntroductionStatus.Paused);
   });
 
   it('rejects product creation when the skin profile is missing', async () => {
@@ -743,6 +852,42 @@ describe('InventoryService', () => {
     expect(result.items).toHaveLength(30);
     expect(result.nextCursor).toBeTruthy();
     expect(repo.find).not.toHaveBeenCalled();
+  });
+
+  it('filters inventory lists by product introduction status', async () => {
+    queryBuilder.getMany.mockResolvedValue([]);
+
+    await service.list('user-1', {
+      stat: ShelfStatFilter.All,
+      category: 'all',
+      introductionStatus: ProductIntroductionStatus.Paused,
+      search: '',
+      sort: ShelfSort.RecentlyAdded,
+      limit: 30,
+    });
+
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'inventory.introduction_status = :introductionStatus',
+      { introductionStatus: ProductIntroductionStatus.Paused },
+    );
+  });
+
+  it('includes legacy null introduction rows when filtering tolerated products', async () => {
+    queryBuilder.getMany.mockResolvedValue([]);
+
+    await service.list('user-1', {
+      stat: ShelfStatFilter.All,
+      category: 'all',
+      introductionStatus: ProductIntroductionStatus.Tolerated,
+      search: '',
+      sort: ShelfSort.RecentlyAdded,
+      limit: 30,
+    });
+
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      '(inventory.introduction_status = :introductionStatus OR inventory.introduction_status IS NULL)',
+      { introductionStatus: ProductIntroductionStatus.Tolerated },
+    );
   });
 
   it('uses the saved timezone ahead of the request timezone for date-based inventory filters', async () => {

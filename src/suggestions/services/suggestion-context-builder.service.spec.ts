@@ -6,6 +6,7 @@ import {
   DataProvenance,
   PreferredTimeOfDay,
   ProductCategory,
+  ProductIntroductionStatus,
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
@@ -354,6 +355,109 @@ describe('SuggestionContextBuilder', () => {
     expect(cacheRepo.update).not.toHaveBeenCalled();
   });
 
+  it('keeps early introduction products eligible and excludes only paused or failed statuses', async () => {
+    const summary = await builder.build({
+      ...emptyInput(),
+      shelfActiveProducts: [
+        product({
+          id: 'new-1',
+          brand: 'Ava Lab',
+          name: 'New Vitamin C',
+          category: ProductCategory.Serum,
+          preferredTimeOfDay: PreferredTimeOfDay.Morning,
+          inciIngredients: ['Ascorbic Acid'],
+          benefits: ['brightening'],
+          introductionStatus: ProductIntroductionStatus.New,
+        }),
+        product({
+          id: 'patch-1',
+          brand: 'Ava Lab',
+          name: 'Patch Test Acid',
+          category: ProductCategory.Exfoliant,
+          preferredTimeOfDay: PreferredTimeOfDay.Evening,
+          inciIngredients: ['Lactic Acid'],
+          benefits: ['texture support'],
+          introductionStatus: ProductIntroductionStatus.PatchTesting,
+        }),
+        product({
+          id: 'paused-1',
+          brand: 'Ava Lab',
+          name: 'Paused Retinal',
+          category: ProductCategory.Serum,
+          preferredTimeOfDay: PreferredTimeOfDay.Evening,
+          inciIngredients: ['Retinal'],
+          benefits: ['texture support'],
+          introductionStatus: ProductIntroductionStatus.Paused,
+        }),
+        product({
+          id: 'failed-1',
+          brand: 'Ava Lab',
+          name: 'Failed Peel',
+          category: ProductCategory.Exfoliant,
+          preferredTimeOfDay: PreferredTimeOfDay.Evening,
+          inciIngredients: ['Glycolic Acid'],
+          benefits: ['texture support'],
+          introductionStatus: ProductIntroductionStatus.Failed,
+        }),
+        product({
+          id: 'week-1',
+          brand: 'Ava Lab',
+          name: 'Week One Moisturizer',
+          category: ProductCategory.Moisturizer,
+          preferredTimeOfDay: PreferredTimeOfDay.Either,
+          inciIngredients: ['Glycerin'],
+          benefits: ['barrier support'],
+          introductionStatus: ProductIntroductionStatus.Week1,
+        }),
+        product({
+          id: 'tolerated-1',
+          brand: 'North Sun',
+          name: 'Tolerated SPF',
+          category: ProductCategory.SunProtection,
+          preferredTimeOfDay: PreferredTimeOfDay.Morning,
+          inciIngredients: ['Zinc Oxide'],
+          benefits: ['sun protection'],
+          introductionStatus: ProductIntroductionStatus.Tolerated,
+        }),
+      ],
+    });
+
+    expect(summary.productScores.map((score) => score.productId)).toEqual(
+      expect.arrayContaining(['new-1', 'patch-1', 'week-1', 'tolerated-1']),
+    );
+    expect(summary.productScores.map((score) => score.productId)).not.toEqual(
+      expect.arrayContaining(['paused-1', 'failed-1']),
+    );
+    expect(summary.productScores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'new-1',
+          cautionReasons: expect.arrayContaining([
+            'introduce with low frequency while skin response is learned',
+          ]),
+        }),
+        expect.objectContaining({
+          productId: 'patch-1',
+          cautionReasons: expect.arrayContaining([
+            'introduce with low frequency while skin response is learned',
+          ]),
+        }),
+      ]),
+    );
+    expect(summary.skippedCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'paused-1',
+          reason: 'product introduction is paused',
+        }),
+        expect.objectContaining({
+          productId: 'failed-1',
+          reason: 'product introduction failed and should not be suggested',
+        }),
+      ]),
+    );
+  });
+
   it('keeps private historical text out of cache-key invalidation inputs', () => {
     const baseApplication = applicationLog();
     const baseSuggestion = previousSuggestion();
@@ -648,6 +752,7 @@ function product(input: {
   preferredTimeOfDay: PreferredTimeOfDay;
   inciIngredients: string[];
   benefits: string[];
+  introductionStatus?: ProductIntroductionStatus | null;
 }): InventoryProduct {
   return {
     id: input.id,
@@ -656,6 +761,13 @@ function product(input: {
     name: input.name,
     category: input.category,
     status: ShelfStatus.Active,
+    introduction_status: input.introductionStatus ?? null,
+    introduction_started_at: input.introductionStatus
+      ? new Date('2026-04-20T08:00:00.000Z')
+      : null,
+    introduction_status_updated_at: input.introductionStatus
+      ? new Date('2026-04-28T08:00:00.000Z')
+      : null,
     provenance: DataProvenance.PhotoLookup,
     identity: {
       brand: input.brand,

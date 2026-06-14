@@ -396,6 +396,10 @@ export class SkinJournalController {
       userId,
       triggeredByEventId: body.triggered_by_event_id ?? null,
       reason: body.reason ?? 'User-initiated barrier-repair simplification',
+      recoveryTriggerSource: body.recovery_trigger_source,
+      recoveryTriggerSymptoms: body.recovery_trigger_symptoms,
+      recoveryTriggerSeverity: body.recovery_trigger_severity,
+      recoveryActiveOveruse: body.recovery_active_overuse,
     });
   }
 

@@ -74,6 +74,21 @@ type ResolveProductImageUrl = (
   product: InventoryProduct | null | undefined,
 ) => string | null;
 
+type RoutineMemoryWindow = {
+  start: string;
+  end: string;
+  days: number;
+};
+
+type TimelineBuildContext = {
+  memoryByProduct: Map<string, ProductMemory>;
+  productById: Map<string, RoutineMemoryProductDto>;
+  timeline: RoutineMemoryTimelineEventDto[];
+  reactionDates: string[];
+  window: RoutineMemoryWindow;
+  resolveProductImageUrl: ResolveProductImageUrl;
+};
+
 @Injectable()
 export class RoutineMemoryService {
   constructor(
@@ -208,154 +223,20 @@ export class RoutineMemoryService {
     const memoryByProduct = new Map<string, ProductMemory>();
     const timeline: RoutineMemoryTimelineEventDto[] = [];
     const reactionDates: string[] = [];
+    const timelineContext: TimelineBuildContext = {
+      memoryByProduct,
+      productById,
+      timeline,
+      reactionDates,
+      window,
+      resolveProductImageUrl,
+    };
 
-    for (const product of products) {
-      const productRef =
-        productById.get(product.id) ??
-        productReference(product, resolveProductImageUrl);
-      const productAddedDate = toDateOnlyString(product.created_at);
-      if (productRef.productId) {
-        ensureMemory(memoryByProduct, productRef).addedDate = productAddedDate;
-      }
-      if (!isDateInWindow(productAddedDate, window.start, window.end)) continue;
-      timeline.push(
-        event({
-          id: `product-added:${product.id}`,
-          date: productAddedDate,
-          occurredAt: toIsoString(product.created_at),
-          type: RoutineMemoryEventTypeValue.ProductAdded,
-          severity: RoutineMemoryEventSeverityValue.Info,
-          product: productRef,
-          sourceType: RoutineMemorySourceTypeValue.InventoryProduct,
-          sourceId: product.id,
-        }),
-      );
-    }
-
+    addShelfProductEvents(products, timelineContext);
     applyLifetimeUsage(memoryByProduct, productById, lifetimeUsageRows);
-
-    for (const log of logs) {
-      for (const item of sortedItems(log.items ?? [])) {
-        const product = productReferenceFromItem(item, resolveProductImageUrl);
-        if (item.status === ApplicationItemStatus.Skipped) {
-          if (product?.productId) {
-            ensureMemory(memoryByProduct, product).skippedDates.push(
-              toDateOnlyString(log.target_date),
-            );
-          }
-          timeline.push(
-            event({
-              id: `product-skipped:${log.id}:${item.id}`,
-              date: toDateOnlyString(log.target_date),
-              occurredAt: toNullableIso(log.applied_at ?? log.updated_at),
-              type: RoutineMemoryEventTypeValue.ProductSkipped,
-              severity: RoutineMemoryEventSeverityValue.Watch,
-              product,
-              sourceType: RoutineMemorySourceTypeValue.ApplicationLog,
-              sourceId: log.id,
-            }),
-          );
-          continue;
-        }
-
-        if (!product?.productId) continue;
-        const memory = ensureMemory(memoryByProduct, product);
-        const useDate = toDateOnlyString(log.target_date);
-        if (!memory.firstUseDate || useDate < memory.firstUseDate) {
-          memory.firstUseDate = useDate;
-        }
-        if (memory.firstUseDate === useDate && !memory.firstUseEventEmitted) {
-          memory.firstUseEventEmitted = true;
-          timeline.push(
-            event({
-              id: `first-use:${log.id}:${item.id}`,
-              date: useDate,
-              occurredAt: toNullableIso(item.applied_at ?? log.applied_at),
-              type: RoutineMemoryEventTypeValue.FirstLoggedUse,
-              severity: RoutineMemoryEventSeverityValue.Info,
-              product,
-              sourceType: RoutineMemorySourceTypeValue.ApplicationLog,
-              sourceId: log.id,
-            }),
-          );
-        } else {
-          timeline.push(
-            event({
-              id: `product-used:${log.id}:${item.id}`,
-              date: useDate,
-              occurredAt: toNullableIso(item.applied_at ?? log.applied_at),
-              type: RoutineMemoryEventTypeValue.ProductUsed,
-              severity: RoutineMemoryEventSeverityValue.Info,
-              product,
-              sourceType: RoutineMemorySourceTypeValue.ApplicationLog,
-              sourceId: log.id,
-            }),
-          );
-        }
-        if (!memory.lastUseDate || memory.lastUseDate < useDate) {
-          memory.lastUseDate = useDate;
-        }
-      }
-    }
-
-    for (const entry of journalEntries) {
-      if (entry.recent_change) {
-        const product = entry.recent_change.related_inventory_product_id
-          ? (productById.get(
-              entry.recent_change.related_inventory_product_id,
-            ) ?? null)
-          : null;
-        const type = eventTypeForRecentChange(entry.recent_change.kind);
-        if (type === RoutineMemoryEventTypeValue.FrequencyChanged && product) {
-          ensureMemory(memoryByProduct, product).frequencyChangeDates.push(
-            entry.entry_date,
-          );
-        }
-        timeline.push(
-          event({
-            id: `recent-change:${entry.id}`,
-            date: entry.entry_date,
-            occurredAt: toIsoString(entry.created_at),
-            type,
-            severity: RoutineMemoryEventSeverityValue.Watch,
-            product,
-            sourceType: RoutineMemorySourceTypeValue.SkinJournalEntry,
-            sourceId: entry.id,
-          }),
-        );
-      }
-
-      if (hasReactionSignal(entry)) {
-        reactionDates.push(entry.entry_date);
-        timeline.push(
-          event({
-            id: `reaction-signal:${entry.id}`,
-            date: entry.entry_date,
-            occurredAt: toIsoString(entry.created_at),
-            type: RoutineMemoryEventTypeValue.ReactionSignal,
-            severity: reactionSeverity(entry.reaction_report),
-            product: null,
-            sourceType: RoutineMemorySourceTypeValue.SkinJournalEntry,
-            sourceId: entry.id,
-          }),
-        );
-      }
-    }
-
-    for (const recoveryEvent of recoveryEvents) {
-      timeline.push(
-        event({
-          id: `recovery-started:${recoveryEvent.id}`,
-          date: toDateOnlyString(recoveryEvent.started_at),
-          occurredAt: toIsoString(recoveryEvent.started_at),
-          type: RoutineMemoryEventTypeValue.RecoveryStarted,
-          severity: RoutineMemoryEventSeverityValue.Recovery,
-          product: null,
-          sourceType: RoutineMemorySourceTypeValue.RoutineSimplification,
-          sourceId: recoveryEvent.id,
-        }),
-      );
-    }
+    addApplicationLogEvents(logs, timelineContext);
+    addJournalEntryEvents(journalEntries, timelineContext);
+    addRecoveryEvents(recoveryEvents, timeline);
 
     const sortedTimeline = timeline.sort(compareEvents);
     const suspiciousProducts = buildSuspiciousProducts(
@@ -419,6 +300,221 @@ export class RoutineMemoryService {
       )
       .groupBy(productIdExpression)
       .getRawMany<LifetimeProductUsageRow>();
+  }
+}
+
+function addShelfProductEvents(
+  products: InventoryProduct[],
+  context: TimelineBuildContext,
+): void {
+  for (const product of products) {
+    const productRef =
+      context.productById.get(product.id) ??
+      productReference(product, context.resolveProductImageUrl);
+    const productAddedDate = toDateOnlyString(product.created_at);
+
+    if (productRef.productId) {
+      ensureMemory(context.memoryByProduct, productRef).addedDate =
+        productAddedDate;
+    }
+    if (
+      !isDateInWindow(
+        productAddedDate,
+        context.window.start,
+        context.window.end,
+      )
+    ) {
+      continue;
+    }
+
+    context.timeline.push(
+      event({
+        id: `product-added:${product.id}`,
+        date: productAddedDate,
+        occurredAt: toIsoString(product.created_at),
+        type: RoutineMemoryEventTypeValue.ProductAdded,
+        severity: RoutineMemoryEventSeverityValue.Info,
+        product: productRef,
+        sourceType: RoutineMemorySourceTypeValue.InventoryProduct,
+        sourceId: product.id,
+      }),
+    );
+  }
+}
+
+function addApplicationLogEvents(
+  logs: ApplicationLog[],
+  context: TimelineBuildContext,
+): void {
+  for (const log of logs) {
+    for (const item of sortedItems(log.items ?? [])) {
+      addApplicationLogItemEvent(log, item, context);
+    }
+  }
+}
+
+function addApplicationLogItemEvent(
+  log: ApplicationLog,
+  item: ApplicationLogItem,
+  context: TimelineBuildContext,
+): void {
+  const product = productReferenceFromItem(
+    item,
+    context.resolveProductImageUrl,
+  );
+  if (item.status === ApplicationItemStatus.Skipped) {
+    addSkippedProductEvent(log, item, product, context);
+    return;
+  }
+
+  if (!product?.productId) {
+    return;
+  }
+
+  const useDate = toDateOnlyString(log.target_date);
+  const memory = ensureMemory(context.memoryByProduct, product);
+  if (!memory.firstUseDate || useDate < memory.firstUseDate) {
+    memory.firstUseDate = useDate;
+  }
+
+  const emitsFirstUseEvent =
+    memory.firstUseDate === useDate && !memory.firstUseEventEmitted;
+  context.timeline.push(
+    event({
+      id: emitsFirstUseEvent
+        ? `first-use:${log.id}:${item.id}`
+        : `product-used:${log.id}:${item.id}`,
+      date: useDate,
+      occurredAt: toNullableIso(item.applied_at ?? log.applied_at),
+      type: emitsFirstUseEvent
+        ? RoutineMemoryEventTypeValue.FirstLoggedUse
+        : RoutineMemoryEventTypeValue.ProductUsed,
+      severity: RoutineMemoryEventSeverityValue.Info,
+      product,
+      sourceType: RoutineMemorySourceTypeValue.ApplicationLog,
+      sourceId: log.id,
+    }),
+  );
+
+  if (emitsFirstUseEvent) {
+    memory.firstUseEventEmitted = true;
+  }
+  if (!memory.lastUseDate || memory.lastUseDate < useDate) {
+    memory.lastUseDate = useDate;
+  }
+}
+
+function addSkippedProductEvent(
+  log: ApplicationLog,
+  item: ApplicationLogItem,
+  product: RoutineMemoryProductDto | null,
+  context: TimelineBuildContext,
+): void {
+  if (product?.productId) {
+    ensureMemory(context.memoryByProduct, product).skippedDates.push(
+      toDateOnlyString(log.target_date),
+    );
+  }
+
+  context.timeline.push(
+    event({
+      id: `product-skipped:${log.id}:${item.id}`,
+      date: toDateOnlyString(log.target_date),
+      occurredAt: toNullableIso(log.applied_at ?? log.updated_at),
+      type: RoutineMemoryEventTypeValue.ProductSkipped,
+      severity: RoutineMemoryEventSeverityValue.Watch,
+      product,
+      sourceType: RoutineMemorySourceTypeValue.ApplicationLog,
+      sourceId: log.id,
+    }),
+  );
+}
+
+function addJournalEntryEvents(
+  journalEntries: SkinJournalEntry[],
+  context: TimelineBuildContext,
+): void {
+  for (const entry of journalEntries) {
+    addRecentChangeEvent(entry, context);
+    addReactionSignalEvent(entry, context);
+  }
+}
+
+function addRecentChangeEvent(
+  entry: SkinJournalEntry,
+  context: TimelineBuildContext,
+): void {
+  if (!entry.recent_change) {
+    return;
+  }
+
+  const product = entry.recent_change.related_inventory_product_id
+    ? (context.productById.get(
+        entry.recent_change.related_inventory_product_id,
+      ) ?? null)
+    : null;
+  const type = eventTypeForRecentChange(entry.recent_change.kind);
+
+  if (type === RoutineMemoryEventTypeValue.FrequencyChanged && product) {
+    ensureMemory(context.memoryByProduct, product).frequencyChangeDates.push(
+      entry.entry_date,
+    );
+  }
+
+  context.timeline.push(
+    event({
+      id: `recent-change:${entry.id}`,
+      date: entry.entry_date,
+      occurredAt: toIsoString(entry.created_at),
+      type,
+      severity: RoutineMemoryEventSeverityValue.Watch,
+      product,
+      sourceType: RoutineMemorySourceTypeValue.SkinJournalEntry,
+      sourceId: entry.id,
+    }),
+  );
+}
+
+function addReactionSignalEvent(
+  entry: SkinJournalEntry,
+  context: TimelineBuildContext,
+): void {
+  if (!hasReactionSignal(entry)) {
+    return;
+  }
+
+  context.reactionDates.push(entry.entry_date);
+  context.timeline.push(
+    event({
+      id: `reaction-signal:${entry.id}`,
+      date: entry.entry_date,
+      occurredAt: toIsoString(entry.created_at),
+      type: RoutineMemoryEventTypeValue.ReactionSignal,
+      severity: reactionSeverity(entry.reaction_report),
+      product: null,
+      sourceType: RoutineMemorySourceTypeValue.SkinJournalEntry,
+      sourceId: entry.id,
+    }),
+  );
+}
+
+function addRecoveryEvents(
+  recoveryEvents: RoutineSimplificationEvent[],
+  timeline: RoutineMemoryTimelineEventDto[],
+): void {
+  for (const recoveryEvent of recoveryEvents) {
+    timeline.push(
+      event({
+        id: `recovery-started:${recoveryEvent.id}`,
+        date: toDateOnlyString(recoveryEvent.started_at),
+        occurredAt: toIsoString(recoveryEvent.started_at),
+        type: RoutineMemoryEventTypeValue.RecoveryStarted,
+        severity: RoutineMemoryEventSeverityValue.Recovery,
+        product: null,
+        sourceType: RoutineMemorySourceTypeValue.RoutineSimplification,
+        sourceId: recoveryEvent.id,
+      }),
+    );
   }
 }
 

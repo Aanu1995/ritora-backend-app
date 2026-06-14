@@ -857,6 +857,95 @@ describe('SkinJournalService', () => {
     );
   });
 
+  it('starts Recovery Mode from a user-reported barrier reaction without photo analysis', async () => {
+    await service.upsertEntryForResolvedDate({
+      userId: 'user-1',
+      targetDate: todayInTimeZone('UTC'),
+      timeZone: 'UTC',
+      body: {
+        ...COMPLETE_CHECK_IN_BODY,
+        reaction_report: {
+          symptoms: ['burning', 'stinging'],
+          severity: 'mild',
+          onset: 'today',
+          locations: ['cheeks'],
+          red_flags: [],
+          suspected_trigger: 'active_ingredient',
+          note: 'Stinging after using actives twice this week.',
+        },
+      },
+    });
+
+    expect(simplifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        triggered_by_event_id: null,
+        simplification_mode: 'barrier_repair',
+        recovery_phase: 'stabilize',
+        recovery_trigger_source: 'reaction_report',
+        recovery_trigger_symptoms: ['burning', 'stinging'],
+        recovery_trigger_severity: 'mild',
+        recovery_active_overuse: true,
+        recovery_return_step: 'not_started',
+        restore_strategy: 'phased',
+      }),
+    );
+    expect(simplifications.save).toHaveBeenCalled();
+  });
+
+  it('upgrades an existing active simplification with new Recovery Mode metadata', async () => {
+    const existing = {
+      id: 'simplification-1',
+      user_id: 'user-1',
+      triggered_by_event_id: null,
+      started_at: new Date('2026-06-13T08:00:00.000Z'),
+      ended_at: null,
+      acknowledged_at: null,
+      simplification_mode: 'barrier_repair',
+      recovery_phase: 'stabilize',
+      recovery_trigger_source: 'manual',
+      recovery_trigger_symptoms: [],
+      recovery_trigger_severity: null,
+      recovery_active_overuse: false,
+      recovery_review_after: null,
+      recovery_exit_eligible_at: null,
+      recovery_return_step: 'not_started',
+      restore_strategy: 'full',
+      original_schedule_snapshot: null,
+      reason: 'Older active simplification.',
+      triggered_by_event: null,
+      generateId: jest.fn(),
+    } as RoutineSimplificationEvent;
+    simplifications.findOne.mockResolvedValue(existing);
+    simplifications.save.mockImplementation(async (data) => data);
+
+    await service.startSimplification({
+      userId: 'user-1',
+      triggeredByEventId: null,
+      reason:
+        'User-reported barrier symptoms started Recovery Mode with a phased return.',
+      recoveryTriggerSource: 'reaction_report',
+      recoveryTriggerSymptoms: ['burning'],
+      recoveryTriggerSeverity: 'moderate',
+      recoveryActiveOveruse: true,
+      recoveryReviewAfter: new Date('2026-06-17T08:00:00.000Z'),
+      recoveryExitEligibleAt: new Date('2026-06-19T08:00:00.000Z'),
+    });
+
+    expect(simplifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'simplification-1',
+        recovery_trigger_source: 'reaction_report',
+        recovery_trigger_symptoms: ['burning'],
+        recovery_trigger_severity: 'moderate',
+        recovery_active_overuse: true,
+        recovery_review_after: new Date('2026-06-17T08:00:00.000Z'),
+        recovery_exit_eligible_at: new Date('2026-06-19T08:00:00.000Z'),
+        restore_strategy: 'phased',
+      }),
+    );
+  });
+
   it('records helpfulness feedback for the current analysis interpretation', async () => {
     const analyzedEntry = entry({
       photo_object_key: 'skin-journal/user-1/entry-1/photo.webp',
@@ -3100,6 +3189,43 @@ describe('SkinJournalService', () => {
       expect.objectContaining({
         kind: 'simplification_started',
         dedupeKey: expectNotificationDedupeKey('simplification_started'),
+      }),
+    );
+  });
+
+  it('starts Recovery Mode with photo-analysis metadata for moderate reaction signals', async () => {
+    const current = entry({
+      id: 'entry-reaction',
+      entry_date: '2026-04-10',
+      photo_object_key: 'skin-journal/user-1/entry-reaction/photo.webp',
+      analysis_status: 'pending',
+    });
+    entries.findOne.mockResolvedValue(current);
+    entries.find.mockResolvedValue([current]);
+    events.findOne.mockResolvedValue(null);
+    analysis.analyze.mockResolvedValueOnce(
+      analysisRunResult(
+        analyzedObservations({
+          reaction_signals: {
+            reaction_detected: true,
+            reaction_severity: 'moderate',
+            indicators: ['redness_spike'],
+            confidence: 0.82,
+          },
+          barrier_signs: { barrier_compromise: true, indicators: [] },
+          should_flag_for_doctor: false,
+        }),
+      ),
+    );
+
+    await service.runAnalysis('entry-reaction', 'user-1');
+
+    expect(simplifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recovery_trigger_source: 'photo_analysis',
+        recovery_trigger_severity: 'moderate',
+        recovery_return_step: 'not_started',
+        restore_strategy: 'phased',
       }),
     );
   });

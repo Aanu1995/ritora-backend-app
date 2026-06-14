@@ -4,6 +4,7 @@ import {
   ProductCategory,
   ShelfStatus,
 } from '../../shelf/shelf.types';
+import { getProductIntroductionSuggestionGuidance } from '../../shelf/product-introduction.policy';
 import { SuggestionProductScore } from '../suggestion-context.types';
 import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import {
@@ -27,7 +28,7 @@ import {
 export { SuggestionProductGoalFitReason } from './suggestion-goal-intelligence';
 
 export const SUGGESTION_PRODUCT_SCORING_VERSION =
-  'selection-evidence-reaction-skip-2026-06-05';
+  'selection-evidence-introduction-pace-2026-06-14';
 
 export enum SuggestionProductDataWarning {
   IngredientListMissing = 'ingredient list missing',
@@ -184,6 +185,7 @@ export function scoreProductForSuggestion(
     score -= 20;
     cautions.push('product data is incomplete; suggestion confidence reduced');
   }
+  score += scoreProductIntroductionPace(product, reasons, cautions);
   if (options.environment) {
     const environmentScore = buildEnvironmentAdaptationPolicy(
       options.environment,
@@ -219,6 +221,25 @@ export function scoreProductForSuggestion(
     dataQualityWarnings: productDataQuality.warnings,
     evidenceSourceIds,
   };
+}
+
+function scoreProductIntroductionPace(
+  product: InventoryProduct,
+  reasons: string[],
+  cautions: string[],
+): number {
+  const guidance = getProductIntroductionSuggestionGuidance(
+    product.introduction_status,
+  );
+
+  if (guidance.suitabilityReason) {
+    reasons.push(guidance.suitabilityReason);
+  }
+  if (guidance.cautionReason) {
+    cautions.push(guidance.cautionReason);
+  }
+
+  return guidance.scoreAdjustment;
 }
 
 export function assessProductDataQuality(

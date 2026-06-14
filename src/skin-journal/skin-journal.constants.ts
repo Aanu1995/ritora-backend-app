@@ -178,6 +178,36 @@ export type SimplificationMode = 'barrier_repair';
 
 export type RestoreStrategy = 'full' | 'phased';
 
+export const RecoveryPhaseValue = {
+  Stabilize: 'stabilize',
+  Observe: 'observe',
+  PhasedReturn: 'phased_return',
+} as const;
+
+export type RecoveryPhase =
+  (typeof RecoveryPhaseValue)[keyof typeof RecoveryPhaseValue];
+
+export const RecoveryTriggerSourceValue = {
+  Unknown: 'unknown',
+  Manual: 'manual',
+  ReactionReport: 'reaction_report',
+  PhotoAnalysis: 'photo_analysis',
+} as const;
+
+export type RecoveryTriggerSource =
+  (typeof RecoveryTriggerSourceValue)[keyof typeof RecoveryTriggerSourceValue];
+
+export const RecoveryReturnStepValue = {
+  NotStarted: 'not_started',
+  BarrierOnly: 'barrier_only',
+  OneActiveTest: 'one_active_test',
+  BuildingFrequency: 'building_frequency',
+  Complete: 'complete',
+} as const;
+
+export type RecoveryReturnStep =
+  (typeof RecoveryReturnStepValue)[keyof typeof RecoveryReturnStepValue];
+
 export type ReactionSeverity = 'none' | 'mild' | 'moderate' | 'severe';
 
 export const REACTION_REPORT_SYMPTOMS = [
@@ -185,6 +215,7 @@ export const REACTION_REPORT_SYMPTOMS = [
   'stinging',
   'itching',
   'tightness',
+  'redness',
   'heat',
   'pain',
   'swelling',
