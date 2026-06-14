@@ -27,6 +27,7 @@ const encryptedScheduleSnapshotTransformer =
   );
 
 @Entity('routine_simplification_events')
+@Index('IDX_simplification_user_started', ['user_id', 'started_at'])
 @Index('IDX_simplification_user_unack_active', ['user_id'], {
   where: '"ended_at" IS NULL AND "acknowledged_at" IS NULL',
 })

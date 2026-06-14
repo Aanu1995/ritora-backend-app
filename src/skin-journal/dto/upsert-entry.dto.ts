@@ -1,4 +1,5 @@
 import {
+  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsIn,
@@ -18,10 +19,22 @@ import {
 } from 'class-transformer';
 import {
   CONCERN_KEYS,
+  REACTION_REPORT_LOCATIONS,
+  REACTION_REPORT_ONSETS,
+  REACTION_REPORT_RED_FLAGS,
+  REACTION_REPORT_SEVERITIES,
+  REACTION_REPORT_SYMPTOMS,
+  REACTION_REPORT_TRIGGERS,
   SKIN_JOURNAL_PHOTO_ANGLES,
   type Angle,
   type CycleMarker,
   type OverallFeel,
+  type ReactionReportLocation,
+  type ReactionReportOnset,
+  type ReactionReportRedFlag,
+  type ReactionReportSeverity,
+  type ReactionReportSymptom,
+  type ReactionReportTrigger,
   type RecentChangeKind,
   type SleepBand,
   type StressLevel,
@@ -127,6 +140,11 @@ function transformOptionalRecentChange(params: TransformFnParams): unknown {
   return isRecord(value) ? plainToInstance(RecentChangeDto, value) : value;
 }
 
+function transformOptionalReactionReport(params: TransformFnParams): unknown {
+  const value = parseOptionalNullableJsonObjectValue(params.value);
+  return isRecord(value) ? plainToInstance(ReactionReportDto, value) : value;
+}
+
 function transformOptionalNullableString(params: TransformFnParams): unknown {
   const value = transformValue(params);
   return value === '' ? null : value;
@@ -200,6 +218,39 @@ export class RecentChangeDto {
   @IsOptional() @IsString() @MaxLength(500) note?: string | null;
 }
 
+export class ReactionReportDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsIn(REACTION_REPORT_SYMPTOMS, { each: true })
+  symptoms: ReactionReportSymptom[];
+
+  @IsIn(REACTION_REPORT_SEVERITIES)
+  severity: ReactionReportSeverity;
+
+  @IsOptional()
+  @IsIn(REACTION_REPORT_ONSETS)
+  onset?: ReactionReportOnset | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(REACTION_REPORT_LOCATIONS, { each: true })
+  locations?: ReactionReportLocation[];
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(REACTION_REPORT_RED_FLAGS, { each: true })
+  red_flags?: ReactionReportRedFlag[];
+
+  @IsOptional()
+  @IsIn(REACTION_REPORT_TRIGGERS)
+  suspected_trigger?: ReactionReportTrigger | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  note?: string | null;
+}
+
 export class UpsertEntryDto {
   @IsOptional()
   @Transform(transformOptionalJsonArray)
@@ -253,6 +304,12 @@ export class UpsertEntryDto {
   @ValidateNested()
   @Type(() => RecentChangeDto)
   recent_change?: RecentChangeDto | null;
+
+  @IsOptional()
+  @Transform(transformOptionalReactionReport)
+  @ValidateNested()
+  @Type(() => ReactionReportDto)
+  reaction_report?: ReactionReportDto | null;
 
   @IsOptional()
   @Transform(transformOptionalNullableString)

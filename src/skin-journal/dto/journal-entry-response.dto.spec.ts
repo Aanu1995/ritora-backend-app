@@ -24,6 +24,7 @@ function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
     sweat_exercise_today: null,
     cycle_marker: null,
     recent_change: null,
+    reaction_report: null,
     complaint_note: null,
     analysis_status: 'completed',
     analysis_observations: null,
@@ -124,5 +125,25 @@ describe('JournalEntryResponseDto', () => {
 
     expect(dto.analysis_feedback_submitted).toBe(false);
     expect(dto.analysis_feedback_submitted_at).toBeNull();
+  });
+
+  it('does not expose empty legacy reaction reports as user-visible reactions', () => {
+    const dto = JournalEntryResponseDto.fromEntity(
+      entry({
+        reaction_report: {
+          symptoms: [],
+          severity: 'mild',
+          onset: null,
+          locations: [],
+          red_flags: [],
+          suspected_trigger: null,
+          note: null,
+        },
+      }),
+      'https://signed.example.com/photo.webp',
+    );
+
+    expect(dto.reaction_report).toBeNull();
+    expect(dto.has_reaction).toBe(false);
   });
 });

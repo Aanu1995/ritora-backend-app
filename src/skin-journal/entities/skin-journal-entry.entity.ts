@@ -27,6 +27,7 @@ import type {
   PhotoAnalysisInterpretation,
   RatingsPayload,
   RecentChangePayload,
+  ReactionReportPayload,
   SleepBand,
   StressLevel,
   SunExposure,
@@ -43,6 +44,11 @@ const encryptedRatingsTransformer =
 const encryptedRecentChangeTransformer =
   encryptedJsonFieldTransformer<RecentChangePayload | null>(
     'skin_journal_entries.recent_change',
+    null,
+  );
+const encryptedReactionReportTransformer =
+  encryptedJsonFieldTransformer<ReactionReportPayload | null>(
+    'skin_journal_entries.reaction_report',
     null,
   );
 const encryptedAnalysisTransformer =
@@ -136,6 +142,13 @@ export class SkinJournalEntry {
     transformer: encryptedRecentChangeTransformer,
   })
   recent_change: RecentChangePayload | null;
+
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    transformer: encryptedReactionReportTransformer,
+  })
+  reaction_report: ReactionReportPayload | null;
 
   @Column({
     type: 'text',

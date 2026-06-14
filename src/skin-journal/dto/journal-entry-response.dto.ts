@@ -14,6 +14,7 @@ import type {
   PhotoReferenceQuality,
   RatingsPayload,
   RecentChangePayload,
+  ReactionReportPayload,
   SleepBand,
   StressLevel,
   SunExposure,
@@ -100,6 +101,9 @@ export class JournalEntryResponseDto {
 
   @ApiProperty({ required: false, nullable: true })
   recent_change: RecentChangePayload | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  reaction_report: ReactionReportPayload | null;
 
   @ApiProperty({ required: false, nullable: true })
   complaint_note: string | null;
@@ -207,6 +211,9 @@ export class JournalEntryResponseDto {
     dto.sweat_exercise_today = entry.sweat_exercise_today;
     dto.cycle_marker = entry.cycle_marker;
     dto.recent_change = entry.recent_change;
+    dto.reaction_report = hasReactionReportSymptoms(entry.reaction_report)
+      ? entry.reaction_report
+      : null;
     dto.complaint_note = entry.complaint_note;
     dto.analysis_status = entry.analysis_status;
     dto.analysis_observations = entry.analysis_observations;
@@ -236,11 +243,18 @@ export class JournalEntryResponseDto {
     dto.analysis_retry_count = entry.analysis_retry_count;
     dto.has_reaction =
       entry.has_reaction_signal ||
-      !!entry.analysis_observations?.reaction_signals?.reaction_detected;
+      !!entry.analysis_observations?.reaction_signals?.reaction_detected ||
+      !!dto.reaction_report;
     dto.created_at = entry.created_at;
     dto.updated_at = entry.updated_at;
     return dto;
   }
+}
+
+function hasReactionReportSymptoms(
+  report: ReactionReportPayload | null,
+): boolean {
+  return Boolean(report?.symptoms?.length);
 }
 
 function isFeedbackSubmittedForCurrentAnalysis(

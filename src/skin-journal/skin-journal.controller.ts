@@ -420,7 +420,6 @@ export class SkinJournalController {
   ) {
     return this.service.getInsightOperations(operationsToken);
   }
-
 }
 
 function normalizeUploadedPhotoAngles(

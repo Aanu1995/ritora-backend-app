@@ -2,7 +2,14 @@ import { BadRequestException } from '@nestjs/common';
 import {
   CONCERN_KEYS,
   ConcernKey,
+  REACTION_REPORT_LOCATIONS,
+  REACTION_REPORT_ONSETS,
+  REACTION_REPORT_RED_FLAGS,
+  REACTION_REPORT_SEVERITIES,
+  REACTION_REPORT_SYMPTOMS,
+  REACTION_REPORT_TRIGGERS,
   RatingsPayload,
+  ReactionReportPayload,
   RecentChangePayload,
   SKIN_JOURNAL_PHOTO_ANGLES,
   type Angle,
@@ -21,6 +28,12 @@ const RECENT_CHANGE_KINDS: ReadonlySet<RecentChangePayload['kind']> = new Set<
   'other',
 ]);
 const PHOTO_ANGLES = new Set<Angle>(SKIN_JOURNAL_PHOTO_ANGLES);
+const REACTION_SYMPTOMS = new Set<string>(REACTION_REPORT_SYMPTOMS);
+const REACTION_SEVERITIES = new Set<string>(REACTION_REPORT_SEVERITIES);
+const REACTION_ONSETS = new Set<string>(REACTION_REPORT_ONSETS);
+const REACTION_LOCATIONS = new Set<string>(REACTION_REPORT_LOCATIONS);
+const REACTION_RED_FLAGS = new Set<string>(REACTION_REPORT_RED_FLAGS);
+const REACTION_TRIGGERS = new Set<string>(REACTION_REPORT_TRIGGERS);
 const INVALID_JSON_PAYLOAD_KEY = '__invalid_json_payload__';
 
 export function normalizeUpsertEntryBody(body: UpsertEntryDto): UpsertEntryDto {
@@ -41,6 +54,9 @@ export function normalizeUpsertEntryBody(body: UpsertEntryDto): UpsertEntryDto {
   );
   normalized.ratings = parseOptionalRatings(record.ratings, record);
   normalized.recent_change = parseOptionalRecentChange(record.recent_change);
+  normalized.reaction_report = parseOptionalReactionReport(
+    record.reaction_report,
+  );
 
   return normalized;
 }
@@ -145,6 +161,77 @@ function parseOptionalRecentChange(
         : null,
     note: typeof parsed.note === 'string' ? parsed.note : null,
   };
+}
+
+function parseOptionalReactionReport(
+  value: unknown,
+): ReactionReportPayload | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const parsed = parseObjectish(value);
+  if (!parsed) {
+    throw new BadRequestException('Invalid reaction_report payload');
+  }
+  const symptoms = parseEnumArray(
+    parsed.symptoms,
+    REACTION_SYMPTOMS,
+    'reaction_report.symptoms',
+  );
+  if (symptoms.length === 0) {
+    throw new BadRequestException('reaction_report symptoms are required');
+  }
+  if (
+    typeof parsed.severity !== 'string' ||
+    !REACTION_SEVERITIES.has(parsed.severity)
+  ) {
+    throw new BadRequestException('Invalid reaction_report severity');
+  }
+
+  return {
+    symptoms: symptoms as ReactionReportPayload['symptoms'],
+    severity: parsed.severity as ReactionReportPayload['severity'],
+    onset:
+      typeof parsed.onset === 'string' && REACTION_ONSETS.has(parsed.onset)
+        ? (parsed.onset as ReactionReportPayload['onset'])
+        : null,
+    locations:
+      parsed.locations === undefined
+        ? []
+        : (parseEnumArray(
+            parsed.locations,
+            REACTION_LOCATIONS,
+            'reaction_report.locations',
+          ) as ReactionReportPayload['locations']),
+    red_flags:
+      parsed.red_flags === undefined
+        ? []
+        : (parseEnumArray(
+            parsed.red_flags,
+            REACTION_RED_FLAGS,
+            'reaction_report.red_flags',
+          ) as ReactionReportPayload['red_flags']),
+    suspected_trigger:
+      typeof parsed.suspected_trigger === 'string' &&
+      REACTION_TRIGGERS.has(parsed.suspected_trigger)
+        ? (parsed.suspected_trigger as ReactionReportPayload['suspected_trigger'])
+        : null,
+    note: typeof parsed.note === 'string' ? parsed.note.slice(0, 1000) : null,
+  };
+}
+
+function parseEnumArray(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+  label: string,
+): string[] {
+  if (!Array.isArray(value)) {
+    throw new BadRequestException(`Invalid ${label}`);
+  }
+  const result: unknown[] = [...new Set<unknown>(value)];
+  if (!result.every((item) => typeof item === 'string' && allowed.has(item))) {
+    throw new BadRequestException(`Invalid ${label}`);
+  }
+  return result as string[];
 }
 
 function parseObjectish(value: unknown): Record<string, unknown> | undefined {

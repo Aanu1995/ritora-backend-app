@@ -120,6 +120,7 @@ function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
     user: undefined as never,
     generateId: jest.fn(),
     ...overrides,
+    reaction_report: overrides.reaction_report ?? null,
   };
 }
 
@@ -240,6 +241,9 @@ function insightInputSignature(entries: SkinJournalEntry[]): string {
       sweat_exercise_today: item.sweat_exercise_today,
       cycle_marker: item.cycle_marker,
       recent_change: item.recent_change,
+      ...(item.reaction_report
+        ? { reaction_report: item.reaction_report }
+        : {}),
       complaint_note: item.complaint_note,
     }));
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');

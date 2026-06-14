@@ -154,6 +154,7 @@ import {
   CompareDeltaSeverity,
   InsightGenerationStatusValue,
   PhotoReferenceQualityReason,
+  type ReactionReportPayload,
 } from './skin-journal.constants';
 import {
   buildAnalysisComparisonReference,
@@ -775,6 +776,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         entry.cycle_marker = body.cycle_marker;
       if (body.recent_change !== undefined)
         entry.recent_change = body.recent_change ?? null;
+      if (body.reaction_report !== undefined)
+        entry.reaction_report = body.reaction_report ?? null;
       if (body.complaint_note !== undefined)
         entry.complaint_note = body.complaint_note ?? null;
 
@@ -1392,7 +1395,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       let state: CalendarDayState = CalendarDayStateValue.NoEntry;
       let hasReaction = false;
       if (entry) {
-        if (!entry.photo_object_key) {
+        hasReaction = entryHasUserVisibleReaction(entry);
+        if (hasReaction) {
+          state = CalendarDayStateValue.Reaction;
+        } else if (!entry.photo_object_key) {
           state = CalendarDayStateValue.EntryNoPhoto;
         } else if (
           entry.analysis_status === AnalysisStatusValue.Pending ||
@@ -1403,10 +1409,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         } else if (entry.analysis_status === AnalysisStatusValue.Failed) {
           state = CalendarDayStateValue.Failed;
         } else {
-          hasReaction = entry.has_reaction_signal;
-          state = hasReaction
-            ? CalendarDayStateValue.Reaction
-            : CalendarDayStateValue.Completed;
+          state = CalendarDayStateValue.Completed;
         }
       }
       return {
@@ -1492,7 +1495,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     const concernCounts = new Map<AnalysisConcern, number>();
     let reactionCount = 0;
     for (const entry of list) {
-      if (entry.has_reaction_signal) {
+      if (entryHasUserVisibleReaction(entry)) {
         reactionCount += 1;
       }
       const entryConcerns = new Set<AnalysisConcern>();
@@ -1579,7 +1582,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         date: entry.entry_date,
         entry_id: entry.id,
         analysis_status: entry.analysis_status,
-        has_reaction: entry.has_reaction_signal,
+        has_reaction: entryHasUserVisibleReaction(entry),
       };
     });
 
@@ -3104,28 +3107,32 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   ): string {
     const entryPayload = [...entries]
       .sort((left, right) => left.entry_date.localeCompare(right.entry_date))
-      .map((entry) => ({
-        id: entry.id,
-        entry_date: entry.entry_date,
-        updated_at: entry.updated_at?.toISOString?.() ?? null,
-        photo_object_key: entry.photo_object_key,
-        analysis_status: entry.analysis_status,
-        analysis_concern_keys: entry.analysis_concern_keys,
-        has_reaction_signal: entry.has_reaction_signal,
-        needs_retake: entry.needs_retake,
-        analysis_summary: entry.analysis_summary,
-        analysis_observations: entry.analysis_observations,
-        analysis_interpretation: entry.analysis_interpretation,
-        ratings: entry.ratings,
-        overall_feel: entry.overall_feel,
-        sleep_band: entry.sleep_band,
-        stress_today: entry.stress_today,
-        sun_exposure_today: entry.sun_exposure_today,
-        sweat_exercise_today: entry.sweat_exercise_today,
-        cycle_marker: entry.cycle_marker,
-        recent_change: entry.recent_change,
-        complaint_note: entry.complaint_note,
-      }));
+      .map((entry) => {
+        const reactionReport = reactionReportWithSymptoms(entry);
+        return {
+          id: entry.id,
+          entry_date: entry.entry_date,
+          updated_at: entry.updated_at?.toISOString?.() ?? null,
+          photo_object_key: entry.photo_object_key,
+          analysis_status: entry.analysis_status,
+          analysis_concern_keys: entry.analysis_concern_keys,
+          has_reaction_signal: entry.has_reaction_signal,
+          needs_retake: entry.needs_retake,
+          analysis_summary: entry.analysis_summary,
+          analysis_observations: entry.analysis_observations,
+          analysis_interpretation: entry.analysis_interpretation,
+          ratings: entry.ratings,
+          overall_feel: entry.overall_feel,
+          sleep_band: entry.sleep_band,
+          stress_today: entry.stress_today,
+          sun_exposure_today: entry.sun_exposure_today,
+          sweat_exercise_today: entry.sweat_exercise_today,
+          cycle_marker: entry.cycle_marker,
+          recent_change: entry.recent_change,
+          ...(reactionReport ? { reaction_report: reactionReport } : {}),
+          complaint_note: entry.complaint_note,
+        };
+      });
     const payload =
       routineApplications.length > 0
         ? {
@@ -3846,6 +3853,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   private buildAnalysisEntryContext(
     entry: SkinJournalEntry,
   ): AnalysisEntryContext {
+    const reactionReport = reactionReportWithSymptoms(entry);
     return {
       entry_date: entry.entry_date,
       ratings: entry.ratings,
@@ -3856,6 +3864,12 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       sweat_exercise_today: entry.sweat_exercise_today,
       cycle_marker: entry.cycle_marker,
       recent_change_kind: entry.recent_change?.kind ?? null,
+      reaction_report: reactionReport
+        ? {
+            ...reactionReport,
+            note: sanitizeContextText(reactionReport.note),
+          }
+        : null,
       complaint_note: sanitizeContextText(entry.complaint_note),
       is_pre_routine: entry.is_pre_routine,
     };
@@ -4599,7 +4613,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (filter.kind === 'reaction') {
-      queryBuilder.andWhere('entry.has_reaction_signal = true');
+      queryBuilder.andWhere(
+        '(entry.has_reaction_signal = true OR entry.reaction_report IS NOT NULL)',
+      );
       return;
     }
     queryBuilder.andWhere(':concern = ANY(entry.analysis_concern_keys)', {
@@ -4781,10 +4797,15 @@ function analysisConcernMap(observations: AnalysisObservations | null): Map<
 
 function reactionSeverity(entry: SkinJournalEntry): CompareDeltaSeverity {
   const reaction = entry.analysis_observations?.reaction_signals;
-  if (!reaction?.reaction_detected && !entry.has_reaction_signal) {
+  const reactionReport = reactionReportWithSymptoms(entry);
+  if (
+    !reaction?.reaction_detected &&
+    !entry.has_reaction_signal &&
+    !reactionReport
+  ) {
     return 'none';
   }
-  return reaction?.reaction_severity ?? 'moderate';
+  return reaction?.reaction_severity ?? reactionReport?.severity ?? 'moderate';
 }
 
 function severityRank(severity: CompareDeltaSeverity): number {
@@ -4961,6 +4982,24 @@ function uniqueEntryById(): (
     seen.add(entry.id);
     return true;
   };
+}
+
+function entryHasUserVisibleReaction(entry: SkinJournalEntry): boolean {
+  return Boolean(
+    entry.has_reaction_signal ||
+    entry.analysis_observations?.reaction_signals?.reaction_detected ||
+    entryHasReactionReportSymptoms(entry),
+  );
+}
+
+function entryHasReactionReportSymptoms(entry: SkinJournalEntry): boolean {
+  return Boolean(reactionReportWithSymptoms(entry));
+}
+
+function reactionReportWithSymptoms(
+  entry: SkinJournalEntry,
+): ReactionReportPayload | null {
+  return entry.reaction_report?.symptoms?.length ? entry.reaction_report : null;
 }
 
 function dateOnlyDaysBefore(dateOnly: string, days: number): string {

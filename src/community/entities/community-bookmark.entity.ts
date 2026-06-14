@@ -15,11 +15,7 @@ import { CommunityContentType } from '../community.types';
   ['user_id', 'content_type', 'content_id'],
   { unique: true },
 )
-@Index('idx_community_bookmarks_user_created', [
-  'user_id',
-  'created_at',
-  'id',
-])
+@Index('idx_community_bookmarks_user_created', ['user_id', 'created_at', 'id'])
 export class CommunityBookmark {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;

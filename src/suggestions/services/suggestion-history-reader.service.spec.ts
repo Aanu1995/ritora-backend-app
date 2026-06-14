@@ -397,7 +397,6 @@ describe('SuggestionHistoryReader', () => {
       }),
     );
   });
-
 });
 
 function repo<T extends ObjectLiteral>() {

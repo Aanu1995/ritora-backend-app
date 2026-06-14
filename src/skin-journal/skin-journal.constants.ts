@@ -180,6 +180,80 @@ export type RestoreStrategy = 'full' | 'phased';
 
 export type ReactionSeverity = 'none' | 'mild' | 'moderate' | 'severe';
 
+export const REACTION_REPORT_SYMPTOMS = [
+  'burning',
+  'stinging',
+  'itching',
+  'tightness',
+  'heat',
+  'pain',
+  'swelling',
+  'hives',
+  'peeling',
+  'breakout',
+  'other',
+] as const;
+
+export type ReactionReportSymptom = (typeof REACTION_REPORT_SYMPTOMS)[number];
+
+export const REACTION_REPORT_SEVERITIES = [
+  'mild',
+  'moderate',
+  'severe',
+] as const;
+
+export type ReactionReportSeverity =
+  (typeof REACTION_REPORT_SEVERITIES)[number];
+
+export const REACTION_REPORT_ONSETS = [
+  'today',
+  'yesterday',
+  'two_to_three_days',
+  'four_to_seven_days',
+  'more_than_week',
+  'unsure',
+] as const;
+
+export type ReactionReportOnset = (typeof REACTION_REPORT_ONSETS)[number];
+
+export const REACTION_REPORT_LOCATIONS = [
+  'forehead',
+  'cheeks',
+  'chin_jaw',
+  'around_mouth',
+  'eye_area',
+  'neck',
+  'all_over_face',
+  'body',
+  'other',
+] as const;
+
+export type ReactionReportLocation = (typeof REACTION_REPORT_LOCATIONS)[number];
+
+export const REACTION_REPORT_RED_FLAGS = [
+  'eye_or_lip_swelling',
+  'trouble_breathing',
+  'blistering',
+  'open_skin',
+  'spreading_fast',
+  'severe_pain',
+  'infection_signs',
+] as const;
+
+export type ReactionReportRedFlag = (typeof REACTION_REPORT_RED_FLAGS)[number];
+
+export const REACTION_REPORT_TRIGGERS = [
+  'new_product',
+  'changed_frequency',
+  'active_ingredient',
+  'sunscreen',
+  'treatment',
+  'weather_or_environment',
+  'unknown',
+] as const;
+
+export type ReactionReportTrigger = (typeof REACTION_REPORT_TRIGGERS)[number];
+
 export const AnalysisJobStatusValue = {
   Queued: 'queued',
   Sent: 'sent',
@@ -446,6 +520,16 @@ export interface RecentChangePayload {
   note?: string | null;
 }
 
+export interface ReactionReportPayload {
+  symptoms: ReactionReportSymptom[];
+  severity: ReactionReportSeverity;
+  onset?: ReactionReportOnset | null;
+  locations?: ReactionReportLocation[];
+  red_flags?: ReactionReportRedFlag[];
+  suspected_trigger?: ReactionReportTrigger | null;
+  note?: string | null;
+}
+
 export interface AnalysisSkinContext {
   skin_type?: string | null;
   skin_tone?: string | null;
@@ -472,6 +556,7 @@ export interface AnalysisEntryContext {
   sweat_exercise_today?: boolean | null;
   cycle_marker?: CycleMarker | null;
   recent_change_kind?: RecentChangeKind | null;
+  reaction_report?: ReactionReportPayload | null;
   complaint_note?: string | null;
   is_pre_routine?: boolean | null;
 }
