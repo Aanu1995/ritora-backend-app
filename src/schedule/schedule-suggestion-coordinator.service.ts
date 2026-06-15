@@ -15,6 +15,7 @@ import { requeueSuggestionGenerationJob } from '../suggestions/services/suggesti
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
+  clockTimesEqual,
   deriveSuggestionDaypart,
   formatDateInTimeZone,
 } from '../suggestions/services/suggestion-helpers';
@@ -65,8 +66,12 @@ export class ScheduleSuggestionCoordinator {
     const unrecorded = stale.filter(
       (suggestion) => !recordedIds.has(suggestion.id),
     );
+    const replaceable = unrecorded.filter(
+      (suggestion) =>
+        suggestion.generation_status !== SuggestionGenerationStatus.Ready,
+    );
 
-    await this.supersedeSuggestions(unrecorded);
+    await this.supersedeSuggestions(replaceable);
     await this.cancelJobs(userId, slot.id, context.dates);
     if (unrecorded.length === 0) return;
     await this.requeueVisibleSuggestions(userId, slot, context, unrecorded);
@@ -214,6 +219,11 @@ export class ScheduleSuggestionCoordinator {
       ) {
         continue;
       }
+      if (
+        hasReadySuggestionForSlotTime(superseded, targetDate, slot.slot_time)
+      ) {
+        continue;
+      }
 
       const replacement = await this.createPendingSuggestion(
         userId,
@@ -255,10 +265,7 @@ export class ScheduleSuggestionCoordinator {
         target_date: targetDate,
         target_time: slot.slot_time,
         daypart: deriveSuggestionDaypart(slot.slot_time),
-        mode:
-          slot.mode === SlotModeValue.Manual
-            ? SuggestionMode.Manual
-            : SuggestionMode.Ai,
+        mode: suggestionModeForSlot(slot),
         generation_status: SuggestionGenerationStatus.Pending,
         visible_at: visibleAt,
         generated_at: null,
@@ -281,6 +288,25 @@ export class ScheduleSuggestionCoordinator {
       }),
     );
   }
+}
+
+function hasReadySuggestionForSlotTime(
+  suggestions: readonly SuggestionInstance[],
+  targetDate: string,
+  slotTime: string,
+): boolean {
+  return suggestions.some(
+    (suggestion) =>
+      suggestion.generation_status === SuggestionGenerationStatus.Ready &&
+      suggestion.target_date === targetDate &&
+      clockTimesEqual(suggestion.target_time, slotTime),
+  );
+}
+
+function suggestionModeForSlot(slot: ScheduleSlot): SuggestionMode {
+  return slot.mode === SlotModeValue.Manual
+    ? SuggestionMode.Manual
+    : SuggestionMode.Ai;
 }
 
 function matchesDayOfWeek(targetDate: string, dayOfWeek: DayOfWeek): boolean {

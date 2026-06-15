@@ -137,7 +137,10 @@ export class SuggestionsService {
       (suggestion) =>
         suggestion.request_source === SuggestionRequestSource.OnDemand,
     );
-    const suggestionBySlot = mapLatestSuggestionBySlot(scheduledSuggestions);
+    const suggestionBySlot = mapLatestSuggestionBySlot(
+      scheduledSuggestions,
+      activeSlots,
+    );
     const applicationLogBySuggestion =
       mapLatestApplicationLogBySuggestion(applications);
     const productImageOptions = this.productImageOptions();

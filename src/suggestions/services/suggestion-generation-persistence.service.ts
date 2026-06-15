@@ -57,6 +57,7 @@ export class SuggestionGenerationPersistenceService {
           user_id: user.id,
           slot_id: slot.id,
           target_date: targetDate,
+          target_time: targetTime,
           generation_status: Not(SuggestionGenerationStatus.Superseded),
         },
         order: { generated_at: 'DESC', created_at: 'DESC' },
@@ -73,11 +74,18 @@ export class SuggestionGenerationPersistenceService {
         .update()
         .set({ generation_status: SuggestionGenerationStatus.Superseded })
         .where(
-          'user_id = :userId AND slot_id = :slotId AND target_date = :targetDate AND generation_status <> :superseded',
+          [
+            'user_id = :userId',
+            'slot_id = :slotId',
+            'target_date = :targetDate',
+            'target_time = :targetTime',
+            'generation_status <> :superseded',
+          ].join(' AND '),
           {
             userId: user.id,
             slotId: slot.id,
             targetDate,
+            targetTime,
             superseded: SuggestionGenerationStatus.Superseded,
           },
         )

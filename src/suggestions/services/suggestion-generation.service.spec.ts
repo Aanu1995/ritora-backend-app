@@ -395,6 +395,7 @@ describe('SuggestionGenerationService', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-05-04',
+        target_time: '08:00',
       }),
       {
         generation_status: 'superseded',
@@ -431,6 +432,7 @@ describe('SuggestionGenerationService', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-05-04',
+        target_time: '08:00',
       }),
       {
         generation_status: 'superseded',
@@ -498,6 +500,75 @@ describe('SuggestionGenerationService', () => {
         quantity: 'As needed',
       }),
     ]);
+  });
+
+  it('persists a moved-slot generation without superseding a ready suggestion from the previous time', async () => {
+    const builder = updateBuilder() as unknown as { where: jest.Mock };
+    const movedSlot = {
+      ...slot(),
+      slot_time: '09:00',
+    } as ScheduleSlot;
+    slotRepo.findOne.mockResolvedValue(movedSlot);
+    userRepo.findOne.mockResolvedValue(user());
+    skinProfileRepo.findOne.mockResolvedValue(skinProfile());
+    inventoryRepo.find
+      .mockResolvedValueOnce([product()])
+      .mockResolvedValueOnce([]);
+    journalRepo.find.mockResolvedValue([]);
+    applicationLogRepo.find.mockResolvedValue([]);
+    preferenceRepo.findOne.mockResolvedValue(null);
+    contextBuilder.build.mockResolvedValue(contextSummary());
+    aiGenerator.generate.mockResolvedValue(generationOutput());
+    txSuggestionRepo.findOne.mockResolvedValue(null);
+    txSuggestionRepo.createQueryBuilder.mockReturnValue(builder as never);
+    txSuggestionRepo.create.mockImplementation(
+      (value) => value as SuggestionInstance,
+    );
+    txSuggestionRepo.save.mockImplementation(
+      async (value) =>
+        ({
+          ...(value as SuggestionInstance),
+          id: 'suggestion-new-time',
+          created_at: new Date(),
+          updated_at: new Date(),
+        }) as SuggestionInstance,
+    );
+    txStepRepo.create.mockImplementation((value) => value as SuggestionStep);
+    mockSaveArray(txStepRepo).mockResolvedValue([]);
+
+    await service.generateForJob({
+      ...job(),
+      target_time: '09:00',
+      visible_at: new Date('2026-05-04T07:00:00.000Z'),
+    } as SuggestionGenerationJob);
+
+    expect(txSuggestionRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          user_id: 'user-1',
+          slot_id: 'slot-1',
+          target_date: '2026-05-04',
+          target_time: '09:00',
+        }),
+      }),
+    );
+    expect(builder.where).toHaveBeenCalledWith(
+      expect.stringContaining('target_time = :targetTime'),
+      expect.objectContaining({
+        userId: 'user-1',
+        slotId: 'slot-1',
+        targetDate: '2026-05-04',
+        targetTime: '09:00',
+      }),
+    );
+    expect(txSuggestionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slot_id: 'slot-1',
+        target_date: '2026-05-04',
+        target_time: '09:00',
+        supersedes_id: null,
+      }),
+    );
   });
 
   it('sanitizes generated public copy before persistence and notification dispatch', async () => {
@@ -789,6 +860,7 @@ describe('SuggestionGenerationService', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-05-04',
+        target_time: '08:00',
       }),
       expect.objectContaining({
         generation_status: 'superseded',
@@ -823,6 +895,7 @@ describe('SuggestionGenerationService', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-05-04',
+        target_time: '08:00',
         generation_status: expect.objectContaining({ _type: 'in' }),
       }),
       expect.objectContaining({
@@ -850,6 +923,7 @@ describe('SuggestionGenerationService', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-05-04',
+        target_time: '08:00',
         generation_status: expect.objectContaining({ _type: 'in' }),
       }),
       expect.objectContaining({

@@ -31,6 +31,7 @@ import { SuggestionStep } from './suggestion-step.entity';
 export type SuggestionGenerationContext = SuggestionContextSummary;
 
 const ON_DEMAND_REQUEST_ID_INDEX_WHERE = `"request_source" = '${SuggestionRequestSource.OnDemand}' AND "request_id" IS NOT NULL`;
+const SCHEDULED_ACTIVE_INDEX_WHERE = `"generation_status" <> '${SuggestionGenerationStatus.Superseded}' AND "slot_id" IS NOT NULL`;
 
 const encryptedExplanationTransformer =
   encryptedJsonFieldTransformer<SuggestionExplanationJson | null>(
@@ -57,6 +58,14 @@ const encryptedRequestContextTransformer =
 @Entity('suggestion_instances')
 @Index('IDX_suggestion_instances_user_target_date', ['user_id', 'target_date'])
 @Index('IDX_suggestion_instances_user_visible_at', ['user_id', 'visible_at'])
+@Index(
+  'UQ_suggestion_instances_user_slot_date_time_active',
+  ['user_id', 'slot_id', 'target_date', 'target_time'],
+  {
+    unique: true,
+    where: SCHEDULED_ACTIVE_INDEX_WHERE,
+  },
+)
 @Index(
   'UQ_suggestion_instances_on_demand_request_id',
   ['user_id', 'request_id'],

@@ -235,6 +235,7 @@ export class SuggestionGenerationService {
         user_id: job.user_id,
         slot_id: job.slot_id,
         target_date: toDateOnlyString(job.target_date),
+        target_time: toTimeOnlyString(job.target_time),
         generation_status: In([
           SuggestionGenerationStatus.Pending,
           SuggestionGenerationStatus.Generating,
@@ -297,12 +298,14 @@ export class SuggestionGenerationService {
     const slotId = job.slot_id;
     if (!slotId) return false;
     const targetDate = toDateOnlyString(job.target_date);
+    const targetTime = toTimeOnlyString(job.target_time);
 
     await this.suggestionRepo.update(
       {
         user_id: userId,
         slot_id: slotId,
         target_date: targetDate,
+        target_time: targetTime,
         generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
       {
