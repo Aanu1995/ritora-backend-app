@@ -1024,5 +1024,4 @@ describe('AdminController', () => {
       'sv',
     );
   });
-
 });

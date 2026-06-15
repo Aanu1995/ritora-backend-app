@@ -48,6 +48,9 @@ function toCacheKeyParts(inputs: SuggestionContextBuilderInput) {
         product.id,
         product.updated_at?.toISOString() ?? null,
         product.status,
+        product.introduction_status ?? null,
+        product.introduction_started_at?.toISOString() ?? null,
+        product.introduction_status_updated_at?.toISOString() ?? null,
       ]),
     journals: inputs.recentJournalEntries
       .slice()

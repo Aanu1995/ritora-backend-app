@@ -4,8 +4,10 @@ import {
   DataProvenance,
   LookupConfidence,
   PreferredTimeOfDay,
+  ProductIntroductionStatus,
   ProductCategory,
   Quantity,
+  ShelfIntroductionStatusFilter,
   ShelfSort,
   ShelfStatFilter,
   ShelfStatus,
@@ -59,6 +61,20 @@ export const SHELF_STATUS_VALUES: ShelfStatus[] = [
   ShelfStatus.Archived,
   ShelfStatus.FinishedUp,
 ];
+
+export const PRODUCT_INTRODUCTION_STATUS_VALUES: ProductIntroductionStatus[] = [
+  ProductIntroductionStatus.New,
+  ProductIntroductionStatus.PatchTesting,
+  ProductIntroductionStatus.Week1,
+  ProductIntroductionStatus.BuildingTolerance,
+  ProductIntroductionStatus.Paused,
+  ProductIntroductionStatus.Tolerated,
+  ProductIntroductionStatus.Failed,
+];
+
+export const SHELF_INTRODUCTION_STATUS_FILTER_VALUES: Array<
+  ProductIntroductionStatus | ShelfIntroductionStatusFilter
+> = [ShelfIntroductionStatusFilter.All, ...PRODUCT_INTRODUCTION_STATUS_VALUES];
 
 export const SHELF_SORT_VALUES: ShelfSort[] = [
   ShelfSort.RecentlyAdded,

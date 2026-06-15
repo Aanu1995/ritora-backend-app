@@ -10,6 +10,7 @@ import { Between, DataSource, In, Repository } from 'typeorm';
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { ProductImageUrlResolverOptions } from '../inventory/product-image-url-resolver';
+import { nextProductIntroductionStatusAfterLoggedUse } from '../shelf/product-introduction.policy';
 import { User } from '../users/entities/user.entity';
 import {
   EditApplicationDto,
@@ -30,6 +31,7 @@ import {
   incrementCount,
   isUniqueConstraintError,
 } from './application-tracking.helpers';
+import { ApplicationItemStatus } from './application-tracking.constants';
 import { ApplicationReactiveRegenerationService } from './application-reactive-regeneration.service';
 import { ApplicationTrackingValidationService } from './application-tracking-validation.service';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
@@ -192,6 +194,7 @@ export class ApplicationTrackingService {
         productRepo,
         user.id,
         savedItems,
+        { introductionUsageAt: savedLog.applied_at },
       );
       return ApplicationLogResponseDto.fromEntity(
         savedLog,
@@ -363,6 +366,7 @@ export class ApplicationTrackingService {
           productRepo,
           user.id,
           savedItems,
+          { introductionUsageAt: savedLog.applied_at },
         );
         return ApplicationLogResponseDto.fromEntity(
           savedLog,
@@ -390,6 +394,7 @@ export class ApplicationTrackingService {
     productRepo: Repository<InventoryProduct>,
     userId: string,
     items: ApplicationLogItem[],
+    options: { introductionUsageAt?: Date | null } = {},
   ): Promise<ApplicationLogItem[]> {
     const productIds = Array.from(
       new Set(
@@ -410,6 +415,12 @@ export class ApplicationTrackingService {
     const productById = new Map(
       products.map((product) => [product.id, product]),
     );
+    await this.advanceProductIntroductionFromUsedItems(
+      productRepo,
+      items,
+      productById,
+      options.introductionUsageAt ?? null,
+    );
 
     for (const item of items) {
       item.product = item.inventory_product_id
@@ -422,4 +433,65 @@ export class ApplicationTrackingService {
 
     return items;
   }
+
+  private async advanceProductIntroductionFromUsedItems(
+    productRepo: Repository<InventoryProduct>,
+    items: ApplicationLogItem[],
+    productById: ReadonlyMap<string, InventoryProduct>,
+    usageAt: Date | null,
+  ): Promise<void> {
+    if (!usageAt) {
+      return;
+    }
+
+    const usedProductIds = new Set(
+      items
+        .map((item) => introductionUsedProductId(item))
+        .filter((id): id is string => typeof id === 'string'),
+    );
+    if (usedProductIds.size === 0) {
+      return;
+    }
+
+    const productsToUpdate: InventoryProduct[] = [];
+    for (const productId of usedProductIds) {
+      const product = productById.get(productId);
+      if (!product) {
+        continue;
+      }
+
+      const nextStatus = nextProductIntroductionStatusAfterLoggedUse(
+        {
+          status: product.introduction_status,
+          startedAt: product.introduction_started_at,
+        },
+        usageAt,
+      );
+      if (!nextStatus || product.introduction_status === nextStatus) {
+        continue;
+      }
+
+      product.introduction_status = nextStatus;
+      product.introduction_started_at =
+        product.introduction_started_at ?? usageAt;
+      product.introduction_status_updated_at = usageAt;
+      productsToUpdate.push(product);
+    }
+
+    if (productsToUpdate.length === 0) {
+      return;
+    }
+
+    await productRepo.save(productsToUpdate);
+  }
+}
+
+function introductionUsedProductId(item: ApplicationLogItem): string | null {
+  if (item.status === ApplicationItemStatus.Applied) {
+    return item.inventory_product_id;
+  }
+  if (item.status === ApplicationItemStatus.Substituted) {
+    return item.substituted_with_product_id;
+  }
+  return null;
 }

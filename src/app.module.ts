@@ -21,6 +21,8 @@ import { HealthModule } from './health/health.module';
 import { IngredientsModule } from './ingredients/ingredients.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { RoutineMemoryModule } from './routine-memory/routine-memory.module';
+import { RoutineReviewModule } from './routine-review/routine-review.module';
 import { ScheduleModule } from './schedule/schedule.module';
 import { SkinJournalModule } from './skin-journal/skin-journal.module';
 import { SkinProfileModule } from './skin-profile/skin-profile.module';
@@ -55,6 +57,8 @@ import { UsersModule } from './users/users.module';
     IngredientsModule,
     InventoryModule,
     NotificationsModule,
+    RoutineMemoryModule,
+    RoutineReviewModule,
     ScheduleModule,
     SkinJournalModule,
     SkinProfileModule,

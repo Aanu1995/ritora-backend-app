@@ -16,6 +16,7 @@ import {
   DataProvenance,
   ProductCategory,
   type ManufacturerInfo,
+  ProductIntroductionStatus,
   ShelfStatus,
   type UserFields,
 } from '../../shelf/shelf.types';
@@ -29,6 +30,10 @@ import { User } from '../../users/entities/user.entity';
 @Index('IDX_inventory_products_user_effective_expires', [
   'user_id',
   'effective_expires_at',
+])
+@Index('IDX_inventory_products_user_introduction_status', [
+  'user_id',
+  'introduction_status',
 ])
 export class InventoryProduct {
   @PrimaryColumn({ type: 'varchar', length: 26 })
@@ -75,6 +80,15 @@ export class InventoryProduct {
 
   @Column({ type: 'timestamptz', nullable: true })
   effective_expires_at: Date | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  introduction_status: ProductIntroductionStatus | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  introduction_started_at: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  introduction_status_updated_at: Date | null;
 
   @Column({ type: 'jsonb' })
   identity: CatalogueIdentity;

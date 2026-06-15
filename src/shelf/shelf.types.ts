@@ -47,6 +47,20 @@ export enum ShelfStatus {
   FinishedUp = 'finished-up',
 }
 
+export enum ProductIntroductionStatus {
+  New = 'new',
+  PatchTesting = 'patch_testing',
+  Week1 = 'week_1',
+  BuildingTolerance = 'building_tolerance',
+  Paused = 'paused',
+  Tolerated = 'tolerated',
+  Failed = 'failed',
+}
+
+export enum ShelfIntroductionStatusFilter {
+  All = 'all',
+}
+
 export enum ShelfSort {
   RecentlyAdded = 'recently-added',
   ExpiringSoon = 'expiring-soon',

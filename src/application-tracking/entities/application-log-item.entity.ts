@@ -43,6 +43,16 @@ const encryptedAppliedSnapshotTransformer =
 
 @Entity('application_log_items')
 @Index('IDX_application_items_log_order', ['application_log_id', 'step_order'])
+@Index(
+  'IDX_application_items_inventory_product_usage',
+  ['inventory_product_id', 'status', 'application_log_id'],
+  { where: '"inventory_product_id" IS NOT NULL' },
+)
+@Index(
+  'IDX_application_items_substituted_product_usage',
+  ['substituted_with_product_id', 'status', 'application_log_id'],
+  { where: '"substituted_with_product_id" IS NOT NULL' },
+)
 export class ApplicationLogItem {
   @PrimaryColumn({ type: 'varchar', length: 26 })
   id: string;

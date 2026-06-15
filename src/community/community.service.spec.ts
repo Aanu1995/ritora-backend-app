@@ -23,6 +23,7 @@ import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
 import {
   DataProvenance,
   ProductCategory,
+  ProductIntroductionStatus,
   ShelfStatus,
 } from '../shelf/shelf.types';
 import { UserConsent } from '../users/entities/user-consent.entity';
@@ -622,6 +623,9 @@ function inventoryProductFixture(
     expires_at: null,
     period_after_opening_months: null,
     effective_expires_at: null,
+    introduction_status: ProductIntroductionStatus.Tolerated,
+    introduction_started_at: new Date('2026-05-01T00:00:00.000Z'),
+    introduction_status_updated_at: new Date('2026-05-01T00:00:00.000Z'),
     identity: {
       brand: 'Ritora',
       name: 'Barrier Cream',

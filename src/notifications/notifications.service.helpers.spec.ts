@@ -3,6 +3,7 @@ import { InventoryProduct } from '../inventory/entities/inventory-product.entity
 import {
   DataProvenance,
   ProductCategory,
+  ProductIntroductionStatus,
   ShelfStatus,
 } from '../shelf/shelf.types';
 import { User } from '../users/entities/user.entity';
@@ -86,6 +87,9 @@ function product(overrides: Partial<InventoryProduct> = {}): InventoryProduct {
     expires_at: null,
     period_after_opening_months: null,
     effective_expires_at: new Date('2026-05-10T00:00:00.000Z'),
+    introduction_status: ProductIntroductionStatus.Tolerated,
+    introduction_started_at: new Date('2026-05-01T00:00:00.000Z'),
+    introduction_status_updated_at: new Date('2026-05-01T00:00:00.000Z'),
     identity: {} as InventoryProduct['identity'],
     guidance: {} as InventoryProduct['guidance'],
     manufacturer: {} as InventoryProduct['manufacturer'],

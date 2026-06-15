@@ -1,8 +1,11 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import {
+  ApplicationMethod,
   PreferredTimeOfDay,
   ProductCategory,
+  ProductIntroductionStatus,
+  Quantity,
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import {
@@ -96,12 +99,20 @@ describe('suggestion AI contract', () => {
     );
     expect(SYSTEM_PROMPT).toContain('do not return a basic-only plan');
     expect(SYSTEM_PROMPT).toContain(
-      'Select the best-fitting compatible product from any category',
+      'Rank compatible products using suitabilityScore, preferredTime match, cautionReasons, evidenceSourceIds, current request, goal, journal/photo signals, and environment',
     );
     expect(SYSTEM_PROMPT).toContain(
       'Do not repeat the same basic product set by default',
     );
     expect(SYSTEM_PROMPT).toContain('Gap recommendations');
+    expect(SYSTEM_PROMPT).toContain('Shelf lifecycle and Journal intelligence');
+    expect(SYSTEM_PROMPT).toContain('recent application notes');
+    expect(SYSTEM_PROMPT).toContain('substitutionReason');
+    expect(SYSTEM_PROMPT).toContain('may line up with');
+    expect(SYSTEM_PROMPT).toContain('Explanation inputs');
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not infer or write unsupported habits, tendencies, demographics, ethnicity, skin behavior, SPF adherence, PIH tendency',
+    );
     expect(SYSTEM_PROMPT).toContain('JSON output');
     expect(SYSTEM_PROMPT).toContain('Copy style');
     expect(SYSTEM_PROMPT).toContain('inventoryProductId exactly matching');
@@ -154,6 +165,15 @@ describe('suggestion AI contract', () => {
     expect(prompt).toContain(EnvironmentSignalKind.SeasonalTransitionUvRising);
     expect(prompt).toContain('productScores');
     expect(prompt).toContain('"preferredTimeOfDay": "morning"');
+    expect(prompt).toContain('openedAt=2026-04-01T08:00:00.000Z');
+    expect(prompt).toContain('introductionStatus=tolerated');
+    expect(prompt).toContain('applicationMethod=fingertips');
+    expect(prompt).toContain('userProductNote="Lightweight on my skin."');
+    expect(prompt).toContain('"recentChanges"');
+    expect(prompt).toContain('"possibleCauseItems"');
+    expect(prompt).toContain('"recentItems"');
+    expect(prompt).toContain('"substitutionReason"');
+    expect(prompt).toContain('Used mineral SPF after late run.');
     expect(prompt).not.toContain('data:image');
     expect(prompt).not.toContain('Stockholm');
     expect(prompt).not.toContain('59.33');
@@ -172,6 +192,40 @@ describe('suggestion AI contract', () => {
     expect(prompt).toContain('"productId": "spf-1"');
     expect(prompt).toContain('"category": "sun-protection"');
     expect(prompt).toContain('"active shelf fallback score"');
+  });
+
+  it('keeps paused introduction products out of eligible prompt sections', () => {
+    const pausedSunscreen = {
+      ...sunscreenProduct(),
+      introduction_status: ProductIntroductionStatus.Paused,
+    } as InventoryProduct;
+    const inputs = generationInputs();
+    const prompt = buildPrompt({
+      ...inputs,
+      shelfActiveProducts: [pausedSunscreen],
+      contextSummary: {
+        ...inputs.contextSummary,
+        productScores: [],
+        skippedCandidates: [
+          {
+            productId: 'spf-1',
+            brand: 'North Sun',
+            name: 'Daily SPF 50',
+            category: ProductCategory.SunProtection,
+            introductionStatus: ProductIntroductionStatus.Paused,
+            reason: 'product introduction is paused',
+            sourceIds: [],
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain(
+      'Decision input - active shelf products (only these product IDs are eligible for non-locked application steps):\n(none)',
+    );
+    expect(prompt).toContain('"skippedCandidates"');
+    expect(prompt).toContain('"introductionStatus": "paused"');
+    expect(prompt).not.toContain('"active shelf fallback score"');
   });
 
   it('minimizes sensitive historical notes in prompt context', () => {
@@ -572,6 +626,11 @@ describe('suggestion AI contract', () => {
                 'journal.analysis.guidance.escalation.dermatologist',
               ],
               sourceIds: ['aad_dry_skin_relief'],
+              possibleCauseItems: [
+                'Redness may line up with retinoid timing and low sleep.',
+              ],
+              tryNextItems: ['Keep barrier support steady tonight.'],
+              avoidItems: ['Avoid adding another strong active tonight.'],
             },
           ],
           visualChanges: [
@@ -599,6 +658,9 @@ describe('suggestion AI contract', () => {
     expect(prompt).toContain('"analysisQuality"');
     expect(prompt).toContain('"interpretationSignals"');
     expect(prompt).toContain('"concernGuidance"');
+    expect(prompt).toContain('Redness may line up with retinoid timing');
+    expect(prompt).toContain('Keep barrier support steady tonight');
+    expect(prompt).toContain('Avoid adding another strong active tonight');
     expect(prompt).toContain('"visualChanges"');
     expect(prompt).toContain('"safetySignals"');
     expect(prompt).toContain('aad_dry_skin_relief');
@@ -633,7 +695,7 @@ describe('suggestion AI contract', () => {
       'For intensity=minimal, use 0-2 application steps',
     );
     expect(prompt).toContain(
-      'Zero application steps are valid when the user is comfortable',
+      'Zero application steps are valid when supplied data shows the user is comfortable',
     );
     expect(prompt).toContain(
       'Do not add gapRecommendations for optional upgrades',
@@ -855,6 +917,19 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
     name: product.name,
     category: product.category,
     preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    openedAt: '2026-04-01T08:00:00.000Z',
+    expiresAt: '2026-10-01T08:00:00.000Z',
+    effectiveExpiresAt: '2026-10-01T08:00:00.000Z',
+    introductionStatus: ProductIntroductionStatus.Tolerated,
+    introductionStartedAt: '2026-04-01T08:00:00.000Z',
+    introductionStatusUpdatedAt: '2026-04-10T08:00:00.000Z',
+    benefits: ['sun protection'],
+    suitedFor: ['daily outdoor exposure'],
+    applicationMethod: ApplicationMethod.Fingertips,
+    quantity: Quantity.Generous,
+    guidanceSteps: ['Apply as the last morning step'],
+    guidanceCautions: ['Reapply after sweating'],
+    userProductNote: 'Lightweight on my skin.',
     activeTags: ['spf'],
     suitabilityScore: 90,
     suitabilityReasons: ['daytime sun protection fit'],
@@ -956,6 +1031,14 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
         sweatExerciseDays: 2,
         cycleMarkers: [],
         recentChangeKinds: ['started_new_product'],
+        recentChanges: [
+          {
+            entryDate: '2026-05-03',
+            kind: 'started_new_product',
+            relatedInventoryProductId: 'retinoid-1',
+            note: 'Started retinoid after low sleep.',
+          },
+        ],
         complaintNotes: ['Cheeks felt tight.'],
       },
       detectedConcerns: [
@@ -992,7 +1075,25 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
         guidanceKeys: [],
         caveatKeys: [],
       },
-      concernGuidance: [],
+      concernGuidance: [
+        {
+          concern: 'dryness',
+          severity: 'mild',
+          count: 1,
+          locations: ['cheeks'],
+          confidenceLabels: ['possible'],
+          actionKeys: ['journal.analysis.guidance.actions.barrier_support'],
+          avoidKeys: ['journal.analysis.guidance.avoid.strong_actives'],
+          factorKeys: ['journal.analysis.guidance.factors.low_sleep'],
+          possibleCauseItems: [
+            'Dryness may line up with low sleep and dry air.',
+          ],
+          tryNextItems: ['Keep moisturizer timing steady tonight.'],
+          avoidItems: ['Avoid adding another strong active tonight.'],
+          escalationKeys: [],
+          sourceIds: ['aad_dry_skin_relief'],
+        },
+      ],
       visualChanges: [],
       safetySignals: {
         urgentReviewRecommended: false,
@@ -1069,6 +1170,27 @@ function contextSummary(product: InventoryProduct): SuggestionContextSummary {
           isSubstitution: false,
         },
       ],
+      recentItems: [
+        {
+          targetDate: '2026-05-03',
+          targetTime: '08:00:00',
+          daypart: SuggestionDaypart.Morning,
+          status: 'substituted',
+          itemSource: 'added_off_shelf',
+          stepLabel: ProductCategory.Serum,
+          recommendedProductId: 'retinoid-1',
+          recommendedName: 'Ava Lab Retinal Renewal Serum',
+          recommendedCategory: ProductCategory.Serum,
+          appliedProductId: 'spf-1',
+          appliedName: 'North Sun Daily SPF 50',
+          appliedCategory: ProductCategory.SunProtection,
+          appliedAt: '2026-05-03T07:30:00.000Z',
+          isOffShelf: true,
+          isSubstitution: true,
+          notes: 'Used mineral SPF after late run.',
+          substitutionReason: 'Skin felt warm after low sleep.',
+        },
+      ],
     },
     routineMemory: {
       recordsConsidered: 60,
@@ -1123,12 +1245,27 @@ function sunscreenProduct(): InventoryProduct {
     name: 'Daily SPF 50',
     category: ProductCategory.SunProtection,
     status: ShelfStatus.Active,
+    opened_at: new Date('2026-04-01T08:00:00.000Z'),
+    expires_at: new Date('2026-10-01T08:00:00.000Z'),
+    effective_expires_at: new Date('2026-10-01T08:00:00.000Z'),
+    introduction_status: ProductIntroductionStatus.Tolerated,
+    introduction_started_at: new Date('2026-04-01T08:00:00.000Z'),
+    introduction_status_updated_at: new Date('2026-04-10T08:00:00.000Z'),
     guidance: {
       waitMinutes: null,
-      cautions: [],
+      applicationMethod: ApplicationMethod.Fingertips,
+      quantity: Quantity.Generous,
+      steps: ['Apply as the last morning step'],
+      cautions: ['Reapply after sweating'],
     },
     identity: {
       inciIngredients: ['Zinc Oxide'],
+      benefits: ['sun protection'],
+      suitedFor: ['daily outdoor exposure'],
+    },
+    user_fields: {
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      personalNotes: 'Lightweight on my skin.',
     },
   } as unknown as InventoryProduct;
 }

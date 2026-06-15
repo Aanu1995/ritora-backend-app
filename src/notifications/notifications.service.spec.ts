@@ -7,6 +7,7 @@ import { MailService } from '../mail/mail.service';
 import {
   DataProvenance,
   ProductCategory,
+  ProductIntroductionStatus,
   ShelfStatus,
 } from '../shelf/shelf.types';
 import { User } from '../users/entities/user.entity';
@@ -60,6 +61,9 @@ function inventoryProduct(
     expires_at: null,
     period_after_opening_months: 12,
     effective_expires_at: new Date('2026-05-10T00:00:00.000Z'),
+    introduction_status: ProductIntroductionStatus.Tolerated,
+    introduction_started_at: new Date('2026-04-01T00:00:00.000Z'),
+    introduction_status_updated_at: new Date('2026-04-01T00:00:00.000Z'),
     identity: {
       brand: 'CeraVe',
       name: 'Retinol Serum',

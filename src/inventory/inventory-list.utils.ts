@@ -5,7 +5,12 @@ import {
   resolveShelfToday,
   toShelfStoredUtcDate,
 } from '../shelf/shelf-date.utils';
-import { ShelfStatFilter, ShelfStatus } from '../shelf/shelf.types';
+import {
+  ProductIntroductionStatus,
+  ShelfIntroductionStatusFilter,
+  ShelfStatFilter,
+  ShelfStatus,
+} from '../shelf/shelf.types';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProduct } from './entities/inventory-product.entity';
 import { normalizeInventorySearchValue } from './inventory-snapshot.utils';
@@ -69,6 +74,7 @@ export function buildInventoryListFingerprint(
     userId,
     query.stat,
     query.category,
+    query.introductionStatus ?? ShelfIntroductionStatusFilter.All,
     normalizeInventorySearchValue(query.search),
     query.sort,
     query.limit,
@@ -82,6 +88,32 @@ export function buildInventoryListFingerprint(
   }
 
   return fingerprint.join(':');
+}
+
+export function applyInventoryIntroductionStatusFilter(
+  queryBuilder: SelectQueryBuilder<InventoryProduct>,
+  introductionStatus?:
+    | ProductIntroductionStatus
+    | ShelfIntroductionStatusFilter,
+) {
+  if (
+    !introductionStatus ||
+    introductionStatus === ShelfIntroductionStatusFilter.All
+  ) {
+    return;
+  }
+
+  if (introductionStatus === ProductIntroductionStatus.Tolerated) {
+    queryBuilder.andWhere(
+      '(inventory.introduction_status = :introductionStatus OR inventory.introduction_status IS NULL)',
+      { introductionStatus },
+    );
+    return;
+  }
+
+  queryBuilder.andWhere('inventory.introduction_status = :introductionStatus', {
+    introductionStatus,
+  });
 }
 
 export function applyInventorySearchFilter(

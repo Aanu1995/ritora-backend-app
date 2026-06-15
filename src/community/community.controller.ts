@@ -228,10 +228,7 @@ export class CommunityController {
 
   @Delete('reviews/:id/bookmark')
   @UseGuards(OriginCheckGuard)
-  unbookmarkReview(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-  ) {
+  unbookmarkReview(@CurrentUser('id') userId: string, @Param('id') id: string) {
     return this.communityService.unbookmarkReview(userId, id);
   }
 

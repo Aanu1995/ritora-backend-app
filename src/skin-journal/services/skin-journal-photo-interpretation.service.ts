@@ -21,7 +21,7 @@ import type {
 const PHOTO_INTERPRETATION_VERSION = '1.1' as const;
 const LAST_VERIFIED = '2026-05-01';
 const FORBIDDEN_GENERATED_GUIDANCE_LANGUAGE =
-  /\b(diagnose|diagnosis|treat|treatment|cure|prescribe|stop all|stop every|immediately stop|discontinue|prescribed|prescription|medicine|medication|proves?|confirmed cause|must avoid|never eat|eliminate all|guaranteed|guarantee)\b/i;
+  /\b(diagnose|diagnosis|treat|treatment|cure|prescribe|stop all|stop every|immediately stop|discontinue|prescribed|prescription|medicine|medication|proves?|confirmed cause|caused|caused by|is causing|are causing|was caused by|were caused by|the cause|must avoid|never eat|eliminate all|guaranteed|guarantee)\b/i;
 const AI_STYLE_PUNCTUATION = /[-—–]/;
 const RETINOID_KEYWORDS = [
   'retinol',
@@ -158,6 +158,23 @@ const UNDER_EYE_CONTEXT_KEYWORDS = [
   'eye bag',
   'sleep',
 ] as const;
+
+type AnalysisProductForKeywordSearch = Pick<
+  AnalysisRoutineContext['active_shelf_products'][number],
+  | 'brand'
+  | 'name'
+  | 'category'
+  | 'step_label'
+  | 'ingredient_preview'
+  | 'guidance_cautions'
+  | 'guidance_steps'
+  | 'benefit_tags'
+  | 'suited_for_tags'
+  | 'user_product_note'
+>;
+
+type AnalysisApplicationItemForKeywordSearch =
+  AnalysisRoutineContext['recent_applications'][number]['items'][number];
 const CONTEXT_KEYWORDS_BY_CONCERN: Record<AnalysisConcern, readonly string[]> =
   {
     acne: ACNE_CONTEXT_KEYWORDS,
@@ -786,11 +803,12 @@ export class SkinJournalPhotoInterpretationService {
       }
     }
 
-    const sunscreen = this.findProductByKeywords(routineContext, [
+    const sunscreen = this.findExposureProductByKeywords(routineContext, [
       'spf',
       'sunscreen',
       'sun screen',
       'broad spectrum',
+      'sun-protection',
     ]);
     const activeProduct = this.relevantActiveProduct(concern, routineContext);
     const sunscreenAlreadyExplainsPigmentContext =
@@ -802,11 +820,14 @@ export class SkinJournalPhotoInterpretationService {
       });
     }
 
-    const retinoidOrExfoliant = this.findProductByKeywords(routineContext, [
-      ...RETINOID_KEYWORDS,
-      ...EXFOLIANT_KEYWORDS,
-      ...BENZOYL_PEROXIDE_KEYWORDS,
-    ]);
+    const retinoidOrExfoliant = this.findExposureProductByKeywords(
+      routineContext,
+      [
+        ...RETINOID_KEYWORDS,
+        ...EXFOLIANT_KEYWORDS,
+        ...BENZOYL_PEROXIDE_KEYWORDS,
+      ],
+    );
     if (
       retinoidOrExfoliant &&
       [
@@ -961,16 +982,17 @@ export class SkinJournalPhotoInterpretationService {
   ): string | null {
     if (!routineContext) return null;
     if (concern === 'hyperpigmentation' || concern === 'uneven_tone') {
-      return this.findProductByKeywords(routineContext, [
+      return this.findExposureProductByKeywords(routineContext, [
         'spf',
         'sunscreen',
+        'sun-protection',
         'vitamin c',
         'azelaic',
         'niacinamide',
       ]);
     }
     if (concern === 'acne') {
-      return this.findProductByKeywords(routineContext, [
+      return this.findExposureProductByKeywords(routineContext, [
         'salicylic',
         'benzoyl peroxide',
         'adapalene',
@@ -985,7 +1007,7 @@ export class SkinJournalPhotoInterpretationService {
       concern === 'redness_inflammation' ||
       concern === 'eczema_indicator'
     ) {
-      return this.findProductByKeywords(routineContext, [
+      return this.findExposureProductByKeywords(routineContext, [
         'retinol',
         'retinoid',
         'acid',
@@ -996,23 +1018,25 @@ export class SkinJournalPhotoInterpretationService {
     return null;
   }
 
-  private findProductByKeywords(
+  private findExposureProductByKeywords(
     routineContext: AnalysisRoutineContext | null | undefined,
     keywords: readonly string[],
   ): string | null {
-    const products = routineContext?.routine_products ?? [];
-    for (const product of products) {
-      const haystack = [
-        product.brand,
-        product.name,
-        product.category,
-        product.step_label,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      if (keywords.some((keyword) => haystack.includes(keyword))) {
+    if (!routineContext) return null;
+    for (const product of routineContext.routine_products) {
+      if (productMatchesKeywords(product, keywords)) {
         return productDisplayName(product.brand, product.name);
+      }
+    }
+    for (const application of routineContext.recent_applications) {
+      for (const item of application.items) {
+        if (!isAppliedExposureItem(item)) continue;
+        if (applicationItemMatchesKeywords(item, keywords)) {
+          return productDisplayName(
+            item.applied_brand ?? item.brand,
+            item.applied_name ?? item.name,
+          );
+        }
       }
     }
     return null;
@@ -1028,12 +1052,25 @@ export class SkinJournalPhotoInterpretationService {
     if (routineProduct) {
       return productDisplayName(routineProduct.brand, routineProduct.name);
     }
+    const shelfProduct = routineContext?.active_shelf_products.find(
+      (product) => product.product_id === productId,
+    );
+    if (shelfProduct) {
+      return productDisplayName(shelfProduct.brand, shelfProduct.name);
+    }
     for (const application of routineContext?.recent_applications ?? []) {
       const item = application.items.find((candidate) => {
-        return candidate.product_id === productId;
+        return (
+          candidate.product_id === productId ||
+          candidate.recommended_product_id === productId ||
+          candidate.applied_product_id === productId
+        );
       });
       if (item) {
-        return productDisplayName(item.brand, item.name);
+        return productDisplayName(
+          item.applied_brand ?? item.recommended_brand ?? item.brand,
+          item.applied_name ?? item.recommended_name ?? item.name,
+        );
       }
     }
     return null;
@@ -1657,6 +1694,58 @@ function formatLocations(locations: string[]): string {
 
 function humanizeLocation(location: string): string {
   return location.replace(/_/g, ' ');
+}
+
+function productMatchesKeywords(
+  product: AnalysisProductForKeywordSearch,
+  keywords: readonly string[],
+): boolean {
+  const haystack = [
+    product.brand,
+    product.name,
+    product.category,
+    product.step_label,
+    ...(product.ingredient_preview ?? []),
+    ...(product.guidance_cautions ?? []),
+    ...(product.guidance_steps ?? []),
+    ...(product.benefit_tags ?? []),
+    ...(product.suited_for_tags ?? []),
+    product.user_product_note,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
+function applicationItemMatchesKeywords(
+  item: AnalysisApplicationItemForKeywordSearch,
+  keywords: readonly string[],
+): boolean {
+  const haystack = [
+    item.brand,
+    item.name,
+    item.category,
+    item.step_label,
+    item.recommended_brand,
+    item.recommended_name,
+    item.applied_brand,
+    item.applied_name,
+    item.ad_hoc_brand,
+    item.ad_hoc_name,
+    item.notes,
+    item.substitution_reason,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
+function isAppliedExposureItem(
+  item: AnalysisApplicationItemForKeywordSearch,
+): boolean {
+  return item.status === 'applied' || item.status === 'substituted';
 }
 
 function productDisplayName(

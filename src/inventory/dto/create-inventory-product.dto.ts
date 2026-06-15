@@ -23,6 +23,7 @@ import {
   DataProvenance,
   PreferredTimeOfDay,
   ProductCategory,
+  ProductIntroductionStatus,
   Quantity,
   ShelfStatus,
 } from '../../shelf/shelf.types';
@@ -217,4 +218,9 @@ export class CreateInventoryProductDto {
   @IsOptional()
   @IsEnum(DataProvenance)
   provenance?: DataProvenance | null;
+
+  @EmptyStringToNull()
+  @IsOptional()
+  @IsEnum(ProductIntroductionStatus)
+  introductionStatus?: ProductIntroductionStatus | null;
 }

@@ -48,6 +48,7 @@
     "catalogue:evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-catalogue.ts",
     "smart-picks:monitoring-report:dev": "ts-node -r tsconfig-paths/register src/scripts/report-smart-picks-monitoring.ts",
     "skin-journal:analysis-evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-skin-journal-analysis.ts",
+    "skin-journal:analysis-real-photo:dev": "ts-node -r tsconfig-paths/register src/scripts/analyze-real-skin-journal-photo.ts",
     "skin-journal:insight-evaluate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-skin-journal-insights.ts",
     "skin-journal:insight-launch-gate:dev": "ts-node -r tsconfig-paths/register src/scripts/evaluate-skin-journal-insights.ts --require-broad-launch-clinical-review",
     "skin-journal:analysis-worker": "npm run build && node dist/scripts/start-skin-journal-analysis-worker.js",
@@ -67,6 +68,7 @@
     "catalogue:evaluate": "npm run build && node dist/scripts/evaluate-catalogue.js",
     "smart-picks:monitoring-report": "npm run build && node dist/scripts/report-smart-picks-monitoring.js",
     "skin-journal:analysis-evaluate": "npm run build && node dist/scripts/evaluate-skin-journal-analysis.js",
+    "skin-journal:analysis-real-photo": "npm run build && node dist/scripts/analyze-real-skin-journal-photo.js",
     "skin-journal:insight-evaluate": "npm run build && node dist/scripts/evaluate-skin-journal-insights.js",
     "skin-journal:insight-launch-gate": "npm run build && node dist/scripts/evaluate-skin-journal-insights.js --require-broad-launch-clinical-review"
   },

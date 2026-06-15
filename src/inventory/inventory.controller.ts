@@ -37,6 +37,7 @@ import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
 import { ProductIdListDto } from './dto/product-id-list.dto';
 import { UpdateInventoryProductDto } from './dto/update-inventory-product.dto';
+import { UpdateProductIntroductionDto } from './dto/update-product-introduction.dto';
 import { UploadInventoryProductImageResponseDto } from './dto/upload-inventory-product-image-response.dto';
 import { InventoryService } from './inventory.service';
 
@@ -278,6 +279,15 @@ export class InventoryController {
     @Body() dto: UpdateInventoryProductDto,
   ): Promise<InventoryProductResponseDto> {
     return this.inventoryService.update(userId, id, dto);
+  }
+
+  @Patch(':id/introduction')
+  updateIntroduction(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductIntroductionDto,
+  ): Promise<InventoryProductResponseDto> {
+    return this.inventoryService.updateIntroduction(userId, id, dto);
   }
 
   @Post(':id/archive')

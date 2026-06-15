@@ -154,7 +154,21 @@ import {
   CompareDeltaSeverity,
   InsightGenerationStatusValue,
   PhotoReferenceQualityReason,
+  type ReactionReportSeverity,
+  type ReactionReportPayload,
+  type ReactionReportSymptom,
+  type RecoveryTriggerSource,
+  RecoveryPhaseValue,
+  RecoveryReturnStepValue,
+  RecoveryTriggerSourceValue,
 } from './skin-journal.constants';
+import {
+  buildRecoveryModeStart,
+  buildPhotoAnalysisRecoveryModeStart,
+  normalizeRecoveryTriggerSymptoms,
+  shouldStartRecoveryModeFromReactionReport,
+  type RecoveryModeStart,
+} from './recovery-mode.policy';
 import {
   buildAnalysisComparisonReference,
   buildPhotoReferenceQuality,
@@ -190,6 +204,8 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
 import type { InsightBlock, InsightCandidate } from './insights/insight-types';
 import type { InsightAction } from './insights/insight-types';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
+import { RoutineMemoryService } from '../routine-memory/routine-memory.service';
+import type { RoutineMemoryResponseDto } from '../routine-memory/dto/routine-memory-response.dto';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
@@ -293,6 +309,21 @@ type StoredAnglePhoto = {
   exif_stripped: boolean;
 };
 
+type SimplificationRecoveryMetadata = {
+  recoveryTriggerSource?: RecoveryTriggerSource;
+  recoveryTriggerSymptoms?: ReactionReportSymptom[];
+  recoveryTriggerSeverity?: ReactionReportSeverity | null;
+  recoveryActiveOveruse?: boolean;
+  recoveryReviewAfter?: Date | null;
+  recoveryExitEligibleAt?: Date | null;
+};
+
+type StartSimplificationParams = SimplificationRecoveryMetadata & {
+  userId: string;
+  triggeredByEventId: string | null;
+  reason: string;
+};
+
 const SKIN_PROGRESS_CONSENT = UserConsentType.SkinProgressProcessing;
 const NOTIFICATION_KEYS = {
   analysisFailedTitle: 'skinJournal.notifications.analysisFailed.title',
@@ -325,6 +356,17 @@ const ANALYSIS_CONCERN_SET: ReadonlySet<AnalysisConcern> =
   new Set<AnalysisConcern>(ANALYSIS_CONCERNS);
 const ANALYSIS_CONTEXT_MAX_TEXT_LENGTH = 500;
 const ANALYSIS_CONTEXT_MAX_ITEMS = 12;
+const RECOVERY_SEVERITY_RANK: Record<ReactionReportSeverity, number> = {
+  mild: 1,
+  moderate: 2,
+  severe: 3,
+};
+const RECOVERY_SOURCE_RANK: Record<RecoveryTriggerSource, number> = {
+  [RecoveryTriggerSourceValue.Unknown]: 0,
+  [RecoveryTriggerSourceValue.Manual]: 1,
+  [RecoveryTriggerSourceValue.PhotoAnalysis]: 2,
+  [RecoveryTriggerSourceValue.ReactionReport]: 3,
+};
 const CHECK_IN_REQUIRED_FIELDS = {
   overallFeel: 'overall_feel',
   ratings: 'ratings',
@@ -428,6 +470,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly notifications: NotificationsService,
     @Optional()
     private readonly smartPicksPreparation?: SmartPicksPreparationService,
+    @Optional()
+    private readonly routineMemory?: RoutineMemoryService,
   ) {}
 
   onModuleInit(): void {
@@ -775,6 +819,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         entry.cycle_marker = body.cycle_marker;
       if (body.recent_change !== undefined)
         entry.recent_change = body.recent_change ?? null;
+      if (body.reaction_report !== undefined)
+        entry.reaction_report = body.reaction_report ?? null;
       if (body.complaint_note !== undefined)
         entry.complaint_note = body.complaint_note ?? null;
 
@@ -959,6 +1005,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         'check_in_updated',
       );
     }
+    await this.maybeStartRecoveryModeFromReactionReport(params.userId, saved);
     this.scheduleSmartPicksPreparation(params.userId);
 
     return this.buildEntryResponse(
@@ -1392,7 +1439,10 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       let state: CalendarDayState = CalendarDayStateValue.NoEntry;
       let hasReaction = false;
       if (entry) {
-        if (!entry.photo_object_key) {
+        hasReaction = entryHasUserVisibleReaction(entry);
+        if (hasReaction) {
+          state = CalendarDayStateValue.Reaction;
+        } else if (!entry.photo_object_key) {
           state = CalendarDayStateValue.EntryNoPhoto;
         } else if (
           entry.analysis_status === AnalysisStatusValue.Pending ||
@@ -1403,10 +1453,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         } else if (entry.analysis_status === AnalysisStatusValue.Failed) {
           state = CalendarDayStateValue.Failed;
         } else {
-          hasReaction = entry.has_reaction_signal;
-          state = hasReaction
-            ? CalendarDayStateValue.Reaction
-            : CalendarDayStateValue.Completed;
+          state = CalendarDayStateValue.Completed;
         }
       }
       return {
@@ -1492,7 +1539,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     const concernCounts = new Map<AnalysisConcern, number>();
     let reactionCount = 0;
     for (const entry of list) {
-      if (entry.has_reaction_signal) {
+      if (entryHasUserVisibleReaction(entry)) {
         reactionCount += 1;
       }
       const entryConcerns = new Set<AnalysisConcern>();
@@ -1579,7 +1626,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         date: entry.entry_date,
         entry_id: entry.id,
         analysis_status: entry.analysis_status,
-        has_reaction: entry.has_reaction_signal,
+        has_reaction: entryHasUserVisibleReaction(entry),
       };
     });
 
@@ -1835,6 +1882,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         userId,
         current,
         obs,
+        { routineMemoryContext: preAnalysisRoutineContext.routine_memory },
       );
       const interpretation = this.photoInterpretation.interpret(
         obs,
@@ -3104,28 +3152,32 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
   ): string {
     const entryPayload = [...entries]
       .sort((left, right) => left.entry_date.localeCompare(right.entry_date))
-      .map((entry) => ({
-        id: entry.id,
-        entry_date: entry.entry_date,
-        updated_at: entry.updated_at?.toISOString?.() ?? null,
-        photo_object_key: entry.photo_object_key,
-        analysis_status: entry.analysis_status,
-        analysis_concern_keys: entry.analysis_concern_keys,
-        has_reaction_signal: entry.has_reaction_signal,
-        needs_retake: entry.needs_retake,
-        analysis_summary: entry.analysis_summary,
-        analysis_observations: entry.analysis_observations,
-        analysis_interpretation: entry.analysis_interpretation,
-        ratings: entry.ratings,
-        overall_feel: entry.overall_feel,
-        sleep_band: entry.sleep_band,
-        stress_today: entry.stress_today,
-        sun_exposure_today: entry.sun_exposure_today,
-        sweat_exercise_today: entry.sweat_exercise_today,
-        cycle_marker: entry.cycle_marker,
-        recent_change: entry.recent_change,
-        complaint_note: entry.complaint_note,
-      }));
+      .map((entry) => {
+        const reactionReport = reactionReportWithSymptoms(entry);
+        return {
+          id: entry.id,
+          entry_date: entry.entry_date,
+          updated_at: entry.updated_at?.toISOString?.() ?? null,
+          photo_object_key: entry.photo_object_key,
+          analysis_status: entry.analysis_status,
+          analysis_concern_keys: entry.analysis_concern_keys,
+          has_reaction_signal: entry.has_reaction_signal,
+          needs_retake: entry.needs_retake,
+          analysis_summary: entry.analysis_summary,
+          analysis_observations: entry.analysis_observations,
+          analysis_interpretation: entry.analysis_interpretation,
+          ratings: entry.ratings,
+          overall_feel: entry.overall_feel,
+          sleep_band: entry.sleep_band,
+          stress_today: entry.stress_today,
+          sun_exposure_today: entry.sun_exposure_today,
+          sweat_exercise_today: entry.sweat_exercise_today,
+          cycle_marker: entry.cycle_marker,
+          recent_change: entry.recent_change,
+          ...(reactionReport ? { reaction_report: reactionReport } : {}),
+          complaint_note: entry.complaint_note,
+        };
+      });
     const payload =
       routineApplications.length > 0
         ? {
@@ -3570,24 +3622,54 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     return SimplificationResponseDto.fromEntity(evt);
   }
 
-  async startSimplification(params: {
-    userId: string;
-    triggeredByEventId: string | null;
-    reason: string;
-  }): Promise<SimplificationResponseDto> {
+  async startSimplification(
+    params: StartSimplificationParams,
+  ): Promise<SimplificationResponseDto> {
     const existing = await this.simplifications.findOne({
       where: { user_id: params.userId, ended_at: IsNull() },
     });
     if (existing) {
-      return SimplificationResponseDto.fromEntity(existing);
+      const upgraded = applyRecoveryMetadataToExistingSimplification(
+        existing,
+        params,
+      );
+      if (!upgraded) {
+        return SimplificationResponseDto.fromEntity(existing);
+      }
+
+      const saved = await this.simplifications.save(existing);
+      await this.recordDataAccess(
+        params.userId,
+        UserDataAccessPurpose.SkinJournalSimplification,
+        UserDataAccessActorType.System,
+      );
+      return SimplificationResponseDto.fromEntity(saved);
     }
+    const triggerSymptoms = normalizeRecoveryTriggerSymptoms(
+      params.recoveryTriggerSymptoms ?? [],
+    );
+    const recoverySource =
+      params.recoveryTriggerSource ?? RecoveryTriggerSourceValue.Manual;
+    const usesPhasedRecovery = shouldUsePhasedRecoveryStrategy(
+      params,
+      triggerSymptoms,
+      recoverySource,
+    );
     const event = this.simplifications.create({
       user_id: params.userId,
       triggered_by_event_id: params.triggeredByEventId,
       simplification_mode: 'barrier_repair',
+      recovery_phase: RecoveryPhaseValue.Stabilize,
+      recovery_trigger_source: recoverySource,
+      recovery_trigger_symptoms: triggerSymptoms,
+      recovery_trigger_severity: params.recoveryTriggerSeverity ?? null,
+      recovery_active_overuse: params.recoveryActiveOveruse ?? false,
+      recovery_review_after: params.recoveryReviewAfter ?? null,
+      recovery_exit_eligible_at: params.recoveryExitEligibleAt ?? null,
+      recovery_return_step: RecoveryReturnStepValue.NotStarted,
       reason: params.reason,
       original_schedule_snapshot: null,
-      restore_strategy: 'full',
+      restore_strategy: usesPhasedRecovery ? 'phased' : 'full',
     });
     const saved = await this.simplifications.save(event);
     await this.recordDataAccess(
@@ -3735,6 +3817,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     currentEntry: SkinJournalEntry,
     currentObservations: AnalysisObservations | null,
+    options: {
+      routineMemoryContext?: AnalysisRoutineContext['routine_memory'];
+    } = {},
   ): Promise<AnalysisRoutineContext> {
     const sinceDate = dateOnlyDaysBefore(currentEntry.entry_date, 14);
     const [
@@ -3742,6 +3827,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       routineSteps,
       recentApplications,
       recentEntries,
+      activeRecovery,
+      routineMemory,
     ] = await Promise.all([
       this.inventoryProducts.find({
         where: {
@@ -3776,6 +3863,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         order: { entry_date: 'DESC' },
         take: 8,
       }),
+      this.simplifications.findOne({
+        where: { user_id: userId, ended_at: IsNull() },
+        order: { started_at: 'DESC' },
+      }),
+      options.routineMemoryContext !== undefined
+        ? Promise.resolve(options.routineMemoryContext)
+        : this.buildAnalysisRoutineMemoryContext(userId, currentEntry),
     ]);
 
     const checkIns = [currentEntry, ...recentEntries]
@@ -3789,6 +3883,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       );
 
     return {
+      active_recovery:
+        analysisRecoveryContextFromSimplification(activeRecovery),
+      routine_memory: routineMemory,
       active_shelf_products: activeShelfProducts
         .map((product) =>
           analysisProductContextFromInventoryProduct(product, {
@@ -3814,13 +3911,32 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS),
       recent_applications: recentApplications.map((application) => ({
         target_date: application.target_date,
+        target_time: sanitizeContextText(application.target_time),
         daypart: sanitizeContextText(application.daypart),
         applied_at: application.applied_at?.toISOString() ?? null,
+        general_notes: sanitizeContextText(application.general_notes),
+        has_been_edited: application.has_been_edited,
         items: (application.items ?? []).slice(0, 8).map((item) => {
           const product =
             item.status === 'substituted'
               ? (item.substituted_with_product ?? item.product)
               : item.product;
+          const recommendedBrand = sanitizeContextText(
+            item.product?.brand ??
+              item.product_brand_snapshot ??
+              item.recommended_snapshot?.brand,
+          );
+          const recommendedName = sanitizeContextText(
+            item.product?.name ??
+              item.product_name_snapshot ??
+              item.recommended_snapshot?.name,
+          );
+          const appliedBrand = sanitizeContextText(
+            product?.brand ?? item.applied_snapshot?.brand ?? item.ad_hoc_brand,
+          );
+          const appliedName = sanitizeContextText(
+            product?.name ?? item.applied_snapshot?.name ?? item.ad_hoc_name,
+          );
           return {
             status: sanitizeContextText(item.status) ?? 'unknown',
             product_id:
@@ -3829,13 +3945,44 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
                   item.inventory_product_id)
                 : item.inventory_product_id,
             brand: sanitizeContextText(
-              product?.brand ?? item.product_brand_snapshot,
+              product?.brand ??
+                item.ad_hoc_brand ??
+                item.applied_snapshot?.brand ??
+                item.product_brand_snapshot,
             ),
             name: sanitizeContextText(
-              product?.name ?? item.product_name_snapshot,
+              product?.name ??
+                item.ad_hoc_name ??
+                item.applied_snapshot?.name ??
+                item.product_name_snapshot,
             ),
             category: sanitizeContextText(product?.category),
             step_label: sanitizeContextText(item.step_label),
+            applied_at: item.applied_at?.toISOString() ?? null,
+            item_source: sanitizeContextText(item.item_source),
+            is_ad_hoc: item.is_ad_hoc,
+            ad_hoc_brand: sanitizeContextText(item.ad_hoc_brand),
+            ad_hoc_name: sanitizeContextText(item.ad_hoc_name),
+            recommended_product_id:
+              item.inventory_product_id ??
+              item.recommended_snapshot?.product_id ??
+              null,
+            recommended_brand: recommendedBrand,
+            recommended_name: recommendedName,
+            applied_product_id:
+              item.status === 'substituted'
+                ? (item.substituted_with_product_id ??
+                  item.applied_snapshot?.product_id ??
+                  null)
+                : item.status === 'applied'
+                  ? (item.inventory_product_id ??
+                    item.applied_snapshot?.product_id ??
+                    null)
+                  : null,
+            applied_brand: item.status === 'skipped' ? null : appliedBrand,
+            applied_name: item.status === 'skipped' ? null : appliedName,
+            notes: sanitizeContextText(item.notes),
+            substitution_reason: sanitizeContextText(item.substitution_reason),
           };
         }),
       })),
@@ -3843,9 +3990,44 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async buildAnalysisRoutineMemoryContext(
+    userId: string,
+    currentEntry: SkinJournalEntry,
+  ): Promise<AnalysisRoutineContext['routine_memory']> {
+    if (!this.routineMemory) {
+      return null;
+    }
+
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) {
+      return null;
+    }
+
+    try {
+      const memory = await this.routineMemory.getTimeline(
+        user,
+        {
+          from: dateOnlyDaysBefore(currentEntry.entry_date, 29),
+          to: currentEntry.entry_date,
+        },
+        new Date(`${currentEntry.entry_date}T12:00:00.000Z`),
+        currentEntry.time_zone,
+      );
+      return analysisRoutineMemoryContextFromResponse(memory);
+    } catch (error) {
+      this.logger.warn(
+        `Routine memory context could not be loaded for photo analysis: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
   private buildAnalysisEntryContext(
     entry: SkinJournalEntry,
   ): AnalysisEntryContext {
+    const reactionReport = reactionReportWithSymptoms(entry);
     return {
       entry_date: entry.entry_date,
       ratings: entry.ratings,
@@ -3856,6 +4038,15 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       sweat_exercise_today: entry.sweat_exercise_today,
       cycle_marker: entry.cycle_marker,
       recent_change_kind: entry.recent_change?.kind ?? null,
+      recent_change_product_id:
+        entry.recent_change?.related_inventory_product_id ?? null,
+      recent_change_note: sanitizeContextText(entry.recent_change?.note),
+      reaction_report: reactionReport
+        ? {
+            ...reactionReport,
+            note: sanitizeContextText(reactionReport.note),
+          }
+        : null,
       complaint_note: sanitizeContextText(entry.complaint_note),
       is_pre_routine: entry.is_pre_routine,
     };
@@ -4246,11 +4437,17 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       ) {
         const hadActiveSimplification =
           await this.hasActiveSimplification(userId);
+        const recoveryStart = buildPhotoAnalysisRecoveryModeStart(
+          obs.reaction_signals.reaction_severity === 'severe'
+            ? 'severe'
+            : 'moderate',
+        );
         const simplification = await this.startSimplification({
           userId,
           triggeredByEventId: event.id,
           reason:
             'Journal-only barrier-repair safety state triggered by moderate or severe reaction signals.',
+          ...simplificationRecoveryMetadata(recoveryStart),
         });
         if (!hadActiveSimplification) {
           await this.dispatchNotification({
@@ -4300,6 +4497,28 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       where: { user_id: userId, ended_at: IsNull() },
     });
     return !!existing;
+  }
+
+  private async maybeStartRecoveryModeFromReactionReport(
+    userId: string,
+    entry: SkinJournalEntry,
+  ): Promise<void> {
+    const reactionReport = reactionReportWithSymptoms(entry);
+    if (
+      !reactionReport ||
+      !shouldStartRecoveryModeFromReactionReport(reactionReport)
+    ) {
+      return;
+    }
+
+    const recoveryStart = buildRecoveryModeStart(reactionReport);
+    await this.startSimplification({
+      userId,
+      triggeredByEventId: null,
+      reason:
+        'User-reported barrier symptoms started Recovery Mode with a phased return.',
+      ...simplificationRecoveryMetadata(recoveryStart),
+    });
   }
 
   private async markInsightsAfterJournalChange(
@@ -4599,7 +4818,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (filter.kind === 'reaction') {
-      queryBuilder.andWhere('entry.has_reaction_signal = true');
+      queryBuilder.andWhere(
+        '(entry.has_reaction_signal = true OR entry.reaction_report IS NOT NULL)',
+      );
       return;
     }
     queryBuilder.andWhere(':concern = ANY(entry.analysis_concern_keys)', {
@@ -4781,10 +5002,15 @@ function analysisConcernMap(observations: AnalysisObservations | null): Map<
 
 function reactionSeverity(entry: SkinJournalEntry): CompareDeltaSeverity {
   const reaction = entry.analysis_observations?.reaction_signals;
-  if (!reaction?.reaction_detected && !entry.has_reaction_signal) {
+  const reactionReport = reactionReportWithSymptoms(entry);
+  if (
+    !reaction?.reaction_detected &&
+    !entry.has_reaction_signal &&
+    !reactionReport
+  ) {
     return 'none';
   }
-  return reaction?.reaction_severity ?? 'moderate';
+  return reaction?.reaction_severity ?? reactionReport?.severity ?? 'moderate';
 }
 
 function severityRank(severity: CompareDeltaSeverity): number {
@@ -4870,6 +5096,140 @@ function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: unknown }).code === '23505';
 }
 
+function applyRecoveryMetadataToExistingSimplification(
+  event: RoutineSimplificationEvent,
+  params: SimplificationRecoveryMetadata,
+): boolean {
+  const triggerSymptoms = normalizeRecoveryTriggerSymptoms(
+    params.recoveryTriggerSymptoms ?? [],
+  );
+  const hasRecoveryMetadata =
+    params.recoveryTriggerSource !== undefined ||
+    triggerSymptoms.length > 0 ||
+    params.recoveryTriggerSeverity !== undefined ||
+    params.recoveryActiveOveruse === true ||
+    params.recoveryReviewAfter !== undefined ||
+    params.recoveryExitEligibleAt !== undefined;
+
+  if (!hasRecoveryMetadata) {
+    return false;
+  }
+
+  let changed = false;
+  if (
+    params.recoveryTriggerSource &&
+    RECOVERY_SOURCE_RANK[params.recoveryTriggerSource] >
+      RECOVERY_SOURCE_RANK[
+        event.recovery_trigger_source ?? RecoveryTriggerSourceValue.Unknown
+      ]
+  ) {
+    event.recovery_trigger_source = params.recoveryTriggerSource;
+    changed = true;
+  }
+
+  const mergedSymptoms = mergeRecoverySymptoms(
+    event.recovery_trigger_symptoms,
+    triggerSymptoms,
+  );
+  if (!sameStringArray(event.recovery_trigger_symptoms ?? [], mergedSymptoms)) {
+    event.recovery_trigger_symptoms = mergedSymptoms;
+    changed = true;
+  }
+
+  if (
+    params.recoveryTriggerSeverity &&
+    isMoreSevere(
+      params.recoveryTriggerSeverity,
+      event.recovery_trigger_severity,
+    )
+  ) {
+    event.recovery_trigger_severity = params.recoveryTriggerSeverity;
+    changed = true;
+  }
+
+  if (params.recoveryActiveOveruse && !event.recovery_active_overuse) {
+    event.recovery_active_overuse = true;
+    changed = true;
+  }
+
+  if (
+    params.recoveryReviewAfter &&
+    (!event.recovery_review_after ||
+      params.recoveryReviewAfter < event.recovery_review_after)
+  ) {
+    event.recovery_review_after = params.recoveryReviewAfter;
+    changed = true;
+  }
+
+  if (
+    params.recoveryExitEligibleAt &&
+    (!event.recovery_exit_eligible_at ||
+      params.recoveryExitEligibleAt > event.recovery_exit_eligible_at)
+  ) {
+    event.recovery_exit_eligible_at = params.recoveryExitEligibleAt;
+    changed = true;
+  }
+
+  if (event.restore_strategy !== 'phased') {
+    event.restore_strategy = 'phased';
+    changed = true;
+  }
+
+  return changed;
+}
+
+function simplificationRecoveryMetadata(
+  recoveryStart: RecoveryModeStart,
+): SimplificationRecoveryMetadata {
+  return {
+    recoveryTriggerSource: recoveryStart.trigger_source,
+    recoveryTriggerSymptoms: recoveryStart.trigger_symptoms,
+    recoveryTriggerSeverity: recoveryStart.trigger_severity,
+    recoveryActiveOveruse: recoveryStart.active_overuse,
+    recoveryReviewAfter: recoveryStart.review_after,
+    recoveryExitEligibleAt: recoveryStart.exit_eligible_at,
+  };
+}
+
+function shouldUsePhasedRecoveryStrategy(
+  params: SimplificationRecoveryMetadata,
+  triggerSymptoms: readonly ReactionReportSymptom[],
+  recoverySource: RecoveryTriggerSource,
+): boolean {
+  return (
+    triggerSymptoms.length > 0 ||
+    params.recoveryActiveOveruse === true ||
+    params.recoveryTriggerSeverity === 'moderate' ||
+    params.recoveryTriggerSeverity === 'severe' ||
+    recoverySource === RecoveryTriggerSourceValue.ReactionReport ||
+    recoverySource === RecoveryTriggerSourceValue.PhotoAnalysis
+  );
+}
+
+function mergeRecoverySymptoms(
+  current: readonly ReactionReportSymptom[] | null | undefined,
+  incoming: readonly ReactionReportSymptom[],
+): ReactionReportSymptom[] {
+  return Array.from(new Set([...(current ?? []), ...incoming]));
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]) {
+  return (
+    left.length === right.length &&
+    left.every((item, index) => item === right[index])
+  );
+}
+
+function isMoreSevere(
+  incoming: ReactionReportSeverity,
+  current: ReactionReportSeverity | null,
+): boolean {
+  return (
+    !current ||
+    RECOVERY_SEVERITY_RANK[incoming] > RECOVERY_SEVERITY_RANK[current]
+  );
+}
+
 function sanitizeContextText(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -4914,9 +5274,94 @@ function analysisProductContextFromInventoryProduct(
       product?.user_fields?.preferredTimeOfDay,
     ),
     opened_at: product?.opened_at?.toISOString() ?? null,
+    expires_at: product?.expires_at?.toISOString() ?? null,
+    effective_expires_at: product?.effective_expires_at?.toISOString() ?? null,
+    introduction_status: sanitizeContextText(product?.introduction_status),
+    introduction_started_at:
+      product?.introduction_started_at?.toISOString() ?? null,
+    introduction_status_updated_at:
+      product?.introduction_status_updated_at?.toISOString() ?? null,
+    benefit_tags: sanitizeStringArray(product?.identity?.benefits),
+    suited_for_tags: sanitizeStringArray(product?.identity?.suitedFor),
     ingredient_preview: sanitizeStringArray(product?.identity?.inciIngredients),
+    application_method: sanitizeContextText(
+      product?.guidance?.applicationMethod,
+    ),
+    quantity: sanitizeContextText(product?.guidance?.quantity),
+    wait_minutes: product?.guidance?.waitMinutes ?? null,
+    guidance_steps: sanitizeStringArray(product?.guidance?.steps),
     guidance_cautions: sanitizeStringArray(product?.guidance?.cautions),
+    user_product_note: sanitizeContextText(product?.user_fields?.personalNotes),
     is_specialist_locked: fallback.isSpecialistLocked,
+  };
+}
+
+function analysisRecoveryContextFromSimplification(
+  simplification: RoutineSimplificationEvent | null | undefined,
+): AnalysisRoutineContext['active_recovery'] {
+  if (!simplification) {
+    return null;
+  }
+
+  return {
+    active: true,
+    simplification_mode: simplification.simplification_mode,
+    recovery_phase: simplification.recovery_phase,
+    trigger_source: simplification.recovery_trigger_source,
+    trigger_symptoms: simplification.recovery_trigger_symptoms ?? [],
+    trigger_severity: simplification.recovery_trigger_severity,
+    active_overuse: simplification.recovery_active_overuse,
+    review_after: simplification.recovery_review_after?.toISOString() ?? null,
+    exit_eligible_at:
+      simplification.recovery_exit_eligible_at?.toISOString() ?? null,
+    return_step: simplification.recovery_return_step,
+    restore_strategy: simplification.restore_strategy,
+  };
+}
+
+function analysisRoutineMemoryContextFromResponse(
+  memory: RoutineMemoryResponseDto,
+): AnalysisRoutineContext['routine_memory'] {
+  return {
+    window: memory.window,
+    summary: {
+      timeline_event_count: memory.summary.timelineEventCount,
+      product_change_count: memory.summary.productChangeCount,
+      application_log_count: memory.summary.applicationLogCount,
+      reaction_signal_count: memory.summary.reactionSignalCount,
+      recovery_event_count: memory.summary.recoveryEventCount,
+      suspicious_product_count: memory.summary.suspiciousProductCount,
+      has_possible_links: memory.summary.hasPossibleLinks,
+    },
+    suspicious_products: memory.suspiciousProducts
+      .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS)
+      .map((product) => ({
+        product_id: product.productId,
+        brand: sanitizeContextText(product.brand),
+        name: sanitizeContextText(product.name),
+        category: sanitizeContextText(product.category),
+        suspicion_level: product.suspicionLevel,
+        score: product.score,
+        reason_codes: sanitizeStringArray(product.reasonCodes),
+        first_use_date: product.firstUseDate,
+        last_use_date: product.lastUseDate,
+        nearest_reaction_date: product.nearestReactionDate,
+        days_from_first_use_to_reaction: product.daysFromFirstUseToReaction,
+        reaction_signal_count_near_use: product.reactionSignalCountNearUse,
+      })),
+    recent_events: memory.timeline
+      .slice(-ANALYSIS_CONTEXT_MAX_ITEMS)
+      .map((eventItem) => ({
+        date: eventItem.date,
+        occurred_at: eventItem.occurredAt,
+        type: eventItem.type,
+        severity: eventItem.severity,
+        source_type: eventItem.sourceType,
+        product_id: eventItem.product?.productId ?? null,
+        brand: sanitizeContextText(eventItem.product?.brand),
+        name: sanitizeContextText(eventItem.product?.name),
+        category: sanitizeContextText(eventItem.product?.category),
+      })),
   };
 }
 
@@ -4961,6 +5406,30 @@ function uniqueEntryById(): (
     seen.add(entry.id);
     return true;
   };
+}
+
+function entryHasUserVisibleReaction(entry: SkinJournalEntry): boolean {
+  return Boolean(
+    entry.has_reaction_signal ||
+    entry.analysis_observations?.reaction_signals?.reaction_detected ||
+    entryHasReactionReportSymptoms(entry),
+  );
+}
+
+function entryHasReactionReportSymptoms(entry: SkinJournalEntry): boolean {
+  return Boolean(reactionReportWithSymptoms(entry));
+}
+
+function reactionReportWithSymptoms(
+  entry: SkinJournalEntry,
+): ReactionReportPayload | null {
+  const report = entry.reaction_report;
+  if (!report) {
+    return null;
+  }
+  return report.symptoms.length > 0 || (report.red_flags?.length ?? 0) > 0
+    ? report
+    : null;
 }
 
 function dateOnlyDaysBefore(dateOnly: string, days: number): string {

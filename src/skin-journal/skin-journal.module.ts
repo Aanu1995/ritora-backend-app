@@ -22,6 +22,7 @@ import { RoutineStep } from '../schedule/entities/routine-step.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PlatformGlobalRestrictionsModule } from '../platform-controls/platform-global-restrictions.module';
+import { RoutineMemoryModule } from '../routine-memory/routine-memory.module';
 import { SmartPicksModule } from '../smart-picks/smart-picks.module';
 import { UsersModule } from '../users/users.module';
 import { SkinJournalController } from './skin-journal.controller';
@@ -41,6 +42,7 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
   imports: [
     NotificationsModule,
     PlatformGlobalRestrictionsModule,
+    RoutineMemoryModule,
     SmartPicksModule,
     UsersModule,
     TypeOrmModule.forFeature([

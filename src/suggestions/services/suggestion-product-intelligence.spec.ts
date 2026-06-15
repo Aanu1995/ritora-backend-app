@@ -3,6 +3,7 @@ import {
   ApplicationMethod,
   PreferredTimeOfDay,
   ProductCategory,
+  ProductIntroductionStatus,
   Quantity,
   ShelfStatus,
 } from '../../shelf/shelf.types';
@@ -302,6 +303,50 @@ describe('suggestion product intelligence', () => {
     expect(score.cautionReasons).toContain('recent same-daypart repeat');
   });
 
+  it('keeps early product introductions eligible but lowers frequency confidence', () => {
+    const weekOneProduct = productWithData({
+      category: ProductCategory.Serum,
+      inciIngredients: ['Niacinamide', 'Glycerin'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      introductionStatus: ProductIntroductionStatus.Week1,
+    });
+    const toleratedProduct = productWithData({
+      category: ProductCategory.Serum,
+      inciIngredients: ['Niacinamide', 'Glycerin'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      introductionStatus: ProductIntroductionStatus.Tolerated,
+    });
+
+    const weekOneScore = scoreProductForSuggestion(weekOneProduct, {
+      daypart: 'morning',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'medium',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+    const toleratedScore = scoreProductForSuggestion(toleratedProduct, {
+      daypart: 'morning',
+      primaryGoal: 'barrier support',
+      sensitivityLevel: 'medium',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(weekOneScore.suitabilityScore).toBeGreaterThan(0);
+    expect(weekOneScore.suitabilityScore).toBeLessThan(
+      toleratedScore.suitabilityScore,
+    );
+    expect(weekOneScore.cautionReasons).toContain(
+      'introduce with low frequency while skin response is learned',
+    );
+  });
+
   it('treats the skin profile main goal as a strong product-fit signal beyond literal word overlap', () => {
     const sunscreen = productWithData({
       category: ProductCategory.SunProtection,
@@ -401,6 +446,7 @@ function productWithData(input: {
   inciIngredients: string[];
   inciLastConfirmedAt: string | null;
   preferredTimeOfDay: PreferredTimeOfDay | null;
+  introductionStatus?: ProductIntroductionStatus | null;
   benefits?: string[];
   name?: string;
 }): InventoryProduct {
@@ -411,6 +457,7 @@ function productWithData(input: {
     name: input.name ?? 'Barrier Serum',
     category: input.category,
     status: ShelfStatus.Active,
+    introduction_status: input.introductionStatus ?? null,
     identity: {
       inciIngredients: input.inciIngredients,
       inciLastConfirmedAt: input.inciLastConfirmedAt,

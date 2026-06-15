@@ -11,7 +11,12 @@ import {
   SUGGESTION_REACTION_SKIP_PAUSE_DAYS,
 } from '../suggestions.constants';
 import { suggestionHistoryWindow } from './suggestion-historical-window';
-import { daysBetween, increment, unique } from './suggestion-context-common';
+import {
+  daysBetween,
+  increment,
+  trimForPrompt,
+  unique,
+} from './suggestion-context-common';
 
 export type ApplicationProductSignal = {
   adheredCount: number;
@@ -110,6 +115,7 @@ export function buildAppliedProductHistory(
     windowStartDate: fromDate,
     windowEndDate: toDate,
     recordsConsidered: logs.length,
+    recentItems: buildRecentApplicationItems(logs, targetDate),
     products: Array.from(byProduct.values())
       .map((product) => ({
         productId: product.productId,
@@ -129,6 +135,53 @@ export function buildAppliedProductHistory(
       .sort(compareAppliedProductHistory)
       .slice(0, 50),
   };
+}
+
+function buildRecentApplicationItems(
+  logs: ApplicationLog[],
+  targetDate: string,
+): NonNullable<
+  NonNullable<SuggestionContextSummary['appliedProductHistory']>['recentItems']
+> {
+  return logs
+    .filter((log) => toDateOnlyString(log.target_date) <= targetDate)
+    .slice()
+    .sort(compareApplicationLogRecency)
+    .flatMap((log) =>
+      (log.items ?? [])
+        .slice()
+        .sort((first, second) => first.step_order - second.step_order)
+        .map((item) => {
+          const recommended = resolveRecommendedProduct(item);
+          const applied = resolveAppliedProduct(item);
+          return {
+            targetDate: toDateOnlyString(log.target_date),
+            targetTime: log.target_time ?? null,
+            daypart: log.daypart ?? null,
+            status: item.status,
+            itemSource: item.item_source ?? ApplicationItemSource.Recommended,
+            stepLabel: item.step_label ?? recommended?.stepLabel ?? null,
+            recommendedProductId: recommended?.productId ?? null,
+            recommendedName: productDisplayName(recommended),
+            recommendedCategory: recommended?.category ?? null,
+            appliedProductId: applied?.productId ?? null,
+            appliedName: productDisplayName(applied),
+            appliedCategory: applied?.category ?? null,
+            appliedAt:
+              item.applied_at?.toISOString() ??
+              log.applied_at?.toISOString() ??
+              null,
+            isOffShelf: applied?.isOffShelf ?? item.is_ad_hoc,
+            isSubstitution: item.status === ApplicationItemStatus.Substituted,
+            notes: trimNullablePromptText(item.notes, 120),
+            substitutionReason: trimNullablePromptText(
+              item.substitution_reason,
+              120,
+            ),
+          };
+        }),
+    )
+    .slice(0, 30);
 }
 
 export function buildApplicationProductSignals(
@@ -357,6 +410,41 @@ function compareAppliedProductHistory(
     return firstApplied < secondApplied ? 1 : -1;
   return (first.name ?? '').localeCompare(second.name ?? '');
 }
+
+function compareApplicationLogRecency(
+  first: ApplicationLog,
+  second: ApplicationLog,
+): number {
+  const firstDate = toDateOnlyString(first.target_date);
+  const secondDate = toDateOnlyString(second.target_date);
+  if (firstDate !== secondDate) return firstDate < secondDate ? 1 : -1;
+  const firstTime = first.target_time ?? '';
+  const secondTime = second.target_time ?? '';
+  if (firstTime !== secondTime) return firstTime < secondTime ? 1 : -1;
+  const firstUpdated = first.updated_at?.getTime() ?? 0;
+  const secondUpdated = second.updated_at?.getTime() ?? 0;
+  return secondUpdated - firstUpdated;
+}
+
+function productDisplayName(
+  product: ResolvedApplicationProduct | null,
+): string | null {
+  if (!product) return null;
+  return [product.brand, product.name]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join(' ')
+    .trim();
+}
+
+function trimNullablePromptText(
+  value: string | null | undefined,
+  maxLength: number,
+): string | null {
+  if (!value) return null;
+  const trimmed = trimForPrompt(value, maxLength);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function resolveRecommendedProduct(
   item: ApplicationLogItem,
 ): ResolvedApplicationProduct | null {

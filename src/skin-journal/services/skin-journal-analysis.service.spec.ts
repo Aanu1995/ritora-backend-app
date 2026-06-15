@@ -170,9 +170,9 @@ type OpenAiRequestBody = {
   };
 };
 
-function requestBody(fetchMock: jest.Mock): OpenAiRequestBody {
+function requestBody(fetchMock: jest.Mock, callIndex = 0): OpenAiRequestBody {
   return JSON.parse(
-    fetchMock.mock.calls[0][1].body as string,
+    fetchMock.mock.calls[callIndex][1].body as string,
   ) as OpenAiRequestBody;
 }
 
@@ -358,10 +358,70 @@ describe('SkinJournalAnalysisService', () => {
         sun_exposure_today: 'brief',
         sweat_exercise_today: false,
         recent_change_kind: 'started_new_product',
+        recent_change_product_id: 'retinoid-1',
+        recent_change_note: 'Started retinol this week.',
         complaint_note: 'Burning feeling near cheeks',
         is_pre_routine: true,
       },
       routineContext: {
+        active_recovery: {
+          active: true,
+          simplification_mode: 'barrier_repair',
+          recovery_phase: 'stabilize',
+          trigger_source: 'reaction_report',
+          trigger_symptoms: ['burning', 'redness'],
+          trigger_severity: 'moderate',
+          active_overuse: true,
+          review_after: '2026-05-03T08:00:00.000Z',
+          exit_eligible_at: '2026-05-05T08:00:00.000Z',
+          return_step: 'not_started',
+          restore_strategy: 'phased',
+        },
+        routine_memory: {
+          window: {
+            start: '2026-04-01',
+            end: '2026-04-30',
+            days: 30,
+          },
+          summary: {
+            timeline_event_count: 4,
+            product_change_count: 1,
+            application_log_count: 2,
+            reaction_signal_count: 1,
+            recovery_event_count: 0,
+            suspicious_product_count: 1,
+            has_possible_links: true,
+          },
+          suspicious_products: [
+            {
+              product_id: 'retinoid-1',
+              brand: 'Routine Brand',
+              name: 'Retinol Serum',
+              category: 'serum',
+              suspicion_level: 'possible',
+              score: 5,
+              reason_codes: ['reaction_after_first_logged_use'],
+              first_use_date: '2026-04-18',
+              last_use_date: '2026-04-29',
+              nearest_reaction_date: '2026-04-30',
+              days_from_first_use_to_reaction: 2,
+              reaction_signal_count_near_use: 1,
+            },
+          ],
+          recent_events: [
+            {
+              date: '2026-04-18',
+              occurred_at: '2026-04-18T20:00:00.000Z',
+              type: 'first_logged_use',
+              severity: 'info',
+              source_type: 'application_log',
+              product_id: 'retinoid-1',
+              brand: 'Routine Brand',
+              name: 'Retinol Serum',
+              category: 'serum',
+            },
+          ],
+        },
         active_shelf_products: [
           {
             product_id: 'cleanser-1',
@@ -371,7 +431,20 @@ describe('SkinJournalAnalysisService', () => {
             step_label: null,
             preferred_time: 'evening',
             opened_at: '2026-04-20T18:00:00.000Z',
+            expires_at: '2026-10-20T18:00:00.000Z',
+            effective_expires_at: '2026-10-20T18:00:00.000Z',
+            introduction_status: 'building_tolerance',
+            introduction_started_at: '2026-04-20T18:00:00.000Z',
+            introduction_status_updated_at: '2026-04-27T18:00:00.000Z',
+            benefit_tags: ['gentle cleanse'],
+            suited_for_tags: ['sensitive skin'],
             ingredient_preview: ['aqua', 'glycerin'],
+            application_method: 'fingertips',
+            quantity: 'coin-size',
+            wait_minutes: null,
+            guidance_steps: ['Massage briefly and rinse'],
+            guidance_cautions: ['Avoid eye area'],
+            user_product_note: 'Fine most days.',
           },
         ],
         routine_products: [
@@ -383,15 +456,31 @@ describe('SkinJournalAnalysisService', () => {
             step_label: 'treatment',
             preferred_time: 'evening',
             opened_at: '2026-04-18T18:00:00.000Z',
+            expires_at: '2026-10-18T18:00:00.000Z',
+            effective_expires_at: '2026-10-18T18:00:00.000Z',
+            introduction_status: 'week_1',
+            introduction_started_at: '2026-04-18T18:00:00.000Z',
+            introduction_status_updated_at: '2026-04-19T18:00:00.000Z',
+            benefit_tags: ['texture support'],
+            suited_for_tags: ['experienced users'],
             ingredient_preview: ['retinol', 'squalane'],
+            application_method: 'dropper',
+            quantity: 'pea-size',
+            wait_minutes: 10,
+            guidance_steps: ['Apply after moisturizer if sensitive'],
+            guidance_cautions: ['Use only at night'],
+            user_product_note: 'Can sting if layered too often.',
             is_specialist_locked: false,
           },
         ],
         recent_applications: [
           {
             target_date: '2026-04-29',
+            target_time: '20:00:00',
             daypart: 'evening',
             applied_at: '2026-04-29T20:00:00.000Z',
+            general_notes: 'Cheeks felt warm after routine.',
+            has_been_edited: true,
             items: [
               {
                 status: 'applied',
@@ -400,6 +489,15 @@ describe('SkinJournalAnalysisService', () => {
                 name: 'Retinol Serum',
                 category: 'serum',
                 step_label: 'treatment',
+                applied_at: '2026-04-29T20:05:00.000Z',
+                item_source: 'recommended',
+                is_ad_hoc: false,
+                recommended_product_id: 'retinoid-1',
+                recommended_name: 'Retinol Serum',
+                applied_product_id: 'retinoid-1',
+                applied_name: 'Retinol Serum',
+                notes: 'No immediate stinging tonight.',
+                substitution_reason: null,
               },
             ],
           },
@@ -426,7 +524,46 @@ describe('SkinJournalAnalysisService', () => {
     expect(systemPrompt).toContain('Severity and confidence rubric');
     expect(systemPrompt).toContain('Decision priority order');
     expect(systemPrompt).toContain(
-      'Broader lifestyle or nutrition contributors are watch-only ideas',
+      'Concrete context means visible photo evidence',
+    );
+    expect(systemPrompt).toContain(
+      'User-reported lifestyle or nutrition changes in those fields are concrete context',
+    );
+    expect(systemPrompt).toContain(
+      'Broader lifestyle or nutrition ideas are watch-only only when no concrete context explains the concern',
+    );
+    expect(systemPrompt).toContain(
+      'A shelf product is not exposure unless it also appears in routine products, recent applications, recent_change_product_id, or routine_memory events',
+    );
+    expect(systemPrompt).toContain('Shelf and recovery context rules');
+    expect(systemPrompt).toContain('Use product introduction_status');
+    expect(systemPrompt).toContain(
+      'Valid values are new, patch_testing, week_1, building_tolerance, tolerated, paused, failed, or missing',
+    );
+    expect(systemPrompt).toContain('tolerated or missing introduction_status');
+    expect(systemPrompt).toContain('paused or failed introduction_status');
+    expect(systemPrompt).toContain('Use opened_at, expires_at');
+    expect(systemPrompt).toContain('Use preferred_time only as context');
+    expect(systemPrompt).toContain('Use benefit_tags, suited_for_tags');
+    expect(systemPrompt).toContain('Use user_product_note, recent_change_note');
+    expect(systemPrompt).toContain('recommended_* fields describe');
+    expect(systemPrompt).toContain(
+      'routine_memory is a backend-derived chronology summary',
+    );
+    expect(systemPrompt).toContain('routine_memory.suspicious_products');
+    expect(systemPrompt).toContain('routine_memory.recent_events');
+    expect(systemPrompt).toContain(
+      'Do not anchor on product explanations just because product data is detailed',
+    );
+    expect(systemPrompt).toContain(
+      'food, late eating, sleep, stress, sweat, cycle, travel, illness',
+    );
+    expect(systemPrompt).toContain('If active_recovery is present');
+    expect(systemPrompt).toContain(
+      'When recovery_phase=stabilize or return_step=not_started/barrier_only',
+    );
+    expect(systemPrompt).toContain(
+      'When recovery_phase=phased_return or return_step=one_active_test/building_frequency',
     );
     expect(systemPrompt).toContain('Guidance responsibility');
     expect(systemPrompt).toContain(
@@ -441,21 +578,40 @@ describe('SkinJournalAnalysisService', () => {
     expect(systemPrompt).toContain(
       'The first bullet in each section must use the strongest concrete data',
     );
+    expect(systemPrompt).toContain('Rank guidance evidence in this order');
+    expect(systemPrompt).toContain(
+      'the first Possible cause bullet must describe the visible pattern or image quality limit',
+    );
+    expect(systemPrompt).toContain(
+      'Do not present products as the default explanation',
+    );
+    expect(systemPrompt).toContain(
+      'If saying keep routine steady, specify what stays steady',
+    );
     expect(systemPrompt).toContain(
       'Avoid for now bullets name temporary caution',
+    );
+    expect(systemPrompt).toContain(
+      'Do not turn one photo into a permanent product, food, or habit ban',
     );
     expect(
       body.text.format.schema?.properties?.guidance_decisions?.maxItems,
     ).toBeGreaterThan(4);
-    expect(systemPrompt).toContain('concrete user data');
+    expect(systemPrompt).toContain('concrete context');
     expect(systemPrompt).toContain('late eating');
     expect(systemPrompt).toContain('food patterns');
+    expect(systemPrompt).toContain(
+      'consider product and non-product contributors side by side',
+    );
+    expect(systemPrompt).toContain(
+      'If the user note mentions late eating, food, sleep, stress, sweat, or cycle context',
+    );
     expect(systemPrompt).toContain('vitamin deficiency');
     expect(systemPrompt).toContain(
       'Do not claim vitamin deficiency causes large pores',
     );
     expect(systemPrompt).toContain(
-      'overall nutrition or hydration context may be worth logging',
+      'overall nutrition or hydration patterns may be worth logging',
     );
     expect(systemPrompt).toContain(
       'use this order when relevant: same-light photos, shine tracking',
@@ -469,16 +625,36 @@ describe('SkinJournalAnalysisService', () => {
     expect(userPrompt).toContain('Decision input - user concern focus');
     expect(userPrompt).toContain('Decision input - current entry check-in');
     expect(userPrompt).toContain(
-      'Input authority rule: use supplied notes, check-ins, product names',
+      'Input authority rule: use supplied notes, check-ins, recovery state',
     );
+    expect(userPrompt).toContain('product lifecycle fields');
     expect(userPrompt).toContain(
       'Possible cause, Try next, and Avoid for now must use concrete supplied data first.',
     );
-    expect(userPrompt).toContain('Broader food, late eating, sleep, stress');
+    expect(userPrompt).toContain(
+      'Concrete supplied data means visible photo evidence',
+    );
+    expect(userPrompt).toContain('User-reported food, late eating, sleep');
+    expect(userPrompt).toContain(
+      'Do not prefer product explanations by default',
+    );
+    expect(userPrompt).toContain(
+      'Broader factors may appear only as cautious watch-or-log items when no concrete context explains the concern',
+    );
     expect(userPrompt).toContain('Prior redness appeared mild around cheeks.');
     expect(userPrompt).toContain('medium_deep');
     expect(userPrompt).toContain('started_new_product');
+    expect(userPrompt).toContain('Started retinol this week.');
     expect(userPrompt).toContain('Burning feeling near cheeks');
+    expect(userPrompt).toContain('active_recovery');
+    expect(userPrompt).toContain('routine_memory');
+    expect(userPrompt).toContain('reaction_after_first_logged_use');
+    expect(userPrompt).toContain('building_tolerance');
+    expect(userPrompt).toContain('week_1');
+    expect(userPrompt).toContain('effective_expires_at');
+    expect(userPrompt).toContain('user_product_note');
+    expect(userPrompt).toContain('Cheeks felt warm after routine.');
+    expect(userPrompt).toContain('No immediate stinging tonight.');
     expect(userPrompt).toContain('active_shelf_products');
     expect(userPrompt).toContain('Retinol Serum');
     expect(userPrompt).toContain('lt5h');
@@ -657,6 +833,53 @@ describe('SkinJournalAnalysisService', () => {
         },
       }),
     ).rejects.toThrow('artificial wording');
+  });
+
+  it('retries once when photo analysis copy fails backend wording validation', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue(
+          openAiPayload({
+            overall_assessment: 'Skin looks calmer — keep watching it.',
+            user_visible_message: 'Skin looks calmer — keep watching it.',
+          }),
+        ),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue(openAiPayload()),
+      });
+    global.fetch = fetchMock;
+    const service = new SkinJournalAnalysisService(
+      config({ OPENAI_API_KEY: 'sk-test' }),
+      photoStorage,
+    );
+
+    const result = await service.analyze({
+      userId: 'user-1',
+      entryId: 'entry-1',
+      photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+      priorPhotoObjectKey: null,
+      priorAnalysis: null,
+      concernFocus: null,
+      skinContext: {},
+      entryContext: {
+        entry_date: '2026-05-01',
+      },
+    });
+
+    expect(result.observations.overall_assessment).toBe(
+      'Skin appears stable today.',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(promptText(requestBody(fetchMock, 1), 'user')).toContain(
+      'Validation retry',
+    );
+    expect(result.metadata.input_tokens).toBe(2000);
+    expect(result.metadata.output_tokens).toBe(200);
+    expect(result.metadata.total_tokens).toBe(2200);
   });
 
   it('passes previous and current photos when a previous photo is available', async () => {
@@ -1026,6 +1249,63 @@ describe('SkinJournalAnalysisService', () => {
         entryContext: null,
       }),
     ).rejects.toThrow('forbidden medical language');
+  });
+
+  it('rejects hard cause claims that blame a product from model output', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(
+        openAiPayload({
+          detected_concerns: [
+            {
+              concern: 'acne',
+              severity: 'mild',
+              locations: ['chin'],
+              confidence: 0.72,
+              change_from_previous: 'unknown',
+              change_confidence: 0.4,
+            },
+          ],
+          guidance_decisions: [
+            {
+              concern: 'acne',
+              possible_factor_codes: ['recent_product_change'],
+              possible_cause_items: ['Retinol caused your acne breakout.'],
+              action_codes: ['log_clusters'],
+              try_next_items: [
+                'Log whether new spots line up with routine or lifestyle changes.',
+              ],
+              avoid_codes: ['multiple_new_actives'],
+              avoid_items: [
+                'Avoid adding several new actives while comparing the pattern.',
+              ],
+              reasoning_summary: 'The model blamed the product too strongly.',
+            },
+          ],
+        }),
+      ),
+    });
+    const service = new SkinJournalAnalysisService(
+      config({
+        OPENAI_API_KEY: 'sk-test',
+      }),
+      photoStorage,
+    );
+
+    await expect(
+      service.analyze({
+        userId: 'user-1',
+        entryId: 'entry-1',
+        photoObjectKey: 'skin-journal/user-1/entry-1/photo.webp',
+        concernFocus: null,
+        priorAnalysis: null,
+        skinContext: null,
+        entryContext: {
+          entry_date: '2026-05-01',
+          complaint_note: 'Late meal before bed and a few new chin bumps.',
+        },
+      }),
+    ).rejects.toThrow('possible_cause_items must include');
   });
 
   it('rejects invalid safety enum values from model output', async () => {

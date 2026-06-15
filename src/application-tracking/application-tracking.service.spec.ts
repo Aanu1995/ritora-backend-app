@@ -13,6 +13,12 @@ import { ApplicationTrackingService } from './application-tracking.service';
 import { SuggestionInstance } from '../suggestions/entities/suggestion-instance.entity';
 import { SkinJournalService } from '../skin-journal/skin-journal.service';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
+import {
+  DataProvenance,
+  ProductCategory,
+  ProductIntroductionStatus,
+  ShelfStatus,
+} from '../shelf/shelf.types';
 
 describe('ApplicationTrackingService', () => {
   const logRepo = repo<ApplicationLog>();
@@ -125,6 +131,141 @@ describe('ApplicationTrackingService', () => {
       'user-1',
     );
     expect(txLogRepo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('automatically moves a new applied shelf product into week 1 introduction', async () => {
+    const savedLog = applicationLog({ id: 'log-1', editCount: 0 });
+    const savedItems = [applicationItem({ id: 'item-1', status: 'applied' })];
+    const product = inventoryProduct({
+      introductionStatus: ProductIntroductionStatus.New,
+      introductionStartedAt: new Date('2026-05-01T08:00:00.000Z'),
+      introductionStatusUpdatedAt: new Date('2026-05-01T08:00:00.000Z'),
+    });
+    logRepo.findOne.mockResolvedValue(null);
+    validation.loadSuggestionForRecord.mockResolvedValue(suggestion());
+    validation.resolveTarget.mockResolvedValue({
+      slotId: 'slot-1',
+      targetDate: '2026-05-04',
+      targetTime: '08:00',
+      daypart: 'morning',
+    });
+    validation.buildItemDrafts.mockResolvedValue([draftItem('applied')]);
+    txLogRepo.create.mockImplementation(
+      (value) => ({ ...savedLog, ...value }) as ApplicationLog,
+    );
+    txLogRepo.save.mockResolvedValue(savedLog);
+    txItemRepo.create.mockImplementation(
+      (value) => ({ ...savedItems[0], ...value }) as ApplicationLogItem,
+    );
+    mockSaveArray(txItemRepo).mockResolvedValue(savedItems);
+    txVersionRepo.create.mockImplementation(
+      (value) => value as ApplicationLogVersion,
+    );
+    txVersionRepo.save.mockResolvedValue({} as ApplicationLogVersion);
+    txInventoryRepo.find.mockResolvedValue([product]);
+    mockSaveArray(txInventoryRepo).mockResolvedValue([product]);
+
+    await service.record(user(), {
+      suggestionInstanceId: 'suggestion-1',
+      targetDate: '2026-05-04',
+      items: [itemInput('applied')],
+    });
+
+    expect(txInventoryRepo.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 'product-1',
+        introduction_status: ProductIntroductionStatus.Week1,
+        introduction_started_at: new Date('2026-05-01T08:00:00.000Z'),
+      }),
+    ]);
+  });
+
+  it.each([
+    null,
+    ProductIntroductionStatus.Paused,
+    ProductIntroductionStatus.Failed,
+    ProductIntroductionStatus.Tolerated,
+  ])(
+    'does not override manually or legacy %s introduction status',
+    async (introductionStatus) => {
+      const savedLog = applicationLog({ id: 'log-1', editCount: 0 });
+      const savedItems = [applicationItem({ id: 'item-1', status: 'applied' })];
+      logRepo.findOne.mockResolvedValue(null);
+      validation.loadSuggestionForRecord.mockResolvedValue(suggestion());
+      validation.resolveTarget.mockResolvedValue({
+        slotId: 'slot-1',
+        targetDate: '2026-05-04',
+        targetTime: '08:00',
+        daypart: 'morning',
+      });
+      validation.buildItemDrafts.mockResolvedValue([draftItem('applied')]);
+      txLogRepo.create.mockImplementation(
+        (value) => ({ ...savedLog, ...value }) as ApplicationLog,
+      );
+      txLogRepo.save.mockResolvedValue(savedLog);
+      txItemRepo.create.mockImplementation(
+        (value) => ({ ...savedItems[0], ...value }) as ApplicationLogItem,
+      );
+      mockSaveArray(txItemRepo).mockResolvedValue(savedItems);
+      txVersionRepo.create.mockImplementation(
+        (value) => value as ApplicationLogVersion,
+      );
+      txVersionRepo.save.mockResolvedValue({} as ApplicationLogVersion);
+      txInventoryRepo.find.mockResolvedValue([
+        inventoryProduct({
+          introductionStatus,
+        }),
+      ]);
+
+      await service.record(user(), {
+        suggestionInstanceId: 'suggestion-1',
+        targetDate: '2026-05-04',
+        items: [itemInput('applied')],
+      });
+
+      expect(txInventoryRepo.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('propagates automatic introduction update failures', async () => {
+    const savedLog = applicationLog({ id: 'log-1', editCount: 0 });
+    const savedItems = [applicationItem({ id: 'item-1', status: 'applied' })];
+    const product = inventoryProduct({
+      introductionStatus: ProductIntroductionStatus.New,
+    });
+    logRepo.findOne.mockResolvedValue(null);
+    validation.loadSuggestionForRecord.mockResolvedValue(suggestion());
+    validation.resolveTarget.mockResolvedValue({
+      slotId: 'slot-1',
+      targetDate: '2026-05-04',
+      targetTime: '08:00',
+      daypart: 'morning',
+    });
+    validation.buildItemDrafts.mockResolvedValue([draftItem('applied')]);
+    txLogRepo.create.mockImplementation(
+      (value) => ({ ...savedLog, ...value }) as ApplicationLog,
+    );
+    txLogRepo.save.mockResolvedValue(savedLog);
+    txItemRepo.create.mockImplementation(
+      (value) => ({ ...savedItems[0], ...value }) as ApplicationLogItem,
+    );
+    mockSaveArray(txItemRepo).mockResolvedValue(savedItems);
+    txVersionRepo.create.mockImplementation(
+      (value) => value as ApplicationLogVersion,
+    );
+    txVersionRepo.save.mockResolvedValue({} as ApplicationLogVersion);
+    txInventoryRepo.find.mockResolvedValue([product]);
+    txInventoryRepo.save.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(
+      service.record(user(), {
+        suggestionInstanceId: 'suggestion-1',
+        targetDate: '2026-05-04',
+        items: [itemInput('applied')],
+      }),
+    ).rejects.toThrow('database unavailable');
+
+    expect(product.introduction_status).toBe(ProductIntroductionStatus.Week1);
   });
 
   it('starts independent post-record refresh work without waiting for the regeneration queue', async () => {
@@ -445,5 +586,76 @@ function itemInput(
     inventoryProductId: 'product-1',
     substitutedWithProductId: status === 'substituted' ? 'product-2' : null,
     status,
+  };
+}
+
+function inventoryProduct(input: {
+  introductionStatus: ProductIntroductionStatus | null;
+  introductionStartedAt?: Date | null;
+  introductionStatusUpdatedAt?: Date | null;
+}): InventoryProduct {
+  const now = new Date('2026-05-01T08:00:00.000Z');
+  return {
+    id: 'product-1',
+    user_id: 'user-1',
+    brand: 'Ava Lab',
+    name: 'Barrier Serum',
+    category: ProductCategory.Serum,
+    barcode: null,
+    status: ShelfStatus.Active,
+    provenance: DataProvenance.PhotoLookup,
+    brand_search: 'ava lab',
+    name_search: 'barrier serum',
+    search_document: 'ava lab barrier serum',
+    opened_at: null,
+    expires_at: null,
+    period_after_opening_months: null,
+    effective_expires_at: null,
+    introduction_status: input.introductionStatus,
+    introduction_started_at: input.introductionStartedAt ?? now,
+    introduction_status_updated_at: input.introductionStatusUpdatedAt ?? now,
+    identity: {
+      brand: 'Ava Lab',
+      name: 'Barrier Serum',
+      category: ProductCategory.Serum,
+      barcode: null,
+      imageUrls: [],
+      sizeMl: 30,
+      description: null,
+      benefits: [],
+      suitedFor: [],
+      inciIngredients: ['Aqua'],
+      inciLastConfirmedAt: null,
+    },
+    guidance: {
+      applicationMethod: null,
+      quantity: null,
+      steps: [],
+      cautions: [],
+      waitMinutes: null,
+    },
+    manufacturer: {
+      brand: 'Ava Lab',
+      parentCompany: null,
+      countryOfOrigin: null,
+      countryOfManufacture: null,
+      supportEmail: null,
+      productUrl: null,
+      websiteUrl: null,
+    },
+    user_fields: {
+      openedAt: null,
+      expiresAt: null,
+      periodAfterOpeningMonths: null,
+      pricePaid: null,
+      pricePaidCurrency: null,
+      purchasedFrom: null,
+      personalNotes: null,
+      preferredTimeOfDay: null,
+    },
+    created_at: now,
+    updated_at: now,
+    user: undefined as never,
+    generateId: jest.fn(),
   };
 }

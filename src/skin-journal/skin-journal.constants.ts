@@ -178,7 +178,112 @@ export type SimplificationMode = 'barrier_repair';
 
 export type RestoreStrategy = 'full' | 'phased';
 
+export const RecoveryPhaseValue = {
+  Stabilize: 'stabilize',
+  Observe: 'observe',
+  PhasedReturn: 'phased_return',
+} as const;
+
+export type RecoveryPhase =
+  (typeof RecoveryPhaseValue)[keyof typeof RecoveryPhaseValue];
+
+export const RecoveryTriggerSourceValue = {
+  Unknown: 'unknown',
+  Manual: 'manual',
+  ReactionReport: 'reaction_report',
+  PhotoAnalysis: 'photo_analysis',
+} as const;
+
+export type RecoveryTriggerSource =
+  (typeof RecoveryTriggerSourceValue)[keyof typeof RecoveryTriggerSourceValue];
+
+export const RecoveryReturnStepValue = {
+  NotStarted: 'not_started',
+  BarrierOnly: 'barrier_only',
+  OneActiveTest: 'one_active_test',
+  BuildingFrequency: 'building_frequency',
+  Complete: 'complete',
+} as const;
+
+export type RecoveryReturnStep =
+  (typeof RecoveryReturnStepValue)[keyof typeof RecoveryReturnStepValue];
+
 export type ReactionSeverity = 'none' | 'mild' | 'moderate' | 'severe';
+
+export const REACTION_REPORT_SYMPTOMS = [
+  'burning',
+  'stinging',
+  'itching',
+  'tightness',
+  'redness',
+  'heat',
+  'pain',
+  'swelling',
+  'hives',
+  'peeling',
+  'breakout',
+  'other',
+] as const;
+
+export type ReactionReportSymptom = (typeof REACTION_REPORT_SYMPTOMS)[number];
+
+export const REACTION_REPORT_SEVERITIES = [
+  'mild',
+  'moderate',
+  'severe',
+] as const;
+
+export type ReactionReportSeverity =
+  (typeof REACTION_REPORT_SEVERITIES)[number];
+
+export const REACTION_REPORT_ONSETS = [
+  'today',
+  'yesterday',
+  'two_to_three_days',
+  'four_to_seven_days',
+  'more_than_week',
+  'unsure',
+] as const;
+
+export type ReactionReportOnset = (typeof REACTION_REPORT_ONSETS)[number];
+
+export const REACTION_REPORT_LOCATIONS = [
+  'forehead',
+  'cheeks',
+  'chin_jaw',
+  'around_mouth',
+  'eye_area',
+  'neck',
+  'all_over_face',
+  'body',
+  'other',
+] as const;
+
+export type ReactionReportLocation = (typeof REACTION_REPORT_LOCATIONS)[number];
+
+export const REACTION_REPORT_RED_FLAGS = [
+  'eye_or_lip_swelling',
+  'trouble_breathing',
+  'blistering',
+  'open_skin',
+  'spreading_fast',
+  'severe_pain',
+  'infection_signs',
+] as const;
+
+export type ReactionReportRedFlag = (typeof REACTION_REPORT_RED_FLAGS)[number];
+
+export const REACTION_REPORT_TRIGGERS = [
+  'new_product',
+  'changed_frequency',
+  'active_ingredient',
+  'sunscreen',
+  'treatment',
+  'weather_or_environment',
+  'unknown',
+] as const;
+
+export type ReactionReportTrigger = (typeof REACTION_REPORT_TRIGGERS)[number];
 
 export const AnalysisJobStatusValue = {
   Queued: 'queued',
@@ -382,7 +487,7 @@ export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT = 4;
 export const SKIN_JOURNAL_ANALYSIS_MAX_CONCURRENT_PER_USER = 2;
 export const SKIN_JOURNAL_ANALYSIS_DAILY_BUDGET_USD = 3;
 export const SKIN_JOURNAL_ANALYSIS_PROMPT_VERSION =
-  'skin-journal-photo-v2026-06-03.1';
+  'skin-journal-photo-v2026-06-14.1';
 export const SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: AnalysisQueueDriver =
   'database';
 export const SKIN_JOURNAL_ANALYSIS_SQS_WAIT_TIME_SECONDS = 10;
@@ -446,6 +551,16 @@ export interface RecentChangePayload {
   note?: string | null;
 }
 
+export interface ReactionReportPayload {
+  symptoms: ReactionReportSymptom[];
+  severity: ReactionReportSeverity;
+  onset?: ReactionReportOnset | null;
+  locations?: ReactionReportLocation[];
+  red_flags?: ReactionReportRedFlag[];
+  suspected_trigger?: ReactionReportTrigger | null;
+  note?: string | null;
+}
+
 export interface AnalysisSkinContext {
   skin_type?: string | null;
   skin_tone?: string | null;
@@ -472,6 +587,9 @@ export interface AnalysisEntryContext {
   sweat_exercise_today?: boolean | null;
   cycle_marker?: CycleMarker | null;
   recent_change_kind?: RecentChangeKind | null;
+  recent_change_product_id?: string | null;
+  recent_change_note?: string | null;
+  reaction_report?: ReactionReportPayload | null;
   complaint_note?: string | null;
   is_pre_routine?: boolean | null;
 }
@@ -484,15 +602,30 @@ export interface AnalysisRoutineProductContext {
   step_label: string | null;
   preferred_time?: string | null;
   opened_at?: string | null;
+  expires_at?: string | null;
+  effective_expires_at?: string | null;
+  introduction_status?: string | null;
+  introduction_started_at?: string | null;
+  introduction_status_updated_at?: string | null;
+  benefit_tags?: string[];
+  suited_for_tags?: string[];
   ingredient_preview?: string[];
+  application_method?: string | null;
+  quantity?: string | null;
+  wait_minutes?: number | null;
+  guidance_steps?: string[];
   guidance_cautions?: string[];
+  user_product_note?: string | null;
   is_specialist_locked?: boolean;
 }
 
 export interface AnalysisRecentApplicationContext {
   target_date: string;
+  target_time?: string | null;
   daypart: string | null;
   applied_at: string | null;
+  general_notes?: string | null;
+  has_been_edited?: boolean;
   items: Array<{
     status: string;
     product_id: string | null;
@@ -500,6 +633,19 @@ export interface AnalysisRecentApplicationContext {
     name: string | null;
     category: string | null;
     step_label: string | null;
+    applied_at?: string | null;
+    item_source?: string | null;
+    is_ad_hoc?: boolean;
+    ad_hoc_brand?: string | null;
+    ad_hoc_name?: string | null;
+    recommended_product_id?: string | null;
+    recommended_brand?: string | null;
+    recommended_name?: string | null;
+    applied_product_id?: string | null;
+    applied_brand?: string | null;
+    applied_name?: string | null;
+    notes?: string | null;
+    substitution_reason?: string | null;
   }>;
 }
 
@@ -507,7 +653,65 @@ export interface AnalysisCheckInContext extends AnalysisEntryContext {
   detected_concerns?: AnalysisConcern[];
 }
 
+export interface AnalysisRecoveryContext {
+  active: boolean;
+  simplification_mode: SimplificationMode;
+  recovery_phase: RecoveryPhase;
+  trigger_source: RecoveryTriggerSource;
+  trigger_symptoms: ReactionReportSymptom[];
+  trigger_severity: ReactionReportSeverity | null;
+  active_overuse: boolean;
+  review_after: string | null;
+  exit_eligible_at: string | null;
+  return_step: RecoveryReturnStep;
+  restore_strategy: RestoreStrategy;
+}
+
+export interface AnalysisRoutineMemoryContext {
+  window: {
+    start: string;
+    end: string;
+    days: number;
+  };
+  summary: {
+    timeline_event_count: number;
+    product_change_count: number;
+    application_log_count: number;
+    reaction_signal_count: number;
+    recovery_event_count: number;
+    suspicious_product_count: number;
+    has_possible_links: boolean;
+  };
+  suspicious_products: Array<{
+    product_id: string;
+    brand: string | null;
+    name: string | null;
+    category: string | null;
+    suspicion_level: string;
+    score: number;
+    reason_codes: string[];
+    first_use_date: string | null;
+    last_use_date: string | null;
+    nearest_reaction_date: string | null;
+    days_from_first_use_to_reaction: number | null;
+    reaction_signal_count_near_use: number;
+  }>;
+  recent_events: Array<{
+    date: string;
+    occurred_at: string | null;
+    type: string;
+    severity: string;
+    source_type: string;
+    product_id: string | null;
+    brand: string | null;
+    name: string | null;
+    category: string | null;
+  }>;
+}
+
 export interface AnalysisRoutineContext {
+  active_recovery?: AnalysisRecoveryContext | null;
+  routine_memory?: AnalysisRoutineMemoryContext | null;
   active_shelf_products: AnalysisRoutineProductContext[];
   routine_products: AnalysisRoutineProductContext[];
   recent_applications: AnalysisRecentApplicationContext[];

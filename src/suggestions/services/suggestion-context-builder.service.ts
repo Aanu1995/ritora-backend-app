@@ -11,6 +11,10 @@ import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
+import {
+  getProductIntroductionSuggestionGuidance,
+  isProductIntroductionEligibleForSuggestions,
+} from '../../shelf/product-introduction.policy';
 import { buildEnvironmentAdaptationPolicy } from '../../environment-intelligence/environment-adaptation-policy';
 import { RoutineBreak } from '../entities/routine-break.entity';
 import { SuggestionContextCache } from '../entities/suggestion-context-cache.entity';
@@ -132,7 +136,16 @@ export class SuggestionContextBuilder {
     const environmentPolicy = buildEnvironmentAdaptationPolicy(
       normalizedInputs.environment,
     );
+    const introductionSkippedCandidates =
+      buildProductIntroductionSkippedCandidates(
+        normalizedInputs.shelfActiveProducts,
+      );
     const productScores = normalizedInputs.shelfActiveProducts
+      .filter((product) =>
+        isProductIntroductionEligibleForSuggestions(
+          product.introduction_status,
+        ),
+      )
       .map((product) =>
         scoreProductForSuggestion(product, {
           daypart: normalizedInputs.daypart,
@@ -207,7 +220,10 @@ export class SuggestionContextBuilder {
       evidenceSources: [],
       skippedCandidates: [],
     };
-    const skippedCandidates = skippedReasonsFromPolicy(baseContext);
+    const skippedCandidates = [
+      ...introductionSkippedCandidates,
+      ...skippedReasonsFromPolicy(baseContext),
+    ];
     const summary: SuggestionContextSummary = {
       ...baseContext,
       safetyConstraints: [
@@ -280,4 +296,29 @@ export interface SuggestionContextBuilderInput {
   environment?: EnvironmentContextSummary | null;
   aiPersonalizationAllowed?: boolean;
   aiPersonalizationBlockedReason?: string | null;
+}
+
+function buildProductIntroductionSkippedCandidates(
+  products: InventoryProduct[],
+): SuggestionContextSummary['skippedCandidates'] {
+  return products.flatMap((product) => {
+    const guidance = getProductIntroductionSuggestionGuidance(
+      product.introduction_status,
+    );
+    if (!guidance.blockReason) {
+      return [];
+    }
+
+    return [
+      {
+        productId: product.id,
+        brand: product.brand,
+        name: product.name,
+        category: product.category,
+        introductionStatus: product.introduction_status ?? null,
+        reason: guidance.blockReason,
+        sourceIds: [],
+      },
+    ];
+  });
 }

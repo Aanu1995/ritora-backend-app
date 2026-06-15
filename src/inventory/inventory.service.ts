@@ -24,6 +24,7 @@ import {
   ShelfStatFilter,
   ShelfStatus,
   DataProvenance,
+  ProductIntroductionStatus,
   type ShelfProductSnapshot,
 } from '../shelf/shelf.types';
 import { SkinProfile } from '../skin-profile/entities/skin-profile.entity';
@@ -43,8 +44,10 @@ import { CreateInventoryProductDto } from './dto/create-inventory-product.dto';
 import { InventoryListQueryDto } from './dto/inventory-list-query.dto';
 import { InventoryProductResponseDto } from './dto/inventory-product-response.dto';
 import { UpdateInventoryProductDto } from './dto/update-inventory-product.dto';
+import { UpdateProductIntroductionDto } from './dto/update-product-introduction.dto';
 import { InventoryProduct } from './entities/inventory-product.entity';
 import {
+  applyInventoryIntroductionStatusFilter,
   applyInventorySearchFilter,
   applyInventoryStatFilter,
   buildInventoryListFingerprint,
@@ -223,9 +226,18 @@ export class InventoryService {
       toInventorySnapshotFromCreateDto(dto),
     );
 
-    const entity = this.inventoryRepository.create(
-      this.toEntityPayload(userId, this.normalizeManagedMediaRefs(normalized)),
-    );
+    const now = new Date();
+    const introductionStatus =
+      dto.introductionStatus ?? ProductIntroductionStatus.Tolerated;
+    const entity = this.inventoryRepository.create({
+      ...this.toEntityPayload(
+        userId,
+        this.normalizeManagedMediaRefs(normalized),
+      ),
+      introduction_status: introductionStatus,
+      introduction_started_at: now,
+      introduction_status_updated_at: now,
+    });
     const saved = await this.inventoryRepository.save(entity);
     await this.evaluateProductExpiryAlerts(userId, saved);
     this.scheduleSmartPicksPreparation(userId);
@@ -246,6 +258,22 @@ export class InventoryService {
     await this.evaluateProductExpiryAlerts(userId, saved);
     this.scheduleSmartPicksPreparation(userId);
     this.scheduleIngredientProductAnalysis(userId, saved.id);
+    return this.toResponseDto(saved);
+  }
+
+  async updateIntroduction(
+    userId: string,
+    id: string,
+    dto: UpdateProductIntroductionDto,
+  ): Promise<InventoryProductResponseDto> {
+    const product = await this.findByIdOrFail(userId, id);
+    const now = new Date();
+    product.introduction_status = dto.status;
+    product.introduction_started_at = product.introduction_started_at ?? now;
+    product.introduction_status_updated_at = now;
+
+    const saved = await this.saveIntroductionUpdate(product);
+    this.scheduleSmartPicksPreparation(userId);
     return this.toResponseDto(saved);
   }
 
@@ -493,6 +521,12 @@ export class InventoryService {
     );
   }
 
+  private async saveIntroductionUpdate(
+    product: InventoryProduct,
+  ): Promise<InventoryProduct> {
+    return this.inventoryRepository.save(product);
+  }
+
   private buildNextCursor(
     item: InventoryProduct | undefined,
     sort: ShelfSort,
@@ -548,6 +582,11 @@ export class InventoryService {
         category: query.category,
       });
     }
+
+    applyInventoryIntroductionStatusFilter(
+      queryBuilder,
+      query.introductionStatus,
+    );
 
     applyInventorySearchFilter(
       queryBuilder,

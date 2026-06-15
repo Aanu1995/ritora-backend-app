@@ -1573,6 +1573,11 @@ function buildCaseSummary(
     evaluationCase.inputs.contextSummary.productScores.some(
       (score) => score.category === ProductCategory.SunProtection,
     );
+  const contextSkinBehavior =
+    evaluationCase.inputs.contextSummary.profileSignals?.skinBehavior;
+  const skinBehavior = hasReportableObjectValue(contextSkinBehavior)
+    ? contextSkinBehavior
+    : (evaluationCase.inputs.skinProfile?.skin_behavior ?? {});
   return sanitizeForReport({
     id: evaluationCase.id,
     title: evaluationCase.title,
@@ -1629,6 +1634,7 @@ function buildCaseSummary(
             ),
           )
         : (evaluationCase.inputs.skinProfile?.active_tolerances ?? {}),
+      skinBehavior,
       routinePreferences:
         evaluationCase.inputs.skinProfile?.routine_preferences ?? {},
     },
@@ -1720,6 +1726,14 @@ function buildCaseSummary(
       specialistLocked: step.is_specialist_locked,
     })),
     expectations: evaluationCase.expected,
+  });
+}
+
+function hasReportableObjectValue(value: unknown): value is object {
+  if (!value || typeof value !== 'object') return false;
+  return Object.values(value).some((entry) => {
+    if (Array.isArray(entry)) return entry.length > 0;
+    return entry !== null && entry !== undefined && entry !== '';
   });
 }
 

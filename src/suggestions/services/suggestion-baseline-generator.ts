@@ -240,8 +240,9 @@ export function deterministicExplanation(
       return {
         name: product
           ? `${product.brand} ${product.name}`
-          : candidate.productId,
-        reason: deterministicSkippedReason(language),
+          : [candidate.brand, candidate.name].filter(Boolean).join(' ') ||
+            candidate.productId,
+        reason: deterministicSkippedReason(language, candidate.reason),
       };
     }),
     inputs: [
@@ -315,7 +316,24 @@ function evidenceDetail(count: number, language: AppLanguage): string {
   }[language];
 }
 
-function deterministicSkippedReason(language: AppLanguage): string {
+function deterministicSkippedReason(
+  language: AppLanguage,
+  reason?: string | null,
+): string {
+  if (/introduction is paused|paused/i.test(reason ?? '')) {
+    return {
+      en: 'Skipped because the product introduction is paused.',
+      sv: 'Hoppas over eftersom produktintroduktionen ar pausad.',
+      es: 'Se omite porque la introduccion del producto esta pausada.',
+    }[language];
+  }
+  if (/introduction failed|failed/i.test(reason ?? '')) {
+    return {
+      en: 'Skipped because this product introduction is marked as failed.',
+      sv: 'Hoppas over eftersom produktintroduktionen ar markerad som misslyckad.',
+      es: 'Se omite porque la introduccion del producto esta marcada como fallida.',
+    }[language];
+  }
   return {
     en: 'Skipped because today calls for a simpler routine.',
     sv: 'Hoppas over eftersom dagen behover en enklare rutin.',

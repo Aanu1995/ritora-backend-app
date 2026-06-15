@@ -1,6 +1,7 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { StepLabel, STEP_LABELS } from '../../schedule/dto/schedule.constants';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
+import { isProductIntroductionEligibleForSuggestions } from '../../shelf/product-introduction.policy';
 import {
   DEFAULT_LANGUAGE,
   normalizeLanguage,
@@ -43,17 +44,22 @@ export function buildAssemblyContext(
   return {
     language: normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE),
     lockedSteps: inputs.routineSteps
-      .filter((step) => step.is_specialist_locked)
+      .filter(
+        (step) =>
+          step.is_specialist_locked &&
+          isRoutineStepEligibleForSuggestions(inputs, step),
+      )
       .sort((a, b) => a.step_order - b.step_order),
     routineById: new Map(inputs.routineSteps.map((step) => [step.id, step])),
     activeProductById: new Map(
-      inputs.shelfActiveProducts.map((product) => [product.id, product]),
+      inputs.shelfActiveProducts
+        .filter(isInventoryProductEligibleForSuggestions)
+        .map((product) => [product.id, product]),
     ),
     activeProductByName: new Map(
-      inputs.shelfActiveProducts.map((product) => [
-        productKey(product.brand, product.name),
-        product,
-      ]),
+      inputs.shelfActiveProducts
+        .filter(isInventoryProductEligibleForSuggestions)
+        .map((product) => [productKey(product.brand, product.name), product]),
     ),
   };
 }
@@ -120,7 +126,11 @@ export function lockedStepsAreIntact(
   rawSteps: RawSuggestionStepResponse[],
 ): boolean {
   const lockedSteps = inputs.routineSteps
-    .filter((step) => step.is_specialist_locked)
+    .filter(
+      (step) =>
+        step.is_specialist_locked &&
+        isRoutineStepEligibleForSuggestions(inputs, step),
+    )
     .sort((a, b) => a.step_order - b.step_order);
   const rawLocked = rawSteps
     .filter(
@@ -195,9 +205,35 @@ function normalizeRoutineNote(note: string | null | undefined): string | null {
 export function isAllSpecialistLocked(
   inputs: SuggestionGenerationInputs,
 ): boolean {
+  const eligibleRoutineSteps = inputs.routineSteps.filter((step) =>
+    isRoutineStepEligibleForSuggestions(inputs, step),
+  );
   return (
-    inputs.routineSteps.length > 0 &&
-    inputs.routineSteps.every((step) => step.is_specialist_locked)
+    eligibleRoutineSteps.length > 0 &&
+    eligibleRoutineSteps.every((step) => step.is_specialist_locked)
+  );
+}
+
+export function isRoutineStepEligibleForSuggestions(
+  inputs: SuggestionGenerationInputs,
+  step: RoutineStep,
+): boolean {
+  const product =
+    step.product ??
+    inputs.shelfActiveProducts.find(
+      (shelfProduct) => shelfProduct.id === step.inventory_product_id,
+    ) ??
+    null;
+  if (!product) return !step.inventory_product_id;
+  return isInventoryProductEligibleForSuggestions(product);
+}
+
+function isInventoryProductEligibleForSuggestions(
+  product: InventoryProduct | null | undefined,
+): boolean {
+  if (!product) return false;
+  return isProductIntroductionEligibleForSuggestions(
+    product.introduction_status,
   );
 }
 

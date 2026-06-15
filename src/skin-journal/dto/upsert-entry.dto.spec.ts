@@ -53,4 +53,26 @@ describe('UpsertEntryDto', () => {
       ]),
     );
   });
+
+  it('rejects reaction reports without symptoms on JSON requests', async () => {
+    const dto = plainToInstance(UpsertEntryDto, {
+      reaction_report: {
+        symptoms: [],
+        severity: 'mild',
+      },
+    });
+
+    const errors = await validate(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          property: 'reaction_report',
+        }),
+      ]),
+    );
+  });
 });

@@ -13,6 +13,7 @@ import { User } from '../users/entities/user.entity';
 import { UserDataAccessLogService } from '../users/user-data-access-log.service';
 import { UserConsentType } from '../users/user-consent.constants';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RoutineMemoryService } from '../routine-memory/routine-memory.service';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import {
   SkinProfileWaterHardness,
@@ -120,6 +121,7 @@ function entry(overrides: Partial<SkinJournalEntry> = {}): SkinJournalEntry {
     user: undefined as never,
     generateId: jest.fn(),
     ...overrides,
+    reaction_report: overrides.reaction_report ?? null,
   };
 }
 
@@ -240,6 +242,9 @@ function insightInputSignature(entries: SkinJournalEntry[]): string {
       sweat_exercise_today: item.sweat_exercise_today,
       cycle_marker: item.cycle_marker,
       recent_change: item.recent_change,
+      ...(item.reaction_report
+        ? { reaction_report: item.reaction_report }
+        : {}),
       complaint_note: item.complaint_note,
     }));
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -437,6 +442,9 @@ describe('SkinJournalService', () => {
   const smartPicksPreparation = {
     scheduleForUser: jest.fn(),
   } as unknown as jest.Mocked<SmartPicksPreparationService>;
+  const routineMemory = {
+    getTimeline: jest.fn(),
+  } as unknown as jest.Mocked<Pick<RoutineMemoryService, 'getTimeline'>>;
   type InsightPolishOptions = { locale: string; aiPolishEnabled: boolean };
   const insightPolish = {
     polish: jest.fn<
@@ -572,6 +580,73 @@ describe('SkinJournalService', () => {
     mediaRetention.enqueueDeletionVerification.mockClear();
     config.get.mockClear();
     smartPicksPreparation.scheduleForUser.mockClear();
+    routineMemory.getTimeline.mockClear();
+    routineMemory.getTimeline.mockResolvedValue({
+      generatedAt: '2026-04-10T12:00:00.000Z',
+      timeZone: 'UTC',
+      window: {
+        start: '2026-03-12',
+        end: '2026-04-10',
+        days: 30,
+      },
+      disclaimer:
+        'Routine Memory shows timing patterns, not proof of what caused a reaction.',
+      summary: {
+        timelineEventCount: 3,
+        productChangeCount: 1,
+        applicationLogCount: 1,
+        reactionSignalCount: 1,
+        recoveryEventCount: 0,
+        suspiciousProductCount: 1,
+        hasPossibleLinks: true,
+      },
+      timeline: [
+        {
+          id: 'memory-event-1',
+          date: '2026-04-08',
+          occurredAt: '2026-04-08T18:00:00.000Z',
+          type: 'first_logged_use',
+          severity: 'info',
+          product: {
+            productId: 'inventory-1',
+            brand: 'Test',
+            name: 'Retinol Serum',
+            category: 'serum',
+            imageUrl: 'https://private.example.com/product.webp',
+          },
+          sourceType: 'application_log',
+          sourceId: 'application-log-1',
+        },
+        {
+          id: 'memory-event-2',
+          date: '2026-04-10',
+          occurredAt: '2026-04-10T08:00:00.000Z',
+          type: 'reaction_signal',
+          severity: 'warning',
+          product: null,
+          sourceType: 'skin_journal_entry',
+          sourceId: 'entry-current',
+        },
+      ],
+      suspiciousProducts: [
+        {
+          productId: 'inventory-1',
+          brand: 'Test',
+          name: 'Retinol Serum',
+          category: 'serum',
+          imageUrl: 'https://private.example.com/product.webp',
+          suspicionLevel: 'possible',
+          score: 5,
+          reasonCodes: ['reaction_after_first_logged_use'],
+          firstUseDate: '2026-04-08',
+          lastUseDate: '2026-04-09',
+          nearestReactionDate: '2026-04-10',
+          daysFromFirstUseToReaction: 2,
+          reactionSignalCountNearUse: 1,
+        },
+      ],
+      productTimelines: [],
+    });
     accountMonitoringEvents = repo();
 
     const module = await Test.createTestingModule({
@@ -642,6 +717,7 @@ describe('SkinJournalService', () => {
           provide: SmartPicksPreparationService,
           useValue: smartPicksPreparation,
         },
+        { provide: RoutineMemoryService, useValue: routineMemory },
       ],
     }).compile();
 
@@ -850,6 +926,95 @@ describe('SkinJournalService', () => {
     );
     expect(smartPicksPreparation.scheduleForUser).toHaveBeenCalledWith(
       'user-1',
+    );
+  });
+
+  it('starts Recovery Mode from a user-reported barrier reaction without photo analysis', async () => {
+    await service.upsertEntryForResolvedDate({
+      userId: 'user-1',
+      targetDate: todayInTimeZone('UTC'),
+      timeZone: 'UTC',
+      body: {
+        ...COMPLETE_CHECK_IN_BODY,
+        reaction_report: {
+          symptoms: ['burning', 'stinging'],
+          severity: 'mild',
+          onset: 'today',
+          locations: ['cheeks'],
+          red_flags: [],
+          suspected_trigger: 'active_ingredient',
+          note: 'Stinging after using actives twice this week.',
+        },
+      },
+    });
+
+    expect(simplifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: 'user-1',
+        triggered_by_event_id: null,
+        simplification_mode: 'barrier_repair',
+        recovery_phase: 'stabilize',
+        recovery_trigger_source: 'reaction_report',
+        recovery_trigger_symptoms: ['burning', 'stinging'],
+        recovery_trigger_severity: 'mild',
+        recovery_active_overuse: true,
+        recovery_return_step: 'not_started',
+        restore_strategy: 'phased',
+      }),
+    );
+    expect(simplifications.save).toHaveBeenCalled();
+  });
+
+  it('upgrades an existing active simplification with new Recovery Mode metadata', async () => {
+    const existing = {
+      id: 'simplification-1',
+      user_id: 'user-1',
+      triggered_by_event_id: null,
+      started_at: new Date('2026-06-13T08:00:00.000Z'),
+      ended_at: null,
+      acknowledged_at: null,
+      simplification_mode: 'barrier_repair',
+      recovery_phase: 'stabilize',
+      recovery_trigger_source: 'manual',
+      recovery_trigger_symptoms: [],
+      recovery_trigger_severity: null,
+      recovery_active_overuse: false,
+      recovery_review_after: null,
+      recovery_exit_eligible_at: null,
+      recovery_return_step: 'not_started',
+      restore_strategy: 'full',
+      original_schedule_snapshot: null,
+      reason: 'Older active simplification.',
+      triggered_by_event: null,
+      generateId: jest.fn(),
+    } as RoutineSimplificationEvent;
+    simplifications.findOne.mockResolvedValue(existing);
+    simplifications.save.mockImplementation(async (data) => data);
+
+    await service.startSimplification({
+      userId: 'user-1',
+      triggeredByEventId: null,
+      reason:
+        'User-reported barrier symptoms started Recovery Mode with a phased return.',
+      recoveryTriggerSource: 'reaction_report',
+      recoveryTriggerSymptoms: ['burning'],
+      recoveryTriggerSeverity: 'moderate',
+      recoveryActiveOveruse: true,
+      recoveryReviewAfter: new Date('2026-06-17T08:00:00.000Z'),
+      recoveryExitEligibleAt: new Date('2026-06-19T08:00:00.000Z'),
+    });
+
+    expect(simplifications.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'simplification-1',
+        recovery_trigger_source: 'reaction_report',
+        recovery_trigger_symptoms: ['burning'],
+        recovery_trigger_severity: 'moderate',
+        recovery_active_overuse: true,
+        recovery_review_after: new Date('2026-06-17T08:00:00.000Z'),
+        recovery_exit_eligible_at: new Date('2026-06-19T08:00:00.000Z'),
+        restore_strategy: 'phased',
+      }),
     );
   });
 
@@ -2287,6 +2452,28 @@ describe('SkinJournalService', () => {
           brand: 'Test',
           name: 'Retinol Serum',
           category: 'serum',
+          opened_at: new Date('2026-04-08T18:00:00.000Z'),
+          expires_at: new Date('2026-10-08T18:00:00.000Z'),
+          effective_expires_at: new Date('2026-10-08T18:00:00.000Z'),
+          introduction_status: 'week_1',
+          introduction_started_at: new Date('2026-04-08T18:00:00.000Z'),
+          introduction_status_updated_at: new Date('2026-04-09T18:00:00.000Z'),
+          identity: {
+            benefits: ['texture support'],
+            suitedFor: ['experienced retinoid users'],
+            inciIngredients: ['retinol', 'squalane', 'glycerin'],
+          },
+          guidance: {
+            applicationMethod: 'dropper',
+            quantity: 'pea-size',
+            steps: ['Apply after moisturizer if sensitive'],
+            cautions: ['Use only at night'],
+            waitMinutes: 10,
+          },
+          user_fields: {
+            preferredTimeOfDay: 'evening',
+            personalNotes: 'Can sting if layered too often.',
+          },
         },
       },
     ]);
@@ -2298,11 +2485,27 @@ describe('SkinJournalService', () => {
         name: 'Retinol Serum',
         category: 'serum',
         opened_at: new Date('2026-04-08T18:00:00.000Z'),
+        expires_at: new Date('2026-10-08T18:00:00.000Z'),
+        effective_expires_at: new Date('2026-10-08T18:00:00.000Z'),
+        introduction_status: 'week_1',
+        introduction_started_at: new Date('2026-04-08T18:00:00.000Z'),
+        introduction_status_updated_at: new Date('2026-04-09T18:00:00.000Z'),
         identity: {
+          benefits: ['texture support'],
+          suitedFor: ['experienced retinoid users'],
           inciIngredients: ['retinol', 'squalane', 'glycerin'],
         },
-        guidance: { cautions: ['Use only at night'] },
-        user_fields: { preferredTimeOfDay: 'evening' },
+        guidance: {
+          applicationMethod: 'dropper',
+          quantity: 'pea-size',
+          steps: ['Apply after moisturizer if sensitive'],
+          cautions: ['Use only at night'],
+          waitMinutes: 10,
+        },
+        user_fields: {
+          preferredTimeOfDay: 'evening',
+          personalNotes: 'Can sting if layered too often.',
+        },
       },
       {
         id: 'inventory-2',
@@ -2311,18 +2514,34 @@ describe('SkinJournalService', () => {
         name: 'Rich Balm',
         category: 'moisturizer',
         opened_at: null,
+        expires_at: null,
+        effective_expires_at: null,
+        introduction_status: 'tolerated',
+        introduction_started_at: null,
+        introduction_status_updated_at: null,
         identity: {
+          benefits: ['barrier support'],
+          suitedFor: ['dry skin'],
           inciIngredients: ['petrolatum', 'shea butter'],
         },
-        guidance: { cautions: [] },
-        user_fields: { preferredTimeOfDay: 'either' },
+        guidance: {
+          applicationMethod: null,
+          quantity: null,
+          steps: [],
+          cautions: [],
+          waitMinutes: null,
+        },
+        user_fields: { preferredTimeOfDay: 'either', personalNotes: null },
       },
     ]);
     applicationLogs.find.mockResolvedValue([
       {
         target_date: '2026-04-09',
+        target_time: '20:00:00',
         daypart: 'evening',
         applied_at: new Date('2026-04-09T20:00:00.000Z'),
+        general_notes: 'Cheeks felt warmer after the evening routine.',
+        has_been_edited: true,
         items: [
           {
             status: 'skipped',
@@ -2337,13 +2556,48 @@ describe('SkinJournalService', () => {
               category: 'serum',
             },
             substituted_with_product: null,
+            applied_at: null,
+            item_source: 'recommended',
+            is_ad_hoc: false,
+            ad_hoc_brand: null,
+            ad_hoc_name: null,
+            notes: 'Skipped because it stung last time.',
+            substitution_reason: null,
+            recommended_snapshot: {
+              product_id: 'inventory-1',
+              brand: 'Test',
+              name: 'Retinol Serum',
+              step_label: 'treatment',
+            },
+            applied_snapshot: null,
           },
         ],
       },
     ]);
+    simplifications.findOne.mockResolvedValue({
+      id: 'simplification-1',
+      user_id: 'user-1',
+      simplification_mode: 'barrier_repair',
+      recovery_phase: 'stabilize',
+      recovery_trigger_source: 'reaction_report',
+      recovery_trigger_symptoms: ['burning', 'redness'],
+      recovery_trigger_severity: 'moderate',
+      recovery_active_overuse: true,
+      recovery_review_after: new Date('2026-04-13T08:00:00.000Z'),
+      recovery_exit_eligible_at: new Date('2026-04-15T08:00:00.000Z'),
+      recovery_return_step: 'not_started',
+      restore_strategy: 'phased',
+    });
 
     await service.runAnalysis(current.id, 'user-1');
 
+    expect(routineMemory.getTimeline).toHaveBeenCalledTimes(1);
+    expect(routineMemory.getTimeline).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'user-1', time_zone: 'UTC' }),
+      { from: '2026-03-12', to: '2026-04-10' },
+      expect.any(Date),
+      'UTC',
+    );
     expect(analysis.analyze).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
@@ -2370,10 +2624,54 @@ describe('SkinJournalService', () => {
           sweat_exercise_today: false,
           cycle_marker: 'dont_track',
           recent_change_kind: 'started_new_product',
+          recent_change_product_id: 'inventory-1',
+          recent_change_note: 'retinoid',
           complaint_note: 'Burning feeling near cheeks',
           is_pre_routine: true,
         }),
         routineContext: expect.objectContaining({
+          active_recovery: expect.objectContaining({
+            active: true,
+            simplification_mode: 'barrier_repair',
+            recovery_phase: 'stabilize',
+            trigger_source: 'reaction_report',
+            trigger_symptoms: ['burning', 'redness'],
+            trigger_severity: 'moderate',
+            active_overuse: true,
+            review_after: '2026-04-13T08:00:00.000Z',
+            exit_eligible_at: '2026-04-15T08:00:00.000Z',
+            return_step: 'not_started',
+            restore_strategy: 'phased',
+          }),
+          routine_memory: expect.objectContaining({
+            window: {
+              start: '2026-03-12',
+              end: '2026-04-10',
+              days: 30,
+            },
+            summary: expect.objectContaining({
+              timeline_event_count: 3,
+              suspicious_product_count: 1,
+              has_possible_links: true,
+            }),
+            suspicious_products: [
+              expect.objectContaining({
+                product_id: 'inventory-1',
+                name: 'Retinol Serum',
+                suspicion_level: 'possible',
+                reason_codes: ['reaction_after_first_logged_use'],
+                days_from_first_use_to_reaction: 2,
+              }),
+            ],
+            recent_events: expect.arrayContaining([
+              expect.objectContaining({
+                type: 'first_logged_use',
+                product_id: 'inventory-1',
+                name: 'Retinol Serum',
+                source_type: 'application_log',
+              }),
+            ]),
+          }),
           active_shelf_products: expect.arrayContaining([
             expect.objectContaining({
               product_id: 'inventory-1',
@@ -2382,13 +2680,28 @@ describe('SkinJournalService', () => {
               category: 'serum',
               preferred_time: 'evening',
               opened_at: '2026-04-08T18:00:00.000Z',
+              expires_at: '2026-10-08T18:00:00.000Z',
+              effective_expires_at: '2026-10-08T18:00:00.000Z',
+              introduction_status: 'week_1',
+              introduction_started_at: '2026-04-08T18:00:00.000Z',
+              introduction_status_updated_at: '2026-04-09T18:00:00.000Z',
+              benefit_tags: ['texture support'],
+              suited_for_tags: ['experienced retinoid users'],
               ingredient_preview: ['retinol', 'squalane', 'glycerin'],
+              application_method: 'dropper',
+              quantity: 'pea-size',
+              wait_minutes: 10,
+              guidance_steps: ['Apply after moisturizer if sensitive'],
+              guidance_cautions: ['Use only at night'],
+              user_product_note: 'Can sting if layered too often.',
             }),
             expect.objectContaining({
               product_id: 'inventory-2',
               name: 'Rich Balm',
               category: 'moisturizer',
               preferred_time: 'either',
+              benefit_tags: ['barrier support'],
+              suited_for_tags: ['dry skin'],
             }),
           ]),
           routine_products: expect.arrayContaining([
@@ -2398,18 +2711,31 @@ describe('SkinJournalService', () => {
               name: 'Retinol Serum',
               category: 'serum',
               step_label: 'treatment',
+              introduction_status: 'week_1',
+              guidance_cautions: ['Use only at night'],
             }),
           ]),
           recent_applications: expect.arrayContaining([
             expect.objectContaining({
               target_date: '2026-04-09',
+              target_time: '20:00:00',
               daypart: 'evening',
+              general_notes: 'Cheeks felt warmer after the evening routine.',
+              has_been_edited: true,
               items: expect.arrayContaining([
                 expect.objectContaining({
                   status: 'skipped',
                   product_id: 'inventory-1',
                   name: 'Retinol Serum',
                   category: 'serum',
+                  applied_at: null,
+                  item_source: 'recommended',
+                  is_ad_hoc: false,
+                  recommended_product_id: 'inventory-1',
+                  recommended_name: 'Retinol Serum',
+                  applied_product_id: null,
+                  applied_name: null,
+                  notes: 'Skipped because it stung last time.',
                 }),
               ]),
             }),
@@ -2419,6 +2745,8 @@ describe('SkinJournalService', () => {
               entry_date: '2026-04-10',
               sleep_band: '5to7h',
               stress_today: 'high',
+              recent_change_product_id: 'inventory-1',
+              recent_change_note: 'retinoid',
             }),
           ]),
         }),
@@ -2426,10 +2754,13 @@ describe('SkinJournalService', () => {
     );
     const call = analysis.analyze.mock.calls.at(-1)?.[0] as {
       skinContext?: Record<string, unknown> | null;
+      routineContext?: Record<string, unknown> | null;
     };
     expect(call.skinContext).not.toHaveProperty('ethnicity');
     expect(call.skinContext).not.toHaveProperty('country_code');
     expect(call.skinContext).not.toHaveProperty('city');
+    expect(JSON.stringify(call.routineContext)).not.toContain('imageUrl');
+    expect(JSON.stringify(call.routineContext)).not.toContain('sourceId');
     expect(photoInterpretation.interpret).toHaveBeenCalledWith(
       expect.objectContaining({ model_version: 'test-model' }),
       expect.any(Date),
@@ -2440,11 +2771,28 @@ describe('SkinJournalService', () => {
         }),
         recentChange: current.recent_change,
         routineContext: expect.objectContaining({
+          routine_memory: expect.objectContaining({
+            summary: expect.objectContaining({
+              has_possible_links: true,
+            }),
+            suspicious_products: [
+              expect.objectContaining({
+                product_id: 'inventory-1',
+                reason_codes: ['reaction_after_first_logged_use'],
+              }),
+            ],
+          }),
+          active_recovery: expect.objectContaining({
+            recovery_phase: 'stabilize',
+            trigger_source: 'reaction_report',
+            active_overuse: true,
+          }),
           routine_products: [
             expect.objectContaining({
               product_id: 'inventory-1',
               name: 'Retinol Serum',
               step_label: 'treatment',
+              introduction_status: 'week_1',
             }),
           ],
           recent_applications: [
@@ -2463,6 +2811,7 @@ describe('SkinJournalService', () => {
               entry_date: '2026-04-10',
               ratings: { redness: 4, irritation: 3, sensitivity: 4 },
               stress_today: 'high',
+              recent_change_note: 'retinoid',
               complaint_note: 'Burning feeling near cheeks',
             }),
           ]),
@@ -3096,6 +3445,43 @@ describe('SkinJournalService', () => {
       expect.objectContaining({
         kind: 'simplification_started',
         dedupeKey: expectNotificationDedupeKey('simplification_started'),
+      }),
+    );
+  });
+
+  it('starts Recovery Mode with photo-analysis metadata for moderate reaction signals', async () => {
+    const current = entry({
+      id: 'entry-reaction',
+      entry_date: '2026-04-10',
+      photo_object_key: 'skin-journal/user-1/entry-reaction/photo.webp',
+      analysis_status: 'pending',
+    });
+    entries.findOne.mockResolvedValue(current);
+    entries.find.mockResolvedValue([current]);
+    events.findOne.mockResolvedValue(null);
+    analysis.analyze.mockResolvedValueOnce(
+      analysisRunResult(
+        analyzedObservations({
+          reaction_signals: {
+            reaction_detected: true,
+            reaction_severity: 'moderate',
+            indicators: ['redness_spike'],
+            confidence: 0.82,
+          },
+          barrier_signs: { barrier_compromise: true, indicators: [] },
+          should_flag_for_doctor: false,
+        }),
+      ),
+    );
+
+    await service.runAnalysis('entry-reaction', 'user-1');
+
+    expect(simplifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recovery_trigger_source: 'photo_analysis',
+        recovery_trigger_severity: 'moderate',
+        recovery_return_step: 'not_started',
+        restore_strategy: 'phased',
       }),
     );
   });
