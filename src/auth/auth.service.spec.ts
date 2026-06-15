@@ -153,7 +153,7 @@ describe('AuthService', () => {
       save: jest.fn().mockImplementation((data) => Promise.resolve(data)),
       findOne: jest.fn(),
       find: jest.fn().mockResolvedValue([]),
-      update: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     accountMonitoringEventsRepo = {
       create: jest.fn().mockImplementation((data) => data),
@@ -426,7 +426,24 @@ describe('AuthService', () => {
 
       expect(result.accessToken).toBe('access-token-123');
       expect(result.user.email).toBe('test@example.com');
-      expect(res.cookie).toHaveBeenCalled();
+      const createdSession = sessionsRepo.create.mock.calls[0][0] as {
+        created_at: Date;
+        expires_at: Date;
+        last_used_at: Date;
+      };
+      expect(createdSession.created_at).toBeInstanceOf(Date);
+      expect(createdSession.last_used_at).toBe(createdSession.created_at);
+      expect(createdSession.expires_at.getTime()).toBeGreaterThan(
+        createdSession.created_at.getTime() + 6 * 24 * 60 * 60 * 1000,
+      );
+      expect(res.cookie).toHaveBeenCalledWith(
+        'ritora_refresh',
+        expect.any(String),
+        expect.objectContaining({
+          httpOnly: true,
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+        }),
+      );
     });
 
     it('sanitizes stored session metadata from request headers', async () => {
@@ -894,12 +911,14 @@ describe('AuthService', () => {
       const secret = 'a'.repeat(64);
       const secretHash = sha256(secret);
       const user = fakeUser();
+      const originalExpiresAt = new Date(Date.now() + 86400000);
 
       sessionsRepo.findOne.mockResolvedValue({
         id: '01SESSION',
         user_id: user.id,
         refresh_token_hash: secretHash,
-        expires_at: new Date(Date.now() + 86400000),
+        expires_at: originalExpiresAt,
+        created_at: new Date(Date.now() - 60_000),
         revoked_at: null,
         user,
       });
@@ -912,7 +931,25 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('access-token-123');
       expect(result.refreshToken).toMatch(/^01SESSION\.[a-f0-9]{64}$/);
       expect(result.preferredLanguage).toBe('en');
-      expect(sessionsRepo.save).toHaveBeenCalled();
+      expect(sessionsRepo.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expires_at: expect.any(Object),
+          id: '01SESSION',
+          refresh_token_hash: secretHash,
+          revoked_at: expect.any(Object),
+        }),
+        expect.objectContaining({
+          expires_at: expect.any(Date),
+          last_used_at: expect.any(Date),
+          refresh_token_hash: expect.not.stringMatching(secretHash),
+        }),
+      );
+      const updatePayload = sessionsRepo.update.mock.calls[0][1] as {
+        expires_at: Date;
+      };
+      expect(updatePayload.expires_at.getTime()).toBeGreaterThan(
+        originalExpiresAt.getTime(),
+      );
       expect(res.cookie).toHaveBeenCalled();
     });
 
@@ -925,6 +962,7 @@ describe('AuthService', () => {
         user_id: user.id,
         refresh_token_hash: sha256(secret),
         expires_at: new Date(Date.now() + 86400000),
+        created_at: new Date(Date.now() - 60_000),
         revoked_at: null,
         ip_address: '127.0.0.1',
         user_agent: 'Existing Agent',
@@ -938,7 +976,8 @@ describe('AuthService', () => {
         'Next\r\nAgent',
       );
 
-      expect(sessionsRepo.save).toHaveBeenCalledWith(
+      expect(sessionsRepo.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: '01SESSION' }),
         expect.objectContaining({
           ip_address: '127.0.0.1',
           user_agent: 'Next Agent',
@@ -992,6 +1031,7 @@ describe('AuthService', () => {
         user_id: user.id,
         refresh_token_hash: sha256(secret),
         expires_at: new Date(Date.now() + 86400000),
+        created_at: new Date(Date.now() - 60_000),
         revoked_at: null,
         user,
       });
@@ -1000,7 +1040,7 @@ describe('AuthService', () => {
         service.refreshTokens(`01SESSION.${secret}`, asResponse(res)),
       ).rejects.toThrow(ForbiddenException);
 
-      expect(sessionsRepo.save).not.toHaveBeenCalled();
+      expect(sessionsRepo.update).not.toHaveBeenCalled();
       expect(res.cookie).not.toHaveBeenCalled();
     });
 
@@ -1019,6 +1059,7 @@ describe('AuthService', () => {
         user_id: user.id,
         refresh_token_hash: sha256(secret),
         expires_at: new Date(Date.now() + 86400000),
+        created_at: new Date(Date.now() - 60_000),
         revoked_at: null,
         user,
       });
@@ -1048,6 +1089,7 @@ describe('AuthService', () => {
         user_id: user.id,
         refresh_token_hash: sha256(secret),
         expires_at: new Date(Date.now() + 86400000),
+        created_at: new Date(Date.now() - 60_000),
         revoked_at: null,
         user,
       });
@@ -1061,7 +1103,7 @@ describe('AuthService', () => {
       expect(usersService.clearExpiredAccountRestriction).toHaveBeenCalledWith(
         user.id,
       );
-      expect(sessionsRepo.save).toHaveBeenCalled();
+      expect(sessionsRepo.update).toHaveBeenCalled();
       expect(res.cookie).toHaveBeenCalled();
     });
   });

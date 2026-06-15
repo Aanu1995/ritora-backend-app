@@ -229,6 +229,7 @@ describe('envValidationSchema', () => {
       OTEL_SERVICE_NAME: 'ritora-backend-api',
       JWT_SECRET: 'dev-jwt-secret-change-me',
       JWT_REFRESH_SECRET: 'dev-refresh-secret-change-me',
+      JWT_REFRESH_EXPIRY: '7d',
       MAIL_FROM: 'onboarding@resend.dev',
       NOTIFICATION_MAIL_FROM: '',
       SUPPORT_EMAIL: 'support@getritora.com',
