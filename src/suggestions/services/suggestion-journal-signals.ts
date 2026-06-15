@@ -24,6 +24,11 @@ export function buildJournalSignals(
   const sunExposureCounts: Record<string, number> = {};
   const cycleMarkers: string[] = [];
   const recentChangeKinds: string[] = [];
+  const recentChanges: NonNullable<
+    NonNullable<
+      SuggestionContextSummary['journalSignals']
+    >['checkIns']['recentChanges']
+  > = [];
   const photoAnalysis = new JournalPhotoAnalysisSignalCollector();
   let sweatExerciseDays = 0;
   const complaintNotes: string[] = [];
@@ -38,8 +43,18 @@ export function buildJournalSignals(
       increment(sunExposureCounts, entry.sun_exposure_today);
     if (entry.sweat_exercise_today) sweatExerciseDays += 1;
     if (entry.cycle_marker) cycleMarkers.push(entry.cycle_marker);
-    if (entry.recent_change?.kind)
+    if (entry.recent_change?.kind) {
       recentChangeKinds.push(entry.recent_change.kind);
+      if (recentChanges.length < 8) {
+        recentChanges.push({
+          entryDate,
+          kind: entry.recent_change.kind,
+          relatedInventoryProductId:
+            entry.recent_change.related_inventory_product_id ?? null,
+          note: trimForPrompt(entry.recent_change.note ?? '', 120) || null,
+        });
+      }
+    }
     if (entry.complaint_note && complaintNotes.length < 5) {
       complaintNotes.push(trimForPrompt(entry.complaint_note, 120));
     }
@@ -73,6 +88,7 @@ export function buildJournalSignals(
       sweatExerciseDays,
       cycleMarkers: unique(cycleMarkers),
       recentChangeKinds: unique(recentChangeKinds),
+      recentChanges,
       complaintNotes,
     },
     detectedConcerns: photoSummary.detectedConcerns,

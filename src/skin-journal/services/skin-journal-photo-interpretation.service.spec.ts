@@ -338,6 +338,104 @@ describe('SkinJournalPhotoInterpretationService', () => {
     );
   });
 
+  it('names a recent-change product from active shelf without treating shelf-only metadata as exposure', () => {
+    const result = service.interpret(
+      observations({
+        detected_concerns: [
+          {
+            concern: 'acne',
+            severity: 'moderate',
+            locations: ['chin'],
+            confidence: 0.74,
+          },
+        ],
+      }),
+      generatedAt,
+      {
+        recentChange: {
+          kind: 'started_new_product',
+          related_inventory_product_id: 'retinoid-1',
+          note: 'Started retinol',
+        },
+        routineContext: {
+          active_shelf_products: [
+            {
+              product_id: 'retinoid-1',
+              brand: 'Test',
+              name: 'Night Renewal',
+              category: 'treatment',
+              step_label: null,
+              ingredient_preview: ['retinol'],
+            },
+          ],
+          routine_products: [],
+          recent_applications: [],
+          recent_check_ins: [],
+        },
+      },
+    );
+
+    const acneFactors =
+      result.concern_guidance
+        ?.find((item) => item.concern === 'acne')
+        ?.possible_factor_keys.map((item) => item.key) ?? [];
+
+    expect(acneFactors).toContain(
+      'journal.analysis.guidance.factors.recentProductChangeNamed',
+    );
+    expect(acneFactors).not.toContain(
+      'journal.analysis.guidance.factors.routineProductTiming',
+    );
+    expect(acneFactors).not.toContain(
+      'journal.analysis.guidance.factors.activeIngredientTiming',
+    );
+  });
+
+  it('does not treat unused active shelf products as product exposure', () => {
+    const result = service.interpret(
+      observations({
+        detected_concerns: [
+          {
+            concern: 'acne',
+            severity: 'moderate',
+            locations: ['chin'],
+            confidence: 0.74,
+          },
+        ],
+      }),
+      generatedAt,
+      {
+        routineContext: {
+          active_shelf_products: [
+            {
+              product_id: 'retinoid-1',
+              brand: 'Test',
+              name: 'Night Renewal',
+              category: 'treatment',
+              step_label: null,
+              ingredient_preview: ['retinol'],
+            },
+          ],
+          routine_products: [],
+          recent_applications: [],
+          recent_check_ins: [],
+        },
+      },
+    );
+
+    const acneFactors =
+      result.concern_guidance
+        ?.find((item) => item.concern === 'acne')
+        ?.possible_factor_keys.map((item) => item.key) ?? [];
+
+    expect(acneFactors).not.toContain(
+      'journal.analysis.guidance.factors.routineProductTiming',
+    );
+    expect(acneFactors).not.toContain(
+      'journal.analysis.guidance.factors.activeIngredientTiming',
+    );
+  });
+
   it('maps large pores and oiliness to oily skin guidance', () => {
     const result = service.interpret(
       observations({
@@ -461,7 +559,7 @@ describe('SkinJournalPhotoInterpretationService', () => {
               product_id: 'spf-1',
               brand: 'Test',
               name: 'SPF 50 Sunscreen',
-              category: 'sunscreen',
+              category: 'sun-protection',
               step_label: 'morning SPF',
             },
           ],
@@ -470,7 +568,7 @@ describe('SkinJournalPhotoInterpretationService', () => {
               product_id: 'spf-1',
               brand: 'Test',
               name: 'SPF 50 Sunscreen',
-              category: 'sunscreen',
+              category: 'sun-protection',
               step_label: 'morning SPF',
             },
           ],
@@ -485,7 +583,7 @@ describe('SkinJournalPhotoInterpretationService', () => {
                   product_id: 'spf-1',
                   brand: 'Test',
                   name: 'SPF 50 Sunscreen',
-                  category: 'sunscreen',
+                  category: 'sun-protection',
                   step_label: 'morning SPF',
                 },
               ],

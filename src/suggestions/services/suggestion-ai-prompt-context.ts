@@ -84,6 +84,25 @@ export function formatAppliedProductHistoryForPrompt(
       isOffShelf: product.isOffShelf,
       isSubstitution: product.isSubstitution,
     })),
+    recentItems: (history.recentItems ?? []).slice(0, 20).map((item) => ({
+      targetDate: item.targetDate,
+      targetTime: item.targetTime,
+      daypart: item.daypart,
+      status: item.status,
+      itemSource: item.itemSource,
+      stepLabel: item.stepLabel,
+      recommendedProductId: item.recommendedProductId,
+      recommendedName: item.recommendedName,
+      recommendedCategory: item.recommendedCategory,
+      appliedProductId: item.appliedProductId,
+      appliedName: item.appliedName,
+      appliedCategory: item.appliedCategory,
+      appliedAt: item.appliedAt,
+      isOffShelf: item.isOffShelf,
+      isSubstitution: item.isSubstitution,
+      notes: item.notes,
+      substitutionReason: item.substitutionReason,
+    })),
   };
 }
 
@@ -102,6 +121,14 @@ export function formatJournalSignalsForPrompt(
       sweatExerciseDays: signals.checkIns.sweatExerciseDays,
       cycleMarkers: signals.checkIns.cycleMarkers.slice(0, 10),
       recentChangeKinds: signals.checkIns.recentChangeKinds.slice(0, 10),
+      recentChanges: (signals.checkIns.recentChanges ?? [])
+        .slice(0, 8)
+        .map((change) => ({
+          entryDate: change.entryDate,
+          kind: change.kind,
+          relatedInventoryProductId: change.relatedInventoryProductId,
+          note: change.note,
+        })),
       complaintNotes: signals.checkIns.complaintNotes
         .slice(0, 5)
         .map((note) => trimPromptText(note, 120)),
@@ -160,6 +187,15 @@ export function formatJournalSignalsForPrompt(
           actionKeys: guidance.actionKeys.slice(0, 12),
           avoidKeys: guidance.avoidKeys.slice(0, 12),
           factorKeys: guidance.factorKeys.slice(0, 12),
+          possibleCauseItems: (guidance.possibleCauseItems ?? [])
+            .slice(0, 4)
+            .map((item) => trimPromptText(item, 140)),
+          tryNextItems: (guidance.tryNextItems ?? [])
+            .slice(0, 4)
+            .map((item) => trimPromptText(item, 140)),
+          avoidItems: (guidance.avoidItems ?? [])
+            .slice(0, 4)
+            .map((item) => trimPromptText(item, 140)),
           escalationKeys: guidance.escalationKeys.slice(0, 12),
           sourceIds: guidance.sourceIds.slice(0, 12),
         }))
@@ -272,6 +308,19 @@ export function formatScoredContextForPrompt(
       name: score.name,
       category: score.category,
       preferredTimeOfDay: score.preferredTimeOfDay,
+      openedAt: score.openedAt ?? null,
+      expiresAt: score.expiresAt ?? null,
+      effectiveExpiresAt: score.effectiveExpiresAt ?? null,
+      introductionStatus: score.introductionStatus ?? null,
+      introductionStartedAt: score.introductionStartedAt ?? null,
+      introductionStatusUpdatedAt: score.introductionStatusUpdatedAt ?? null,
+      benefits: score.benefits ?? [],
+      suitedFor: score.suitedFor ?? [],
+      applicationMethod: score.applicationMethod ?? null,
+      quantity: score.quantity ?? null,
+      guidanceSteps: score.guidanceSteps ?? [],
+      guidanceCautions: score.guidanceCautions ?? [],
+      userProductNote: score.userProductNote ?? null,
       activeTags: score.activeTags,
       suitabilityScore: score.suitabilityScore,
       suitabilityReasons: score.suitabilityReasons,
@@ -304,6 +353,10 @@ export function formatScoredContextForPrompt(
     },
     skippedCandidates: summary.skippedCandidates.map((candidate) => ({
       productId: candidate.productId,
+      brand: candidate.brand ?? null,
+      name: candidate.name ?? null,
+      category: candidate.category ?? null,
+      introductionStatus: candidate.introductionStatus ?? null,
       reason: candidate.reason,
       sourceIds: candidate.sourceIds,
     })),

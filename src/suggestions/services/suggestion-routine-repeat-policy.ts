@@ -1,4 +1,5 @@
 import { ProductCategory } from '../../shelf/shelf.types';
+import { isProductIntroductionEligibleForSuggestions } from '../../shelf/product-introduction.policy';
 import {
   SuggestionDaypart,
   SuggestionStepProvenance,
@@ -32,6 +33,14 @@ export function hasCurrentSelectionEvidence(
     (product) => product.id === productId,
   );
   if (!score && !shelfProduct) return false;
+  if (
+    shelfProduct &&
+    !isProductIntroductionEligibleForSuggestions(
+      shelfProduct.introduction_status,
+    )
+  ) {
+    return false;
+  }
   const preferredTime =
     score?.preferredTimeOfDay ?? shelfProduct?.user_fields?.preferredTimeOfDay;
   if (!isPreferredTimeCompatibleWithDaypart(preferredTime, inputs.daypart)) {
@@ -62,12 +71,7 @@ export function requiresOwnedDaytimeSpf(
   ) {
     return false;
   }
-  return (
-    inputs.contextSummary.productScores.some(
-      (score) => score.category === ProductCategory.SunProtection,
-    ) ||
-    inputs.shelfActiveProducts.some(
-      (product) => product.category === ProductCategory.SunProtection,
-    )
+  return resolveSuggestionProductScores(inputs).some(
+    (score) => score.category === ProductCategory.SunProtection,
   );
 }

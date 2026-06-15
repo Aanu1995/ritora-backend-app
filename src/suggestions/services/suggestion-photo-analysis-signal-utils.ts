@@ -5,6 +5,7 @@ import type {
   PhotoAnalysisTextRef,
 } from '../../skin-journal/skin-journal.constants';
 import type { SuggestionContextSummary } from '../suggestion-context.types';
+import { trimForPrompt } from './suggestion-context-common';
 
 type JournalSignals = NonNullable<SuggestionContextSummary['journalSignals']>;
 
@@ -42,6 +43,9 @@ export type ConcernGuidanceAggregate = {
   actionKeys: Set<string>;
   avoidKeys: Set<string>;
   factorKeys: Set<string>;
+  possibleCauseItems: string[];
+  tryNextItems: string[];
+  avoidItems: string[];
   escalationKeys: Set<string>;
   sourceIds: Set<string>;
 };
@@ -104,6 +108,9 @@ export function createConcernGuidanceAggregate(
     actionKeys: new Set<string>(),
     avoidKeys: new Set<string>(),
     factorKeys: new Set<string>(),
+    possibleCauseItems: [],
+    tryNextItems: [],
+    avoidItems: [],
     escalationKeys: new Set<string>(),
     sourceIds: new Set<string>(),
   };
@@ -182,6 +189,9 @@ export function buildConcernGuidance(
       actionKeys: Array.from(aggregate.actionKeys).sort(),
       avoidKeys: Array.from(aggregate.avoidKeys).sort(),
       factorKeys: Array.from(aggregate.factorKeys).sort(),
+      possibleCauseItems: aggregate.possibleCauseItems.slice(0, 6),
+      tryNextItems: aggregate.tryNextItems.slice(0, 6),
+      avoidItems: aggregate.avoidItems.slice(0, 6),
       escalationKeys: Array.from(aggregate.escalationKeys).sort(),
       sourceIds: Array.from(aggregate.sourceIds).sort(),
     }))
@@ -191,6 +201,18 @@ export function buildConcernGuidance(
         second.count - first.count ||
         first.concern.localeCompare(second.concern),
     );
+}
+
+export function addGuidanceItems(
+  target: string[],
+  values: readonly string[] | undefined,
+): void {
+  for (const value of values ?? []) {
+    const trimmed = trimForPrompt(value, 160);
+    if (!trimmed || target.includes(trimmed)) continue;
+    target.push(trimmed);
+    if (target.length >= 8) return;
+  }
 }
 
 export function buildVisualChanges(

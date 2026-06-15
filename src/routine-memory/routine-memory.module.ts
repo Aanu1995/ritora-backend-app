@@ -20,5 +20,6 @@ import { RoutineMemoryService } from './routine-memory.service';
   ],
   controllers: [RoutineMemoryController],
   providers: [RoutineMemoryService],
+  exports: [RoutineMemoryService],
 })
 export class RoutineMemoryModule {}

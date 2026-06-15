@@ -1,4 +1,8 @@
-import type { PreferredTimeOfDay, ProductCategory } from '../shelf/shelf.types';
+import type {
+  PreferredTimeOfDay,
+  ProductCategory,
+  ProductIntroductionStatus,
+} from '../shelf/shelf.types';
 import type { EnvironmentContextSummary } from '../environment-intelligence/environment-intelligence.types';
 import {
   SuggestionDaypart,
@@ -68,6 +72,10 @@ export interface SuggestionContextSummary {
   evidenceSources: SuggestionEvidenceSourceJson[];
   skippedCandidates: {
     productId: string;
+    brand?: string | null;
+    name?: string | null;
+    category?: ProductCategory | null;
+    introductionStatus?: ProductIntroductionStatus | null;
     reason: string;
     sourceIds: SuggestionEvidenceSourceId[];
   }[];
@@ -146,6 +154,12 @@ export interface SuggestionJournalSignals {
     sweatExerciseDays: number;
     cycleMarkers: string[];
     recentChangeKinds: string[];
+    recentChanges?: {
+      entryDate: string;
+      kind: string;
+      relatedInventoryProductId: string | null;
+      note: string | null;
+    }[];
     complaintNotes: string[];
   };
   detectedConcerns: {
@@ -195,6 +209,9 @@ export interface SuggestionJournalSignals {
     actionKeys: string[];
     avoidKeys: string[];
     factorKeys: string[];
+    possibleCauseItems?: string[];
+    tryNextItems?: string[];
+    avoidItems?: string[];
     escalationKeys: string[];
     sourceIds: string[];
   }[];
@@ -230,6 +247,7 @@ export interface SuggestionAppliedProductHistory {
   windowEndDate: string;
   recordsConsidered: number;
   products: SuggestionAppliedProductHistoryItem[];
+  recentItems?: SuggestionRecentApplicationItem[];
 }
 
 export interface SuggestionAppliedProductHistoryItem {
@@ -246,6 +264,26 @@ export interface SuggestionAppliedProductHistoryItem {
   lastAppliedAt: string | null;
   isOffShelf: boolean;
   isSubstitution: boolean;
+}
+
+export interface SuggestionRecentApplicationItem {
+  targetDate: string;
+  targetTime: string | null;
+  daypart: string | null;
+  status: string;
+  itemSource: string;
+  stepLabel: string | null;
+  recommendedProductId: string | null;
+  recommendedName: string | null;
+  recommendedCategory: string | null;
+  appliedProductId: string | null;
+  appliedName: string | null;
+  appliedCategory: string | null;
+  appliedAt: string | null;
+  isOffShelf: boolean;
+  isSubstitution: boolean;
+  notes: string | null;
+  substitutionReason: string | null;
 }
 
 export interface SuggestionRoutineMemory {
@@ -274,6 +312,19 @@ export interface SuggestionProductScore {
   name: string;
   category: ProductCategory;
   preferredTimeOfDay: PreferredTimeOfDay | null;
+  openedAt?: string | null;
+  expiresAt?: string | null;
+  effectiveExpiresAt?: string | null;
+  introductionStatus?: ProductIntroductionStatus | null;
+  introductionStartedAt?: string | null;
+  introductionStatusUpdatedAt?: string | null;
+  benefits?: string[];
+  suitedFor?: string[];
+  applicationMethod?: string | null;
+  quantity?: string | null;
+  guidanceSteps?: string[];
+  guidanceCautions?: string[];
+  userProductNote?: string | null;
   activeTags: string[];
   suitabilityScore: number;
   suitabilityReasons: string[];

@@ -558,6 +558,32 @@ describe("Today's Suggestion evaluation reporting", () => {
     });
   });
 
+  it('includes supplied skin behavior in judge case summaries', async () => {
+    const report = await evaluateTodaysSuggestionGoldenCases({
+      generator: {
+        generate: jest.fn().mockResolvedValue(
+          darkMarksOutput({
+            includeSpfGap: true,
+          }),
+        ),
+      },
+      judge: passingJudge,
+      model: 'gpt-4.1-mini',
+      generatedAt: '2026-05-18T08:00:00.000Z',
+      cases: [goldenCase('dark_marks_no_spf_gap')],
+    });
+    const summary = report.cases[0].sanitizedCaseSummary as {
+      skinProfile: {
+        skinBehavior: Record<string, unknown>;
+      };
+    };
+
+    expect(summary.skinProfile.skinBehavior).toMatchObject({
+      pihTendency: 'high',
+      sunscreenHabit: 'inconsistent',
+    });
+  });
+
   it('records repeatability variation without failing when repeated outputs stay valid', async () => {
     const first = darkMarksOutput({ includeSpfGap: true });
     const second = darkMarksOutput({ includeSpfGap: true });

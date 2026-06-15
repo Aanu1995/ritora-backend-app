@@ -10,6 +10,7 @@ import type { SuggestionContextSummary } from '../suggestion-context.types';
 import { increment, trimForPrompt, unique } from './suggestion-context-common';
 import {
   addTextRefKeys,
+  addGuidanceItems,
   buildConcernGuidance,
   buildDetectedConcerns,
   buildInterpretationSignals,
@@ -291,6 +292,12 @@ export class JournalPhotoAnalysisSignalCollector {
     addTextRefKeys(aggregate.actionKeys, guidance.action_keys);
     addTextRefKeys(aggregate.avoidKeys, guidance.avoid_keys);
     addTextRefKeys(aggregate.factorKeys, guidance.possible_factor_keys);
+    addGuidanceItems(
+      aggregate.possibleCauseItems,
+      guidance.possible_cause_items,
+    );
+    addGuidanceItems(aggregate.tryNextItems, guidance.try_next_items);
+    addGuidanceItems(aggregate.avoidItems, guidance.avoid_items);
     if (guidance.escalation_key) {
       aggregate.escalationKeys.add(guidance.escalation_key.key);
     }

@@ -312,6 +312,10 @@ function buildProductIntroductionSkippedCandidates(
     return [
       {
         productId: product.id,
+        brand: product.brand,
+        name: product.name,
+        category: product.category,
+        introductionStatus: product.introduction_status ?? null,
         reason: guidance.blockReason,
         sourceIds: [],
       },

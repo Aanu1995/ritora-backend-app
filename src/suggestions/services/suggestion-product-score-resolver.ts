@@ -1,5 +1,6 @@
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ProductCategory } from '../../shelf/shelf.types';
+import { isProductIntroductionEligibleForSuggestions } from '../../shelf/product-introduction.policy';
 import { SuggestionProductScore } from '../suggestion-context.types';
 import { SuggestionDaypart } from '../suggestions.constants';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
@@ -21,14 +22,29 @@ export function resolveSuggestionProductScores(
   const cached = resolvedScoreCache.get(inputs);
   if (cached) return cached;
   const refreshedScores = new Map(
-    inputs.shelfActiveProducts.map((product) => [
-      product.id,
-      buildFallbackScore(inputs, product),
-    ]),
+    inputs.shelfActiveProducts
+      .filter((product) =>
+        isProductIntroductionEligibleForSuggestions(
+          product.introduction_status,
+        ),
+      )
+      .map((product) => [product.id, buildFallbackScore(inputs, product)]),
+  );
+  const shelfProductById = new Map(
+    inputs.shelfActiveProducts.map((product) => [product.id, product]),
   );
   const scoresByProductId = new Map<string, SuggestionProductScore>();
 
   for (const contextScore of inputs.contextSummary.productScores) {
+    const shelfProduct = shelfProductById.get(contextScore.productId);
+    if (
+      shelfProduct &&
+      !isProductIntroductionEligibleForSuggestions(
+        shelfProduct.introduction_status,
+      )
+    ) {
+      continue;
+    }
     const refreshedScore = refreshedScores.get(contextScore.productId);
     scoresByProductId.set(
       contextScore.productId,
@@ -139,6 +155,39 @@ function mergeProductScores(
     category: contextScore.category ?? refreshedScore.category,
     preferredTimeOfDay:
       contextScore.preferredTimeOfDay ?? refreshedScore.preferredTimeOfDay,
+    openedAt: contextScore.openedAt ?? refreshedScore.openedAt,
+    expiresAt: contextScore.expiresAt ?? refreshedScore.expiresAt,
+    effectiveExpiresAt:
+      contextScore.effectiveExpiresAt ?? refreshedScore.effectiveExpiresAt,
+    introductionStatus:
+      contextScore.introductionStatus ?? refreshedScore.introductionStatus,
+    introductionStartedAt:
+      contextScore.introductionStartedAt ??
+      refreshedScore.introductionStartedAt,
+    introductionStatusUpdatedAt:
+      contextScore.introductionStatusUpdatedAt ??
+      refreshedScore.introductionStatusUpdatedAt,
+    benefits: unique([
+      ...(contextScore.benefits ?? []),
+      ...(refreshedScore.benefits ?? []),
+    ]),
+    suitedFor: unique([
+      ...(contextScore.suitedFor ?? []),
+      ...(refreshedScore.suitedFor ?? []),
+    ]),
+    applicationMethod:
+      contextScore.applicationMethod ?? refreshedScore.applicationMethod,
+    quantity: contextScore.quantity ?? refreshedScore.quantity,
+    guidanceSteps: unique([
+      ...(contextScore.guidanceSteps ?? []),
+      ...(refreshedScore.guidanceSteps ?? []),
+    ]),
+    guidanceCautions: unique([
+      ...(contextScore.guidanceCautions ?? []),
+      ...(refreshedScore.guidanceCautions ?? []),
+    ]),
+    userProductNote:
+      contextScore.userProductNote ?? refreshedScore.userProductNote,
     activeTags: unique([
       ...contextScore.activeTags,
       ...refreshedScore.activeTags,
@@ -180,7 +229,11 @@ function shouldRefreshContextScore(score: SuggestionProductScore): boolean {
   return (
     (score.activeTags.length === 0 && categoryDependsOnActiveTags(score)) ||
     score.suitabilityReasons.length === 0 ||
-    score.dataQuality !== 'verified'
+    score.dataQuality !== 'verified' ||
+    score.introductionStatus === undefined ||
+    score.openedAt === undefined ||
+    score.guidanceSteps === undefined ||
+    score.userProductNote === undefined
   );
 }
 

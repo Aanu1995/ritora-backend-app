@@ -204,6 +204,8 @@ import { KnowledgeBaseService } from './insights/knowledge-base/knowledge-base.s
 import type { InsightBlock, InsightCandidate } from './insights/insight-types';
 import type { InsightAction } from './insights/insight-types';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
+import { RoutineMemoryService } from '../routine-memory/routine-memory.service';
+import type { RoutineMemoryResponseDto } from '../routine-memory/dto/routine-memory-response.dto';
 import { ApplicationLog } from '../application-tracking/entities/application-log.entity';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../schedule/entities/routine-step.entity';
@@ -468,6 +470,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     private readonly notifications: NotificationsService,
     @Optional()
     private readonly smartPicksPreparation?: SmartPicksPreparationService,
+    @Optional()
+    private readonly routineMemory?: RoutineMemoryService,
   ) {}
 
   onModuleInit(): void {
@@ -1878,6 +1882,7 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         userId,
         current,
         obs,
+        { routineMemoryContext: preAnalysisRoutineContext.routine_memory },
       );
       const interpretation = this.photoInterpretation.interpret(
         obs,
@@ -3812,6 +3817,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     currentEntry: SkinJournalEntry,
     currentObservations: AnalysisObservations | null,
+    options: {
+      routineMemoryContext?: AnalysisRoutineContext['routine_memory'];
+    } = {},
   ): Promise<AnalysisRoutineContext> {
     const sinceDate = dateOnlyDaysBefore(currentEntry.entry_date, 14);
     const [
@@ -3819,6 +3827,8 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       routineSteps,
       recentApplications,
       recentEntries,
+      activeRecovery,
+      routineMemory,
     ] = await Promise.all([
       this.inventoryProducts.find({
         where: {
@@ -3853,6 +3863,13 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         order: { entry_date: 'DESC' },
         take: 8,
       }),
+      this.simplifications.findOne({
+        where: { user_id: userId, ended_at: IsNull() },
+        order: { started_at: 'DESC' },
+      }),
+      options.routineMemoryContext !== undefined
+        ? Promise.resolve(options.routineMemoryContext)
+        : this.buildAnalysisRoutineMemoryContext(userId, currentEntry),
     ]);
 
     const checkIns = [currentEntry, ...recentEntries]
@@ -3866,6 +3883,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       );
 
     return {
+      active_recovery:
+        analysisRecoveryContextFromSimplification(activeRecovery),
+      routine_memory: routineMemory,
       active_shelf_products: activeShelfProducts
         .map((product) =>
           analysisProductContextFromInventoryProduct(product, {
@@ -3891,13 +3911,32 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
         .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS),
       recent_applications: recentApplications.map((application) => ({
         target_date: application.target_date,
+        target_time: sanitizeContextText(application.target_time),
         daypart: sanitizeContextText(application.daypart),
         applied_at: application.applied_at?.toISOString() ?? null,
+        general_notes: sanitizeContextText(application.general_notes),
+        has_been_edited: application.has_been_edited,
         items: (application.items ?? []).slice(0, 8).map((item) => {
           const product =
             item.status === 'substituted'
               ? (item.substituted_with_product ?? item.product)
               : item.product;
+          const recommendedBrand = sanitizeContextText(
+            item.product?.brand ??
+              item.product_brand_snapshot ??
+              item.recommended_snapshot?.brand,
+          );
+          const recommendedName = sanitizeContextText(
+            item.product?.name ??
+              item.product_name_snapshot ??
+              item.recommended_snapshot?.name,
+          );
+          const appliedBrand = sanitizeContextText(
+            product?.brand ?? item.applied_snapshot?.brand ?? item.ad_hoc_brand,
+          );
+          const appliedName = sanitizeContextText(
+            product?.name ?? item.applied_snapshot?.name ?? item.ad_hoc_name,
+          );
           return {
             status: sanitizeContextText(item.status) ?? 'unknown',
             product_id:
@@ -3906,18 +3945,83 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
                   item.inventory_product_id)
                 : item.inventory_product_id,
             brand: sanitizeContextText(
-              product?.brand ?? item.product_brand_snapshot,
+              product?.brand ??
+                item.ad_hoc_brand ??
+                item.applied_snapshot?.brand ??
+                item.product_brand_snapshot,
             ),
             name: sanitizeContextText(
-              product?.name ?? item.product_name_snapshot,
+              product?.name ??
+                item.ad_hoc_name ??
+                item.applied_snapshot?.name ??
+                item.product_name_snapshot,
             ),
             category: sanitizeContextText(product?.category),
             step_label: sanitizeContextText(item.step_label),
+            applied_at: item.applied_at?.toISOString() ?? null,
+            item_source: sanitizeContextText(item.item_source),
+            is_ad_hoc: item.is_ad_hoc,
+            ad_hoc_brand: sanitizeContextText(item.ad_hoc_brand),
+            ad_hoc_name: sanitizeContextText(item.ad_hoc_name),
+            recommended_product_id:
+              item.inventory_product_id ??
+              item.recommended_snapshot?.product_id ??
+              null,
+            recommended_brand: recommendedBrand,
+            recommended_name: recommendedName,
+            applied_product_id:
+              item.status === 'substituted'
+                ? (item.substituted_with_product_id ??
+                  item.applied_snapshot?.product_id ??
+                  null)
+                : item.status === 'applied'
+                  ? (item.inventory_product_id ??
+                    item.applied_snapshot?.product_id ??
+                    null)
+                  : null,
+            applied_brand: item.status === 'skipped' ? null : appliedBrand,
+            applied_name: item.status === 'skipped' ? null : appliedName,
+            notes: sanitizeContextText(item.notes),
+            substitution_reason: sanitizeContextText(item.substitution_reason),
           };
         }),
       })),
       recent_check_ins: checkIns,
     };
+  }
+
+  private async buildAnalysisRoutineMemoryContext(
+    userId: string,
+    currentEntry: SkinJournalEntry,
+  ): Promise<AnalysisRoutineContext['routine_memory']> {
+    if (!this.routineMemory) {
+      return null;
+    }
+
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) {
+      return null;
+    }
+
+    try {
+      const memory = await this.routineMemory.getTimeline(
+        user,
+        {
+          from: dateOnlyDaysBefore(currentEntry.entry_date, 29),
+          to: currentEntry.entry_date,
+        },
+        new Date(`${currentEntry.entry_date}T12:00:00.000Z`),
+        currentEntry.time_zone,
+      );
+      return analysisRoutineMemoryContextFromResponse(memory);
+    } catch (error) {
+      this.logger.warn(
+        `Routine memory context could not be loaded for photo analysis: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
   }
 
   private buildAnalysisEntryContext(
@@ -3934,6 +4038,9 @@ export class SkinJournalService implements OnModuleInit, OnModuleDestroy {
       sweat_exercise_today: entry.sweat_exercise_today,
       cycle_marker: entry.cycle_marker,
       recent_change_kind: entry.recent_change?.kind ?? null,
+      recent_change_product_id:
+        entry.recent_change?.related_inventory_product_id ?? null,
+      recent_change_note: sanitizeContextText(entry.recent_change?.note),
       reaction_report: reactionReport
         ? {
             ...reactionReport,
@@ -5167,9 +5274,94 @@ function analysisProductContextFromInventoryProduct(
       product?.user_fields?.preferredTimeOfDay,
     ),
     opened_at: product?.opened_at?.toISOString() ?? null,
+    expires_at: product?.expires_at?.toISOString() ?? null,
+    effective_expires_at: product?.effective_expires_at?.toISOString() ?? null,
+    introduction_status: sanitizeContextText(product?.introduction_status),
+    introduction_started_at:
+      product?.introduction_started_at?.toISOString() ?? null,
+    introduction_status_updated_at:
+      product?.introduction_status_updated_at?.toISOString() ?? null,
+    benefit_tags: sanitizeStringArray(product?.identity?.benefits),
+    suited_for_tags: sanitizeStringArray(product?.identity?.suitedFor),
     ingredient_preview: sanitizeStringArray(product?.identity?.inciIngredients),
+    application_method: sanitizeContextText(
+      product?.guidance?.applicationMethod,
+    ),
+    quantity: sanitizeContextText(product?.guidance?.quantity),
+    wait_minutes: product?.guidance?.waitMinutes ?? null,
+    guidance_steps: sanitizeStringArray(product?.guidance?.steps),
     guidance_cautions: sanitizeStringArray(product?.guidance?.cautions),
+    user_product_note: sanitizeContextText(product?.user_fields?.personalNotes),
     is_specialist_locked: fallback.isSpecialistLocked,
+  };
+}
+
+function analysisRecoveryContextFromSimplification(
+  simplification: RoutineSimplificationEvent | null | undefined,
+): AnalysisRoutineContext['active_recovery'] {
+  if (!simplification) {
+    return null;
+  }
+
+  return {
+    active: true,
+    simplification_mode: simplification.simplification_mode,
+    recovery_phase: simplification.recovery_phase,
+    trigger_source: simplification.recovery_trigger_source,
+    trigger_symptoms: simplification.recovery_trigger_symptoms ?? [],
+    trigger_severity: simplification.recovery_trigger_severity,
+    active_overuse: simplification.recovery_active_overuse,
+    review_after: simplification.recovery_review_after?.toISOString() ?? null,
+    exit_eligible_at:
+      simplification.recovery_exit_eligible_at?.toISOString() ?? null,
+    return_step: simplification.recovery_return_step,
+    restore_strategy: simplification.restore_strategy,
+  };
+}
+
+function analysisRoutineMemoryContextFromResponse(
+  memory: RoutineMemoryResponseDto,
+): AnalysisRoutineContext['routine_memory'] {
+  return {
+    window: memory.window,
+    summary: {
+      timeline_event_count: memory.summary.timelineEventCount,
+      product_change_count: memory.summary.productChangeCount,
+      application_log_count: memory.summary.applicationLogCount,
+      reaction_signal_count: memory.summary.reactionSignalCount,
+      recovery_event_count: memory.summary.recoveryEventCount,
+      suspicious_product_count: memory.summary.suspiciousProductCount,
+      has_possible_links: memory.summary.hasPossibleLinks,
+    },
+    suspicious_products: memory.suspiciousProducts
+      .slice(0, ANALYSIS_CONTEXT_MAX_ITEMS)
+      .map((product) => ({
+        product_id: product.productId,
+        brand: sanitizeContextText(product.brand),
+        name: sanitizeContextText(product.name),
+        category: sanitizeContextText(product.category),
+        suspicion_level: product.suspicionLevel,
+        score: product.score,
+        reason_codes: sanitizeStringArray(product.reasonCodes),
+        first_use_date: product.firstUseDate,
+        last_use_date: product.lastUseDate,
+        nearest_reaction_date: product.nearestReactionDate,
+        days_from_first_use_to_reaction: product.daysFromFirstUseToReaction,
+        reaction_signal_count_near_use: product.reactionSignalCountNearUse,
+      })),
+    recent_events: memory.timeline
+      .slice(-ANALYSIS_CONTEXT_MAX_ITEMS)
+      .map((eventItem) => ({
+        date: eventItem.date,
+        occurred_at: eventItem.occurredAt,
+        type: eventItem.type,
+        severity: eventItem.severity,
+        source_type: eventItem.sourceType,
+        product_id: eventItem.product?.productId ?? null,
+        brand: sanitizeContextText(eventItem.product?.brand),
+        name: sanitizeContextText(eventItem.product?.name),
+        category: sanitizeContextText(eventItem.product?.category),
+      })),
   };
 }
 

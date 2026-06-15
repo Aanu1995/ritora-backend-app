@@ -2,7 +2,10 @@ import { MODULE_METADATA } from '@nestjs/common/constants';
 import { AppConfigModule } from '../../config/app-config.module';
 import { SkinJournalPhotoStorageService } from '../services/skin-journal-photo-storage.service';
 import { SkinJournalAnalysisService } from '../services/skin-journal-analysis.service';
-import { SkinJournalAnalysisEvaluationModule } from './skin-journal-analysis-evaluation.module';
+import {
+  SkinJournalAnalysisEvaluationModule,
+  SkinJournalAnalysisEvaluationPhotoStorage,
+} from './skin-journal-analysis-evaluation.module';
 
 describe('SkinJournalAnalysisEvaluationModule', () => {
   it('uses a narrow runtime instead of booting the full API app', () => {
@@ -19,11 +22,10 @@ describe('SkinJournalAnalysisEvaluationModule', () => {
       ),
     ).toEqual([
       SkinJournalAnalysisService,
+      SkinJournalAnalysisEvaluationPhotoStorage,
       expect.objectContaining({
         provide: SkinJournalPhotoStorageService,
-        useValue: expect.objectContaining({
-          readPhotoBuffer: expect.any(Function),
-        }),
+        useExisting: SkinJournalAnalysisEvaluationPhotoStorage,
       }),
     ]);
   });

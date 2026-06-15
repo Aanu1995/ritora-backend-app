@@ -3,10 +3,12 @@ import { ApplicationLog } from '../../application-tracking/entities/application-
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import {
+  ApplicationMethod,
   DataProvenance,
   PreferredTimeOfDay,
   ProductCategory,
   ProductIntroductionStatus,
+  Quantity,
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
@@ -126,6 +128,14 @@ describe('SuggestionContextBuilder', () => {
           sunExposureCounts: { lots: 1 },
           sweatExerciseDays: 1,
           recentChangeKinds: ['started_new_product'],
+          recentChanges: [
+            expect.objectContaining({
+              entryDate: '2026-04-29',
+              kind: 'started_new_product',
+              relatedInventoryProductId: 'retinoid-1',
+              note: 'Started retinoid after a late meal.',
+            }),
+          ],
           complaintNotes: ['Stinging around cheeks after yesterday.'],
         }),
         trendSignals: expect.arrayContaining([
@@ -173,6 +183,15 @@ describe('SuggestionContextBuilder', () => {
             actionKeys: ['journal.analysis.guidance.actions.barrier_support'],
             avoidKeys: ['journal.analysis.guidance.avoid.strong_actives'],
             factorKeys: ['journal.analysis.guidance.factors.recent_retinoid'],
+            possibleCauseItems: [
+              'Redness may line up with the new retinoid and late meal note.',
+            ],
+            tryNextItems: [
+              'Keep the barrier routine steady and compare cheek redness tomorrow.',
+            ],
+            avoidItems: [
+              'Avoid adding more strong actives while cheeks sting.',
+            ],
             escalationKeys: [
               'journal.analysis.guidance.escalation.dermatologist',
             ],
@@ -212,6 +231,19 @@ describe('SuggestionContextBuilder', () => {
             useCount: 1,
             isOffShelf: true,
             isSubstitution: true,
+          }),
+        ]),
+        recentItems: expect.arrayContaining([
+          expect.objectContaining({
+            targetDate: '2026-04-28',
+            targetTime: '08:00:00',
+            status: 'substituted',
+            itemSource: 'added_off_shelf',
+            recommendedProductId: 'retinoid-1',
+            recommendedName: 'Ava Lab Retinal Renewal Serum',
+            appliedProductId: 'spf-1',
+            appliedName: 'North Sun Daily SPF 50 Sunscreen',
+            substitutionReason: 'Skin felt warm, used sunscreen instead.',
           }),
         ]),
       }),
@@ -282,7 +314,11 @@ describe('SuggestionContextBuilder', () => {
       expect.arrayContaining([
         expect.objectContaining({
           productId: 'retinoid-1',
-          dataQuality: 'partial',
+          introductionStatus: null,
+          userProductNote: 'Can sting if layered too often.',
+          guidanceSteps: ['Apply after moisturizer if sensitive'],
+          guidanceCautions: ['Use only at night'],
+          dataQuality: 'verified',
           activeTags: expect.arrayContaining(['retinoid']),
           evidenceSourceIds: expect.arrayContaining([
             SuggestionEvidenceSourceId.AadRetinoidRetinol,
@@ -295,7 +331,11 @@ describe('SuggestionContextBuilder', () => {
         }),
         expect.objectContaining({
           productId: 'spf-1',
-          dataQuality: 'partial',
+          openedAt: '2026-04-01T08:00:00.000Z',
+          effectiveExpiresAt: '2026-10-01T08:00:00.000Z',
+          applicationMethod: 'fingertips',
+          quantity: 'generous',
+          dataQuality: 'verified',
           activeTags: ['spf'],
           evidenceSourceIds: expect.arrayContaining([
             SuggestionEvidenceSourceId.AadSunscreenSelection,
@@ -448,10 +488,18 @@ describe('SuggestionContextBuilder', () => {
       expect.arrayContaining([
         expect.objectContaining({
           productId: 'paused-1',
+          brand: 'Ava Lab',
+          name: 'Paused Retinal',
+          category: ProductCategory.Serum,
+          introductionStatus: ProductIntroductionStatus.Paused,
           reason: 'product introduction is paused',
         }),
         expect.objectContaining({
           productId: 'failed-1',
+          brand: 'Ava Lab',
+          name: 'Failed Peel',
+          category: ProductCategory.Exfoliant,
+          introductionStatus: ProductIntroductionStatus.Failed,
           reason: 'product introduction failed and should not be suggested',
         }),
       ]),
@@ -729,6 +777,12 @@ function retinoidProduct(): InventoryProduct {
     preferredTimeOfDay: PreferredTimeOfDay.Evening,
     inciIngredients: ['Retinal', 'Niacinamide'],
     benefits: ['texture support'],
+    suitedFor: ['experienced retinoid users'],
+    applicationMethod: ApplicationMethod.Dropper,
+    quantity: Quantity.PeaSize,
+    guidanceSteps: ['Apply after moisturizer if sensitive'],
+    guidanceCautions: ['Use only at night'],
+    userProductNote: 'Can sting if layered too often.',
   });
 }
 
@@ -741,6 +795,14 @@ function sunscreenProduct(): InventoryProduct {
     preferredTimeOfDay: PreferredTimeOfDay.Morning,
     inciIngredients: ['Zinc Oxide', 'Uvinul A Plus'],
     benefits: ['sun protection'],
+    suitedFor: ['daily outdoor exposure'],
+    openedAt: new Date('2026-04-01T08:00:00.000Z'),
+    expiresAt: new Date('2026-10-01T08:00:00.000Z'),
+    effectiveExpiresAt: new Date('2026-10-01T08:00:00.000Z'),
+    applicationMethod: ApplicationMethod.Fingertips,
+    quantity: Quantity.Generous,
+    guidanceSteps: ['Apply as the last morning step'],
+    guidanceCautions: ['Reapply after sweating'],
   });
 }
 
@@ -752,6 +814,15 @@ function product(input: {
   preferredTimeOfDay: PreferredTimeOfDay;
   inciIngredients: string[];
   benefits: string[];
+  suitedFor?: string[];
+  openedAt?: Date | null;
+  expiresAt?: Date | null;
+  effectiveExpiresAt?: Date | null;
+  applicationMethod?: string | null;
+  quantity?: string | null;
+  guidanceSteps?: string[];
+  guidanceCautions?: string[];
+  userProductNote?: string | null;
   introductionStatus?: ProductIntroductionStatus | null;
 }): InventoryProduct {
   return {
@@ -761,6 +832,9 @@ function product(input: {
     name: input.name,
     category: input.category,
     status: ShelfStatus.Active,
+    opened_at: input.openedAt ?? null,
+    expires_at: input.expiresAt ?? null,
+    effective_expires_at: input.effectiveExpiresAt ?? null,
     introduction_status: input.introductionStatus ?? null,
     introduction_started_at: input.introductionStatus
       ? new Date('2026-04-20T08:00:00.000Z')
@@ -778,15 +852,15 @@ function product(input: {
       sizeMl: null,
       description: null,
       benefits: input.benefits,
-      suitedFor: [],
+      suitedFor: input.suitedFor ?? [],
       inciIngredients: input.inciIngredients,
       inciLastConfirmedAt: '2026-04-01',
     },
     guidance: {
-      applicationMethod: null,
-      quantity: null,
-      steps: [],
-      cautions: [],
+      applicationMethod: input.applicationMethod ?? null,
+      quantity: input.quantity ?? null,
+      steps: input.guidanceSteps ?? [],
+      cautions: input.guidanceCautions ?? [],
       waitMinutes: null,
     },
     manufacturer: {
@@ -805,7 +879,7 @@ function product(input: {
       pricePaid: null,
       pricePaidCurrency: null,
       purchasedFrom: null,
-      personalNotes: null,
+      personalNotes: input.userProductNote ?? null,
       preferredTimeOfDay: input.preferredTimeOfDay,
     },
     updated_at: new Date('2026-04-28T11:00:00.000Z'),
@@ -828,6 +902,7 @@ function reactionJournalEntry(): SkinJournalEntry {
     recent_change: {
       kind: 'started_new_product',
       related_inventory_product_id: 'retinoid-1',
+      note: 'Started retinoid after a late meal.',
     },
     complaint_note: 'Stinging around cheeks after yesterday.',
     ratings: {
@@ -956,6 +1031,13 @@ function reactionJournalEntry(): SkinJournalEntry {
             key: 'journal.analysis.guidance.escalation.dermatologist',
           },
           source_ids: ['aad_dry_skin_relief'],
+          possible_cause_items: [
+            'Redness may line up with the new retinoid and late meal note.',
+          ],
+          try_next_items: [
+            'Keep the barrier routine steady and compare cheek redness tomorrow.',
+          ],
+          avoid_items: ['Avoid adding more strong actives while cheeks sting.'],
           sources: [],
         },
       ],
@@ -968,7 +1050,10 @@ function applicationLog(): ApplicationLog {
   return {
     id: 'log-1',
     target_date: '2026-04-28',
+    target_time: '08:00:00',
     daypart: 'morning',
+    applied_at: new Date('2026-04-28T07:45:00.000Z'),
+    general_notes: 'Skin felt warm after yesterday.',
     has_been_edited: true,
     updated_at: new Date('2026-04-28T20:00:00.000Z'),
     items: [
@@ -977,12 +1062,18 @@ function applicationLog(): ApplicationLog {
         step_label: ProductCategory.Serum,
         is_ad_hoc: false,
         inventory_product_id: 'retinoid-1',
+        product_brand_snapshot: 'Ava Lab',
+        product_name_snapshot: 'Retinal Renewal Serum',
+        notes: 'Skipped because cheeks felt warm.',
       },
       {
         status: 'substituted',
         step_label: ProductCategory.Serum,
         is_ad_hoc: true,
         item_source: 'added_off_shelf',
+        inventory_product_id: 'retinoid-1',
+        product_brand_snapshot: 'Ava Lab',
+        product_name_snapshot: 'Retinal Renewal Serum',
         substituted_with_product_id: 'spf-1',
         applied_snapshot: {
           product_id: 'spf-1',
@@ -990,6 +1081,7 @@ function applicationLog(): ApplicationLog {
           name: 'Daily SPF 50 Sunscreen',
           step_label: ProductCategory.SunProtection,
         },
+        substitution_reason: 'Skin felt warm, used sunscreen instead.',
         applied_at: new Date('2026-04-28T07:45:00.000Z'),
       },
     ],

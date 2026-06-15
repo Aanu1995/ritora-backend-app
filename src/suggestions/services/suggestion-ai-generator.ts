@@ -14,6 +14,7 @@ import {
 } from '../../common/i18n/i18n';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { ProductCategory } from '../../shelf/shelf.types';
+import { isProductIntroductionEligibleForSuggestions } from '../../shelf/product-introduction.policy';
 import { StepLabel } from '../../schedule/dto/schedule.constants';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
@@ -36,7 +37,7 @@ import {
   buildAssemblyContext,
   buildDeterministicSafetyFlags,
   computeMode,
-  isAllSpecialistLocked,
+  isRoutineStepEligibleForSuggestions,
   lockedStepsAreIntact,
   resolveRawStep,
   routineStepToOutput,
@@ -165,24 +166,6 @@ export class SuggestionAiGenerator {
       );
     }
 
-    if (isAllSpecialistLocked(inputs)) {
-      return this.buildBaseline(
-        inputs,
-        startedAt,
-        'deterministic-baseline',
-        'all_specialist_locked',
-      );
-    }
-
-    if (hasNoUsableShelfOptions(inputs)) {
-      return this.buildBaseline(
-        inputs,
-        startedAt,
-        'deterministic-baseline',
-        'no_usable_shelf_limited_data',
-      );
-    }
-
     if (!apiKey || !model) {
       return this.buildBaseline(
         inputs,
@@ -297,16 +280,24 @@ export class SuggestionAiGenerator {
       repairedSteps,
       context.lockedSteps.length > 0,
     );
-    const explanation = normalizeExplanationForSelectedSteps(
+    let explanation = normalizeExplanationForSelectedSteps(
       inputs,
       orderedSteps,
       sanitizeExplanation(raw.explanation ?? defaultExplanation()),
     );
-    const copyFallbackReason = resolveCopyFallbackReason(
+    let copyFallbackReason = resolveCopyFallbackReason(
       inputs,
       orderedSteps,
       explanation,
     );
+    if (copyFallbackReason === 'contradictory_only_copy') {
+      explanation = repairContradictoryOnlyCopy(explanation);
+      copyFallbackReason = resolveCopyFallbackReason(
+        inputs,
+        orderedSteps,
+        explanation,
+      );
+    }
     if (copyFallbackReason) {
       this.logger.warn(
         `AI suggestion copy contradicted the steps: ${copyFallbackReason}. Falling back.`,
@@ -454,7 +445,7 @@ export class SuggestionAiGenerator {
       hasReactionSignal,
       simplifiedForReaction: hasReactionSignal && orderedSteps.length === 0,
       explanation:
-        orderedSteps.length === 0 || hasAiSupportStep
+        orderedSteps.length === 0 || steps.length === 0 || hasAiSupportStep
           ? deterministicExplanation(inputs, steps)
           : defaultExplanation(),
       gapRecommendations: buildDeterministicGapRecommendations(inputs),
@@ -489,7 +480,10 @@ function buildManualBaselineSteps(
   fallbackReason: string | null,
 ): SuggestionGenerationStepOutput[] {
   const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
-  const routineOutputs = orderedSteps.map((step, index) =>
+  const eligibleOrderedSteps = orderedSteps.filter((step) =>
+    isRoutineStepEligibleForSuggestions(inputs, step),
+  );
+  const routineOutputs = eligibleOrderedSteps.map((step, index) =>
     routineStepToOutput(step, index, { language }),
   );
   const productBackedRoutineOutputs = routineOutputs.filter(
@@ -499,7 +493,7 @@ function buildManualBaselineSteps(
     productBackedRoutineOutputs.length !== routineOutputs.length;
   if (
     hasProductlessRoutineOutput &&
-    !orderedSteps.some((step) => step.is_specialist_locked)
+    !eligibleOrderedSteps.some((step) => step.is_specialist_locked)
   ) {
     const existingProductIds = new Set(
       productBackedRoutineOutputs
@@ -520,7 +514,7 @@ function buildManualBaselineSteps(
   }
   if (
     fallbackReason !== 'missing_barrier_moisturizer' ||
-    orderedSteps.some((step) => step.is_specialist_locked)
+    eligibleOrderedSteps.some((step) => step.is_specialist_locked)
   ) {
     return routineOutputs;
   }
@@ -577,9 +571,18 @@ function repairRecoverableMissingSteps(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionGenerationStepOutput[] {
-  return repairMissingOnDemandMoisturizer(
+  return repairMissingEligibleManualRoutineSteps(
     inputs,
-    repairMissingOwnedDaytimeSpf(inputs, steps),
+    repairMissingMinimalRoutineSupport(
+      inputs,
+      repairMissingBarrierMoisturizer(
+        inputs,
+        repairMissingOnDemandMoisturizer(
+          inputs,
+          repairMissingOwnedDaytimeSpf(inputs, steps),
+        ),
+      ),
+    ),
   );
 }
 
@@ -689,6 +692,14 @@ function shouldRemoveStepForHardSafetyRecovery(
     (productScore) => productScore.productId === step.inventoryProductId,
   );
   switch (reason) {
+    case 'blocked_product_introduction_status':
+      return !inputs.shelfActiveProducts
+        .filter((product) => product.id === step.inventoryProductId)
+        .every((product) =>
+          isProductIntroductionEligibleForSuggestions(
+            product.introduction_status,
+          ),
+        );
     case 'unsupported_product_selection':
       return !hasCurrentSelectionEvidence(inputs, step.inventoryProductId);
     case 'unsafe_daytime_strong_active':
@@ -774,13 +785,206 @@ function repairMissingOnDemandMoisturizer(
     : steps;
 }
 
+function repairMissingBarrierMoisturizer(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  if (!requiresBarrierMoisturizer(inputs)) return steps;
+  const selectedScores = selectedProductScores(inputs, steps);
+  if (
+    selectedScores.some(
+      (score) => score.category === ProductCategory.Moisturizer,
+    )
+  ) {
+    return steps;
+  }
+  const existingProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  const moisturizerStep = buildDeterministicAiSteps(inputs).find(
+    (step) =>
+      step.stepLabel === ProductCategory.Moisturizer &&
+      step.inventoryProductId &&
+      !existingProductIds.has(step.inventoryProductId),
+  );
+  return moisturizerStep
+    ? orderBaselineSteps([...steps, moisturizerStep])
+    : steps;
+}
+
+function repairMissingEligibleManualRoutineSteps(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  const selectedRoutineStepIds = new Set(
+    steps
+      .map((step) => step.routineStepId)
+      .filter((routineStepId): routineStepId is string =>
+        Boolean(routineStepId),
+      ),
+  );
+  const selectedProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const missingManualSteps = inputs.routineSteps
+    .filter((step) => !step.is_specialist_locked)
+    .filter((step) => isRoutineStepEligibleForSuggestions(inputs, step))
+    .filter((step) => Boolean(step.inventory_product_id))
+    .filter((step) => !selectedRoutineStepIds.has(step.id))
+    .filter(
+      (step) =>
+        !step.inventory_product_id ||
+        !selectedProductIds.has(step.inventory_product_id),
+    )
+    .filter((step) =>
+      step.inventory_product_id
+        ? hasCurrentSelectionEvidence(inputs, step.inventory_product_id)
+        : false,
+    )
+    .filter((step) => {
+      const score = step.inventory_product_id
+        ? scoreByProductId.get(step.inventory_product_id)
+        : null;
+      return score ? canRepairManualRoutineStep(inputs, score) : false;
+    })
+    .sort((left, right) => left.step_order - right.step_order);
+
+  if (missingManualSteps.length === 0) return steps;
+
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
+  return [
+    ...steps,
+    ...missingManualSteps.map((step) =>
+      routineStepToOutput(step, step.step_order, { language }),
+    ),
+  ];
+}
+
+function canRepairManualRoutineStep(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  if (
+    hasPregnancyOrMedicationCaution(inputs) &&
+    hasPregnancyCautionActive(score)
+  ) {
+    return false;
+  }
+  if (hasReactionSignalInInputs(inputs) && hasStrongActive(score)) {
+    return false;
+  }
+  if (
+    (inputs.contextSummary.routineBreak.recentlyResumed ||
+      inputs.contextSummary.applicationPatterns.conservativeRestart) &&
+    hasStrongActive(score)
+  ) {
+    return false;
+  }
+  if (hasDaytimeStrongActiveConflict(inputs, score)) return false;
+  return !(requiresRecentStrongActiveSpacing(inputs) && hasStrongActive(score));
+}
+
+const MINIMAL_SUPPORT_MAX_STEPS = 4;
+const IMMEDIATE_SUPPORT_CATEGORIES = new Set<ProductCategory>([
+  ProductCategory.Cleanser,
+  ProductCategory.Moisturizer,
+  ProductCategory.SunProtection,
+]);
+
+function repairMissingMinimalRoutineSupport(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  if (!prefersStoredMinimalRoutine(inputs)) return steps;
+  if (steps.length >= MINIMAL_SUPPORT_MAX_STEPS) return steps;
+
+  const selectedScores = selectedProductScores(inputs, steps);
+  const selectedOptionalScores = selectedScores.filter(
+    (score) => !IMMEDIATE_SUPPORT_CATEGORIES.has(score.category),
+  );
+  if (selectedOptionalScores.length === 0) return steps;
+
+  const selectedProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  const lowestOptionalScore = Math.min(
+    ...selectedOptionalScores.map((score) => score.suitabilityScore),
+  );
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const supportSteps = buildDeterministicAiSteps(inputs).filter((step) => {
+    if (!step.inventoryProductId) return false;
+    if (selectedProductIds.has(step.inventoryProductId)) return false;
+    if (!IMMEDIATE_SUPPORT_CATEGORIES.has(step.stepLabel as ProductCategory)) {
+      return false;
+    }
+    if (
+      step.stepLabel === ProductCategory.SunProtection &&
+      !requiresOwnedDaytimeSpf(inputs)
+    ) {
+      return false;
+    }
+    const score = scoreByProductId.get(step.inventoryProductId);
+    return Boolean(score && score.suitabilityScore >= lowestOptionalScore);
+  });
+  if (supportSteps.length === 0) return steps;
+
+  return orderBaselineSteps([
+    ...steps,
+    ...supportSteps.slice(0, MINIMAL_SUPPORT_MAX_STEPS - steps.length),
+  ]);
+}
+
+function prefersStoredMinimalRoutine(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  const preferences = inputs.skinProfile?.routine_preferences;
+  if (preferences?.pace === 'minimal') return true;
+  if (
+    inputs.daypart === SuggestionDaypart.Morning &&
+    typeof preferences?.am_minutes === 'number' &&
+    preferences.am_minutes <= 5
+  ) {
+    return true;
+  }
+  if (
+    inputs.daypart === SuggestionDaypart.Evening &&
+    typeof preferences?.pm_minutes === 'number' &&
+    preferences.pm_minutes <= 5
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function orderGeneratedSteps(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
   hasLockedInput: boolean,
 ): SuggestionGenerationStepOutput[] {
+  const applyStableOrder = (orderedSteps: SuggestionGenerationStepOutput[]) =>
+    orderedSteps.map((step, index) => ({ ...step, stepOrder: index }));
+
   if (hasLockedInput || inputs.routineSteps.length > 0) {
-    return [...steps].sort((left, right) => left.stepOrder - right.stepOrder);
+    return applyStableOrder(
+      [...steps].sort((left, right) => left.stepOrder - right.stepOrder),
+    );
   }
   return orderBaselineSteps(steps);
 }
@@ -1056,7 +1260,8 @@ function deterministicSkippedExplanationItems(
       ? [shelfProduct?.brand ?? score.brand, shelfProduct?.name ?? score.name]
           .filter(Boolean)
           .join(' ')
-      : candidate.productId;
+      : [candidate.brand, candidate.name].filter(Boolean).join(' ') ||
+        candidate.productId;
     const normalizedName = normalizeProductCopy(name);
     if (
       [...selectedProductLabels].some(
@@ -1115,12 +1320,6 @@ function hasReactionSignalInInputs(
   );
 }
 
-function hasNoUsableShelfOptions(inputs: SuggestionGenerationInputs): boolean {
-  return (
-    inputs.routineSteps.length === 0 && inputs.shelfActiveProducts.length === 0
-  );
-}
-
 type GenerationMetadata = Omit<
   SuggestionGenerationOutput['metadata'],
   'promptVersion'
@@ -1132,6 +1331,9 @@ function resolveHardSafetyFallbackReason(
 ): string | null {
   if (steps.some(isSkippedProductReturnedAsStep)) {
     return 'skipped_product_returned_as_step';
+  }
+  if (hasBlockedProductIntroductionStatusStep(inputs, steps)) {
+    return 'blocked_product_introduction_status';
   }
   const selectedScores = selectedProductScores(inputs, steps);
   if (
@@ -1245,6 +1447,28 @@ function selectedProductScores(
       (score): score is SuggestionContextSummary['productScores'][number] =>
         Boolean(score),
     );
+}
+
+function hasBlockedProductIntroductionStatusStep(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): boolean {
+  const blockedProductIds = new Set(
+    inputs.shelfActiveProducts
+      .filter(
+        (product) =>
+          !isProductIntroductionEligibleForSuggestions(
+            product.introduction_status,
+          ),
+      )
+      .map((product) => product.id),
+  );
+  if (blockedProductIds.size === 0) return false;
+  return steps.some(
+    (step) =>
+      typeof step.inventoryProductId === 'string' &&
+      blockedProductIds.has(step.inventoryProductId),
+  );
 }
 
 function requiresRecentStrongActiveSpacing(
@@ -1362,6 +1586,24 @@ function resolveCopyFallbackReason(
     return 'contradictory_only_copy';
   }
   return null;
+}
+
+function repairContradictoryOnlyCopy(
+  explanation: SuggestionExplanationJson,
+): SuggestionExplanationJson {
+  return {
+    ...explanation,
+    headline: removeOnlyWord(explanation.headline),
+    body: explanation.body.map(removeOnlyWord).filter(Boolean),
+  };
+}
+
+function removeOnlyWord(value: string): string {
+  return value
+    .replace(/\bonly\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim();
 }
 
 function hasMedicationCautionMainGuidance(
