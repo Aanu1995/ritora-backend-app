@@ -9,6 +9,7 @@ import {
   SuggestionGenerationContext,
   SuggestionInstance,
 } from '../entities/suggestion-instance.entity';
+import { SuggestionProductScore } from '../suggestion-context.types';
 import { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import {
   SUGGESTION_DAYPARTS,
@@ -29,7 +30,10 @@ import {
 } from '../suggestions.constants';
 import { getSuggestionEvidenceSources } from '../services/suggestion-evidence-sources';
 import { applyGapRecommendationActions } from '../services/suggestion-gap-actions';
+import { SuggestionStep } from '../entities/suggestion-step.entity';
 import { SuggestionStepResponseDto } from './suggestion-step-response.dto';
+
+const INGREDIENT_LIST_MISSING_WARNING = 'ingredient list missing';
 
 export class SuggestionProductDataQualityDto {
   @ApiProperty()
@@ -195,7 +199,10 @@ export class SuggestionInstanceResponseDto {
 function buildProductDataQualityDto(
   instance: SuggestionInstance,
 ): SuggestionProductDataQualityDto {
-  const scores = instance.generation_context?.productScores ?? [];
+  const scores = visibleProductScores(instance);
+  const liveIngredientAvailability = liveIngredientAvailabilityByProductId(
+    instance.steps ?? [],
+  );
   const dto = new SuggestionProductDataQualityDto();
   dto.verifiedCount = scores.filter(
     (score) => score.dataQuality === 'verified',
@@ -209,10 +216,66 @@ function buildProductDataQualityDto(
   dto.warnings = Array.from(
     new Set(
       scores
-        .flatMap((score) => score.dataQualityWarnings ?? [])
+        .flatMap((score) =>
+          productScopedWarnings(score, liveIngredientAvailability),
+        )
         .map((warning) => warning.trim())
         .filter(Boolean),
     ),
   ).slice(0, 6);
   return dto;
+}
+
+function visibleProductScores(
+  instance: SuggestionInstance,
+): SuggestionProductScore[] {
+  const scores = instance.generation_context?.productScores ?? [];
+  const suggestedProductIds = new Set(
+    (instance.steps ?? [])
+      .map((step) => step.inventory_product_id)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  if (suggestedProductIds.size === 0) return scores;
+  return scores.filter((score) => suggestedProductIds.has(score.productId));
+}
+
+function liveIngredientAvailabilityByProductId(
+  steps: SuggestionStep[],
+): ReadonlyMap<string, boolean> {
+  const productIngredientsById = new Map<string, boolean>();
+  for (const step of steps) {
+    const productId = step.inventory_product_id;
+    if (!productId || !step.product) continue;
+    const hasIngredients = (step.product.identity?.inciIngredients ?? []).some(
+      (ingredient) => ingredient.trim().length > 0,
+    );
+    if (hasIngredients || !productIngredientsById.has(productId)) {
+      productIngredientsById.set(productId, hasIngredients);
+    }
+  }
+  return productIngredientsById;
+}
+
+function productScopedWarnings(
+  score: SuggestionProductScore,
+  liveIngredientAvailability: ReadonlyMap<string, boolean>,
+): string[] {
+  const hasLiveIngredientList =
+    liveIngredientAvailability.get(score.productId) === true;
+  return (score.dataQualityWarnings ?? [])
+    .map((warning) => warning.trim())
+    .filter(Boolean)
+    .filter(
+      (warning) =>
+        !(hasLiveIngredientList && warning === INGREDIENT_LIST_MISSING_WARNING),
+    )
+    .map((warning) => `${productWarningLabel(score)}: ${warning}`);
+}
+
+function productWarningLabel(score: SuggestionProductScore): string {
+  const label = [score.brand, score.name]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(' ');
+  return label || score.productId;
 }

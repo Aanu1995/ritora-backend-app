@@ -322,6 +322,35 @@ describe('Auth (e2e)', () => {
       expect(refreshCookie).toContain('ritora_refresh');
     });
 
+    it('should extend the persisted refresh session expiry', async () => {
+      const sessionId = getSessionIdFromCookie(refreshCookie);
+      const dataSource = app.get(DataSource);
+      const shortenedExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await dataSource.query(
+        `UPDATE auth_sessions
+         SET expires_at = $1
+         WHERE id = $2`,
+        [shortenedExpiresAt, sessionId],
+      );
+
+      const res = await refreshWithCookie(refreshCookie).expect(200);
+      accessToken = getAccessTokenFromResponse(res);
+      refreshCookie = getFirstSetCookieHeader(res);
+
+      const rows = await dataSource.query<Array<{ expires_at: Date | string }>>(
+        `SELECT expires_at
+         FROM auth_sessions
+         WHERE id = $1`,
+        [sessionId],
+      );
+
+      expect(rows).toHaveLength(1);
+      expect(new Date(rows[0].expires_at).getTime()).toBeGreaterThan(
+        shortenedExpiresAt.getTime() + 5 * 24 * 60 * 60 * 1000,
+      );
+    });
+
     it('should reject without cookie', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/auth/refresh')

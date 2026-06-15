@@ -15,7 +15,7 @@ import { compare, hash } from 'bcrypt';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { Response } from 'express';
 import type { SignOptions } from 'jsonwebtoken';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, MoreThan, Repository } from 'typeorm';
 import { ulid } from 'ulid';
 import { type AppLanguage, normalizeLanguage } from '../common/i18n/i18n';
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
@@ -147,6 +147,11 @@ const ACCOUNT_DELETION_CONFIRM_EXPIRY = '1h';
 const ACCOUNT_DELETION_BATCH_SIZE = 100;
 const ACCOUNT_DELETION_CANCEL_IDEMPOTENCY_MS = 24 * 60 * 60 * 1000;
 const ACCOUNT_DELETION_EXTERNAL_OPERATION_TIMEOUT_MS = 10_000;
+
+type RefreshSessionWindow = {
+  cookieMaxAgeMs: number;
+  expiresAt: Date;
+};
 
 function roundUpToWholeSecond(value: Date): Date {
   const timestamp = value.getTime();
@@ -616,14 +621,35 @@ export class AuthService {
 
     const newSecret = randomBytes(32).toString('hex');
     const newSecretHash = this.sha256(newSecret);
-    session.refresh_token_hash = newSecretHash;
-    session.last_used_at = nowDate();
-    session.ip_address = sanitizeIpAddress(ip) ?? session.ip_address;
-    session.user_agent = sanitizeUserAgent(userAgent) ?? session.user_agent;
-    await this.sessionsRepository.save(session);
+    const rotatedAt = nowDate();
+    const refreshWindow = this.buildRefreshSessionWindow(rotatedAt);
+
+    if (refreshWindow.cookieMaxAgeMs <= 0) {
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    const updateResult = await this.sessionsRepository.update(
+      {
+        expires_at: MoreThan(rotatedAt),
+        id: session.id,
+        refresh_token_hash: storedHash,
+        revoked_at: IsNull(),
+      },
+      {
+        refresh_token_hash: newSecretHash,
+        expires_at: refreshWindow.expiresAt,
+        last_used_at: rotatedAt,
+        ip_address: sanitizeIpAddress(ip) ?? session.ip_address ?? null,
+        user_agent: sanitizeUserAgent(userAgent) ?? session.user_agent ?? null,
+      },
+    );
+
+    if (updateResult.affected !== 1) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
     const newRefreshToken = `${session.id}.${newSecret}`;
-    this.setRefreshCookie(res, newRefreshToken);
+    this.setRefreshCookie(res, newRefreshToken, refreshWindow.cookieMaxAgeMs);
 
     const accessToken = this.generateAccessToken(session.user, session.id);
 
@@ -1326,19 +1352,22 @@ export class AuthService {
     const secret = randomBytes(32).toString('hex');
     const secretHash = this.sha256(secret);
     const refreshToken = `${sessionId}.${secret}`;
+    const createdAt = nowDate();
+    const refreshWindow = this.buildRefreshSessionWindow(createdAt);
 
     const session = this.sessionsRepository.create({
       id: sessionId,
       user_id: user.id,
       refresh_token_hash: secretHash,
-      expires_at: this.expiresIn(this.jwtRefreshExpiry),
+      expires_at: refreshWindow.expiresAt,
       user_agent: sanitizeUserAgent(userAgent),
       ip_address: sanitizeIpAddress(ip),
-      last_used_at: nowDate(),
+      created_at: createdAt,
+      last_used_at: createdAt,
     });
     await this.sessionsRepository.save(session);
 
-    this.setRefreshCookie(res, refreshToken);
+    this.setRefreshCookie(res, refreshToken, refreshWindow.cookieMaxAgeMs);
     const accessToken = this.generateAccessToken(user, sessionId);
 
     return { accessToken, refreshToken };
@@ -1357,11 +1386,15 @@ export class AuthService {
     );
   }
 
-  private setRefreshCookie(res: Response, token: string): void {
+  private setRefreshCookie(
+    res: Response,
+    token: string,
+    maxAgeMs = this.parseExpiryMs(this.jwtRefreshExpiry),
+  ): void {
     res.cookie(
       this.cookieRefreshName,
       token,
-      this.getRefreshCookieOptions(this.parseExpiryMs(this.jwtRefreshExpiry)),
+      this.getRefreshCookieOptions(maxAgeMs),
     );
   }
 
@@ -1823,6 +1856,17 @@ export class AuthService {
       default:
         return 15 * 60 * 1000;
     }
+  }
+
+  private buildRefreshSessionWindow(refreshedAt: Date): RefreshSessionWindow {
+    const expiresAt = new Date(
+      refreshedAt.getTime() + this.parseExpiryMs(this.jwtRefreshExpiry),
+    );
+
+    return {
+      cookieMaxAgeMs: Math.max(0, expiresAt.getTime() - refreshedAt.getTime()),
+      expiresAt,
+    };
   }
 
   private getRefreshCookieOptions(maxAge?: number): {

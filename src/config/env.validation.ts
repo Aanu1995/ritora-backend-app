@@ -272,7 +272,10 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().trim().min(1).required(),
   }),
   JWT_ACCESS_EXPIRY: Joi.string().trim().required(),
-  JWT_REFRESH_EXPIRY: Joi.string().trim().required(),
+  JWT_REFRESH_EXPIRY: Joi.string()
+    .trim()
+    .pattern(/^\d+[smhd]$/)
+    .required(),
   JWT_ISSUER: Joi.string().trim().required(),
   JWT_AUDIENCE: Joi.string().trim().required(),
 
