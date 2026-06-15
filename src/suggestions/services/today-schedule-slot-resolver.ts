@@ -8,6 +8,7 @@ import {
   SuggestionMode,
 } from '../suggestions.constants';
 import { mapDayOfWeekShort } from './suggestion-history.helpers';
+import { clockTimesEqual, compareClockTimes } from './suggestion-helpers';
 
 export async function includeHistoricalSlotsForReadySuggestions(params: {
   slotRepo: Repository<ScheduleSlot>;
@@ -16,7 +17,8 @@ export async function includeHistoricalSlotsForReadySuggestions(params: {
   scheduledSuggestions: SuggestionInstance[];
 }): Promise<ScheduleSlot[]> {
   const { slotRepo, userId, activeSlots, scheduledSuggestions } = params;
-  const activeSlotIds = new Set(activeSlots.map((slot) => slot.id));
+  const activeSlotById = new Map(activeSlots.map((slot) => [slot.id, slot]));
+  const activeSlotIds = new Set(activeSlotById.keys());
   const missingSlotIds = Array.from(
     new Set(
       scheduledSuggestions.flatMap((suggestion) => {
@@ -34,7 +36,16 @@ export async function includeHistoricalSlotsForReadySuggestions(params: {
       suggestion.generation_status === SuggestionGenerationStatus.Ready &&
       !suggestion.slot_id,
   );
-  if (missingSlotIds.length === 0 && unlinkedReadySuggestions.length === 0) {
+  const retimedReadySuggestions = scheduledSuggestions.filter(
+    (suggestion) =>
+      suggestion.generation_status === SuggestionGenerationStatus.Ready &&
+      hasActiveSlotAtDifferentTime(activeSlotById, suggestion),
+  );
+  if (
+    missingSlotIds.length === 0 &&
+    unlinkedReadySuggestions.length === 0 &&
+    retimedReadySuggestions.length === 0
+  ) {
     return activeSlots;
   }
 
@@ -56,13 +67,21 @@ export async function includeHistoricalSlotsForReadySuggestions(params: {
   const unlinkedFallbackSlots = unlinkedReadySuggestions.map((suggestion) =>
     historicalSlotFromSuggestion(userId, suggestion),
   );
+  const retimedFallbackSlots = retimedReadySuggestions.map((suggestion) =>
+    historicalSlotFromSuggestion(
+      userId,
+      suggestion,
+      historicalSnapshotSlotIdForSuggestion(suggestion),
+    ),
+  );
 
   return [
     ...activeSlots,
     ...historicalSlots,
     ...fallbackSlots,
     ...unlinkedFallbackSlots,
-  ].sort((a, b) => a.slot_time.localeCompare(b.slot_time));
+    ...retimedFallbackSlots,
+  ].sort((a, b) => compareClockTimes(a.slot_time, b.slot_time));
 }
 
 export function historicalSlotIdForSuggestion(
@@ -71,12 +90,19 @@ export function historicalSlotIdForSuggestion(
   return suggestion.slot_id ?? `suggestion:${suggestion.id}`;
 }
 
+export function historicalSnapshotSlotIdForSuggestion(
+  suggestion: SuggestionInstance,
+): string {
+  return `suggestion:${suggestion.id}`;
+}
+
 function historicalSlotFromSuggestion(
   userId: string,
   suggestion: SuggestionInstance,
+  slotId = historicalSlotIdForSuggestion(suggestion),
 ): ScheduleSlot {
   const slot = new ScheduleSlot();
-  slot.id = historicalSlotIdForSuggestion(suggestion);
+  slot.id = slotId;
   slot.user_id = userId;
   slot.day_of_week = mapDayOfWeekShort(
     'UTC',
@@ -95,4 +121,14 @@ function historicalSlotFromSuggestion(
   slot.deleted_at = null;
   slot.steps = [];
   return slot;
+}
+
+function hasActiveSlotAtDifferentTime(
+  activeSlotById: ReadonlyMap<string, ScheduleSlot>,
+  suggestion: SuggestionInstance,
+): boolean {
+  if (!suggestion.slot_id) return false;
+  const activeSlot = activeSlotById.get(suggestion.slot_id);
+  if (!activeSlot) return false;
+  return !clockTimesEqual(activeSlot.slot_time, suggestion.target_time);
 }

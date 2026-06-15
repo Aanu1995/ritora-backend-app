@@ -15,6 +15,7 @@ import {
   Repository,
 } from 'typeorm';
 import { resolveEffectiveTimeZone } from '../../common/timezone/timezone.utils';
+import { toTimeOnlyString } from '../../common/utils/date';
 import { SlotModeValue } from '../../schedule/dto/schedule.constants';
 import { ScheduleSlot } from '../../schedule/entities/schedule-slot.entity';
 import { UserNotificationPreference } from '../../notifications/entities/user-notification-preference.entity';
@@ -33,10 +34,11 @@ import { RoutineBreakService } from './routine-break.service';
 import {
   buildSlotInstant,
   clampLeadTimeMinutes,
+  clockTimeToSeconds,
   deriveSuggestionDaypart,
   formatDateInTimeZone,
 } from './suggestion-helpers';
-import { insertSuggestionGenerationJob } from './suggestion-generation-job-queue';
+import { requeueSuggestionGenerationJob } from './suggestion-generation-job-queue';
 
 const SCHEDULER_DAYS_OF_WEEK = [
   'sun',
@@ -178,12 +180,12 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
     }
 
     if (candidates.length === 0) return 0;
-    await this.ensurePendingSuggestions(candidates);
+    const jobCandidates = await this.ensurePendingSuggestions(candidates);
 
-    for (const candidate of candidates) {
+    for (const candidate of jobCandidates) {
       const { slot, user, targetDate, visibleAt } = candidate;
       try {
-        const inserted = await insertSuggestionGenerationJob(this.jobRepo, {
+        const requeued = await requeueSuggestionGenerationJob(this.jobRepo, {
           user_id: user.id,
           slot_id: slot.id,
           target_date: targetDate,
@@ -194,7 +196,7 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
           run_after: visibleAt,
           last_error: null,
         });
-        if (inserted) enqueued += 1;
+        if (requeued) enqueued += 1;
       } catch (error) {
         this.logger.warn(
           `Failed to enqueue job for user ${user.id}, slot ${slot.id}, date ${targetDate}: ${
@@ -223,7 +225,7 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
 
   private async ensurePendingSuggestions(
     candidates: readonly EligibleScheduleCandidate[],
-  ): Promise<void> {
+  ): Promise<EligibleScheduleCandidate[]> {
     const existing = await this.suggestionRepo.find({
       where: {
         user_id: In(uniqueValues(candidates.map(({ user }) => user.id))),
@@ -233,7 +235,14 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
         ),
         generation_status: Not(SuggestionGenerationStatus.Superseded),
       },
-      select: ['id', 'user_id', 'slot_id', 'target_date'],
+      select: [
+        'id',
+        'user_id',
+        'slot_id',
+        'target_date',
+        'target_time',
+        'generation_status',
+      ],
     });
     const existingKeys = new Set(
       existing.map((suggestion) =>
@@ -241,13 +250,31 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
           suggestion.user_id,
           suggestion.slot_id ?? '',
           suggestion.target_date,
+          toTimeOnlyString(suggestion.target_time),
         ),
       ),
+    );
+    const readyKeys = new Set(
+      existing
+        .filter(
+          (suggestion) =>
+            suggestion.generation_status === SuggestionGenerationStatus.Ready,
+        )
+        .map((suggestion) =>
+          scheduleCandidateKey(
+            suggestion.user_id,
+            suggestion.slot_id ?? '',
+            suggestion.target_date,
+            toTimeOnlyString(suggestion.target_time),
+          ),
+        ),
     );
     const pending = candidates
       .filter(
         ({ slot, user, targetDate }) =>
-          !existingKeys.has(scheduleCandidateKey(user.id, slot.id, targetDate)),
+          !existingKeys.has(
+            scheduleCandidateKey(user.id, slot.id, targetDate, slot.slot_time),
+          ),
       )
       .map(({ slot, user, targetDate, visibleAt }) =>
         this.suggestionRepo.create({
@@ -288,6 +315,13 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
     if (pending.length > 0) {
       await this.suggestionRepo.save(pending);
     }
+
+    return candidates.filter(
+      ({ slot, user, targetDate }) =>
+        !readyKeys.has(
+          scheduleCandidateKey(user.id, slot.id, targetDate, slot.slot_time),
+        ),
+    );
   }
 
   private scheduleNext(delayMs: number): void {
@@ -318,8 +352,9 @@ function scheduleCandidateKey(
   userId: string,
   slotId: string,
   targetDate: string,
+  targetTime: string,
 ): string {
-  return `${userId}:${slotId}:${targetDate}`;
+  return `${userId}:${slotId}:${targetDate}:${clockTimeToSeconds(targetTime)}`;
 }
 
 function uniqueValues(values: readonly string[]): string[] {

@@ -681,6 +681,85 @@ describe('SuggestionsService', () => {
     ]);
   });
 
+  it('keeps an already generated suggestion at its original time after the active slot is moved', async () => {
+    preferenceRepo.findOne.mockResolvedValue({
+      suggestion_lead_time_minutes: 120,
+    } as UserNotificationPreference);
+    slotRepo.find.mockResolvedValue([
+      scheduleSlot({
+        id: 'slot-1',
+        slotTime: '13:00',
+        mode: 'ai',
+        lockedSteps: 0,
+      }),
+    ]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-ready',
+        slotId: 'slot-1',
+        targetTime: '12:00',
+        generatedAt: new Date('2026-04-29T09:55:00.000Z'),
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(result.slots).toEqual([
+      expect.objectContaining({
+        slotId: 'suggestion:suggestion-ready',
+        slotTime: '12:00',
+        status: 'ready',
+        suggestion: expect.objectContaining({
+          id: 'suggestion-ready',
+          slotId: 'slot-1',
+          targetTime: '12:00',
+        }),
+      }),
+      expect.objectContaining({
+        slotId: 'slot-1',
+        slotTime: '13:00',
+        suggestion: null,
+      }),
+    ]);
+  });
+
+  it('keeps a same-time suggestion on the active slot when time precision differs', async () => {
+    preferenceRepo.findOne.mockResolvedValue({
+      suggestion_lead_time_minutes: 120,
+    } as UserNotificationPreference);
+    slotRepo.find.mockResolvedValue([
+      scheduleSlot({
+        id: 'slot-1',
+        slotTime: '12:00:00',
+        mode: 'ai',
+        lockedSteps: 0,
+      }),
+    ]);
+    suggestionRepo.find.mockResolvedValue([
+      suggestionInstance({
+        id: 'suggestion-ready',
+        slotId: 'slot-1',
+        targetTime: '12:00',
+        generatedAt: new Date('2026-04-29T09:55:00.000Z'),
+      }),
+    ]);
+    applicationLogRepo.find.mockResolvedValue([]);
+
+    const result = await service.getTodaysSuggestion(user(), null);
+
+    expect(result.slots).toEqual([
+      expect.objectContaining({
+        slotId: 'slot-1',
+        slotTime: '12:00:00',
+        suggestion: expect.objectContaining({
+          id: 'suggestion-ready',
+          targetTime: '12:00',
+        }),
+      }),
+    ]);
+  });
+
   it('blocks manual regeneration while the user is on a routine break', async () => {
     routineBreakService.isRoutineBreakActive.mockResolvedValue(true);
     suggestionRepo.findOne.mockResolvedValue({

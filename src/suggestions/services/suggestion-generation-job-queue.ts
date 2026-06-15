@@ -3,7 +3,11 @@ import { ulid } from 'ulid';
 import { isPostgresUniqueConstraintError } from '../../common/utils/database-errors';
 import { toDateOnlyString, toTimeOnlyString } from '../../common/utils/date';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
-import { SuggestionRequestSource } from '../suggestions.constants';
+import {
+  SuggestionGenerationJobStatus,
+  SuggestionRequestSource,
+} from '../suggestions.constants';
+import { clockTimesEqual } from './suggestion-helpers';
 
 type BaseSuggestionGenerationJobDraft = Pick<
   SuggestionGenerationJob,
@@ -39,23 +43,48 @@ export async function insertSuggestionGenerationJob(
 export async function requeueSuggestionGenerationJob(
   repo: Repository<SuggestionGenerationJob>,
   draft: SuggestionGenerationJobDraft,
-): Promise<void> {
+): Promise<boolean> {
   const targetDate = toDateOnlyString(draft.target_date);
   const requestSource = normalizeRequestSource(draft.request_source);
   const where = buildJobLookup(draft, requestSource, targetDate);
   const existing = await repo.findOne({
     where,
-    select: ['id'],
+    select: ['id', 'status', 'target_time'],
   });
   if (existing) {
-    await repo.update({ id: existing.id }, buildJobUpdate(draft));
-    return;
+    return updateExistingJob(repo, existing, draft);
   }
 
   const inserted = await insertSuggestionGenerationJob(repo, draft);
-  if (inserted) return;
+  if (inserted) return true;
 
-  await repo.update(where, buildJobUpdate(draft));
+  const conflicting = await repo.findOne({
+    where,
+    select: ['id', 'status', 'target_time'],
+  });
+  if (!conflicting) return false;
+  return updateExistingJob(repo, conflicting, draft);
+}
+
+async function updateExistingJob(
+  repo: Repository<SuggestionGenerationJob>,
+  existing: Pick<SuggestionGenerationJob, 'id' | 'status' | 'target_time'>,
+  draft: SuggestionGenerationJobDraft,
+): Promise<boolean> {
+  if (shouldKeepExistingJob(existing, draft)) return false;
+  await repo.update({ id: existing.id }, buildJobUpdate(draft));
+  return true;
+}
+
+function shouldKeepExistingJob(
+  existing: Pick<SuggestionGenerationJob, 'status' | 'target_time'>,
+  draft: SuggestionGenerationJobDraft,
+): boolean {
+  if (existing.status === SuggestionGenerationJobStatus.Running) return true;
+  return (
+    existing.status === SuggestionGenerationJobStatus.Queued &&
+    clockTimesEqual(existing.target_time, draft.target_time)
+  );
 }
 
 function buildJobLookup(

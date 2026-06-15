@@ -44,7 +44,99 @@ describe('includeHistoricalSlotsForReadySuggestions', () => {
       }),
     );
   });
+
+  it('keeps a ready suggestion as a separate snapshot when its active slot moved to another time', async () => {
+    const slotRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<ScheduleSlot>;
+
+    const slots = await includeHistoricalSlotsForReadySuggestions({
+      slotRepo,
+      userId: 'user-1',
+      activeSlots: [
+        scheduleSlot({
+          id: 'slot-1',
+          slot_time: '09:00',
+        }),
+      ],
+      scheduledSuggestions: [
+        suggestion({
+          id: 'suggestion-ready',
+          slot_id: 'slot-1',
+          target_date: '2026-05-08',
+          target_time: '08:00',
+          daypart: SuggestionDaypart.Morning,
+          mode: SuggestionMode.Ai,
+        }),
+      ],
+    });
+
+    expect(slots).toEqual([
+      expect.objectContaining({
+        id: 'suggestion:suggestion-ready',
+        slot_time: '08:00',
+      }),
+      expect.objectContaining({
+        id: 'slot-1',
+        slot_time: '09:00',
+      }),
+    ]);
+    expect(slotRepo.find).not.toHaveBeenCalled();
+  });
+
+  it('does not create a snapshot when active slot and suggestion times differ only by seconds precision', async () => {
+    const slotRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    } as unknown as Repository<ScheduleSlot>;
+
+    const slots = await includeHistoricalSlotsForReadySuggestions({
+      slotRepo,
+      userId: 'user-1',
+      activeSlots: [
+        scheduleSlot({
+          id: 'slot-1',
+          slot_time: '08:00:00',
+        }),
+      ],
+      scheduledSuggestions: [
+        suggestion({
+          id: 'suggestion-ready',
+          slot_id: 'slot-1',
+          target_date: '2026-05-08',
+          target_time: '08:00',
+          daypart: SuggestionDaypart.Morning,
+          mode: SuggestionMode.Ai,
+        }),
+      ],
+    });
+
+    expect(slots).toEqual([
+      expect.objectContaining({
+        id: 'slot-1',
+        slot_time: '08:00:00',
+      }),
+    ]);
+    expect(slotRepo.find).not.toHaveBeenCalled();
+  });
 });
+
+function scheduleSlot(overrides: Partial<ScheduleSlot>): ScheduleSlot {
+  return {
+    id: 'slot-1',
+    user_id: 'user-1',
+    day_of_week: 'fri',
+    slot_time: '08:00',
+    mode: SlotModeValue.Ai,
+    slot_notes: null,
+    specialist_provider_name: null,
+    specialist_clinic_name: null,
+    specialist_active_since: null,
+    specialist_safety_notes: null,
+    deleted_at: null,
+    steps: [],
+    ...overrides,
+  } as ScheduleSlot;
+}
 
 function suggestion(
   overrides: Partial<SuggestionInstance>,

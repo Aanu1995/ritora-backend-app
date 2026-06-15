@@ -154,6 +154,7 @@ describe('SuggestionGenerationWorker', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-05-04',
+        target_time: '08:00',
         generation_status: 'pending',
       },
       {
@@ -169,6 +170,18 @@ describe('SuggestionGenerationWorker', () => {
         target_date: '2026-05-04',
       }),
     );
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'job-1',
+        status: 'running',
+        locked_by: expect.stringMatching(/^suggestion-/),
+      }),
+      expect.objectContaining({
+        status: 'completed',
+        locked_at: null,
+        locked_by: null,
+      }),
+    );
   });
 
   it('cancels claimed queued work when a break becomes active before generation', async () => {
@@ -182,6 +195,7 @@ describe('SuggestionGenerationWorker', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-05-04',
+        target_time: '08:00',
         generation_status: 'pending',
       },
       {
@@ -190,7 +204,11 @@ describe('SuggestionGenerationWorker', () => {
       },
     );
     expect(jobRepo.update).toHaveBeenCalledWith(
-      { id: 'job-1' },
+      expect.objectContaining({
+        id: 'job-1',
+        status: 'running',
+        locked_by: expect.stringMatching(/^suggestion-/),
+      }),
       expect.objectContaining({
         status: 'cancelled',
         last_error: 'routine_break_active',
@@ -221,7 +239,11 @@ describe('SuggestionGenerationWorker', () => {
 
     expect(suggestionRepo.update).not.toHaveBeenCalled();
     expect(jobRepo.update).toHaveBeenCalledWith(
-      { id: 'job-corrupt' },
+      expect.objectContaining({
+        id: 'job-corrupt',
+        status: 'running',
+        locked_by: expect.stringMatching(/^suggestion-/),
+      }),
       expect.objectContaining({
         status: 'failed',
         attempt_count: 3,

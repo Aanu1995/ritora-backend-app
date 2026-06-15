@@ -87,7 +87,14 @@ describe('SuggestionScheduler', () => {
           target_date: expect.objectContaining({ _type: 'in' }),
           generation_status: expect.objectContaining({ _type: 'not' }),
         },
-        select: ['id', 'user_id', 'slot_id', 'target_date'],
+        select: [
+          'id',
+          'user_id',
+          'slot_id',
+          'target_date',
+          'target_time',
+          'generation_status',
+        ],
       }),
     );
     expect(suggestionRepo.findOne).not.toHaveBeenCalled();
@@ -160,7 +167,7 @@ describe('SuggestionScheduler', () => {
     expect(jobRepo.insert).not.toHaveBeenCalled();
   });
 
-  it('does not requeue a job that already exists for the slot and date', async () => {
+  it('does not requeue when a ready suggestion already exists for the same slot time', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-04-29T06:00:00.000Z'));
     slotRepo.find.mockResolvedValue([
       {
@@ -183,6 +190,8 @@ describe('SuggestionScheduler', () => {
         user_id: 'user-1',
         slot_id: 'slot-1',
         target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'ready',
       } as SuggestionInstance,
     ]);
     jobRepo.insert.mockRejectedValue(
@@ -192,9 +201,117 @@ describe('SuggestionScheduler', () => {
     const result = await scheduler.runOnce();
 
     expect(result.enqueued).toBe(0);
-    expect(jobRepo.insert).toHaveBeenCalledTimes(1);
     expect(suggestionRepo.save).not.toHaveBeenCalled();
     expect(suggestionRepo.findOne).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
+    expect(jobRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('creates a new pending suggestion when the current slot time differs from an existing ready suggestion', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T07:00:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        day_of_week: 'wed',
+        slot_time: '09:00',
+        mode: 'ai',
+      } as ScheduleSlot,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    preferenceRepo.find.mockResolvedValue([
+      { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
+    ] as UserNotificationPreference[]);
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'ready-1',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'ready',
+      } as SuggestionInstance,
+    ]);
+    suggestionRepo.create.mockImplementation(
+      (value) => value as SuggestionInstance,
+    );
+    mockSaveArray(suggestionRepo).mockResolvedValue([
+      { id: 'pending-1' },
+    ] as SuggestionInstance[]);
+    jobRepo.findOne.mockResolvedValue({
+      id: 'job-1',
+    } as SuggestionGenerationJob);
+    jobRepo.update.mockResolvedValue({
+      generatedMaps: [],
+      raw: [],
+      affected: 1,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result.enqueued).toBe(1);
+    expect(suggestionRepo.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '09:00',
+        generation_status: 'pending',
+      }),
+    ]);
+    expect(jobRepo.update).toHaveBeenCalledWith(
+      { id: 'job-1' },
+      expect.objectContaining({
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '09:00',
+        status: 'queued',
+        run_after: new Date('2026-04-29T07:00:00.000Z'),
+      }),
+    );
+  });
+
+  it('does not rewrite an already queued same-time job for an existing pending suggestion', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T06:00:00.000Z'));
+    slotRepo.find.mockResolvedValue([
+      {
+        id: 'slot-1',
+        user_id: 'user-1',
+        day_of_week: 'wed',
+        slot_time: '08:00:00',
+        mode: 'ai',
+      } as ScheduleSlot,
+    ]);
+    userRepo.find.mockResolvedValue([
+      { id: 'user-1', time_zone: 'UTC' } as User,
+    ]);
+    preferenceRepo.find.mockResolvedValue([
+      { user_id: 'user-1', suggestion_lead_time_minutes: 120 },
+    ] as UserNotificationPreference[]);
+    suggestionRepo.find.mockResolvedValue([
+      {
+        id: 'pending-1',
+        user_id: 'user-1',
+        slot_id: 'slot-1',
+        target_date: '2026-04-29',
+        target_time: '08:00',
+        generation_status: 'pending',
+      } as SuggestionInstance,
+    ]);
+    jobRepo.findOne.mockResolvedValue({
+      id: 'job-1',
+      target_time: '08:00:00',
+      status: 'queued',
+    } as SuggestionGenerationJob);
+
+    const result = await scheduler.runOnce();
+
+    expect(result.enqueued).toBe(0);
+    expect(suggestionRepo.save).not.toHaveBeenCalled();
+    expect(jobRepo.insert).not.toHaveBeenCalled();
     expect(jobRepo.update).not.toHaveBeenCalled();
   });
 
@@ -235,4 +352,10 @@ function repo<T extends ObjectLiteral>() {
     save: jest.fn(),
     update: jest.fn(),
   } as unknown as jest.Mocked<Repository<T>>;
+}
+
+function mockSaveArray<T extends ObjectLiteral>(
+  repository: Repository<T>,
+): jest.Mock<Promise<T[]>, [T[]]> {
+  return repository.save as unknown as jest.Mock<Promise<T[]>, [T[]]>;
 }

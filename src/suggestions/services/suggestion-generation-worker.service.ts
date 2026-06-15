@@ -82,15 +82,12 @@ export class SuggestionGenerationWorker
         }
         await this.markSuggestionGenerating(job);
         await this.generationService.generateForJob(job);
-        await this.jobRepo.update(
-          { id: job.id },
-          {
-            status: SuggestionGenerationJobStatus.Completed,
-            last_error: null,
-            locked_at: null,
-            locked_by: null,
-          },
-        );
+        await this.jobRepo.update(this.claimedJobWhere(job), {
+          status: SuggestionGenerationJobStatus.Completed,
+          last_error: null,
+          locked_at: null,
+          locked_by: null,
+        });
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'unknown error';
@@ -117,17 +114,14 @@ export class SuggestionGenerationWorker
             },
           });
         }
-        await this.jobRepo.update(
-          { id: job.id },
-          {
-            status: nextStatus,
-            attempt_count: nextAttemptCount,
-            run_after: new Date(Date.now() + retryDelayMs(nextAttemptCount)),
-            last_error: message,
-            locked_at: null,
-            locked_by: null,
-          },
-        );
+        await this.jobRepo.update(this.claimedJobWhere(job), {
+          status: nextStatus,
+          attempt_count: nextAttemptCount,
+          run_after: new Date(Date.now() + retryDelayMs(nextAttemptCount)),
+          last_error: message,
+          locked_at: null,
+          locked_by: null,
+        });
       }
     } finally {
       this.polling = false;
@@ -166,6 +160,14 @@ export class SuggestionGenerationWorker
     });
   }
 
+  private claimedJobWhere(job: SuggestionGenerationJob) {
+    return {
+      id: job.id,
+      status: SuggestionGenerationJobStatus.Running,
+      locked_by: this.workerId,
+    };
+  }
+
   private async cancelJobForRoutineBreak(
     job: SuggestionGenerationJob,
   ): Promise<void> {
@@ -181,15 +183,12 @@ export class SuggestionGenerationWorker
           ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
         },
       );
-      await this.jobRepo.update(
-        { id: job.id },
-        {
-          status: SuggestionGenerationJobStatus.Cancelled,
-          last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
-          locked_at: null,
-          locked_by: null,
-        },
-      );
+      await this.jobRepo.update(this.claimedJobWhere(job), {
+        status: SuggestionGenerationJobStatus.Cancelled,
+        last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+        locked_at: null,
+        locked_by: null,
+      });
       return;
     }
 
@@ -202,15 +201,12 @@ export class SuggestionGenerationWorker
       generation_status: SuggestionGenerationStatus.Superseded,
       ai_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
     });
-    await this.jobRepo.update(
-      { id: job.id },
-      {
-        status: SuggestionGenerationJobStatus.Cancelled,
-        last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
-        locked_at: null,
-        locked_by: null,
-      },
-    );
+    await this.jobRepo.update(this.claimedJobWhere(job), {
+      status: SuggestionGenerationJobStatus.Cancelled,
+      last_error: ROUTINE_BREAK_SUPPRESSED_JOB_REASON,
+      locked_at: null,
+      locked_by: null,
+    });
   }
 
   private async recoverStaleRunningJobs(now = new Date()): Promise<void> {
@@ -380,6 +376,7 @@ function scheduledSuggestionWhere(
       user_id: job.user_id,
       slot_id: job.slot_id,
       target_date: job.target_date,
+      target_time: job.target_time,
       generation_status: generationStatus,
     };
   }
