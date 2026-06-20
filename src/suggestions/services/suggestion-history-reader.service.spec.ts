@@ -60,9 +60,13 @@ describe('SuggestionHistoryReader', () => {
       range: '7d',
     });
 
+    const expectedDefaultPageSize = 20;
     expect(historyQueryBuilder.andWhere).toHaveBeenCalledWith(
       'suggestion.generation_status = :status',
       { status: 'ready' },
+    );
+    expect(historyQueryBuilder.limit).toHaveBeenCalledWith(
+      expectedDefaultPageSize + 1,
     );
     expect(slotRepo.find).not.toHaveBeenCalled();
   });
