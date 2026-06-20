@@ -11,7 +11,7 @@ import {
 } from './suggestion-generation-history-loader';
 
 describe('suggestion generation history loaders', () => {
-  it('keeps dense 30-day application history reads indexed and avoids older backfill queries', async () => {
+  it('caps dense 30-day application history reads at the recent window maximum and avoids older backfill queries', async () => {
     const repo = mockRepo<ApplicationLog>(
       applicationLogs('window', 10_000, '2026-05-04'),
     );
@@ -24,8 +24,8 @@ describe('suggestion generation history loaders', () => {
     );
 
     expect(Date.now() - startedAt).toBeLessThan(2_000);
-    expect(result.rows).toHaveLength(10_000);
-    expect(result.windowRowCount).toBe(10_000);
+    expect(result.rows).toHaveLength(90);
+    expect(result.windowRowCount).toBe(90);
     expect(result.backfillRowCount).toBe(0);
     expect(repo.find).toHaveBeenCalledTimes(1);
     expect(repo.find).toHaveBeenCalledWith(
@@ -36,6 +36,7 @@ describe('suggestion generation history loaders', () => {
         }),
         order: { target_date: 'DESC', created_at: 'DESC' },
         relations: ['items', 'items.product', 'items.substituted_with_product'],
+        take: 90,
       }),
     );
   });
@@ -94,7 +95,7 @@ describe('suggestion generation history loaders', () => {
     );
   });
 
-  it('uses indexed user/date predicates for dense journal history', async () => {
+  it('caps dense journal history at the recent window maximum while using indexed user/date predicates', async () => {
     const repo = mockRepo<SkinJournalEntry>(
       journalEntries('window', 1_000, '2026-05-04'),
     );
@@ -106,10 +107,10 @@ describe('suggestion generation history loaders', () => {
     );
 
     expectIndexedWindowQuery(repo, 'entry_date');
-    expect(result.rows).toHaveLength(1_000);
+    expect(result.rows).toHaveLength(90);
   });
 
-  it('uses indexed user/date predicates for dense suggestion history', async () => {
+  it('caps dense suggestion history at the recent window maximum while using indexed user/date predicates', async () => {
     const repo = mockRepo<SuggestionInstance>(
       suggestions('window', 1_000, '2026-05-04'),
     );
@@ -121,10 +122,10 @@ describe('suggestion generation history loaders', () => {
     );
 
     expectIndexedWindowQuery(repo, 'target_date');
-    expect(result.rows).toHaveLength(1_000);
+    expect(result.rows).toHaveLength(90);
   });
 
-  it('uses indexed user/date predicates for dense routine break history', async () => {
+  it('caps dense routine break history at the recent window maximum while using indexed user/date predicates', async () => {
     const repo = mockRepo<RoutineBreak>(
       routineBreaks('window', 1_000, '2026-05-04'),
     );
@@ -136,7 +137,7 @@ describe('suggestion generation history loaders', () => {
     );
 
     expectIndexedRoutineBreakWindowQuery(repo);
-    expect(result.rows).toHaveLength(1_000);
+    expect(result.rows).toHaveLength(90);
   });
 
   it('includes routine breaks that overlap the 30-day window after starting earlier', async () => {
@@ -193,6 +194,7 @@ function expectIndexedWindowQuery<T extends ObjectLiteral>(
   const firstQuery = repo.find.mock.calls[0]?.[0];
   const where = firstQuery?.where as Record<string, unknown> | undefined;
   expect(repo.find).toHaveBeenCalledTimes(1);
+  expect(firstQuery).toEqual(expect.objectContaining({ take: 90 }));
   expect(where).toEqual(
     expect.objectContaining({
       user_id: 'user-1',
@@ -206,6 +208,7 @@ function expectIndexedRoutineBreakWindowQuery(
 ): void {
   const firstQuery = repo.find.mock.calls[0]?.[0];
   const where = firstQuery?.where;
+  expect(firstQuery).toEqual(expect.objectContaining({ take: 90 }));
   expect(where).toEqual(
     expect.arrayContaining([
       expect.objectContaining({

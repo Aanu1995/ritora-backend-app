@@ -333,22 +333,22 @@ describe('SuggestionGenerationService', () => {
     );
   });
 
-  it('uses all records from a dense 30-day window without backfill queries', async () => {
+  it('keeps dense 30-day histories up to the recent window maximum without backfill queries', async () => {
     slotRepo.findOne.mockResolvedValue(slot());
     userRepo.findOne.mockResolvedValue(user());
     skinProfileRepo.findOne.mockResolvedValue(skinProfile());
     inventoryRepo.find
       .mockResolvedValueOnce([product()])
       .mockResolvedValueOnce([]);
-    journalRepo.find.mockResolvedValueOnce(journalHistory('window', 31, 0));
+    journalRepo.find.mockResolvedValueOnce(journalHistory('window', 91, 0));
     applicationLogRepo.find.mockResolvedValueOnce(
-      applicationHistory('window', 32, 0),
+      applicationHistory('window', 92, 0),
     );
     suggestionRepo.find.mockResolvedValueOnce(
-      suggestionHistory('window', 33, 0),
+      suggestionHistory('window', 93, 0),
     );
     routineBreakRepo.find.mockResolvedValueOnce(
-      routineBreakHistory('window', 34, 0),
+      routineBreakHistory('window', 94, 0),
     );
     preferenceRepo.findOne.mockResolvedValue(null);
     contextBuilder.build.mockResolvedValue(contextSummary());
@@ -373,10 +373,10 @@ describe('SuggestionGenerationService', () => {
     await service.generateForJob(job());
 
     const buildInput = contextBuilder.build.mock.calls[0]?.[0];
-    expect(buildInput?.recentJournalEntries).toHaveLength(31);
-    expect(buildInput?.recentApplications).toHaveLength(32);
-    expect(buildInput?.recentSuggestions).toHaveLength(33);
-    expect(buildInput?.recentRoutineBreaks).toHaveLength(34);
+    expect(buildInput?.recentJournalEntries).toHaveLength(90);
+    expect(buildInput?.recentApplications).toHaveLength(90);
+    expect(buildInput?.recentSuggestions).toHaveLength(90);
+    expect(buildInput?.recentRoutineBreaks).toHaveLength(90);
     expect(journalRepo.find).toHaveBeenCalledTimes(1);
     expect(applicationLogRepo.find).toHaveBeenCalledTimes(1);
     expect(suggestionRepo.find).toHaveBeenCalledTimes(1);

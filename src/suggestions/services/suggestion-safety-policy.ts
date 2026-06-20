@@ -407,15 +407,29 @@ function activeCautionMessage(
 }
 
 export function skippedReasonsFromPolicy(
-  context: SuggestionContextSummary,
+  context: Pick<SuggestionContextSummary, 'productScores'>,
 ): SuggestionContextSummary['skippedCandidates'] {
   return context.productScores
+    .map((product) => ({
+      ...product,
+      cautionReasons: product.cautionReasons.filter(
+        isBlockingSkippedCandidateReason,
+      ),
+    }))
     .filter((product) => product.cautionReasons.length > 0)
     .map((product) => ({
       productId: product.productId,
       reason: product.cautionReasons[0],
       sourceIds: product.evidenceSourceIds,
     }));
+}
+
+export function isBlockingSkippedCandidateReason(
+  reason: string | null | undefined,
+): boolean {
+  return /recent reaction-related skip|recently substituted|strong active used often recently|pause strong actives|preferred time of day does not match|product may be expired|restart gently|space strong active|strong active.{0,40}spac|space_strong_actives|avoid new strong active|pregnan|breastfeed|trying|conceiv|medication|photosensit|clinician|professional|product introduction is paused|product introduction is marked as failed/i.test(
+    reason ?? '',
+  );
 }
 
 function activeMixFlag(

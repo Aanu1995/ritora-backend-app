@@ -1,7 +1,10 @@
 import { PreferredTimeOfDay, ProductCategory } from '../../shelf/shelf.types';
 import { SuggestionProductScore } from '../suggestion-context.types';
 import { SuggestionEvidenceSourceId } from '../suggestions.constants';
-import { buildSafetyConstraints } from './suggestion-safety-policy';
+import {
+  buildSafetyConstraints,
+  skippedReasonsFromPolicy,
+} from './suggestion-safety-policy';
 
 describe('suggestion safety policy', () => {
   it('does not add strong-active spacing merely because a strong active is on the shelf', () => {
@@ -54,6 +57,35 @@ describe('suggestion safety policy', () => {
     });
 
     expect(constraints).toContain('space_strong_actives');
+  });
+
+  it('does not treat generic usage cautions as skipped candidates', () => {
+    const sunscreen = {
+      ...productScore('spf-1', ProductCategory.SunProtection, []),
+      cautionReasons: [
+        'Keep babies and young children out of direct sunlight',
+        'Avoid contact with eyes',
+      ],
+      evidenceSourceIds: [SuggestionEvidenceSourceId.AadSunscreenSelection],
+    };
+    const retinoid = {
+      ...productScore('retinoid-1', ProductCategory.Treatment, ['retinoid']),
+      cautionReasons: [
+        'Avoid contact with eyes',
+        'pause strong actives while reaction signal is present',
+      ],
+    };
+
+    const skipped = skippedReasonsFromPolicy({
+      productScores: [sunscreen, retinoid],
+    });
+
+    expect(skipped).toEqual([
+      expect.objectContaining({
+        productId: 'retinoid-1',
+        reason: 'pause strong actives while reaction signal is present',
+      }),
+    ]);
   });
 });
 

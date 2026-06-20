@@ -64,16 +64,17 @@ function developmentEnv(
     APPLE_CALLBACK_URL: 'http://localhost:3001/api/v1/auth/apple/callback',
     RESEND_API_KEY: '',
     OPENAI_API_KEY: '',
-    OPENAI_MODEL: '',
-    CATALOGUE_AI_MODEL: 'gpt-5.5',
-    INGREDIENT_ANALYSIS_AI_MODEL: 'gpt-5.5',
-    INGREDIENT_EXPLANATION_AI_MODEL: 'gpt-5.5',
-    INGREDIENT_TRANSLATION_AI_MODEL: 'gpt-5.5',
+    OPENAI_MODEL: 'gpt-5.4-mini',
+    CATALOGUE_AI_MODEL: 'gpt-5.4-mini',
+    INGREDIENT_ANALYSIS_AI_MODEL: 'gpt-5.4-mini',
+    INGREDIENT_EXPLANATION_AI_MODEL: 'gpt-5.4-mini',
+    PRODUCT_CHECK_AI_MODEL: 'gpt-5.4-mini',
+    INGREDIENT_TRANSLATION_AI_MODEL: 'gpt-5.4-mini',
     INGREDIENT_TRANSLATION_SOURCE_LANGUAGE: 'en',
-    SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'gpt-5.5',
-    SUGGESTION_AI_MODEL: 'gpt-5.5',
-    SMART_PICKS_AI_MODEL: 'gpt-5.5',
-    COMMUNITY_MODERATION_AI_MODEL: 'gpt-5.5',
+    SKIN_JOURNAL_ANALYSIS_AI_MODEL: 'gpt-5.4-mini',
+    SUGGESTION_AI_MODEL: 'gpt-5.4-mini',
+    SMART_PICKS_AI_MODEL: 'gpt-5.4-mini',
+    COMMUNITY_MODERATION_AI_MODEL: 'gpt-5.4-mini',
     INGREDIENT_ANALYSIS_QUEUE_DRIVER: 'database',
     INGREDIENT_ANALYSIS_SQS_QUEUE_URL: '',
     INGREDIENT_ANALYSIS_SQS_DLQ_URL: '',
@@ -89,7 +90,7 @@ function developmentEnv(
     ACCOUNT_MONITORING_QUEUE_DRIVER: 'none',
     ACCOUNT_MONITORING_SQS_QUEUE_URL: '',
     ACCOUNT_MONITORING_SQS_DLQ_URL: '',
-    INSIGHTS_AI_MODEL: 'gpt-5.5',
+    INSIGHTS_AI_MODEL: 'gpt-5.4-mini',
     SKIN_JOURNAL_ANALYSIS_INPUT_TOKEN_COST_PER_1M_USD: 0,
     SKIN_JOURNAL_ANALYSIS_OUTPUT_TOKEN_COST_PER_1M_USD: 0,
     SKIN_JOURNAL_ANALYSIS_QUEUE_DRIVER: 'database',
@@ -245,20 +246,21 @@ describe('envValidationSchema', () => {
     expect(result.error?.message).toContain('API_PORT');
   });
 
-  it('keeps feature-specific OpenAI models explicit and OPENAI_MODEL as fallback only', () => {
+  it('keeps OpenAI model env values aligned while feature-specific keys remain explicit', () => {
     const result = validateEnv(developmentEnv());
 
     expect(result.error).toBeUndefined();
-    expect(result.value.OPENAI_MODEL).toBe('');
-    expect(result.value.CATALOGUE_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.INGREDIENT_ANALYSIS_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.INGREDIENT_EXPLANATION_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.INGREDIENT_TRANSLATION_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.SKIN_JOURNAL_ANALYSIS_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.SUGGESTION_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.SMART_PICKS_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.COMMUNITY_MODERATION_AI_MODEL).toBe('gpt-5.5');
-    expect(result.value.INSIGHTS_AI_MODEL).toBe('gpt-5.5');
+    expect(result.value.OPENAI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.CATALOGUE_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.INGREDIENT_ANALYSIS_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.INGREDIENT_EXPLANATION_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.PRODUCT_CHECK_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.INGREDIENT_TRANSLATION_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.SKIN_JOURNAL_ANALYSIS_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.SUGGESTION_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.SMART_PICKS_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.COMMUNITY_MODERATION_AI_MODEL).toBe('gpt-5.4-mini');
+    expect(result.value.INSIGHTS_AI_MODEL).toBe('gpt-5.4-mini');
   });
 
   it('honors explicit production swagger and database SSL settings', () => {

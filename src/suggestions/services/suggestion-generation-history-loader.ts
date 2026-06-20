@@ -15,6 +15,7 @@ import { SuggestionGenerationStatus } from '../suggestions.constants';
 import {
   mergeHistoryWindowWithBackfill,
   SUGGESTION_CONTEXT_BACKFILL_RECORDS,
+  SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS,
   suggestionHistoryWindow,
   suggestionHistoryWindowInstants,
 } from './suggestion-historical-window';
@@ -44,6 +45,7 @@ export async function loadSuggestionJournalHistory(
   const windowRows = await journalRepo.find({
     where: { user_id: userId, entry_date: Between(fromDate, toDate) },
     order: { entry_date: 'DESC', updated_at: 'DESC' },
+    take: SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS,
   });
   const backfillRows =
     windowRows.length < SUGGESTION_CONTEXT_BACKFILL_RECORDS
@@ -66,6 +68,7 @@ export async function loadSuggestionApplicationHistory(
     where: { user_id: userId, target_date: Between(fromDate, toDate) },
     relations: ['items', 'items.product', 'items.substituted_with_product'],
     order: { target_date: 'DESC', created_at: 'DESC' },
+    take: SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS,
   });
   const backfillRows =
     windowRows.length < SUGGESTION_CONTEXT_BACKFILL_RECORDS
@@ -97,6 +100,7 @@ export async function loadSuggestionInstanceHistory(
     },
     relations: ['steps', 'steps.product'],
     order: { target_date: 'DESC', target_time: 'DESC', created_at: 'DESC' },
+    take: SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS,
   });
   const backfillRows =
     windowRows.length < SUGGESTION_CONTEXT_BACKFILL_RECORDS
@@ -144,6 +148,7 @@ export async function loadSuggestionRoutineBreakHistory(
       { user_id: userId, starts_at: LessThan(from), ends_at: IsNull() },
     ],
     order: { starts_at: 'DESC' },
+    take: SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS,
   });
   const backfillRows =
     windowRows.length < SUGGESTION_CONTEXT_BACKFILL_RECORDS
