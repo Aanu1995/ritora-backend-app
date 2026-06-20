@@ -694,7 +694,7 @@ function buildContextSummary(input: {
                   SuggestionEvidenceSourceId.MayoDrySkinCare,
                   SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
                 ]
-            : [SuggestionEvidenceSourceId.MayoDrySkinCare],
+              : [SuggestionEvidenceSourceId.MayoDrySkinCare],
       };
     }),
     applicationPatterns: {

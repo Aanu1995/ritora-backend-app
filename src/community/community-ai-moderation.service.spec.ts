@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import '../test-globals.setup';
 import { OPENAI_COMMUNITY_MODERATION_REASONING_EFFORT } from '../common/utils/openai-request-options';
 import { CommunityAiModerationService } from './community-ai-moderation.service';
 import {

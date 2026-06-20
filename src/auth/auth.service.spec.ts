@@ -11,6 +11,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { hashSync } from 'bcrypt';
 import { createHash } from 'crypto';
 import type { Response } from 'express';
+import '../test-globals.setup';
 import { CataloguePhotoStorageService } from '../catalogue/catalogue-photo-storage.service';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import { SmartPickProductSuggestion } from '../smart-picks/entities/smart-pick-product-suggestion.entity';

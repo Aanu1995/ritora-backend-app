@@ -870,7 +870,9 @@ function repairConflictingLowerScoredAiSelection(
   );
   const selectedScores = steps
     .map((step) =>
-      step.inventoryProductId ? scoreByProductId.get(step.inventoryProductId) : null,
+      step.inventoryProductId
+        ? scoreByProductId.get(step.inventoryProductId)
+        : null,
     )
     .filter(
       (score): score is SuggestionContextSummary['productScores'][number] =>
@@ -896,9 +898,7 @@ function repairConflictingLowerScoredAiSelection(
           candidate.suitabilityScore >=
           selectedScore.suitabilityScore + CONFLICT_REPLACEMENT_SCORE_MARGIN,
       )
-      .filter((candidate) =>
-        hasAiLayeringConflict(candidate, selectedScore),
-      )
+      .filter((candidate) => hasAiLayeringConflict(candidate, selectedScore))
       .filter((candidate) =>
         selectedScores
           .filter((score) => score.productId !== selectedScore.productId)
@@ -1369,7 +1369,11 @@ function sanitizeStepExplanationsForSelectedSteps(
   return steps.map((step) => {
     if (
       !step.explanation ||
-      !isUnselectedStrongActiveCopy(inputs, selectedProductLabels, step.explanation)
+      !isUnselectedStrongActiveCopy(
+        inputs,
+        selectedProductLabels,
+        step.explanation,
+      )
     ) {
       return step;
     }
@@ -1380,7 +1384,7 @@ function sanitizeStepExplanationsForSelectedSteps(
   });
 }
 
-function safeStepExplanation(stepLabel: string): string {
+function safeStepExplanation(stepLabel: StepLabel): string {
   switch (stepLabel) {
     case ProductCategory.Cleanser:
       return 'Gentle cleanse fits this slot.';
@@ -1421,7 +1425,10 @@ function removeSensitiveProfileClaims(detail: string): string {
     .map((part) => part.trim())
     .filter((part) => part.length > 0 && !isSensitiveProfileClaim(part))
     .join('; ')
-    .replace(/\b(ethnicity|race|countryCode|country|city|location|fitzpatrick(?:Phototype)?|phototype)\s*[:=]\s*[^,;]+,?\s*/gi, '')
+    .replace(
+      /\b(ethnicity|race|countryCode|country|city|location|fitzpatrick(?:Phototype)?|phototype)\s*[:=]\s*[^,;]+,?\s*/gi,
+      '',
+    )
     .replace(/\s*;\s*;/g, ';')
     .replace(/\s+,/g, ',')
     .replace(/\s{2,}/g, ' ')

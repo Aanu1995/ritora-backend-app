@@ -181,9 +181,6 @@
     "transformIgnorePatterns": [
       "/node_modules/(?!uuid/)"
     ],
-    "setupFiles": [
-      "<rootDir>/test-globals.setup.ts"
-    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s",
       "!**/*.spec.ts",

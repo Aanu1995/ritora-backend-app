@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { ObjectLiteral, Repository } from 'typeorm';
+import '../../test-globals.setup';
 import { SuggestionGenerationJob } from '../entities/suggestion-generation-job.entity';
 import { SuggestionInstance } from '../entities/suggestion-instance.entity';
 import { RoutineBreakService } from './routine-break.service';

@@ -1216,9 +1216,7 @@ function contextSummaryFor(input: {
       )
         ? ['daytime_spf_available']
         : []),
-      ...(shouldSpaceStrongActives
-        ? ['space_strong_actives']
-        : []),
+      ...(shouldSpaceStrongActives ? ['space_strong_actives'] : []),
       ...(hasMedicalSafetyContext(input.profile)
         ? ['pregnancy_or_medication_active_caution']
         : []),
@@ -1466,11 +1464,12 @@ function productScore(
           ? 25
           : 80,
     suitabilityReasons: [`${product.name} fits the available shelf context.`],
-    cautionReasons: options.shouldSpaceStrongActives && strongTags(product).length
-      ? ['Strong active should be spaced carefully for this scenario.']
-      : product.id.includes('fragrance')
-        ? ['Known fragrance sensitivity makes this a poor fit.']
-        : [],
+    cautionReasons:
+      options.shouldSpaceStrongActives && strongTags(product).length
+        ? ['Strong active should be spaced carefully for this scenario.']
+        : product.id.includes('fragrance')
+          ? ['Known fragrance sensitivity makes this a poor fit.']
+          : [],
     waitMinutes: product.guidance?.waitMinutes ?? null,
     inciQuality: product.identity?.inciIngredients?.length
       ? 'available'

@@ -1,3 +1,4 @@
+import '../../test-globals.setup';
 import { SkinJournalService } from '../skin-journal.service';
 import { SkinJournalAnalysisQueueService } from './skin-journal-analysis-queue.service';
 import { SkinJournalAnalysisWorkerService } from './skin-journal-analysis-worker.service';

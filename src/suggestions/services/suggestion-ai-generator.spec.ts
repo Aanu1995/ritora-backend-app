@@ -781,7 +781,10 @@ describe('SuggestionAiGenerator', () => {
     );
     expect(result.explanation.headline.toLowerCase()).not.toContain('retinol');
     expect(
-      result.steps.map((step) => step.explanation).join(' ').toLowerCase(),
+      result.steps
+        .map((step) => step.explanation)
+        .join(' ')
+        .toLowerCase(),
     ).not.toContain('retinol');
   });
 
