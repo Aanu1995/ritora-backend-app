@@ -1,0 +1,296 @@
+{
+  "reportType": "todays_suggestion_live_ai_evaluation",
+  "generatedAt": "2026-06-20T02:05:18.894Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "2026-06-20.v10",
+  "totalCases": 1,
+  "passedCases": 1,
+  "failedCases": 0,
+  "repeatabilityRuns": 1,
+  "repeatabilityFailures": 0,
+  "strict": true,
+  "cases": [
+    {
+      "caseId": "sensitive_reactive_skin_evening",
+      "title": "Sensitive skin keeps evening routine gentle",
+      "status": "passed",
+      "hardChecksPassed": 23,
+      "hardChecksTotal": 23,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 4,
+        "gapQuality": 5,
+        "safetyConfidence": 4,
+        "passed": true,
+        "explanations": [
+          "Gives a practical right-now evening routine that fits the shelf.",
+          "Clear and easy to follow for a beginner.",
+          "Uses the sensitive-skin, redness, dryness, and fragrance-trigger context well, though it invents unsupported reaction-history details.",
+          "No shopping gap is needed here; skipping the fragranced mask is appropriate.",
+          "Avoids the forbidden retinoid and fragrance trigger, and stays within the 3-step limit; the only downside is some hallucinated input details."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-20.v10",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "557e9db317255e6d672aa1e0833d04cf223dd3d9d00b981ab1d192b2f5a82932",
+      "repeatability": {
+        "runs": 1,
+        "passed": true,
+        "baselineSignature": "ec5f152c9271ba27b3d785ac55a48b717197db9a142f879ff5bdd8816fbb85d9",
+        "variations": [],
+        "mismatches": []
+      },
+      "generatedAt": "2026-06-20T02:05:18.894Z",
+      "sanitizedCaseSummary": {
+        "id": "sensitive_reactive_skin_evening",
+        "title": "Sensitive skin keeps evening routine gentle",
+        "riskFocus": [
+          "sensitive_skin",
+          "fragrance_trigger"
+        ],
+        "manualReviewChecklist": [
+          "Does it prioritize comfort over goal speed?",
+          "Does it avoid the known fragrance trigger?"
+        ],
+        "request": {
+          "source": "scheduled",
+          "intent": null,
+          "intensity": null,
+          "daypart": "evening",
+          "targetTime": "20:30"
+        },
+        "skinProfile": {
+          "skinType": "sensitive",
+          "skinTone": "medium",
+          "sensitivityLevel": "high",
+          "primaryGoal": "calm redness",
+          "currentConcerns": [
+            "redness",
+            "dryness"
+          ],
+          "pregnancyStatus": null,
+          "dermatologistCare": null,
+          "safetyContext": {
+            "conditions": [],
+            "medications": [],
+            "photosensitizingOther": false
+          },
+          "activeTolerances": {},
+          "skinBehavior": {},
+          "routinePreferences": {}
+        },
+        "contextSignals": {
+          "reaction": {
+            "hasSignal": false,
+            "severity": null,
+            "confidence": null,
+            "indicators": [],
+            "affectedZones": [],
+            "concernKeys": [],
+            "daysSinceLatestSignal": null,
+            "barrierCompromised": false,
+            "photoInputImages": 0,
+            "multiAnglePhotoEntries": 0
+          },
+          "routineBreak": {
+            "recentlyResumed": false,
+            "lastPausedFrom": null,
+            "lastPausedUntil": null
+          },
+          "applicationPatterns": {
+            "days": 0,
+            "daysSinceLastApplication": null,
+            "conservativeRestart": false,
+            "skippedByCategory": {},
+            "substitutedByCategory": {},
+            "addedOffShelfCount": 0,
+            "editedLogCount": 0,
+            "adherenceByCategory": {}
+          },
+          "appliedProductHistory": null,
+          "routineMemory": null,
+          "environment": null,
+          "safetyConstraints": []
+        },
+        "spfExpectation": {
+          "required": false,
+          "ownedSunscreen": false,
+          "correctHandling": "SPF handling is not required unless directly relevant."
+        },
+        "ownedProducts": [
+          {
+            "productId": "cleanser-1",
+            "brand": "Ava Lab",
+            "name": "Soft Cream Cleanser",
+            "category": "cleanser",
+            "activeTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "moisturizer-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Cream",
+            "category": "moisturizer",
+            "activeTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "mask-fragrance-1",
+            "brand": "Glow Brand",
+            "name": "Fragranced Glow Mask",
+            "category": "mask",
+            "activeTags": [
+              "fragrance",
+              "mask"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": [
+              "Known fragrance sensitivity makes this a poor fit."
+            ]
+          },
+          {
+            "productId": "retinoid-1",
+            "brand": "Ava Lab",
+            "name": "Retinol Night Serum",
+            "category": "treatment",
+            "activeTags": [
+              "retinoid",
+              "retinol"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          }
+        ],
+        "routineSteps": [],
+        "expectations": {
+          "forbidsStrongActives": true,
+          "forbiddenProductIds": [
+            "retinoid-1",
+            "mask-fragrance-1"
+          ],
+          "requiredProductIds": [
+            "moisturizer-1"
+          ],
+          "maxStepCount": 3
+        }
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "hasReactionSignal": false,
+        "simplifiedForReaction": false,
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-20.v10",
+          "inputTokens": 6633,
+          "outputTokens": 12696,
+          "totalTokens": 19329,
+          "estimatedCostUsd": 0.008613,
+          "durationMs": 79190
+        },
+        "spfHandling": {
+          "required": false,
+          "ownedSunscreen": false,
+          "hasSunscreenStep": false,
+          "hasSunscreenGap": false
+        },
+        "explanation": {
+          "headline": "Simple evening barrier routine",
+          "body": [
+            "I kept tonight focused on calm and barrier support."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Gentle cleanse for a low-irritation start."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Barrier support fits this slot."
+            }
+          ],
+          "skipped": [
+            {
+              "name": "Glow Brand Fragranced Glow Mask",
+              "reason": "Fragrance sensitivity makes this a poor fit."
+            }
+          ],
+          "inputs": [
+            {
+              "label": "request source",
+              "detail": "scheduled"
+            },
+            {
+              "label": "target timing",
+              "detail": "targetDate=2026-05-18, targetTime=20:30, daypart=evening"
+            },
+            {
+              "label": "skin profile",
+              "detail": "type=sensitive, sensitivity=high, primaryGoal=calm redness, currentConcerns=redness,dryness"
+            },
+            {
+              "label": "reaction history",
+              "detail": "trigger=fragrance, reactiontypes=redness,stinging, severity=moderate"
+            },
+            {
+              "label": "active shelf products",
+              "detail": "Ava Lab Soft Cream Cleanser (cleanser-1); Ava Lab Barrier Cream (moisturizer-1); Glow Brand Fragranced Glow Mask"
+            }
+          ]
+        },
+        "steps": [
+          {
+            "resolvedCategory": "cleanser",
+            "resolvedActiveTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "stepOrder": 0,
+            "routineStepId": null,
+            "inventoryProductId": "cleanser-1",
+            "productBrand": "Ava Lab",
+            "productName": "Soft Cream Cleanser",
+            "stepLabel": "cleanser",
+            "provenance": "ai_added",
+            "explanation": "Gentle cleanse for a low-irritation start.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "moisturizer",
+            "resolvedActiveTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "stepOrder": 1,
+            "routineStepId": null,
+            "inventoryProductId": "moisturizer-1",
+            "productBrand": "Ava Lab",
+            "productName": "Barrier Cream",
+            "stepLabel": "moisturizer",
+            "provenance": "ai_added",
+            "explanation": "Barrier support fits this slot.",
+            "routineNote": null,
+            "safetyWarnings": []
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": []
+      }
+    }
+  ]
+}

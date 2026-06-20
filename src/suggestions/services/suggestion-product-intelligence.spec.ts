@@ -395,6 +395,78 @@ describe('suggestion product intelligence', () => {
       genericScore.suitabilityScore,
     );
   });
+
+  it('uses product description as product evidence for active and goal fit scoring', () => {
+    const describedVitaminC = productWithData({
+      category: ProductCategory.Serum,
+      inciIngredients: ['Water'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      benefits: [],
+      description:
+        'Antioxidant vitamin C serum for uneven tone and dark marks.',
+      name: 'Daily Glow Serum',
+    });
+
+    const score = scoreProductForSuggestion(describedVitaminC, {
+      daypart: 'morning',
+      primaryGoal: 'fade dark marks',
+      secondaryGoals: [],
+      sensitivityLevel: 'mid',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(score.activeTags).toContain('vitamin_c');
+    expect(score.suitabilityReasons).toEqual(
+      expect.arrayContaining([
+        SuggestionProductGoalFitReason.PrimarySelectedGoal,
+      ]),
+    );
+  });
+
+  it('does not penalize tolerated retinoids from quiet history or hardcoded daypart assumptions', () => {
+    const retinol = productWithData({
+      category: ProductCategory.Treatment,
+      inciIngredients: ['Retinol'],
+      inciLastConfirmedAt: '2026-05-01',
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      introductionStatus: ProductIntroductionStatus.Tolerated,
+      benefits: ['texture support'],
+      name: 'Retinol Treatment',
+    });
+
+    const activeScore = scoreProductForSuggestion(retinol, {
+      daypart: 'morning',
+      primaryGoal: 'smooth texture',
+      secondaryGoals: [],
+      sensitivityLevel: 'mid',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: true,
+    });
+    const normalScore = scoreProductForSuggestion(retinol, {
+      daypart: 'morning',
+      primaryGoal: 'smooth texture',
+      secondaryGoals: [],
+      sensitivityLevel: 'mid',
+      recentUseCount: 0,
+      hasReactionSignal: false,
+      lockedProductIds: new Set(),
+      conservativeRestart: false,
+    });
+
+    expect(activeScore.cautionReasons).not.toEqual(
+      expect.arrayContaining([
+        'restart gently before using strong actives again',
+        'retinoid is usually better suited to evening',
+      ]),
+    );
+    expect(activeScore.suitabilityScore).toBe(normalScore.suitabilityScore);
+  });
 });
 
 function scoringOptions(input: {
@@ -448,6 +520,7 @@ function productWithData(input: {
   preferredTimeOfDay: PreferredTimeOfDay | null;
   introductionStatus?: ProductIntroductionStatus | null;
   benefits?: string[];
+  description?: string;
   name?: string;
 }): InventoryProduct {
   return {
@@ -459,6 +532,7 @@ function productWithData(input: {
     status: ShelfStatus.Active,
     introduction_status: input.introductionStatus ?? null,
     identity: {
+      description: input.description ?? null,
       inciIngredients: input.inciIngredients,
       inciLastConfirmedAt: input.inciLastConfirmedAt,
       benefits: input.benefits ?? ['barrier support'],

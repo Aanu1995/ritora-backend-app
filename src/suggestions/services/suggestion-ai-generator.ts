@@ -12,8 +12,12 @@ import {
   normalizeLanguage,
   type AppLanguage,
 } from '../../common/i18n/i18n';
+import { isHighUvRisk } from '../../environment-intelligence/environment-adaptation-policy';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
-import { ProductCategory } from '../../shelf/shelf.types';
+import {
+  ProductCategory,
+  ProductIntroductionStatus,
+} from '../../shelf/shelf.types';
 import { isProductIntroductionEligibleForSuggestions } from '../../shelf/product-introduction.policy';
 import { StepLabel } from '../../schedule/dto/schedule.constants';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
@@ -57,6 +61,7 @@ import {
 } from './suggestion-ai-contract';
 import {
   buildDeterministicAiSteps,
+  buildDeterministicAiStepForCategory,
   buildDeterministicGapRecommendations,
   deterministicExplanation,
 } from './suggestion-baseline-generator';
@@ -73,7 +78,9 @@ import {
 } from './suggestion-product-intelligence';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
-export const SUGGESTION_AI_TIMEOUT_MS = 180_000;
+export const SUGGESTION_AI_TODAYS_TIMEOUT_MS = 300_000;
+export const SUGGESTION_AI_QUICK_TIMEOUT_MS = 180_000;
+export const SUGGESTION_AI_TIMEOUT_MS = SUGGESTION_AI_TODAYS_TIMEOUT_MS;
 export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 24000;
 const SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 
@@ -182,6 +189,7 @@ export class SuggestionAiGenerator {
         model,
         prompt,
         reasoningEffort: suggestionReasoningEffort(inputs),
+        timeoutMs: suggestionTimeoutMs(inputs),
       });
       if (!outputText) {
         throw new Error('OpenAI returned no usable structured output.');
@@ -275,10 +283,14 @@ export class SuggestionAiGenerator {
         hardSafetyFallbackReason,
       );
     }
-    const orderedSteps = orderGeneratedSteps(
+    let orderedSteps = orderGeneratedSteps(
       inputs,
       repairedSteps,
       context.lockedSteps.length > 0,
+    );
+    orderedSteps = sanitizeStepExplanationsForSelectedSteps(
+      inputs,
+      orderedSteps,
     );
     let explanation = normalizeExplanationForSelectedSteps(
       inputs,
@@ -292,6 +304,14 @@ export class SuggestionAiGenerator {
     );
     if (copyFallbackReason === 'contradictory_only_copy') {
       explanation = repairContradictoryOnlyCopy(explanation);
+      copyFallbackReason = resolveCopyFallbackReason(
+        inputs,
+        orderedSteps,
+        explanation,
+      );
+    }
+    if (copyFallbackReason === 'missing_medication_caution_copy') {
+      explanation = repairMissingMedicationCautionCopy(inputs, explanation);
       copyFallbackReason = resolveCopyFallbackReason(
         inputs,
         orderedSteps,
@@ -348,6 +368,7 @@ export class SuggestionAiGenerator {
     model: string;
     prompt: string;
     reasoningEffort: OpenAiReasoningEffort;
+    timeoutMs: number;
   }): Promise<{
     outputText: string | null;
     payload: OpenAiResponsePayload;
@@ -377,6 +398,7 @@ export class SuggestionAiGenerator {
     model: string;
     prompt: string;
     reasoningEffort: OpenAiReasoningEffort;
+    timeoutMs: number;
   }): Promise<OpenAiResponsePayload> {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -407,7 +429,7 @@ export class SuggestionAiGenerator {
           format: RESPONSE_FORMAT,
         },
       }),
-      signal: AbortSignal.timeout(SUGGESTION_AI_TIMEOUT_MS),
+      signal: AbortSignal.timeout(input.timeoutMs),
     });
 
     if (!response.ok) {
@@ -472,6 +494,12 @@ function suggestionReasoningEffort(
   return inputs.requestSource === SuggestionRequestSource.Scheduled
     ? OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT
     : OPENAI_QUICK_SUGGESTION_REASONING_EFFORT;
+}
+
+function suggestionTimeoutMs(inputs: SuggestionGenerationInputs): number {
+  return inputs.requestSource === SuggestionRequestSource.Scheduled
+    ? SUGGESTION_AI_TODAYS_TIMEOUT_MS
+    : SUGGESTION_AI_QUICK_TIMEOUT_MS;
 }
 
 function buildManualBaselineSteps(
@@ -573,13 +601,19 @@ function repairRecoverableMissingSteps(
 ): SuggestionGenerationStepOutput[] {
   return repairMissingEligibleManualRoutineSteps(
     inputs,
-    repairMissingMinimalRoutineSupport(
+    repairThinScheduledMorningSupport(
       inputs,
-      repairMissingBarrierMoisturizer(
+      repairMissingMinimalRoutineSupport(
         inputs,
-        repairMissingOnDemandMoisturizer(
+        repairMissingBarrierMoisturizer(
           inputs,
-          repairMissingOwnedDaytimeSpf(inputs, steps),
+          repairMissingOnDemandMoisturizer(
+            inputs,
+            repairConflictingLowerScoredAiSelection(
+              inputs,
+              repairMissingOwnedDaytimeSpf(inputs, steps),
+            ),
+          ),
         ),
       ),
     ),
@@ -705,9 +739,14 @@ function shouldRemoveStepForHardSafetyRecovery(
     case 'unsafe_daytime_strong_active':
       return score ? hasDaytimeStrongActiveConflict(inputs, score) : false;
     case 'unsafe_recent_strong_active_spacing':
+    case 'unsafe_medication_strong_active':
     case 'unsafe_reaction_active':
     case 'unsafe_restart_active':
       return score ? hasStrongActive(score) : false;
+    case 'unsafe_sensitive_history_active':
+      return score
+        ? hasSensitiveReactiveHistoryStrongActiveCaution(inputs, score)
+        : false;
     case 'unsafe_pregnancy_active':
       return score ? hasPregnancyCautionActive(score) : false;
     case 'preferred_time_of_day_mismatch':
@@ -737,11 +776,10 @@ function repairMissingOwnedDaytimeSpf(
       .map((step) => step.inventoryProductId)
       .filter((productId): productId is string => Boolean(productId)),
   );
-  const sunscreenStep = buildDeterministicAiSteps(inputs).find(
-    (step) =>
-      step.stepLabel === ProductCategory.SunProtection &&
-      step.inventoryProductId &&
-      !existingProductIds.has(step.inventoryProductId),
+  const sunscreenStep = buildDeterministicAiStepForCategory(
+    inputs,
+    ProductCategory.SunProtection,
+    existingProductIds,
   );
   return sunscreenStep ? orderBaselineSteps([...steps, sunscreenStep]) : steps;
 }
@@ -774,11 +812,10 @@ function repairMissingOnDemandMoisturizer(
       .map((step) => step.inventoryProductId)
       .filter((productId): productId is string => Boolean(productId)),
   );
-  const moisturizerStep = buildDeterministicAiSteps(inputs).find(
-    (step) =>
-      step.stepLabel === ProductCategory.Moisturizer &&
-      step.inventoryProductId &&
-      !existingProductIds.has(step.inventoryProductId),
+  const moisturizerStep = buildDeterministicAiStepForCategory(
+    inputs,
+    ProductCategory.Moisturizer,
+    existingProductIds,
   );
   return moisturizerStep
     ? orderBaselineSteps([...steps, moisturizerStep])
@@ -803,15 +840,185 @@ function repairMissingBarrierMoisturizer(
       .map((step) => step.inventoryProductId)
       .filter((productId): productId is string => Boolean(productId)),
   );
-  const moisturizerStep = buildDeterministicAiSteps(inputs).find(
-    (step) =>
-      step.stepLabel === ProductCategory.Moisturizer &&
-      step.inventoryProductId &&
-      !existingProductIds.has(step.inventoryProductId),
+  const moisturizerStep = buildDeterministicAiStepForCategory(
+    inputs,
+    ProductCategory.Moisturizer,
+    existingProductIds,
   );
   return moisturizerStep
     ? orderBaselineSteps([...steps, moisturizerStep])
     : steps;
+}
+
+const CONFLICT_REPLACEMENT_SCORE_MARGIN = 8;
+
+function repairConflictingLowerScoredAiSelection(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  let repaired = false;
+  const selectedProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  const selectedScores = steps
+    .map((step) =>
+      step.inventoryProductId ? scoreByProductId.get(step.inventoryProductId) : null,
+    )
+    .filter(
+      (score): score is SuggestionContextSummary['productScores'][number] =>
+        Boolean(score),
+    );
+
+  const repairedSteps = steps.map((step) => {
+    if (
+      step.provenance !== SuggestionStepProvenance.AiAdded ||
+      !step.inventoryProductId
+    ) {
+      return step;
+    }
+    const selectedScore = scoreByProductId.get(step.inventoryProductId);
+    if (!selectedScore) return step;
+    const replacementScore = [...scoreByProductId.values()]
+      .filter((candidate) => !selectedProductIds.has(candidate.productId))
+      .filter((candidate) =>
+        isEligibleConflictReplacementCandidate(inputs, candidate),
+      )
+      .filter(
+        (candidate) =>
+          candidate.suitabilityScore >=
+          selectedScore.suitabilityScore + CONFLICT_REPLACEMENT_SCORE_MARGIN,
+      )
+      .filter((candidate) =>
+        hasAiLayeringConflict(candidate, selectedScore),
+      )
+      .filter((candidate) =>
+        selectedScores
+          .filter((score) => score.productId !== selectedScore.productId)
+          .every((score) => areAiProductsCompatible(candidate, score)),
+      )
+      .sort((left, right) => right.suitabilityScore - left.suitabilityScore)[0];
+    if (!replacementScore) return step;
+    const replacementStep = buildAiStepForProductScore(
+      inputs,
+      replacementScore,
+      step.stepOrder,
+    );
+    if (!replacementStep?.inventoryProductId) return step;
+    selectedProductIds.delete(step.inventoryProductId);
+    selectedProductIds.add(replacementStep.inventoryProductId);
+    repaired = true;
+    return replacementStep;
+  });
+
+  return repaired ? orderBaselineSteps(repairedSteps) : steps;
+}
+
+function isEligibleConflictReplacementCandidate(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  if (!hasCurrentSelectionEvidence(inputs, score.productId)) return false;
+  if (
+    !isPreferredTimeCompatibleWithDaypart(
+      score.preferredTimeOfDay,
+      inputs.daypart,
+    )
+  ) {
+    return false;
+  }
+  if (
+    inputs.contextSummary.skippedCandidates.some(
+      (candidate) =>
+        candidate.productId === score.productId &&
+        !/recent same-daypart repeat/i.test(candidate.reason),
+    )
+  ) {
+    return false;
+  }
+  return canRepairManualRoutineStep(inputs, score);
+}
+
+function buildAiStepForProductScore(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+  stepOrder: number,
+): SuggestionGenerationStepOutput | null {
+  return resolveRawStep(
+    {
+      stepOrder,
+      routineStepId: null,
+      inventoryProductId: score.productId,
+      stepLabel: score.category,
+      explanation:
+        'Selected because the current scoring better supports this slot and conflicting products should not be layered together.',
+      provenance: SuggestionStepProvenance.AiAdded,
+    },
+    stepOrder,
+    buildAssemblyContext(inputs),
+  );
+}
+
+function areAiProductsCompatible(
+  left: SuggestionContextSummary['productScores'][number],
+  right: SuggestionContextSummary['productScores'][number],
+): boolean {
+  return !hasAiLayeringConflict(left, right);
+}
+
+function hasAiLayeringConflict(
+  left: SuggestionContextSummary['productScores'][number],
+  right: SuggestionContextSummary['productScores'][number],
+): boolean {
+  return (
+    hasExplicitAiLayeringConflict(left, right) ||
+    hasStrongActiveAiLayeringConflict(left, right) ||
+    hasVitaminCNiacinamideAiConflict(left, right)
+  );
+}
+
+function hasExplicitAiLayeringConflict(
+  left: SuggestionContextSummary['productScores'][number],
+  right: SuggestionContextSummary['productScores'][number],
+): boolean {
+  const text = [
+    ...left.cautionReasons,
+    ...right.cautionReasons,
+    ...(left.guidanceCautions ?? []),
+    ...(right.guidanceCautions ?? []),
+  ].join(' ');
+  return /(?:do not|don't|avoid|separate|split|alternate).{0,40}(?:layer|combine|mix|same routine|together)|(?:layer|combine|mix).{0,40}(?:irritat|unstable|less comfortable|not recommended)/i.test(
+    text,
+  );
+}
+
+function hasStrongActiveAiLayeringConflict(
+  left: SuggestionContextSummary['productScores'][number],
+  right: SuggestionContextSummary['productScores'][number],
+): boolean {
+  return (
+    left.activeTags.some(isStrongActiveTag) &&
+    right.activeTags.some(isStrongActiveTag)
+  );
+}
+
+function hasVitaminCNiacinamideAiConflict(
+  left: SuggestionContextSummary['productScores'][number],
+  right: SuggestionContextSummary['productScores'][number],
+): boolean {
+  const leftTags = new Set(left.activeTags);
+  const rightTags = new Set(right.activeTags);
+  return (
+    (leftTags.has('vitamin_c') && rightTags.has('niacinamide')) ||
+    (leftTags.has('niacinamide') && rightTags.has('vitamin_c'))
+  );
 }
 
 function repairMissingEligibleManualRoutineSteps(
@@ -880,12 +1087,17 @@ function canRepairManualRoutineStep(
   ) {
     return false;
   }
+  if (hasMedicationStrongActiveCaution(inputs) && hasStrongActive(score)) {
+    return false;
+  }
+  if (hasSensitiveReactiveHistoryStrongActiveCaution(inputs, score)) {
+    return false;
+  }
   if (hasReactionSignalInInputs(inputs) && hasStrongActive(score)) {
     return false;
   }
   if (
-    (inputs.contextSummary.routineBreak.recentlyResumed ||
-      inputs.contextSummary.applicationPatterns.conservativeRestart) &&
+    inputs.contextSummary.routineBreak.recentlyResumed &&
     hasStrongActive(score)
   ) {
     return false;
@@ -899,6 +1111,13 @@ const IMMEDIATE_SUPPORT_CATEGORIES = new Set<ProductCategory>([
   ProductCategory.Cleanser,
   ProductCategory.Moisturizer,
   ProductCategory.SunProtection,
+]);
+const THIN_MORNING_SUPPORT_TRIGGER_CATEGORIES = new Set<ProductCategory>([
+  ProductCategory.Cleanser,
+  ProductCategory.Moisturizer,
+  ProductCategory.Serum,
+  ProductCategory.Treatment,
+  ProductCategory.Exfoliant,
 ]);
 
 function repairMissingMinimalRoutineSupport(
@@ -951,6 +1170,66 @@ function repairMissingMinimalRoutineSupport(
   ]);
 }
 
+function repairThinScheduledMorningSupport(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  if (inputs.requestSource !== SuggestionRequestSource.Scheduled) return steps;
+  if (inputs.daypart !== SuggestionDaypart.Morning) return steps;
+  if (!requiresOwnedDaytimeSpf(inputs)) return steps;
+  if (steps.length >= 3) return steps;
+
+  const selectedScores = selectedProductScores(inputs, steps);
+  if (selectedScores.length === 0) return steps;
+  if (
+    !selectedScores.some(
+      (score) => score.category === ProductCategory.SunProtection,
+    )
+  ) {
+    return steps;
+  }
+  if (
+    !selectedScores.some(
+      (score) =>
+        score.category !== ProductCategory.SunProtection &&
+        THIN_MORNING_SUPPORT_TRIGGER_CATEGORIES.has(score.category),
+    )
+  ) {
+    return steps;
+  }
+
+  const selectedCategories = new Set(
+    selectedScores.map((score) => score.category),
+  );
+  const selectedProductIds = new Set(
+    steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId)),
+  );
+  let repairedSteps = steps;
+  for (const category of [
+    ProductCategory.Cleanser,
+    ProductCategory.Moisturizer,
+  ]) {
+    if (repairedSteps.length >= 3 || selectedCategories.has(category)) {
+      continue;
+    }
+    const supportStep = buildDeterministicAiStepForCategory(
+      inputs,
+      category,
+      selectedProductIds,
+    );
+    if (!supportStep?.inventoryProductId) continue;
+    selectedProductIds.add(supportStep.inventoryProductId);
+    selectedCategories.add(category);
+    repairedSteps = [...repairedSteps, supportStep];
+  }
+
+  return repairedSteps.length === steps.length
+    ? steps
+    : orderBaselineSteps(repairedSteps);
+}
+
 function prefersStoredMinimalRoutine(
   inputs: SuggestionGenerationInputs,
 ): boolean {
@@ -994,19 +1273,7 @@ function normalizeExplanationForSelectedSteps(
   steps: SuggestionGenerationStepOutput[],
   explanation: SuggestionExplanationJson,
 ): SuggestionExplanationJson {
-  const selectedProductLabels = new Set(
-    steps.flatMap((step) =>
-      [
-        step.inventoryProductId,
-        step.productName,
-        step.productBrand && step.productName
-          ? `${step.productBrand} ${step.productName}`
-          : null,
-      ]
-        .filter((value): value is string => Boolean(value?.trim()))
-        .map((value) => normalizeProductCopy(value)),
-    ),
-  );
+  const selectedProductLabels = selectedProductLabelsForSteps(steps);
   const perStepReasons = steps.map((step) => ({
     stepOrder: step.stepOrder,
     reason: step.explanation ?? 'Good fit for this slot.',
@@ -1015,7 +1282,8 @@ function normalizeExplanationForSelectedSteps(
     ...explanation.body.filter(
       (line) =>
         !isConditionalSelectedSpfText(steps, line) &&
-        !isOffSlotSunscreenCopy(inputs, line),
+        !isOffSlotSunscreenCopy(inputs, line) &&
+        !isUnselectedStrongActiveCopy(inputs, selectedProductLabels, line),
     ),
     ...deterministicExplanationBodyLines(inputs, explanation.body),
   ];
@@ -1034,37 +1302,193 @@ function normalizeExplanationForSelectedSteps(
 
   return {
     ...explanation,
+    headline: isUnselectedStrongActiveCopy(
+      inputs,
+      selectedProductLabels,
+      explanation.headline,
+    )
+      ? safeHeadline(inputs)
+      : explanation.headline,
     body,
     perStepReasons,
     skipped,
-    inputs: normalizeExplanationInputs(inputs, explanation.inputs),
+    inputs: normalizeExplanationInputs(
+      inputs,
+      explanation.inputs,
+      selectedProductLabels,
+    ),
   };
 }
 
 function normalizeExplanationInputs(
   inputs: SuggestionGenerationInputs,
   explanationInputs: SuggestionExplanationJson['inputs'],
+  selectedProductLabels: Set<string>,
 ): SuggestionExplanationJson['inputs'] {
   return explanationInputs
     .map((input) => ({
       ...input,
       detail: removeUnsupportedProfileClaims(inputs, input.detail),
     }))
-    .filter((input) => input.label.trim() && input.detail.trim());
+    .filter(
+      (input) =>
+        input.label.trim() &&
+        input.detail.trim() &&
+        !isSensitiveExplanationInputLabel(input.label) &&
+        !isUnselectedStrongActiveCopy(
+          inputs,
+          selectedProductLabels,
+          `${input.label} ${input.detail}`,
+        ),
+    );
+}
+
+function selectedProductLabelsForSteps(
+  steps: SuggestionGenerationStepOutput[],
+): Set<string> {
+  return new Set(
+    steps.flatMap((step) =>
+      [
+        step.inventoryProductId,
+        step.productName,
+        step.productBrand && step.productName
+          ? `${step.productBrand} ${step.productName}`
+          : null,
+      ]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => normalizeProductCopy(value)),
+    ),
+  );
+}
+
+function sanitizeStepExplanationsForSelectedSteps(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  const selectedProductLabels = selectedProductLabelsForSteps(steps);
+  return steps.map((step) => {
+    if (
+      !step.explanation ||
+      !isUnselectedStrongActiveCopy(inputs, selectedProductLabels, step.explanation)
+    ) {
+      return step;
+    }
+    return {
+      ...step,
+      explanation: safeStepExplanation(step.stepLabel),
+    };
+  });
+}
+
+function safeStepExplanation(stepLabel: string): string {
+  switch (stepLabel) {
+    case ProductCategory.Cleanser:
+      return 'Gentle cleanse fits this slot.';
+    case ProductCategory.Moisturizer:
+      return 'Barrier support fits this slot.';
+    case ProductCategory.SunProtection:
+      return 'Daytime protection fits this slot.';
+    default:
+      return 'This selected shelf product fits the current context.';
+  }
+}
+
+function safeHeadline(inputs: SuggestionGenerationInputs): string {
+  return inputs.daypart === SuggestionDaypart.Evening
+    ? 'Gentle evening routine'
+    : 'Gentle routine';
 }
 
 function removeUnsupportedProfileClaims(
   inputs: SuggestionGenerationInputs,
   detail: string,
 ): string {
-  if (hasHighPihTendency(inputs)) return detail;
-  return detail
+  const withoutSensitiveClaims = removeSensitiveProfileClaims(detail);
+  if (hasHighPihTendency(inputs)) return withoutSensitiveClaims;
+  return withoutSensitiveClaims
     .replace(/,\s*high PIH tendency\b/gi, '')
     .replace(/\bhigh PIH tendency,\s*/gi, '')
     .replace(/\bhigh PIH tendency\b/gi, '')
     .replace(/\s+,/g, ',')
     .replace(/\s{2,}/g, ' ')
+    .replace(/^[,;]\s*|\s*[,;]\s*$/g, '')
     .trim();
+}
+
+function removeSensitiveProfileClaims(detail: string): string {
+  return detail
+    .split(/\s*;\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && !isSensitiveProfileClaim(part))
+    .join('; ')
+    .replace(/\b(ethnicity|race|countryCode|country|city|location|fitzpatrick(?:Phototype)?|phototype)\s*[:=]\s*[^,;]+,?\s*/gi, '')
+    .replace(/\s*;\s*;/g, ';')
+    .replace(/\s+,/g, ',')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[,;]\s*|\s*[,;]\s*$/g, '')
+    .trim();
+}
+
+function isSensitiveProfileClaim(value: string): boolean {
+  return /^(?:ethnicity|race|countryCode|country|city|location|fitzpatrick(?:Phototype)?|phototype)\s*[:=]/i.test(
+    value,
+  );
+}
+
+function isSensitiveExplanationInputLabel(label: string): boolean {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return [
+    'ethnicity',
+    'race',
+    'country',
+    'countrycode',
+    'city',
+    'location',
+    'fitzpatrick',
+    'fitzpatrickphototype',
+    'phototype',
+  ].includes(normalized);
+}
+
+function isUnselectedStrongActiveCopy(
+  inputs: SuggestionGenerationInputs,
+  selectedProductLabels: Set<string>,
+  line: string,
+): boolean {
+  const normalizedLine = normalizeProductCopy(line);
+  if (!normalizedLine) return false;
+  const shelfProductById = new Map(
+    inputs.shelfActiveProducts.map((product) => [product.id, product]),
+  );
+  return resolveSuggestionProductScores(inputs)
+    .filter(hasStrongActive)
+    .filter((score) => {
+      const shelfProduct = shelfProductById.get(score.productId);
+      const selectedLabels = [
+        score.productId,
+        shelfProduct?.name,
+        [shelfProduct?.brand, shelfProduct?.name].filter(Boolean).join(' '),
+        score.name,
+        [score.brand, score.name].filter(Boolean).join(' '),
+      ]
+        .filter(Boolean)
+        .map(normalizeProductCopy);
+      return !selectedLabels.some((label) => selectedProductLabels.has(label));
+    })
+    .some((score) => {
+      const shelfProduct = shelfProductById.get(score.productId);
+      return [
+        score.productId,
+        shelfProduct?.name,
+        [shelfProduct?.brand, shelfProduct?.name].filter(Boolean).join(' '),
+        score.name,
+        [score.brand, score.name].filter(Boolean).join(' '),
+        ...score.activeTags,
+      ]
+        .filter((label): label is string => Boolean(label))
+        .map((label) => normalizeProductCopy(label.replace(/_/g, ' ')))
+        .some((label) => label.length > 0 && normalizedLine.includes(label));
+    });
 }
 
 function hasHighPihTendency(inputs: SuggestionGenerationInputs): boolean {
@@ -1081,6 +1505,10 @@ function normalizeProductCopy(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function deterministicExplanationBodyLines(
@@ -1343,14 +1771,26 @@ function resolveHardSafetyFallbackReason(
     return 'unsafe_pregnancy_active';
   }
   if (
+    hasMedicationStrongActiveCaution(inputs) &&
+    selectedScores.some(hasStrongActive)
+  ) {
+    return 'unsafe_medication_strong_active';
+  }
+  if (
     hasReactionSignalInInputs(inputs) &&
     selectedScores.some(hasStrongActive)
   ) {
     return 'unsafe_reaction_active';
   }
   if (
-    (inputs.contextSummary.routineBreak.recentlyResumed ||
-      inputs.contextSummary.applicationPatterns.conservativeRestart) &&
+    selectedScores.some((score) =>
+      hasSensitiveReactiveHistoryStrongActiveCaution(inputs, score),
+    )
+  ) {
+    return 'unsafe_sensitive_history_active';
+  }
+  if (
+    inputs.contextSummary.routineBreak.recentlyResumed &&
     selectedScores.some(hasStrongActive)
   ) {
     return 'unsafe_restart_active';
@@ -1406,21 +1846,18 @@ function hasDaytimeStrongActiveConflict(
   if (inputs.daypart === SuggestionDaypart.Evening || !hasStrongActive(score)) {
     return false;
   }
-  if (
-    score.activeTags.some((tag) =>
-      ['retinoid', 'retinol', 'adapalene', 'tretinoin'].includes(
-        tag.toLowerCase(),
-      ),
-    )
-  ) {
-    return true;
-  }
-  return /(space_strong_actives|photosensit|very_high|high_uv|daytime|sun)/i.test(
-    JSON.stringify([
-      score.cautionReasons,
-      inputs.contextSummary.safetyConstraints,
-      inputs.contextSummary.environment?.uvRisk ?? '',
-    ]),
+  const hasSuppliedPhotosensitivitySignal =
+    /(?:space_strong_actives|avoid_new_strong_actives|avoid_daytime_strong_active|avoid_daytime_active|photosensit|high_uv|very_high_uv|extreme_uv|sun[- ]?sensitive|sun sensitivity|sun exposure|sunlight)/i.test(
+      JSON.stringify([
+        score.cautionReasons,
+        inputs.contextSummary.safetyConstraints,
+      ]),
+    );
+  return (
+    hasSuppliedPhotosensitivitySignal ||
+    (inputs.contextSummary.environment
+      ? isHighUvRisk(inputs.contextSummary.environment.uvRisk)
+      : false)
   );
 }
 
@@ -1534,6 +1971,72 @@ function hasPregnancyOrMedicationCaution(
   return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(text);
 }
 
+function hasMedicationStrongActiveCaution(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  const safetyContext = inputs.skinProfile?.safety_context ?? {};
+  const text = JSON.stringify([
+    safetyContext.medications ?? [],
+    safetyContext.conditions ?? [],
+    safetyContext.photosensitizing_other
+      ? 'photosensitizing medication context'
+      : '',
+    inputs.skinProfile?.under_dermatologist_care ?? '',
+    inputs.contextSummary.safetyConstraints,
+  ]).toLowerCase();
+  return /\b(medication|medicine|isotretinoin|antibiotic|photosensit|dermatologist|prescriber|clinician|professional)\b/i.test(
+    text,
+  );
+}
+
+function hasSensitiveReactiveHistoryStrongActiveCaution(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  if (!hasStrongActive(score)) return false;
+  if (hasPositiveStrongActiveTolerance(inputs, score)) return false;
+  const profile = inputs.skinProfile;
+  const sensitivityText = JSON.stringify([
+    profile?.skin_type ?? '',
+    profile?.sensitivity_level ?? '',
+    inputs.contextSummary.skinProfile.skinType ?? '',
+    inputs.contextSummary.skinProfile.sensitivityLevel ?? '',
+  ]).toLowerCase();
+  if (!/\b(sensitive|high)\b/i.test(sensitivityText)) return false;
+  const reactionText = JSON.stringify([
+    profile?.reaction_history ?? {},
+    profile?.shopping_preferences ?? {},
+  ]).toLowerCase();
+  return /\b(reaction|reacted|redness|sting|stinging|burn|burning|itch|rash|irritat|fragrance|sensitiv)\b/i.test(
+    reactionText,
+  );
+}
+
+function hasPositiveStrongActiveTolerance(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  const product = inputs.shelfActiveProducts.find(
+    (shelfProduct) => shelfProduct.id === score.productId,
+  );
+  if (product?.introduction_status === ProductIntroductionStatus.Tolerated) {
+    return true;
+  }
+  const toleranceText = JSON.stringify(
+    inputs.skinProfile?.active_tolerances ?? {},
+  ).toLowerCase();
+  if (!toleranceText) return false;
+  return score.activeTags
+    .filter((tag) => isStrongActiveTag(tag))
+    .some((tag) => {
+      const normalizedTag = tag.toLowerCase().replace(/_/g, ' ');
+      return new RegExp(
+        `${escapeRegExp(normalizedTag)}[\\s\\S]{0,80}(tolerat|medium|high|good)`,
+        'i',
+      ).test(toleranceText);
+    });
+}
+
 function hasPregnancyCautionActive(score: { activeTags: string[] }): boolean {
   return score.activeTags.some((tag) =>
     ['retinoid', 'retinol', 'adapalene', 'tretinoin'].includes(
@@ -1595,6 +2098,18 @@ function repairContradictoryOnlyCopy(
     ...explanation,
     headline: removeOnlyWord(explanation.headline),
     body: explanation.body.map(removeOnlyWord).filter(Boolean),
+  };
+}
+
+function repairMissingMedicationCautionCopy(
+  inputs: SuggestionGenerationInputs,
+  explanation: SuggestionExplanationJson,
+): SuggestionExplanationJson {
+  const bodyText = explanation.body.join(' ');
+  if (hasMedicationProfessionalGuidance(bodyText)) return explanation;
+  return {
+    ...explanation,
+    body: [...explanation.body, medicationProfessionalGuidanceLine(inputs)],
   };
 }
 

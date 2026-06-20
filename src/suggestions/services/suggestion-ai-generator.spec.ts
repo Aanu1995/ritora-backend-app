@@ -20,9 +20,11 @@ import {
 } from '../../environment-intelligence/environment-intelligence.constants';
 import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import {
+  ApplicationMethod,
   PreferredTimeOfDay,
   ProductCategory,
   ProductIntroductionStatus,
+  Quantity,
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import {
@@ -32,8 +34,12 @@ import {
   SuggestionRequestSource,
   SuggestionStepProvenance,
 } from '../suggestions.constants';
-import { SuggestionAiGenerator } from './suggestion-ai-generator';
-import { SuggestionGenerationInputs } from './suggestion-ai-generator';
+import {
+  SUGGESTION_AI_QUICK_TIMEOUT_MS,
+  SUGGESTION_AI_TODAYS_TIMEOUT_MS,
+  SuggestionAiGenerator,
+  SuggestionGenerationInputs,
+} from './suggestion-ai-generator';
 import { getSuggestionEvidenceSources } from './suggestion-evidence-sources';
 
 describe('SuggestionAiGenerator', () => {
@@ -45,6 +51,7 @@ describe('SuggestionAiGenerator', () => {
   });
 
   it('calls OpenAI with low-temperature structured output for repeatable suggestions', async () => {
+    const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -96,9 +103,11 @@ describe('SuggestionAiGenerator', () => {
         temperature: 0,
       }),
     );
+    expect(timeoutSpy).toHaveBeenCalledWith(SUGGESTION_AI_TODAYS_TIMEOUT_MS);
   });
 
   it('uses medium reasoning for on-demand quick suggestions', async () => {
+    const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -156,6 +165,7 @@ describe('SuggestionAiGenerator', () => {
         reasoning: { effort: OPENAI_QUICK_SUGGESTION_REASONING_EFFORT },
       }),
     );
+    expect(timeoutSpy).toHaveBeenCalledWith(SUGGESTION_AI_QUICK_TIMEOUT_MS);
   });
 
   it('uses the structured reaction context even when the journal flag has not been backfilled', async () => {
@@ -459,6 +469,89 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('removes medication-context strong active steps instead of falling back', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Gentle acne evening',
+                    body: [
+                      'A gentle evening base fits tonight.',
+                      'BHA is the acne-focused step.',
+                    ],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'bha-1', ProductCategory.Exfoliant),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.skinProfile = {
+      primary_goal: 'manage acne while on medication',
+      safety_context: {
+        medications: ['oral acne medication'],
+        photosensitizing_other: true,
+      },
+      under_dermatologist_care: 'yes',
+    } as unknown as SkinProfile;
+    inputs.contextSummary.safetyConstraints.push(
+      'pregnancy_or_medication_active_caution',
+    );
+    inputs.shelfActiveProducts.push(
+      product('bha-1', 'BHA 2% Liquid', ProductCategory.Exfoliant),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('bha-1', ProductCategory.Exfoliant, 88, ['bha']),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'bha-1' }),
+      ]),
+    );
+    expect(result.explanation.body.join(' ').toLowerCase()).not.toContain(
+      'bha',
+    );
+    expect(result.explanation.body.join(' ').toLowerCase()).toContain(
+      'medication',
+    );
+  });
+
   it('repairs missing medication caution in the main explanation', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -596,6 +689,100 @@ describe('SuggestionAiGenerator', () => {
 
     expect(result.metadata.provider).toBe('openai');
     expect(result.metadata.fallbackReason).toBeNull();
+  });
+
+  it('removes strong actives for high-sensitivity reaction history without explicit tolerance', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening barrier with retinol',
+                    body: [
+                      'Gentle cleanse first.',
+                      'Retinol stays at night.',
+                      'Barrier cream finishes the routine.',
+                    ],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'retinoid-1', ProductCategory.Treatment),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.skinProfile = {
+      skin_type: 'sensitive',
+      sensitivity_level: 'high',
+      reaction_history: {
+        entries: [
+          {
+            trigger: 'fragrance',
+            reaction_types: ['redness', 'stinging'],
+          },
+        ],
+      },
+      shopping_preferences: { ingredient_dislikes: ['fragrance'] },
+    } as unknown as SkinProfile;
+    inputs.contextSummary.skinProfile.skinType = 'sensitive';
+    inputs.contextSummary.skinProfile.sensitivityLevel = 'high';
+    inputs.shelfActiveProducts.push(
+      product('retinoid-1', 'Retinol Night Serum', ProductCategory.Treatment, {
+        introduction_status: null,
+      }),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('retinoid-1', ProductCategory.Treatment, 90, [
+        'retinoid',
+        'retinol',
+      ]),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
+      ]),
+    );
+    expect(result.explanation.body.join(' ').toLowerCase()).not.toContain(
+      'retinol',
+    );
+    expect(result.explanation.headline.toLowerCase()).not.toContain('retinol');
+    expect(
+      result.steps.map((step) => step.explanation).join(' ').toLowerCase(),
+    ).not.toContain('retinol');
   });
 
   it('removes a step that is actually copy for later use instead of falling back', async () => {
@@ -814,6 +1001,136 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('accepts tolerated retinol when sparse application logs do not show reaction or recent strong-active spacing', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening renewal',
+                    body: ['Use the tolerated shelf treatment tonight.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'retinoid-1', ProductCategory.Treatment),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.contextSummary.applicationPatterns.conservativeRestart = true;
+    inputs.contextSummary.safetyConstraints = [];
+    inputs.shelfActiveProducts.push(
+      product('retinoid-1', 'Retinol Night Serum', ProductCategory.Treatment),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('retinoid-1', ProductCategory.Treatment, 90, ['retinoid']),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
+      ]),
+    );
+  });
+
+  it('does not reject retinol from the AI path solely because the slot is daytime', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning plan',
+                    body: ['Use eligible shelf products for this slot.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'retinoid-1', ProductCategory.Treatment),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(3, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.contextSummary.safetyConstraints = ['daytime_spf_available'];
+    inputs.shelfActiveProducts.push(
+      product('retinoid-1', 'Retinol Treatment', ProductCategory.Treatment),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('retinoid-1', ProductCategory.Treatment, 90, ['retinoid']),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
+      ]),
+    );
+  });
+
   it('does not deterministically add a goal-support product when OpenAI returns only basics', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -971,7 +1288,7 @@ describe('SuggestionAiGenerator', () => {
     ]);
   });
 
-  it('removes unsupported PIH tendency claims from AI explanation inputs', async () => {
+  it('removes unsupported sensitive profile claims from AI explanation inputs', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       json: jest.fn().mockResolvedValue({
@@ -991,8 +1308,10 @@ describe('SuggestionAiGenerator', () => {
                       {
                         label: 'Skin',
                         detail:
-                          'Combination skin, medium sensitivity, high PIH tendency',
+                          'Combination skin; tone=deep; ethnicity=Black; countryCode=SE; city=Stockholm; fitzpatrickPhototype=IV; high PIH tendency',
                       },
+                      { label: 'ethnicity', detail: 'Black' },
+                      { label: 'fitzpatrickPhototype', detail: 'IV' },
                     ],
                   },
                   steps: [
@@ -1027,7 +1346,7 @@ describe('SuggestionAiGenerator', () => {
     expect(result.explanation.inputs).toEqual([
       {
         label: 'Skin',
-        detail: 'Combination skin, medium sensitivity',
+        detail: 'Combination skin; tone=deep',
       },
     ]);
   });
@@ -1464,6 +1783,217 @@ describe('SuggestionAiGenerator', () => {
       'moisturizer-1',
       'spf-1',
     ]);
+  });
+
+  it('repairs underfilled scheduled morning AI output that omits eligible cleanser', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Simple morning with SPF',
+                    body: ['Short morning routine.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(
+                      0,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(1, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'moisturizer-1',
+      'spf-1',
+    ]);
+  });
+
+  it('repairs active plus SPF morning output without adding a separated serum companion', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning tone support',
+                    body: ['Use vitamin C and SPF this morning.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'vitamin-c-1', ProductCategory.Serum),
+                    aiProductStep(1, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.shelfActiveProducts.push(
+      product('vitamin-c-1', 'Vitamin C Serum', ProductCategory.Serum),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('vitamin-c-1', ProductCategory.Serum, 96, ['vitamin_c']),
+    );
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
+        score.productId === 'serum-1'
+          ? {
+              ...score,
+              cautionReasons: [
+                'Avoid layering this niacinamide serum with Vitamin C Serum in the same routine.',
+              ],
+            }
+          : score,
+      );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'vitamin-c-1',
+      'spf-1',
+    ]);
+    expect(result.steps.map((step) => step.inventoryProductId)).not.toContain(
+      'serum-1',
+    );
+  });
+
+  it('replaces a lower-scored separated serum with the stronger current fit', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning tone support',
+                    body: ['Use niacinamide for even tone.'],
+                    perStepReasons: [],
+                    skipped: [
+                      {
+                        name: 'Ava Lab Vitamin C Serum',
+                        reason: 'Pairing caution with niacinamide.',
+                      },
+                    ],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'serum-1', ProductCategory.Serum),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                    aiProductStep(3, 'spf-1', ProductCategory.SunProtection),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.shelfActiveProducts.push(
+      product('vitamin-c-1', 'Vitamin C Serum', ProductCategory.Serum),
+    );
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.map((score) =>
+        score.productId === 'serum-1'
+          ? {
+              ...score,
+              suitabilityScore: 82,
+              cautionReasons: [
+                'Avoid layering this niacinamide serum with Vitamin C Serum in the same routine.',
+              ],
+            }
+          : score,
+      );
+    inputs.contextSummary.productScores.push(
+      productScore('vitamin-c-1', ProductCategory.Serum, 96, ['vitamin_c']),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual([
+      'cleanser-1',
+      'vitamin-c-1',
+      'moisturizer-1',
+      'spf-1',
+    ]);
+    expect(result.explanation.skipped).toEqual([]);
   });
 
   it('allows OpenAI to add a product with current goal evidence', async () => {
@@ -3598,6 +4128,152 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('does not treat compatible same-category products as mutually exclusive in scheduled fallback', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.shelfActiveProducts.push(
+      product(
+        'hydrating-serum-1',
+        'Hydrating Support Serum',
+        ProductCategory.Serum,
+        {
+          identity: productIdentity({
+            name: 'Hydrating Support Serum',
+            category: ProductCategory.Serum,
+            description: 'Water-light serum for hydration support.',
+            inciIngredients: ['Glycerin', 'Sodium Hyaluronate'],
+            benefits: ['hydration support'],
+            suitedFor: ['dehydrated skin'],
+          }),
+        },
+      ),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('serum-1', ProductCategory.Serum, 95, ['niacinamide']),
+      productScore('hydrating-serum-1', ProductCategory.Serum, 93, [
+        'humectant',
+      ]),
+      productScore('spf-1', ProductCategory.SunProtection, 92, ['spf']),
+      productScore('cleanser-1', ProductCategory.Cleanser, 88, []),
+      productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+        'ceramide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+    const productIds = result.steps.map((step) => step.inventoryProductId);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(productIds).toEqual(expect.arrayContaining(['serum-1']));
+    expect(productIds).toEqual(expect.arrayContaining(['hydrating-serum-1']));
+  });
+
+  it('does not treat compatible same-category products as mutually exclusive in quick suggestion fallback', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.requestContext = {
+      intent: 'quick_refresh',
+      intensity: 'standard',
+      note: 'Skin feels comfortable but dehydrated before going out.',
+      activityAt: null,
+      requestedAt: '2026-04-29T08:30:00.000Z',
+    };
+    inputs.contextSummary.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.contextSummary.onDemand = inputs.requestContext;
+    inputs.shelfActiveProducts.push(
+      product(
+        'hydrating-serum-1',
+        'Hydrating Support Serum',
+        ProductCategory.Serum,
+        {
+          identity: productIdentity({
+            name: 'Hydrating Support Serum',
+            category: ProductCategory.Serum,
+            description: 'Water-light serum for hydration support.',
+            inciIngredients: ['Glycerin', 'Sodium Hyaluronate'],
+            benefits: ['hydration support'],
+            suitedFor: ['dehydrated skin'],
+          }),
+        },
+      ),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('serum-1', ProductCategory.Serum, 95, ['niacinamide']),
+      productScore('hydrating-serum-1', ProductCategory.Serum, 93, [
+        'humectant',
+      ]),
+      productScore('spf-1', ProductCategory.SunProtection, 92, ['spf']),
+      productScore('cleanser-1', ProductCategory.Cleanser, 88, []),
+      productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+        'ceramide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+    const productIds = result.steps.map((step) => step.inventoryProductId);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.explanation.headline).toBe('Quick shelf suggestion');
+    expect(productIds).toEqual(expect.arrayContaining(['serum-1']));
+    expect(productIds).toEqual(expect.arrayContaining(['hydrating-serum-1']));
+  });
+
+  it('does not layer same-category products when active tags indicate an ingredient conflict', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.shelfActiveProducts.push(
+      product('vitamin-c-1', 'L-Ascorbic Acid Serum', ProductCategory.Serum, {
+        identity: productIdentity({
+          name: 'L-Ascorbic Acid Serum',
+          category: ProductCategory.Serum,
+          description: 'Pure vitamin C serum.',
+          inciIngredients: ['L-Ascorbic Acid'],
+          benefits: ['brightening support'],
+          suitedFor: ['uneven tone'],
+        }),
+        guidance: {
+          applicationMethod: ApplicationMethod.Fingertips,
+          quantity: Quantity.PeaSize,
+          steps: [],
+          cautions: ['Avoid layering with niacinamide in the same routine.'],
+          waitMinutes: null,
+        },
+      }),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('serum-1', ProductCategory.Serum, 95, ['niacinamide']),
+      {
+        ...productScore('vitamin-c-1', ProductCategory.Serum, 94, [
+          'vitamin_c',
+        ]),
+        cautionReasons: [
+          'Avoid layering with niacinamide in the same routine.',
+        ],
+      },
+      productScore('spf-1', ProductCategory.SunProtection, 92, ['spf']),
+      productScore('cleanser-1', ProductCategory.Cleanser, 88, []),
+      productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+        'ceramide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+    const productIds = result.steps
+      .map((step) => step.inventoryProductId)
+      .filter((productId): productId is string => Boolean(productId));
+
+    expect(productIds).not.toEqual(
+      expect.arrayContaining(['serum-1', 'vitamin-c-1']),
+    );
+  });
+
   it('localizes deterministic fallback copy for Spanish suggestions', async () => {
     const generator = new SuggestionAiGenerator({
       get: jest.fn().mockReturnValue(null),
@@ -3786,6 +4462,29 @@ function productScore(
       category === ProductCategory.SunProtection
         ? [SuggestionEvidenceSourceId.AadSunscreenSelection]
         : [SuggestionEvidenceSourceId.MayoDrySkinCare],
+  };
+}
+
+function productIdentity(input: {
+  name: string;
+  category: ProductCategory;
+  description: string;
+  inciIngredients: string[];
+  benefits: string[];
+  suitedFor: string[];
+}): InventoryProduct['identity'] {
+  return {
+    brand: 'Ava Lab',
+    name: input.name,
+    category: input.category,
+    barcode: null,
+    imageUrls: [],
+    sizeMl: null,
+    description: input.description,
+    benefits: input.benefits,
+    suitedFor: input.suitedFor,
+    inciIngredients: input.inciIngredients,
+    inciLastConfirmedAt: '2026-05-01T00:00:00.000Z',
   };
 }
 

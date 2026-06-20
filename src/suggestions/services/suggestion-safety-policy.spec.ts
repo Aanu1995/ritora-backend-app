@@ -1,0 +1,96 @@
+import { PreferredTimeOfDay, ProductCategory } from '../../shelf/shelf.types';
+import { SuggestionProductScore } from '../suggestion-context.types';
+import { SuggestionEvidenceSourceId } from '../suggestions.constants';
+import { buildSafetyConstraints } from './suggestion-safety-policy';
+
+describe('suggestion safety policy', () => {
+  it('does not add strong-active spacing merely because a strong active is on the shelf', () => {
+    const constraints = buildSafetyConstraints({
+      reaction: reactionSummary(),
+      productScores: [
+        productScore('retinol-1', ProductCategory.Treatment, ['retinoid']),
+      ],
+      targetDate: '2026-05-18',
+      appliedProductHistory: {
+        windowStartDate: '2026-04-19',
+        windowEndDate: '2026-05-18',
+        recordsConsidered: 30,
+        products: [],
+      },
+    });
+
+    expect(constraints).not.toContain('space_strong_actives');
+  });
+
+  it('adds strong-active spacing when a strong active was applied recently', () => {
+    const constraints = buildSafetyConstraints({
+      reaction: reactionSummary(),
+      productScores: [
+        productScore('retinol-1', ProductCategory.Treatment, ['retinoid']),
+      ],
+      targetDate: '2026-05-18',
+      appliedProductHistory: {
+        windowStartDate: '2026-04-19',
+        windowEndDate: '2026-05-18',
+        recordsConsidered: 30,
+        products: [
+          {
+            productId: 'retinol-1',
+            brand: 'Ava Lab',
+            name: 'Retinol Treatment',
+            category: ProductCategory.Treatment,
+            stepLabel: ProductCategory.Treatment,
+            sourceTypes: ['recommended'],
+            dayparts: ['evening'],
+            statuses: ['applied'],
+            useCount: 1,
+            lastAppliedDate: '2026-05-17',
+            lastAppliedAt: '2026-05-17T20:00:00.000Z',
+            isOffShelf: false,
+            isSubstitution: false,
+          },
+        ],
+      },
+    });
+
+    expect(constraints).toContain('space_strong_actives');
+  });
+});
+
+function reactionSummary() {
+  return {
+    hasSignal: false,
+    severity: null,
+    confidence: null,
+    indicators: [],
+    affectedZones: [],
+    concernKeys: [],
+    daysSinceLatestSignal: null,
+    barrierCompromised: false,
+    photoInputImages: 0,
+    multiAnglePhotoEntries: 0,
+  };
+}
+
+function productScore(
+  productId: string,
+  category: ProductCategory,
+  activeTags: string[],
+): SuggestionProductScore {
+  return {
+    productId,
+    brand: 'Ava Lab',
+    name: productId,
+    category,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    activeTags,
+    suitabilityScore: 90,
+    suitabilityReasons: ['matches this slot'],
+    cautionReasons: [],
+    waitMinutes: null,
+    inciQuality: 'available',
+    dataQuality: 'verified',
+    dataQualityWarnings: [],
+    evidenceSourceIds: [SuggestionEvidenceSourceId.AadRetinoidRetinol],
+  };
+}

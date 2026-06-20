@@ -443,7 +443,7 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
       },
       manualReviewChecklist: [
         'Does UV context influence the suggestion?',
-        'Does it avoid daytime retinoid use?',
+        'Does it respect the retinoid product preferredTime while prioritizing noon SPF?',
       ],
     }),
     buildCase({
@@ -821,6 +821,101 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
       ],
     }),
     buildCase({
+      id: 'tolerated_retinoid_evening_sparse_history',
+      title:
+        'Tolerated retinoid remains eligible when history is quiet and no reaction is present',
+      riskFocus: [
+        'tolerated_active_eligibility',
+        'sparse_history',
+        'unnecessary_basic_only_repeat',
+      ],
+      profile: profile({
+        primaryGoal: 'smooth fine lines and uneven texture',
+        currentConcerns: ['fine lines', 'texture'],
+        activeTolerances: {
+          retinoid: { tolerance: 'good' },
+          niacinamide: { tolerance: 'good' },
+        },
+        routinePreferences: {
+          pace: 'steady',
+          max_active_nights_per_week: 3,
+          pm_minutes: 12,
+        },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:30',
+      products: [
+        cleanser(),
+        moisturizer(),
+        niacinamideSerum(),
+        vitaminCSerum(),
+        retinoid(),
+      ],
+      recentApplications: [],
+      expected: {
+        minStepCount: 2,
+        maxStepCount: 4,
+        maxStrongActiveCount: 1,
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 2,
+        requiredProductIds: ['retinoid-1'],
+      },
+      manualReviewChecklist: [
+        'Does sparse history avoid becoming a reason to suppress tolerated retinol?',
+        'Does the output still avoid stacking retinol with another strong active?',
+      ],
+    }),
+    buildCase({
+      id: 'tolerated_vitamin_c_morning_not_crowded_out',
+      title:
+        'Tolerated vitamin C is considered separately from niacinamide for pigment goals',
+      riskFocus: [
+        'same_category_selection',
+        'pigment_support',
+        'unnecessary_basic_only_repeat',
+      ],
+      profile: profile({
+        primaryGoal: 'fade post-acne dark marks',
+        currentConcerns: ['dark marks', 'uneven tone'],
+        activeTolerances: {
+          vitamin_c: { tolerance: 'good' },
+          niacinamide: { tolerance: 'good' },
+        },
+        routinePreferences: {
+          pace: 'steady',
+          am_minutes: 10,
+        },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '08:00',
+      products: [
+        cleanser(),
+        moisturizer(),
+        sunscreen(),
+        niacinamideSerum(),
+        vitaminCSerum(),
+      ],
+      recentApplications: [
+        application('2026-05-17', SuggestionDaypart.Morning, [
+          'cleanser-1',
+          'moisturizer-1',
+          'spf-1',
+        ]),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        minStepCount: 3,
+        maxStepCount: 4,
+        minSelectedNonBasicCategoryCount: 1,
+        minSelectedDistinctCategoryCount: 3,
+        requiredProductIds: ['spf-1', 'vitamin-c-1'],
+      },
+      manualReviewChecklist: [
+        'Does vitamin C remain eligible instead of being crowded out solely by niacinamide?',
+        'Does it avoid layering vitamin C and niacinamide together when supplied cautions say to separate them?',
+      ],
+    }),
+    buildCase({
       id: 'non_serum_categories_evening',
       title: 'Evening shelf can choose uploaded non-serum support categories',
       riskFocus: [
@@ -1059,6 +1154,7 @@ function contextSummaryFor(input: {
     input.daypart,
   );
   const profileSignals = buildProfileSignals(input.profile);
+  const shouldSpaceStrongActives = shouldSpaceStrongActivesForCase(input);
   return {
     cacheKey: `eval-${input.id}`,
     builtAt: '2026-05-18T06:00:00.000Z',
@@ -1097,7 +1193,9 @@ function contextSummaryFor(input: {
     environment: input.environment ?? null,
     appliedProductHistory: history.appliedProductHistory,
     routineMemory: history.routineMemory,
-    productScores: input.products.map(productScore),
+    productScores: input.products.map((productValue) =>
+      productScore(productValue, { shouldSpaceStrongActives }),
+    ),
     applicationPatterns: {
       days: input.recentApplications?.length ?? 0,
       daysSinceLastApplication: input.recentApplications?.length ? 1 : null,
@@ -1118,7 +1216,7 @@ function contextSummaryFor(input: {
       )
         ? ['daytime_spf_available']
         : []),
-      ...(input.products.some((product) => strongTags(product).length > 0)
+      ...(shouldSpaceStrongActives
         ? ['space_strong_actives']
         : []),
       ...(hasMedicalSafetyContext(input.profile)
@@ -1132,14 +1230,65 @@ function contextSummaryFor(input: {
       aiPersonalizationBlockedReason: null,
     },
     evidenceSources: getSuggestionEvidenceSources(sourceIds),
-    skippedCandidates: input.products
-      .filter((product) => strongTags(product).length > 0)
-      .map((product) => ({
-        productId: product.id,
-        reason: 'Strong active should be spaced carefully for this scenario.',
-        sourceIds: productSourceIds(product),
-      })),
+    skippedCandidates: shouldSpaceStrongActives
+      ? input.products
+          .filter((product) => strongTags(product).length > 0)
+          .map((product) => ({
+            productId: product.id,
+            reason:
+              'Strong active should be spaced carefully for this scenario.',
+            sourceIds: productSourceIds(product),
+          }))
+      : [],
   };
+}
+
+function shouldSpaceStrongActivesForCase(input: {
+  reaction?: boolean;
+  routineBreakRecentlyResumed?: boolean;
+  recentApplications?: readonly ApplicationLog[];
+  products: readonly InventoryProduct[];
+  profile: SkinProfile;
+}): boolean {
+  return (
+    Boolean(input.reaction) ||
+    Boolean(input.routineBreakRecentlyResumed) ||
+    hasMedicalSafetyContext(input.profile) ||
+    hasRecentStrongActiveApplication(
+      input.recentApplications ?? [],
+      input.products,
+    )
+  );
+}
+
+function hasRecentStrongActiveApplication(
+  applications: readonly ApplicationLog[],
+  products: readonly InventoryProduct[],
+): boolean {
+  const strongProductIds = new Set(
+    products
+      .filter((product) => strongTags(product).length > 0)
+      .map((product) => product.id),
+  );
+  if (strongProductIds.size === 0) return false;
+  return applications.some((applicationLog) => {
+    if (daysBetweenDates(applicationLog.target_date, TARGET_DATE) > 1) {
+      return false;
+    }
+    return applicationLog.items.some((item) => {
+      const productId = item.inventory_product_id;
+      return Boolean(productId && strongProductIds.has(productId));
+    });
+  });
+}
+
+function daysBetweenDates(startDate: string, endDate: string): number {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
 function buildHistorySignals(
@@ -1296,7 +1445,10 @@ function hasMedicalSafetyContext(profileValue: SkinProfile): boolean {
   );
 }
 
-function productScore(product: InventoryProduct): SuggestionProductScore {
+function productScore(
+  product: InventoryProduct,
+  options: { shouldSpaceStrongActives: boolean },
+): SuggestionProductScore {
   const tags = product.identity?.benefits ?? [];
   const activeTags = tags.length ? tags : ['basic'];
   return {
@@ -1314,7 +1466,7 @@ function productScore(product: InventoryProduct): SuggestionProductScore {
           ? 25
           : 80,
     suitabilityReasons: [`${product.name} fits the available shelf context.`],
-    cautionReasons: strongTags(product).length
+    cautionReasons: options.shouldSpaceStrongActives && strongTags(product).length
       ? ['Strong active should be spaced carefully for this scenario.']
       : product.id.includes('fragrance')
         ? ['Known fragrance sensitivity makes this a poor fit.']
@@ -1520,6 +1672,19 @@ function niacinamideSerum() {
     category: ProductCategory.Serum,
     tags: ['niacinamide'],
     ingredients: ['niacinamide', 'glycerin'],
+  });
+}
+
+function vitaminCSerum() {
+  return product({
+    id: 'vitamin-c-1',
+    brand: 'The Ordinary',
+    name: 'Ascorbyl Glucoside Solution 12%',
+    category: ProductCategory.Serum,
+    tags: ['vitamin_c', 'antioxidant', 'pigment-support'],
+    ingredients: ['ascorbyl glucoside', 'glycerin'],
+    cautions: ['Separate from niacinamide if stinging or flushing appears.'],
+    preferredTime: PreferredTimeOfDay.Morning,
   });
 }
 

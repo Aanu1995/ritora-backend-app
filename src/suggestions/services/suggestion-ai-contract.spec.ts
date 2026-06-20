@@ -79,6 +79,15 @@ describe('suggestion AI contract', () => {
     expect(SYSTEM_PROMPT).toContain(
       'any owned product category may be selected',
     );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not use product category as a one-product limit',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Two products in the same category may both be selected',
+    );
+    expect(SYSTEM_PROMPT).not.toContain(
+      'Use at most one non-basic owned product step',
+    );
     expect(SYSTEM_PROMPT).toContain('Caution copy');
     expect(SYSTEM_PROMPT).toContain('Word "only"');
     expect(SYSTEM_PROMPT).toContain('explicit decision inputs only');
@@ -92,6 +101,12 @@ describe('suggestion AI contract', () => {
       'Use past applications, skips, substitutions, reactions, and prior suggestions only to assess tolerance, spacing, safety, recent overuse, and user context.',
     );
     expect(SYSTEM_PROMPT).toContain(
+      'previous-day or older same-daypart history is not a same-day use',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not omit a product merely because it appeared in previous applications or suggestions for the same daypart.',
+    );
+    expect(SYSTEM_PROMPT).toContain(
       'Do not choose a product merely because it appeared in previous suggestions or routines.',
     );
     expect(SYSTEM_PROMPT).toContain(
@@ -99,7 +114,16 @@ describe('suggestion AI contract', () => {
     );
     expect(SYSTEM_PROMPT).toContain('do not return a basic-only plan');
     expect(SYSTEM_PROMPT).toContain(
-      'Rank compatible products using suitabilityScore, preferredTime match, cautionReasons, evidenceSourceIds, current request, goal, journal/photo signals, and environment',
+      'Current selection inputs are only these supplied values',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Two products in the same category may both be selected when each has a distinct current selection input',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'do not select both products in the same output unless a specialist-locked step requires both',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Rank eligible products using suitabilityScore, preferredTime match, cautionReasons, evidenceSourceIds, current request, goal, journal/photo signals, and environment',
     );
     expect(SYSTEM_PROMPT).toContain(
       'Do not repeat the same basic product set by default',
@@ -124,6 +148,8 @@ describe('suggestion AI contract', () => {
     expect(SYSTEM_PROMPT).not.toContain(
       'Use product names and recent applied/substituted/off-shelf product history when deciding whether repetition is justified.',
     );
+    expect(SYSTEM_PROMPT).not.toContain('Retinoids usually fit evening');
+    expect(SYSTEM_PROMPT).not.toContain('avoid daytime retinoid');
     expect(SYSTEM_PROMPT).not.toContain('simplify the routine to barrier mode');
     expect(SYSTEM_PROMPT).not.toContain('directly relevant to this suggestion');
     expect(SYSTEM_PROMPT).toContain('short user-facing app copy');
@@ -167,6 +193,9 @@ describe('suggestion AI contract', () => {
     expect(prompt).toContain('"preferredTimeOfDay": "morning"');
     expect(prompt).toContain('openedAt=2026-04-01T08:00:00.000Z');
     expect(prompt).toContain('introductionStatus=tolerated');
+    expect(prompt).toContain(
+      'description="Lightweight mineral sunscreen for daily UV protection and uneven tone support."',
+    );
     expect(prompt).toContain('applicationMethod=fingertips');
     expect(prompt).toContain('userProductNote="Lightweight on my skin."');
     expect(prompt).toContain('"recentChanges"');
@@ -695,8 +724,9 @@ describe('suggestion AI contract', () => {
       'For intensity=minimal, use 0-2 application steps',
     );
     expect(prompt).toContain(
-      'Zero application steps are valid when supplied data shows the user is comfortable',
+      'Return zero application steps only when the prompt data explicitly shows no current product need',
     );
+    expect(prompt).toContain('each step has its own current selection input');
     expect(prompt).toContain(
       'Do not add gapRecommendations for optional upgrades',
     );
@@ -1259,6 +1289,8 @@ function sunscreenProduct(): InventoryProduct {
       cautions: ['Reapply after sweating'],
     },
     identity: {
+      description:
+        'Lightweight mineral sunscreen for daily UV protection and uneven tone support.',
       inciIngredients: ['Zinc Oxide'],
       benefits: ['sun protection'],
       suitedFor: ['daily outdoor exposure'],

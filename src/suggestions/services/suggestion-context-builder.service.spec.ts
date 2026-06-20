@@ -292,7 +292,6 @@ describe('SuggestionContextBuilder', () => {
         'barrier_recovery_mode',
         'avoid_new_strong_actives',
         'daytime_spf_available',
-        'space_strong_actives',
         'environment_high_uv',
         'environment_barrier_support',
       ]),
@@ -326,7 +325,6 @@ describe('SuggestionContextBuilder', () => {
           ]),
           cautionReasons: expect.arrayContaining([
             'pause strong actives while reaction signal is present',
-            'retinoid is usually better suited to evening',
           ]),
         }),
         expect.objectContaining({
@@ -593,7 +591,7 @@ describe('SuggestionContextBuilder', () => {
     );
   });
 
-  it('marks first-use contexts as conservative and downgrades strong actives', async () => {
+  it('marks first-use contexts without downgrading strong actives by default', async () => {
     const summary = await builder.build({
       ...emptyInput(),
       shelfActiveProducts: [retinoidProduct()],
@@ -609,7 +607,7 @@ describe('SuggestionContextBuilder', () => {
       expect.arrayContaining([
         expect.objectContaining({
           productId: 'retinoid-1',
-          cautionReasons: expect.arrayContaining([
+          cautionReasons: expect.not.arrayContaining([
             'restart gently before using strong actives again',
           ]),
         }),
