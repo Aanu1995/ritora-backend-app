@@ -2,6 +2,7 @@ import { toDateOnlyString } from '../../common/utils/date';
 
 export const SUGGESTION_CONTEXT_HISTORY_DAYS = 30;
 export const SUGGESTION_CONTEXT_BACKFILL_RECORDS = 30;
+export const SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS = 90;
 
 export function suggestionHistoryWindow(targetDate: string): {
   fromDate: string;
@@ -32,10 +33,14 @@ export function mergeHistoryWindowWithBackfill<T>(
   backfillRows: readonly T[],
   getId: (row: T) => string,
 ): T[] {
-  if (windowRows.length >= SUGGESTION_CONTEXT_BACKFILL_RECORDS) {
-    return [...windowRows];
+  const cappedWindowRows = windowRows.slice(
+    0,
+    SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS,
+  );
+  if (cappedWindowRows.length >= SUGGESTION_CONTEXT_BACKFILL_RECORDS) {
+    return [...cappedWindowRows];
   }
-  const rows = [...windowRows];
+  const rows = [...cappedWindowRows];
   const seen = new Set(rows.map(getId));
   for (const row of backfillRows) {
     if (rows.length >= SUGGESTION_CONTEXT_BACKFILL_RECORDS) break;
@@ -44,5 +49,5 @@ export function mergeHistoryWindowWithBackfill<T>(
     rows.push(row);
     seen.add(id);
   }
-  return rows;
+  return rows.slice(0, SUGGESTION_CONTEXT_MAX_WINDOW_RECORDS);
 }

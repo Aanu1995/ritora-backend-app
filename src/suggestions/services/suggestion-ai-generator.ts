@@ -76,9 +76,10 @@ import {
   isPreferredTimeCompatibleWithDaypart,
   isStrongActiveTag,
 } from './suggestion-product-intelligence';
+import { isBlockingSkippedCandidateReason } from './suggestion-safety-policy';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
-export const SUGGESTION_AI_TODAYS_TIMEOUT_MS = 300_000;
+export const SUGGESTION_AI_TODAYS_TIMEOUT_MS = 480_000;
 export const SUGGESTION_AI_QUICK_TIMEOUT_MS = 180_000;
 export const SUGGESTION_AI_TIMEOUT_MS = SUGGESTION_AI_TODAYS_TIMEOUT_MS;
 export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 24000;
@@ -511,9 +512,15 @@ function buildManualBaselineSteps(
   const eligibleOrderedSteps = orderedSteps.filter((step) =>
     isRoutineStepEligibleForSuggestions(inputs, step),
   );
+  const hasEligibleSpecialistLockedStep = eligibleOrderedSteps.some(
+    (step) => step.is_specialist_locked,
+  );
   const routineOutputs = eligibleOrderedSteps.map((step, index) =>
     routineStepToOutput(step, index, { language }),
   );
+  if (routineOutputs.length === 0 && !hasEligibleSpecialistLockedStep) {
+    return buildDeterministicAiSteps(inputs);
+  }
   const productBackedRoutineOutputs = routineOutputs.filter(
     (step) => step.inventoryProductId,
   );
@@ -938,7 +945,8 @@ function isEligibleConflictReplacementCandidate(
     inputs.contextSummary.skippedCandidates.some(
       (candidate) =>
         candidate.productId === score.productId &&
-        !/recent same-daypart repeat/i.test(candidate.reason),
+        !/recent same-daypart repeat/i.test(candidate.reason) &&
+        isBlockingSkippedCandidateReason(candidate.reason),
     )
   ) {
     return false;

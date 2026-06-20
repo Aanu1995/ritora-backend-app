@@ -3370,6 +3370,89 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('keeps scheduled fallback product-backed when the saved slot step no longer resolves to an eligible product', async () => {
+    const fetchMock = jest.fn().mockRejectedValue(new Error('timeout'));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.routineSteps = [
+      {
+        id: 'stale-slot-step',
+        slot_id: 'slot-1',
+        step_order: 0,
+        inventory_product_id: 'deleted-product',
+        step_label: ProductCategory.Treatment,
+        custom_label: null,
+        notes: null,
+        optional: false,
+        is_specialist_locked: false,
+        product: null,
+      } as RoutineStep,
+    ];
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('provider_failure');
+    expect(result.steps.length).toBeGreaterThan(0);
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          inventoryProductId: 'cleanser-1',
+          stepLabel: ProductCategory.Cleanser,
+        }),
+        expect.objectContaining({
+          inventoryProductId: 'moisturizer-1',
+          stepLabel: ProductCategory.Moisturizer,
+        }),
+      ]),
+    );
+    expect(result.steps).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'deleted-product' }),
+      ]),
+    );
+  });
+
+  it('keeps fallback product-backed when skipped candidates are generic usage cautions', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.contextSummary.skippedCandidates =
+      inputs.contextSummary.productScores.map((score) => ({
+        productId: score.productId,
+        reason:
+          score.category === ProductCategory.SunProtection
+            ? 'Keep babies and young children out of direct sunlight'
+            : 'Avoid contact with eyes',
+        sourceIds: score.evidenceSourceIds,
+      }));
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.steps.length).toBeGreaterThan(0);
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          inventoryProductId: 'spf-1',
+          stepLabel: ProductCategory.SunProtection,
+        }),
+        expect.objectContaining({
+          inventoryProductId: 'moisturizer-1',
+          stepLabel: ProductCategory.Moisturizer,
+        }),
+      ]),
+    );
+  });
+
   it('falls back to source-backed AI-mode product suggestions when OpenAI is unavailable', async () => {
     const generator = new SuggestionAiGenerator({
       get: jest.fn().mockReturnValue(null),

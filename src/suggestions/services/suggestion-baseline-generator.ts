@@ -33,6 +33,7 @@ import {
   requiresOwnedDaytimeSpf,
 } from './suggestion-routine-repeat-policy';
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
+import { isBlockingSkippedCandidateReason } from './suggestion-safety-policy';
 import {
   isPreferredTimeCompatibleWithDaypart,
   isStrongActiveTag,
@@ -675,8 +676,10 @@ function isUsableBaselineCandidate(
     (candidate) => candidate.productId === score.productId,
   );
   if (skipped.length === 0) return true;
-  return skipped.every((candidate) =>
-    /recent same-daypart repeat/i.test(candidate.reason),
+  return skipped.every(
+    (candidate) =>
+      /recent same-daypart repeat/i.test(candidate.reason) ||
+      !isBlockingSkippedCandidateReason(candidate.reason),
   );
 }
 
