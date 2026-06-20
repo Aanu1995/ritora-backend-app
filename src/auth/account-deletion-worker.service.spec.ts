@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import '../test-globals.setup';
 import { AuthService } from './auth.service';
 import { AccountDeletionSchedulerService } from './account-deletion-scheduler.service';
 import { AccountDeletionFinalizationDriver } from './account-deletion.types';

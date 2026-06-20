@@ -27,7 +27,11 @@ export function buildSafetyConstraints(
     Partial<
       Pick<
         SuggestionContextSummary,
-        'profileSignals' | 'safetyConstraints' | 'skinProfile'
+        | 'appliedProductHistory'
+        | 'profileSignals'
+        | 'safetyConstraints'
+        | 'skinProfile'
+        | 'targetDate'
       >
     >,
 ): string[] {
@@ -41,11 +45,7 @@ export function buildSafetyConstraints(
   ) {
     constraints.push('daytime_spf_available');
   }
-  if (
-    context.productScores.some((product) =>
-      product.activeTags.some(isStrongActiveTag),
-    )
-  ) {
+  if (hasRecentStrongActiveApplication(context)) {
     constraints.push('space_strong_actives');
   }
   if (hasPregnancyOrMedicationCaution(context)) {
@@ -136,21 +136,6 @@ export function buildPolicySafetyFlags(
         SuggestionEvidenceSourceId.AadAcneTreatment,
       ]),
     );
-  }
-  if (
-    (context.daypart === SuggestionDaypart.Morning ||
-      context.daypart === SuggestionDaypart.Noon) &&
-    selectedTags.has('retinoid')
-  ) {
-    flags.push({
-      severity: 'warning',
-      message: localizedSafetyCopy.morningRetinoid[resolvedLanguage],
-      ingredientSlugs: ['retinoid'],
-      sourceIds: [
-        SuggestionEvidenceSourceId.AadRetinoidRetinol,
-        SuggestionEvidenceSourceId.DermNetTopicalRetinoids,
-      ],
-    });
   }
   if (
     (selectedTags.has('retinoid') ||
@@ -256,11 +241,6 @@ const localizedSafetyCopy: Record<string, Record<AppLanguage, string>> = {
     sv: 'AHA- och BHA-exfolianter bor separeras noggrant.',
     es: 'Los exfoliantes AHA y BHA deben espaciarse con cuidado.',
   },
-  morningRetinoid: {
-    en: 'Retinoids usually fit evening routines unless a specialist advised this timing.',
-    sv: 'Retinoider passar oftast kvallsrutiner om inte en specialist radde denna tid.',
-    es: 'Los retinoides suelen encajar mejor por la noche salvo indicacion de un especialista.',
-  },
   photosensitizing: {
     en: 'Photosensitizing actives increase the importance of daytime sun protection.',
     sv: 'Fotosensibiliserande aktiva amnen gor solskydd dagtid extra viktigt.',
@@ -343,6 +323,39 @@ function localizedEnvironmentSignalMessage(
     },
   };
   return messages[kind][language];
+}
+
+function hasRecentStrongActiveApplication(
+  context: Pick<SuggestionContextSummary, 'reaction' | 'productScores'> &
+    Partial<
+      Pick<SuggestionContextSummary, 'appliedProductHistory' | 'targetDate'>
+    >,
+): boolean {
+  if (!context.targetDate || !context.appliedProductHistory) return false;
+  const scoreByProductId = new Map(
+    context.productScores.map((product) => [product.productId, product]),
+  );
+  const latestAppliedDate =
+    context.appliedProductHistory.products
+      .filter((product) => {
+        if (!product.productId || !product.lastAppliedDate) return false;
+        return scoreByProductId
+          .get(product.productId)
+          ?.activeTags.some(isStrongActiveTag);
+      })
+      .map((product) => product.lastAppliedDate as string)
+      .sort((left, right) => right.localeCompare(left))[0] ?? null;
+  if (!latestAppliedDate) return false;
+  return daysBetweenDates(latestAppliedDate, context.targetDate) <= 1;
+}
+
+function daysBetweenDates(startDate: string, endDate: string): number {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
 function hasPregnancyOrMedicationCaution(

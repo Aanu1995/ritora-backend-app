@@ -1,3 +1,4 @@
+import '../../test-globals.setup';
 import { SkinJournalService } from '../skin-journal.service';
 import { SkinJournalInsightQueueService } from './skin-journal-insight-queue.service';
 import { SkinJournalInsightWorkerService } from './skin-journal-insight-worker.service';

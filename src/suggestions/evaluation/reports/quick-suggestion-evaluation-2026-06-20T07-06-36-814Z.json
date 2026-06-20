@@ -1,0 +1,1480 @@
+{
+  "reportType": "quick_suggestion_live_ai_evaluation",
+  "generatedAt": "2026-06-20T07:06:36.814Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "2026-06-20.v10",
+  "totalCases": 6,
+  "passedCases": 5,
+  "failedCases": 1,
+  "repeatabilityRuns": 1,
+  "repeatabilityFailures": 0,
+  "strict": true,
+  "cases": [
+    {
+      "caseId": "post_workout_on_demand",
+      "title": "Post-workout quick suggestion stays practical",
+      "status": "passed",
+      "hardChecksPassed": 24,
+      "hardChecksTotal": 24,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 5,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Uses only owned products from the shelf.",
+          "Matches the noon/daytime SPF rule.",
+          "Keeps the suggestion short and practical for a post-workout reset.",
+          "Skipped BHA for the correct time reason (evening-only)."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-20.v10",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "c7deb9cf0667f8cc902b9f0f8591c7768fab2613317ec9e631822bf48b2f4592",
+      "generatedAt": "2026-06-20T07:06:36.814Z",
+      "sanitizedCaseSummary": {
+        "id": "post_workout_on_demand",
+        "title": "Post-workout quick suggestion stays practical",
+        "riskFocus": [
+          "on_demand",
+          "post_workout"
+        ],
+        "manualReviewChecklist": [
+          "Does it answer the right-now workout situation?",
+          "Is the routine short enough for minimal intensity?"
+        ],
+        "request": {
+          "source": "on_demand",
+          "intent": "post_workout",
+          "intensity": "minimal",
+          "note": "Sweaty after gym, need something quick.",
+          "daypart": "noon",
+          "targetTime": "13:10"
+        },
+        "expectations": {
+          "requiresOnDemandShape": true,
+          "requiresSpfProtection": true,
+          "maxStepCount": 3,
+          "forbiddenProductIds": [
+            "bha-1"
+          ]
+        },
+        "ownedProducts": [
+          {
+            "productId": "cleanser-1",
+            "brand": "Ava Lab",
+            "name": "Soft Cream Cleanser",
+            "fullName": "Ava Lab Soft Cream Cleanser",
+            "category": "cleanser",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "suitabilityScore": 80,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "moisturizer-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Cream",
+            "fullName": "Ava Lab Barrier Cream",
+            "category": "moisturizer",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "suitabilityScore": 80,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "spf-1",
+            "brand": "Ava Lab",
+            "name": "Daily SPF 50",
+            "fullName": "Ava Lab Daily SPF 50",
+            "category": "sun-protection",
+            "preferredTimeOfDay": "morning",
+            "activeTags": [
+              "spf",
+              "sunscreen"
+            ],
+            "suitabilityScore": 92,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "bha-1",
+            "brand": "Ava Lab",
+            "name": "BHA 2% Liquid",
+            "fullName": "Ava Lab BHA 2% Liquid",
+            "category": "exfoliant",
+            "preferredTimeOfDay": "evening",
+            "activeTags": [
+              "bha",
+              "salicylic"
+            ],
+            "suitabilityScore": 80,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          }
+        ],
+        "skinProfile": {
+          "primaryGoal": "avoid breakouts after workouts",
+          "skinType": "combination",
+          "sensitivityLevel": "medium",
+          "activeConcerns": [
+            "acne",
+            "oiliness"
+          ],
+          "pregnancyStatus": null
+        },
+        "recentApplications": [],
+        "routineMemory": null,
+        "skippedCandidates": [],
+        "safetyConstraints": [
+          "daytime_spf_available"
+        ]
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-20.v10",
+          "inputTokens": 6985,
+          "outputTokens": 2408,
+          "totalTokens": 9393,
+          "estimatedCostUsd": 0.002493,
+          "durationMs": 13166
+        },
+        "explanation": {
+          "headline": "Quick post-gym reset",
+          "body": [
+            "Quick cleanse for sweat and oil.",
+            "Daytime SPF stays in for noon."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Quick cleanse to clear sweat."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Barrier support fits this slot."
+            },
+            {
+              "stepOrder": 2,
+              "reason": "Daytime SPF for noon."
+            }
+          ],
+          "skipped": [
+            {
+              "name": "Ava Lab BHA 2% Liquid",
+              "reason": "preferred time mismatch for this noon slot."
+            }
+          ],
+          "inputs": [
+            {
+              "label": "request source",
+              "detail": "ondemand"
+            },
+            {
+              "label": "intent",
+              "detail": "postworkout"
+            },
+            {
+              "label": "intensity",
+              "detail": "minimal"
+            },
+            {
+              "label": "requestedAt",
+              "detail": "2026-05-18T13:00:00."
+            },
+            {
+              "label": "activityAt",
+              "detail": "2026-05-18T12:40:00."
+            },
+            {
+              "label": "userNote",
+              "detail": "Sweaty after gym, need something quick."
+            },
+            {
+              "label": "targetDate",
+              "detail": "2026-05-18"
+            },
+            {
+              "label": "targetTime",
+              "detail": "13:10"
+            },
+            {
+              "label": "daypart",
+              "detail": "noon"
+            },
+            {
+              "label": "primaryGoal",
+              "detail": "avoid breakouts after workouts"
+            },
+            {
+              "label": "currentConcerns",
+              "detail": "acne; oiliness"
+            },
+            {
+              "label": "safetyConstraints",
+              "detail": "daytimespfavailable"
+            }
+          ]
+        },
+        "stepCount": 3,
+        "steps": [
+          {
+            "stepOrder": 0,
+            "productId": "cleanser-1",
+            "productName": "Soft Cream Cleanser",
+            "provenance": "ai_added",
+            "explanation": "Quick cleanse to clear sweat.",
+            "safetyWarnings": []
+          },
+          {
+            "stepOrder": 1,
+            "productId": "moisturizer-1",
+            "productName": "Barrier Cream",
+            "provenance": "ai_added",
+            "explanation": "Barrier support fits this slot.",
+            "safetyWarnings": []
+          },
+          {
+            "stepOrder": 2,
+            "productId": "spf-1",
+            "productName": "Daily SPF 50",
+            "provenance": "ai_added",
+            "explanation": "Daytime SPF for noon.",
+            "safetyWarnings": [
+              {
+                "severity": "info",
+                "message": "Sweat makes water resistance worth checking.",
+                "ingredientSlugs": [],
+                "sourceIds": [
+                  "aad_sunscreen_selection"
+                ]
+              }
+            ]
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": []
+      }
+    },
+    {
+      "caseId": "event_prep_on_demand",
+      "title": "Event prep avoids risky last-minute actives",
+      "status": "passed",
+      "hardChecksPassed": 24,
+      "hardChecksTotal": 24,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 4,
+        "personalization": 5,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Uses owned products only and fits the noon SPF timing rule.",
+          "Good safety handling by skipping glycolic toner and fragranced mask.",
+          "Clear enough for an on-demand event-prep answer, though it is fairly generic."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-20.v10",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "0757e623400d546e27c35e4e90552dd99cfb6a9f8351c8ee75916db5e011c507",
+      "generatedAt": "2026-06-20T07:06:36.814Z",
+      "sanitizedCaseSummary": {
+        "id": "event_prep_on_demand",
+        "title": "Event prep avoids risky last-minute actives",
+        "riskFocus": [
+          "on_demand",
+          "event_prep"
+        ],
+        "manualReviewChecklist": [
+          "Does event prep avoid experimenting with irritating products?",
+          "Does it still produce useful steps?"
+        ],
+        "request": {
+          "source": "on_demand",
+          "intent": "event_prep",
+          "intensity": "standard",
+          "note": "Dinner in four hours. Avoid irritation.",
+          "daypart": "noon",
+          "targetTime": "15:00"
+        },
+        "expectations": {
+          "requiresOnDemandShape": true,
+          "requiresSpfProtection": true,
+          "forbiddenProductIds": [
+            "aha-1",
+            "mask-fragrance-1"
+          ],
+          "maxStepCount": 4
+        },
+        "ownedProducts": [
+          {
+            "productId": "cleanser-1",
+            "brand": "Ava Lab",
+            "name": "Soft Cream Cleanser",
+            "fullName": "Ava Lab Soft Cream Cleanser",
+            "category": "cleanser",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "suitabilityScore": 80,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "moisturizer-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Cream",
+            "fullName": "Ava Lab Barrier Cream",
+            "category": "moisturizer",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "suitabilityScore": 80,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "spf-1",
+            "brand": "Ava Lab",
+            "name": "Daily SPF 50",
+            "fullName": "Ava Lab Daily SPF 50",
+            "category": "sun-protection",
+            "preferredTimeOfDay": "morning",
+            "activeTags": [
+              "spf",
+              "sunscreen"
+            ],
+            "suitabilityScore": 92,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "aha-1",
+            "brand": "Ava Lab",
+            "name": "Glycolic Toner",
+            "fullName": "Ava Lab Glycolic Toner",
+            "category": "toner",
+            "preferredTimeOfDay": "evening",
+            "activeTags": [
+              "aha",
+              "glycolic"
+            ],
+            "suitabilityScore": 80,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "mask-fragrance-1",
+            "brand": "Glow Brand",
+            "name": "Fragranced Glow Mask",
+            "fullName": "Glow Brand Fragranced Glow Mask",
+            "category": "mask",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "fragrance",
+              "mask"
+            ],
+            "suitabilityScore": 25,
+            "cautionReasons": [
+              "Known fragrance sensitivity makes this a poor fit."
+            ],
+            "dataQuality": "verified"
+          }
+        ],
+        "skinProfile": {
+          "primaryGoal": "look calm before an event",
+          "skinType": "combination",
+          "sensitivityLevel": "medium",
+          "activeConcerns": [
+            "redness",
+            "texture"
+          ],
+          "pregnancyStatus": null
+        },
+        "recentApplications": [],
+        "routineMemory": null,
+        "skippedCandidates": [],
+        "safetyConstraints": [
+          "daytime_spf_available"
+        ]
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-20.v10",
+          "inputTokens": 7335,
+          "outputTokens": 3363,
+          "totalTokens": 10698,
+          "estimatedCostUsd": 0.003118,
+          "durationMs": 17364
+        },
+        "explanation": {
+          "headline": "Simple event prep",
+          "body": [
+            "Simple prep for dinner.",
+            "The plan stays gentle and includes SPF for the noon slot.",
+            "I left out the stronger toner and fragranced mask today."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Gentle reset before the event."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Helps keep the skin looking calm."
+            },
+            {
+              "stepOrder": 2,
+              "reason": "Needed for the noon slot."
+            }
+          ],
+          "skipped": [
+            {
+              "name": "Ava Lab Glycolic Toner",
+              "reason": "Evening-only slot; may increase sun sensitivity."
+            },
+            {
+              "name": "Glow Brand Fragranced Glow Mask",
+              "reason": "Known fragrance sensitivity makes this a poor fit."
+            }
+          ],
+          "inputs": [
+            {
+              "label": "request source",
+              "detail": "ondemand"
+            },
+            {
+              "label": "intent",
+              "detail": "eventprep"
+            },
+            {
+              "label": "intensity",
+              "detail": "standard"
+            },
+            {
+              "label": "requestedAt",
+              "detail": "2026-05-18T13:00:00."
+            },
+            {
+              "label": "activityAt",
+              "detail": "2026-05-18T12:40:00."
+            },
+            {
+              "label": "targetDate",
+              "detail": "2026-05-18"
+            },
+            {
+              "label": "targetTime",
+              "detail": "15:00"
+            },
+            {
+              "label": "daypart",
+              "detail": "noon"
+            },
+            {
+              "label": "primaryGoal",
+              "detail": "look calm before an event"
+            },
+            {
+              "label": "currentConcerns",
+              "detail": "redness, texture"
+            },
+            {
+              "label": "userNote",
+              "detail": "Dinner in four hours."
+            },
+            {
+              "label": "safetyConstraints",
+              "detail": "daytimespfavailable"
+            }
+          ]
+        },
+        "stepCount": 3,
+        "steps": [
+          {
+            "stepOrder": 0,
+            "productId": "cleanser-1",
+            "productName": "Soft Cream Cleanser",
+            "provenance": "ai_added",
+            "explanation": "Gentle reset before the event.",
+            "safetyWarnings": []
+          },
+          {
+            "stepOrder": 1,
+            "productId": "moisturizer-1",
+            "productName": "Barrier Cream",
+            "provenance": "ai_added",
+            "explanation": "Helps keep the skin looking calm.",
+            "safetyWarnings": []
+          },
+          {
+            "stepOrder": 2,
+            "productId": "spf-1",
+            "productName": "Daily SPF 50",
+            "provenance": "ai_added",
+            "explanation": "Needed for the noon slot.",
+            "safetyWarnings": []
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": []
+      }
+    },
+    {
+      "caseId": "quick_plain_skip_does_not_suppress_spf",
+      "title": "Plain skipped SPF remains eligible for daytime quick suggestion",
+      "status": "passed",
+      "hardChecksPassed": 24,
+      "hardChecksTotal": 24,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 5,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Recommends the owned SPF for the noon post-sun request.",
+          "Does not treat the plain skip as a safety reason, and stays minimal."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-20.v10",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "94923f0ce4892fa3142fbcc48167f3a9a40dfe9f534e39fbc7cb9fa77a43e829",
+      "generatedAt": "2026-06-20T07:06:36.814Z",
+      "sanitizedCaseSummary": {
+        "id": "quick_plain_skip_does_not_suppress_spf",
+        "title": "Plain skipped SPF remains eligible for daytime quick suggestion",
+        "riskFocus": [
+          "on_demand",
+          "plain_skip_history",
+          "spf"
+        ],
+        "manualReviewChecklist": [
+          "Does it recommend the owned SPF for the current daytime request?",
+          "Does it avoid treating a non-reaction skip as a safety reason?",
+          "Does it keep the quick suggestion minimal and right-now focused?"
+        ],
+        "request": {
+          "source": "on_demand",
+          "intent": "post_sun",
+          "intensity": "minimal",
+          "note": "I was outside at lunch and need the quickest useful step before more daylight.",
+          "daypart": "noon",
+          "targetTime": "12:05"
+        },
+        "expectations": {
+          "requiresOnDemandShape": true,
+          "requiresSpfProtection": true,
+          "requiredProductIds": [
+            "plain-skip-spf-1"
+          ],
+          "maxStepCount": 2
+        },
+        "ownedProducts": [
+          {
+            "productId": "plain-skip-spf-1",
+            "brand": "Ava Lab",
+            "name": "Morning SPF 50",
+            "fullName": "Ava Lab Morning SPF 50",
+            "category": "sun-protection",
+            "preferredTimeOfDay": "morning",
+            "activeTags": [
+              "spf"
+            ],
+            "suitabilityScore": 92,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          }
+        ],
+        "skinProfile": {
+          "primaryGoal": "maintain calm skin",
+          "skinType": "normal",
+          "sensitivityLevel": "low",
+          "activeConcerns": [],
+          "pregnancyStatus": null
+        },
+        "recentApplications": [
+          {
+            "targetDate": "2026-05-28",
+            "daypart": "noon",
+            "items": [
+              {
+                "status": "skipped",
+                "productId": "plain-skip-spf-1",
+                "noteKind": "plain_non_reaction"
+              }
+            ]
+          }
+        ],
+        "routineMemory": {
+          "skippedProducts": {
+            "plain-skip-spf-1": 1
+          },
+          "skippedProductsRule": "Skipped count alone means not applied, not avoid. Only reaction/intolerance notes or skippedCandidates are safety reasons."
+        },
+        "skippedCandidates": [],
+        "safetyConstraints": []
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-20.v10",
+          "inputTokens": 5725,
+          "outputTokens": 917,
+          "totalTokens": 6642,
+          "estimatedCostUsd": 0.001409,
+          "durationMs": 5090
+        },
+        "explanation": {
+          "headline": "Quick SPF step",
+          "body": [
+            "Use your owned sunscreen now before more daylight.",
+            "It fits this noon post-sun request and is the quickest useful step."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Owned SPF fits this noon daylight request."
+            }
+          ],
+          "skipped": [],
+          "inputs": [
+            {
+              "label": "request source",
+              "detail": "ondemand"
+            },
+            {
+              "label": "intent",
+              "detail": "postsun"
+            },
+            {
+              "label": "intensity",
+              "detail": "minimal"
+            },
+            {
+              "label": "requestedAt",
+              "detail": "2026-05-29T12:05:00."
+            },
+            {
+              "label": "activityAt",
+              "detail": "2026-05-29T11:35:00."
+            },
+            {
+              "label": "userNote",
+              "detail": "I was outside at lunch and need the quickest useful step before more daylight."
+            },
+            {
+              "label": "targetDate",
+              "detail": "2026-05-29"
+            },
+            {
+              "label": "targetTime",
+              "detail": "12:05"
+            },
+            {
+              "label": "daypart",
+              "detail": "noon"
+            },
+            {
+              "label": "active shelf product",
+              "detail": "plain-skip-spf-1 Ava Lab Morning SPF 50 preferredTime=morning suitabilityScore=100"
+            },
+            {
+              "label": "trusted evidence",
+              "detail": "aadsunscreenselection: broad-spectrum sunscreen with SPF 30 or higher."
+            }
+          ]
+        },
+        "stepCount": 1,
+        "steps": [
+          {
+            "stepOrder": 0,
+            "productId": "plain-skip-spf-1",
+            "productName": "Morning SPF 50",
+            "provenance": "ai_added",
+            "explanation": "Owned SPF fits this noon daylight request.",
+            "safetyWarnings": []
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": []
+      }
+    },
+    {
+      "caseId": "quick_category_open_non_serum_evening",
+      "title": "Quick evening suggestion can use uploaded non-serum support categories",
+      "status": "passed",
+      "hardChecksPassed": 24,
+      "hardChecksTotal": 24,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 5,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Uses an owned, evening-compatible toner as a quick right-now step.",
+          "Matches the user’s oily-but-tight, five-minute bedtime request without forcing a full routine.",
+          "No ownership, timing, or safety issues."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-20.v10",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "0d662576ecdef45aa1aa6c56c3763502bd10003ea44f044b24902e0609a9cf39",
+      "generatedAt": "2026-06-20T07:06:36.814Z",
+      "sanitizedCaseSummary": {
+        "id": "quick_category_open_non_serum_evening",
+        "title": "Quick evening suggestion can use uploaded non-serum support categories",
+        "riskFocus": [
+          "on_demand",
+          "category_open_selection",
+          "unnecessary_basic_only_repeat"
+        ],
+        "manualReviewChecklist": [
+          "Does it answer the right-now request without forcing a full routine?",
+          "Does it consider uploaded toner, essence, mask, or lip-care categories when compatible?",
+          "Does it avoid cleanser/moisturizer/SPF-only collapse without inventing products?"
+        ],
+        "request": {
+          "source": "on_demand",
+          "intent": "quick_refresh",
+          "intensity": "minimal",
+          "note": "My skin feels oily but tight after commuting. I have five minutes before bed and want one useful quick step.",
+          "daypart": "evening",
+          "targetTime": "20:15"
+        },
+        "expectations": {
+          "requiresOnDemandShape": true,
+          "minStepCount": 1,
+          "maxStepCount": 3,
+          "minSelectedNonBasicCategoryCount": 1,
+          "forbiddenProductIds": [
+            "quick-spf-1"
+          ]
+        },
+        "ownedProducts": [
+          {
+            "productId": "quick-cleanser-1",
+            "brand": "Ava Lab",
+            "name": "Soft Cream Cleanser",
+            "fullName": "Ava Lab Soft Cream Cleanser",
+            "category": "cleanser",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "suitabilityScore": 72,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-moisturizer-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Cream",
+            "fullName": "Ava Lab Barrier Cream",
+            "category": "moisturizer",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "suitabilityScore": 78,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-spf-1",
+            "brand": "Ava Lab",
+            "name": "Morning SPF 50",
+            "fullName": "Ava Lab Morning SPF 50",
+            "category": "sun-protection",
+            "preferredTimeOfDay": "morning",
+            "activeTags": [
+              "spf"
+            ],
+            "suitabilityScore": 92,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-toner-1",
+            "brand": "Ava Lab",
+            "name": "Soothing Toner",
+            "fullName": "Ava Lab Soothing Toner",
+            "category": "toner",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "soothing",
+              "panthenol"
+            ],
+            "suitabilityScore": 94,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-essence-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Essence",
+            "fullName": "Ava Lab Barrier Essence",
+            "category": "essence",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "barrier",
+              "hydrating"
+            ],
+            "suitabilityScore": 92,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-mask-1",
+            "brand": "Ava Lab",
+            "name": "Calm Clay Mask",
+            "fullName": "Ava Lab Calm Clay Mask",
+            "category": "mask",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "oil-control",
+              "mask"
+            ],
+            "suitabilityScore": 88,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-lip-1",
+            "brand": "Ava Lab",
+            "name": "Comfort Lip Balm",
+            "fullName": "Ava Lab Comfort Lip Balm",
+            "category": "lip-care",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "lip-care",
+              "barrier"
+            ],
+            "suitabilityScore": 65,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          }
+        ],
+        "skinProfile": {
+          "primaryGoal": "stay comfortable while reducing visible oiliness",
+          "skinType": "normal",
+          "sensitivityLevel": "low",
+          "activeConcerns": [
+            "oiliness",
+            "tightness",
+            "dullness"
+          ],
+          "pregnancyStatus": null
+        },
+        "recentApplications": [],
+        "routineMemory": {
+          "skippedProducts": {},
+          "skippedProductsRule": "Skipped count alone means not applied, not avoid. Only reaction/intolerance notes or skippedCandidates are safety reasons."
+        },
+        "skippedCandidates": [],
+        "safetyConstraints": []
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-20.v10",
+          "inputTokens": 8168,
+          "outputTokens": 2544,
+          "totalTokens": 10712,
+          "estimatedCostUsd": 0.002752,
+          "durationMs": 13208
+        },
+        "explanation": {
+          "headline": "Quick calming step",
+          "body": [
+            "Use the soothing toner now.",
+            "It fits your five-minute bedtime window."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Quick comfort for tight, dull skin."
+            }
+          ],
+          "skipped": [],
+          "inputs": [
+            {
+              "label": "request source",
+              "detail": "ondemand"
+            },
+            {
+              "label": "intent",
+              "detail": "quickrefresh"
+            },
+            {
+              "label": "intensity",
+              "detail": "minimal"
+            },
+            {
+              "label": "requestedAt",
+              "detail": "2026-05-29T20:15:00."
+            },
+            {
+              "label": "target timing",
+              "detail": "targetDate=2026-05-29, targetTime=20:15, daypart=evening"
+            },
+            {
+              "label": "userNote",
+              "detail": "My skin feels oily but tight after commuting."
+            },
+            {
+              "label": "primaryGoal",
+              "detail": "stay comfortable while reducing visible oiliness"
+            },
+            {
+              "label": "currentConcerns",
+              "detail": "oiliness, tightness, dullness"
+            },
+            {
+              "label": "routine pace",
+              "detail": "minimal"
+            },
+            {
+              "label": "pmminutes",
+              "detail": "5"
+            },
+            {
+              "label": "sensitivity",
+              "detail": "low"
+            }
+          ]
+        },
+        "stepCount": 1,
+        "steps": [
+          {
+            "stepOrder": 0,
+            "productId": "quick-toner-1",
+            "productName": "Soothing Toner",
+            "provenance": "ai_added",
+            "explanation": "Quick comfort for tight, dull skin.",
+            "safetyWarnings": []
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": []
+      }
+    },
+    {
+      "caseId": "quick_vitamin_c_morning_not_crowded_out",
+      "title": "Quick morning pigment request considers Vitamin C separately",
+      "status": "failed",
+      "hardChecksPassed": 23,
+      "hardChecksTotal": 24,
+      "hardCheckFailures": [
+        {
+          "id": "evidence_source_ids",
+          "title": "Safety flags and gaps cite known evidence source IDs.",
+          "passed": false,
+          "failures": [
+            "Safety flag uses unknown source dermnet_post_inflammatory_hyperpigmentation."
+          ]
+        }
+      ],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 5,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Correctly chose the owned morning Vitamin C for quick dark-mark support and included the required SPF.",
+          "No timing or ownership issues; the suggestion stays small and on-demand focused."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-20.v10",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "9be08543b09a6a65b8a6a41b3b5dc66c117c56a1d99051228945dbe316b9bcb9",
+      "generatedAt": "2026-06-20T07:06:36.814Z",
+      "sanitizedCaseSummary": {
+        "id": "quick_vitamin_c_morning_not_crowded_out",
+        "title": "Quick morning pigment request considers Vitamin C separately",
+        "riskFocus": [
+          "on_demand",
+          "same_category_selection",
+          "pigment_support"
+        ],
+        "manualReviewChecklist": [
+          "Does it select the owned Vitamin C when it is the most direct quick pigment support?",
+          "Does it avoid selecting niacinamide instead solely because both products are serums?",
+          "Does it keep the quick suggestion small and right-now focused?"
+        ],
+        "request": {
+          "source": "on_demand",
+          "intent": "quick_refresh",
+          "intensity": "standard",
+          "note": "I am heading out and want quick support for dark marks without a full routine.",
+          "daypart": "morning",
+          "targetTime": "08:05"
+        },
+        "expectations": {
+          "requiresOnDemandShape": true,
+          "requiresSpfProtection": true,
+          "requiredProductIds": [
+            "quick-spf-1",
+            "quick-vitamin-c-1"
+          ],
+          "maxStepCount": 3
+        },
+        "ownedProducts": [
+          {
+            "productId": "quick-spf-1",
+            "brand": "Ava Lab",
+            "name": "Morning SPF 50",
+            "fullName": "Ava Lab Morning SPF 50",
+            "category": "sun-protection",
+            "preferredTimeOfDay": "morning",
+            "activeTags": [
+              "spf"
+            ],
+            "suitabilityScore": 92,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-niacinamide-1",
+            "brand": "Ava Lab",
+            "name": "Niacinamide Serum",
+            "fullName": "Ava Lab Niacinamide Serum",
+            "category": "serum",
+            "preferredTimeOfDay": "either",
+            "activeTags": [
+              "niacinamide"
+            ],
+            "suitabilityScore": 86,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          },
+          {
+            "productId": "quick-vitamin-c-1",
+            "brand": "Ava Lab",
+            "name": "Ascorbyl Glucoside Solution 12%",
+            "fullName": "Ava Lab Ascorbyl Glucoside Solution 12%",
+            "category": "serum",
+            "preferredTimeOfDay": "morning",
+            "activeTags": [
+              "vitamin_c",
+              "antioxidant",
+              "pigment-support"
+            ],
+            "suitabilityScore": 96,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          }
+        ],
+        "skinProfile": {
+          "primaryGoal": "fade post-acne dark marks",
+          "skinType": "normal",
+          "sensitivityLevel": "low",
+          "activeConcerns": [
+            "dark marks",
+            "uneven tone"
+          ],
+          "pregnancyStatus": null
+        },
+        "recentApplications": [],
+        "routineMemory": {
+          "skippedProducts": {},
+          "skippedProductsRule": "Skipped count alone means not applied, not avoid. Only reaction/intolerance notes or skippedCandidates are safety reasons."
+        },
+        "skippedCandidates": [],
+        "safetyConstraints": []
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-20.v10",
+          "inputTokens": 6578,
+          "outputTokens": 2757,
+          "totalTokens": 9335,
+          "estimatedCostUsd": 0.002641,
+          "durationMs": 15051
+        },
+        "explanation": {
+          "headline": "Quick dark-mark refresh",
+          "body": [
+            "Kept this short for a quick morning refresh.",
+            "Vitamin C supports the dark-mark goal; SPF covers daytime protection."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Best fit for quick morning dark-mark support."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Morning SPF for heading out today."
+            }
+          ],
+          "skipped": [
+            {
+              "name": "Ava Lab Niacinamide Serum",
+              "reason": "Owned niacinamide is compatible, but less direct than Vitamin C for this quick pigment request."
+            }
+          ],
+          "inputs": [
+            {
+              "label": "Request source",
+              "detail": "ondemand"
+            },
+            {
+              "label": "Intent",
+              "detail": "quickrefresh"
+            },
+            {
+              "label": "Intensity",
+              "detail": "standard"
+            },
+            {
+              "label": "requestedAt",
+              "detail": "2026-05-29T08:05:00."
+            },
+            {
+              "label": "User note",
+              "detail": "I am heading out and want quick support for dark marks without a full routine."
+            },
+            {
+              "label": "targetDate",
+              "detail": "2026-05-29"
+            },
+            {
+              "label": "targetTime",
+              "detail": "08:05"
+            },
+            {
+              "label": "daypart",
+              "detail": "morning"
+            },
+            {
+              "label": "Primary goal",
+              "detail": "fade post-acne dark marks"
+            },
+            {
+              "label": "Current concerns",
+              "detail": "dark marks; uneven tone"
+            },
+            {
+              "label": "Skin type",
+              "detail": "normal"
+            },
+            {
+              "label": "Sensitivity",
+              "detail": "low"
+            },
+            {
+              "label": "Routine pace",
+              "detail": "steady"
+            },
+            {
+              "label": "AM minutes",
+              "detail": "10"
+            },
+            {
+              "label": "PM minutes",
+              "detail": "10"
+            },
+            {
+              "label": "Product score",
+              "detail": "quick-vitamin-c-1 suitabilityScore=100; reason=Owned Vitamin C directly fits the dark-mark quick request."
+            },
+            {
+              "label": "Product score",
+              "detail": "quick-spf-1 suitabilityScore=100; reason=Good daytime sunscreen, but not needed indoors tonight."
+            },
+            {
+              "label": "Product score",
+              "detail": "quick-niacinamide-1 suitabilityScore=100; reason=Owned niacinamide is compatible, but less direct than Vitamin C for"
+            }
+          ]
+        },
+        "stepCount": 2,
+        "steps": [
+          {
+            "stepOrder": 0,
+            "productId": "quick-vitamin-c-1",
+            "productName": "Ascorbyl Glucoside Solution 12%",
+            "provenance": "ai_added",
+            "explanation": "Best fit for quick morning dark-mark support.",
+            "safetyWarnings": []
+          },
+          {
+            "stepOrder": 1,
+            "productId": "quick-spf-1",
+            "productName": "Morning SPF 50",
+            "provenance": "ai_added",
+            "explanation": "Morning SPF for heading out today.",
+            "safetyWarnings": [
+              {
+                "severity": "info",
+                "message": "Broad-spectrum SPF 30+ fits daytime use when you head out.",
+                "ingredientSlugs": [],
+                "sourceIds": [
+                  "aad_sunscreen_selection"
+                ]
+              }
+            ]
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": [
+          {
+            "severity": "info",
+            "message": "Sunscreen is central when dark marks or uneven tone are priority concerns.",
+            "ingredientSlugs": [
+              "spf"
+            ],
+            "sourceIds": [
+              "aad_sunscreen_selection",
+              "dermnet_post_inflammatory_hyperpigmentation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "quick_no_extra_step_needed",
+      "title": "Comfortable indoor quick check returns no product steps",
+      "status": "passed",
+      "hardChecksPassed": 24,
+      "hardChecksTotal": 24,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 5,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Correctly says no extra product is needed tonight.",
+          "Avoids using the morning-only SPF in an evening slot.",
+          "No unnecessary shopping pressure or extra steps."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-20.v10",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "dcd3dee794c776bcba41e9362d09c44d3fb0086b206e82d00219c5acce78f781",
+      "generatedAt": "2026-06-20T07:06:36.814Z",
+      "sanitizedCaseSummary": {
+        "id": "quick_no_extra_step_needed",
+        "title": "Comfortable indoor quick check returns no product steps",
+        "riskFocus": [
+          "on_demand",
+          "no_unnecessary_products",
+          "preferred_time"
+        ],
+        "manualReviewChecklist": [
+          "Does it clearly say no extra product is needed right now?",
+          "Does it avoid using a morning-only SPF in an evening quick check?",
+          "Does it avoid creating shopping pressure when no gap is needed?"
+        ],
+        "request": {
+          "source": "on_demand",
+          "intent": "quick_refresh",
+          "intensity": "minimal",
+          "note": "My skin feels comfortable and I am staying indoors. Do I need to apply anything else?",
+          "daypart": "evening",
+          "targetTime": "20:30"
+        },
+        "expectations": {
+          "requiresOnDemandShape": true,
+          "maxStepCount": 0,
+          "forbiddenProductIds": [
+            "morning-spf-only"
+          ]
+        },
+        "ownedProducts": [
+          {
+            "productId": "morning-spf-only",
+            "brand": "Ava Lab",
+            "name": "Morning SPF 50",
+            "fullName": "Ava Lab Morning SPF 50",
+            "category": "sun-protection",
+            "preferredTimeOfDay": "morning",
+            "activeTags": [
+              "spf"
+            ],
+            "suitabilityScore": 92,
+            "cautionReasons": [],
+            "dataQuality": "verified"
+          }
+        ],
+        "skinProfile": {
+          "primaryGoal": "maintain calm skin",
+          "skinType": "normal",
+          "sensitivityLevel": "low",
+          "activeConcerns": [],
+          "pregnancyStatus": null
+        },
+        "recentApplications": [],
+        "routineMemory": {
+          "skippedProducts": {},
+          "skippedProductsRule": "Skipped count alone means not applied, not avoid. Only reaction/intolerance notes or skippedCandidates are safety reasons."
+        },
+        "skippedCandidates": [],
+        "safetyConstraints": []
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-20.v10",
+          "inputTokens": 5639,
+          "outputTokens": 756,
+          "totalTokens": 6395,
+          "estimatedCostUsd": 0.001299,
+          "durationMs": 4389
+        },
+        "explanation": {
+          "headline": "Nothing needed tonight",
+          "body": [
+            "No extra product looks needed for this evening."
+          ],
+          "perStepReasons": [],
+          "skipped": [
+            {
+              "name": "Ava Lab Morning SPF 50",
+              "reason": "preferredTime mismatch"
+            }
+          ],
+          "inputs": [
+            {
+              "label": "request source",
+              "detail": "ondemand"
+            },
+            {
+              "label": "intent",
+              "detail": "quickrefresh"
+            },
+            {
+              "label": "intensity",
+              "detail": "minimal"
+            },
+            {
+              "label": "requestedAt",
+              "detail": "2026-05-29T20:30:00."
+            },
+            {
+              "label": "userNote",
+              "detail": "My skin feels comfortable and I am staying indoors."
+            },
+            {
+              "label": "targetDate",
+              "detail": "2026-05-29"
+            },
+            {
+              "label": "targetTime",
+              "detail": "20:30"
+            },
+            {
+              "label": "daypart",
+              "detail": "evening"
+            },
+            {
+              "label": "skin type",
+              "detail": "normal"
+            },
+            {
+              "label": "sensitivity",
+              "detail": "low"
+            },
+            {
+              "label": "primaryGoal",
+              "detail": "maintain calm skin"
+            },
+            {
+              "label": "active shelf product",
+              "detail": "morning-spf-only | Ava Lab | Morning SPF 50 | preferredTime=morning"
+            },
+            {
+              "label": "product score",
+              "detail": "suitabilityScore=92"
+            },
+            {
+              "label": "product caution",
+              "detail": "preferred time of day does not match this slot"
+            },
+            {
+              "label": "reaction.hasSignal",
+              "detail": "false"
+            },
+            {
+              "label": "reaction.barrierCompromised",
+              "detail": "false"
+            }
+          ]
+        },
+        "stepCount": 0,
+        "steps": [],
+        "gapRecommendations": [],
+        "safetyFlags": []
+      }
+    }
+  ]
+}

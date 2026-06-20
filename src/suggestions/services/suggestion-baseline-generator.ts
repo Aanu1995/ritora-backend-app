@@ -200,6 +200,25 @@ export function buildDeterministicAiSteps(
     .filter((step): step is SuggestionGenerationStepOutput => step !== null);
 }
 
+export function buildDeterministicAiStepForCategory(
+  inputs: SuggestionGenerationInputs,
+  category: ProductCategory,
+  excludedProductIds: Set<string> = new Set(),
+): SuggestionGenerationStepOutput | null {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
+  const productById = new Map(
+    inputs.shelfActiveProducts.map((product) => [product.id, product]),
+  );
+  const score = baselineCandidates(inputs).find(
+    (candidate) =>
+      candidate.category === category &&
+      !excludedProductIds.has(candidate.productId),
+  );
+  if (!score) return null;
+  const product = productById.get(score.productId);
+  return product ? productScoreToStep(product, score, 0, language) : null;
+}
+
 export function deterministicExplanation(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
@@ -587,10 +606,27 @@ function environmentDetail(
 function selectBaselineProducts(
   inputs: SuggestionGenerationInputs,
 ): SuggestionProductScore[] {
-  const preferredOrder = preferredCategoryOrder(inputs);
   const selected: SuggestionProductScore[] = [];
-  const usedCategories = new Set<ProductCategory>();
-  const candidates = resolveSuggestionProductScores(inputs)
+  const candidates = baselineCandidates(inputs);
+
+  const limit = baselineStepLimit(inputs);
+  const prioritizedCandidates = prefersMinimalRoutine(inputs)
+    ? prioritizeImmediateSupport(candidates)
+    : candidates;
+
+  for (const candidate of prioritizedCandidates) {
+    if (selected.length >= limit) break;
+    if (!canLayerBaselineCandidate(candidate, selected)) continue;
+    selected.push(candidate);
+  }
+
+  return orderSelectedBaselineProducts(selected);
+}
+
+function baselineCandidates(
+  inputs: SuggestionGenerationInputs,
+): SuggestionProductScore[] {
+  return resolveSuggestionProductScores(inputs)
     .filter((score) => score.suitabilityScore >= 40)
     .filter((score) =>
       isPreferredTimeCompatibleWithDaypart(
@@ -606,25 +642,29 @@ function selectBaselineProducts(
             ['retinoid', 'aha', 'bha', 'benzoyl_peroxide'].includes(tag),
           )
         : true,
-    );
+    )
+    .sort((left, right) => right.suitabilityScore - left.suitabilityScore);
+}
 
-  for (const category of preferredOrder) {
-    const match = candidates.find(
-      (score) =>
-        score.category === category && !usedCategories.has(score.category),
-    );
-    if (!match) continue;
-    selected.push(match);
-    usedCategories.add(match.category);
+function baselineStepLimit(inputs: SuggestionGenerationInputs): number {
+  if (
+    inputs.requestContext?.intensity === 'minimal' ||
+    prefersMinimalRoutine(inputs)
+  ) {
+    return requiresOwnedDaytimeSpf(inputs) ? 3 : 2;
   }
+  return 4;
+}
 
-  const limit =
-    inputs.requestContext?.intensity === 'minimal'
-      ? requiresOwnedDaytimeSpf(inputs)
-        ? 3
-        : 2
-      : 4;
-  return selected.slice(0, limit);
+function prioritizeImmediateSupport(
+  candidates: SuggestionProductScore[],
+): SuggestionProductScore[] {
+  return [
+    ...candidates.filter((score) => isImmediateSupportCategory(score.category)),
+    ...candidates.filter(
+      (score) => !isImmediateSupportCategory(score.category),
+    ),
+  ];
 }
 
 function isUsableBaselineCandidate(
@@ -640,87 +680,148 @@ function isUsableBaselineCandidate(
   );
 }
 
-function preferredCategoryOrder(
-  inputs: SuggestionGenerationInputs,
-): ProductCategory[] {
-  if (inputs.requestSource === SuggestionRequestSource.OnDemand) {
-    switch (inputs.requestContext?.intent) {
-      case 'post_workout':
-      case 'post_makeup_or_shower':
-        return [
-          ProductCategory.Cleanser,
-          ProductCategory.Moisturizer,
-          ProductCategory.SunProtection,
-        ];
-      case 'post_sun':
-      case 'post_swim':
-        return [
-          ProductCategory.Cleanser,
-          ProductCategory.Moisturizer,
-          ProductCategory.SunProtection,
-        ];
-      case 'event_prep':
-        return [
-          ProductCategory.Cleanser,
-          ProductCategory.Serum,
-          ProductCategory.Moisturizer,
-          ProductCategory.SunProtection,
-        ];
-      case 'quick_refresh':
-      case 'travel_refresh':
-        return [ProductCategory.Moisturizer, ProductCategory.SunProtection];
-      case 'other':
-      case undefined:
-        break;
-    }
-  }
+function isImmediateSupportCategory(category: ProductCategory): boolean {
+  return (
+    category === ProductCategory.Cleanser ||
+    category === ProductCategory.Moisturizer ||
+    category === ProductCategory.SunProtection
+  );
+}
 
-  if (prefersMinimalRoutine(inputs)) {
-    return inputs.daypart === SuggestionDaypart.Evening
-      ? [ProductCategory.Cleanser, ProductCategory.Moisturizer]
-      : [
-          ProductCategory.Cleanser,
-          ProductCategory.Moisturizer,
-          ProductCategory.SunProtection,
-        ];
+function canLayerBaselineCandidate(
+  candidate: SuggestionProductScore,
+  selected: SuggestionProductScore[],
+): boolean {
+  if (selected.some((score) => score.productId === candidate.productId)) {
+    return false;
   }
+  return selected.every((score) =>
+    areBaselineProductsCompatible(score, candidate),
+  );
+}
 
-  if (shouldAvoidStrongActives(inputs)) {
-    return inputs.daypart === SuggestionDaypart.Evening
-      ? [
-          ProductCategory.Cleanser,
-          ProductCategory.Toner,
-          ProductCategory.Essence,
-          ProductCategory.Serum,
-          ProductCategory.Treatment,
-          ProductCategory.Moisturizer,
-        ]
-      : [
-          ProductCategory.Cleanser,
-          ProductCategory.Toner,
-          ProductCategory.Essence,
-          ProductCategory.Serum,
-          ProductCategory.Moisturizer,
-          ProductCategory.SunProtection,
-        ];
-  }
+function areBaselineProductsCompatible(
+  left: SuggestionProductScore,
+  right: SuggestionProductScore,
+): boolean {
+  if (hasExplicitLayeringConflict(left, right)) return false;
+  if (hasStrongActiveLayeringConflict(left, right)) return false;
+  if (hasVitaminCNiacinamideConflict(left, right)) return false;
+  if (left.category !== right.category) return true;
+  return hasDistinctSameCategoryEvidence(left, right);
+}
 
-  if (inputs.daypart === SuggestionDaypart.Evening) {
-    return [
-      ProductCategory.Cleanser,
-      ProductCategory.Serum,
-      ProductCategory.Treatment,
-      ProductCategory.Exfoliant,
-      ProductCategory.Moisturizer,
-    ];
-  }
+function hasExplicitLayeringConflict(
+  left: SuggestionProductScore,
+  right: SuggestionProductScore,
+): boolean {
+  const text = [
+    ...left.cautionReasons,
+    ...right.cautionReasons,
+    ...(left.guidanceCautions ?? []),
+    ...(right.guidanceCautions ?? []),
+  ].join(' ');
+  return /(?:do not|don't|avoid|separate|split|alternate).{0,40}(?:layer|combine|mix|same routine|together)|(?:layer|combine|mix).{0,40}(?:irritat|unstable|less comfortable|not recommended)/i.test(
+    text,
+  );
+}
 
+function hasStrongActiveLayeringConflict(
+  left: SuggestionProductScore,
+  right: SuggestionProductScore,
+): boolean {
+  return (
+    left.activeTags.some(isStrongActiveTag) &&
+    right.activeTags.some(isStrongActiveTag)
+  );
+}
+
+function hasVitaminCNiacinamideConflict(
+  left: SuggestionProductScore,
+  right: SuggestionProductScore,
+): boolean {
+  const leftTags = new Set(left.activeTags);
+  const rightTags = new Set(right.activeTags);
+  return (
+    (leftTags.has('vitamin_c') && rightTags.has('niacinamide')) ||
+    (leftTags.has('niacinamide') && rightTags.has('vitamin_c'))
+  );
+}
+
+function hasDistinctSameCategoryEvidence(
+  left: SuggestionProductScore,
+  right: SuggestionProductScore,
+): boolean {
+  return (
+    hasDistinctTagEvidence(left, right) || hasDistinctTextEvidence(left, right)
+  );
+}
+
+function hasDistinctTagEvidence(
+  left: SuggestionProductScore,
+  right: SuggestionProductScore,
+): boolean {
+  const leftTags = new Set(left.activeTags);
+  const rightTags = new Set(right.activeTags);
+  return (
+    [...leftTags].some((tag) => !rightTags.has(tag)) ||
+    [...rightTags].some((tag) => !leftTags.has(tag))
+  );
+}
+
+function hasDistinctTextEvidence(
+  left: SuggestionProductScore,
+  right: SuggestionProductScore,
+): boolean {
+  const leftEvidence = normalizedLayerEvidence(left);
+  const rightEvidence = normalizedLayerEvidence(right);
+  if (leftEvidence.length === 0 || rightEvidence.length === 0) return false;
+  const leftSet = new Set(leftEvidence);
+  const rightSet = new Set(rightEvidence);
+  return (
+    leftEvidence.some((value) => !rightSet.has(value)) &&
+    rightEvidence.some((value) => !leftSet.has(value))
+  );
+}
+
+function normalizedLayerEvidence(score: SuggestionProductScore): string[] {
   return [
+    ...(score.benefits ?? []),
+    ...(score.suitedFor ?? []),
+    ...score.suitabilityReasons,
+  ]
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 0 && value !== 'matches this slot');
+}
+
+function orderSelectedBaselineProducts(
+  scores: SuggestionProductScore[],
+): SuggestionProductScore[] {
+  return [...scores].sort((left, right) => {
+    const categoryDiff =
+      baselineCategoryRank(left.category) -
+      baselineCategoryRank(right.category);
+    return categoryDiff || right.suitabilityScore - left.suitabilityScore;
+  });
+}
+
+function baselineCategoryRank(category: ProductCategory): number {
+  const order = [
     ProductCategory.Cleanser,
+    ProductCategory.Toner,
+    ProductCategory.Essence,
     ProductCategory.Serum,
+    ProductCategory.Treatment,
+    ProductCategory.Exfoliant,
     ProductCategory.Moisturizer,
     ProductCategory.SunProtection,
+    ProductCategory.EyeCare,
+    ProductCategory.LipCare,
+    ProductCategory.Mask,
+    ProductCategory.Other,
   ];
+  const index = order.indexOf(category);
+  return index >= 0 ? index : order.length;
 }
 
 function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
@@ -728,7 +829,6 @@ function shouldAvoidStrongActives(inputs: SuggestionGenerationInputs): boolean {
     inputs.contextSummary.reaction.hasSignal ||
     inputs.contextSummary.reaction.barrierCompromised ||
     inputs.contextSummary.routineBreak.recentlyResumed ||
-    inputs.contextSummary.applicationPatterns.conservativeRestart ||
     hasRecentStrongActiveApplication(inputs) ||
     inputs.contextSummary.safetyConstraints.some((constraint) =>
       /avoid_strong_actives|avoid_new_strong_actives|photosensit/i.test(
@@ -792,18 +892,6 @@ function daysBetweenDates(startDate: string, endDate: string): number {
   return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
-function hasPregnancyOrMedicationCaution(
-  inputs: SuggestionGenerationInputs,
-): boolean {
-  const safetyValues = Object.values(inputs.skinProfile?.safety_context ?? {});
-  const text = JSON.stringify([
-    inputs.skinProfile?.pregnancy_status ?? '',
-    safetyValues,
-    inputs.skinProfile?.under_dermatologist_care ?? '',
-  ]).toLowerCase();
-  return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(text);
-}
-
 function prefersMinimalRoutine(inputs: SuggestionGenerationInputs): boolean {
   const preferences = inputs.skinProfile?.routine_preferences;
   if (preferences?.pace === 'minimal') return true;
@@ -822,6 +910,18 @@ function prefersMinimalRoutine(inputs: SuggestionGenerationInputs): boolean {
     return true;
   }
   return false;
+}
+
+function hasPregnancyOrMedicationCaution(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  const safetyValues = Object.values(inputs.skinProfile?.safety_context ?? {});
+  const text = JSON.stringify([
+    inputs.skinProfile?.pregnancy_status ?? '',
+    safetyValues,
+    inputs.skinProfile?.under_dermatologist_care ?? '',
+  ]).toLowerCase();
+  return /(pregnan|breastfeed|trying|conceiv|medication)/i.test(text);
 }
 
 function productScoreToStep(

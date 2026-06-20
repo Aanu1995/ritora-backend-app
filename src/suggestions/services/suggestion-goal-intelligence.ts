@@ -236,6 +236,7 @@ function buildProductGoalText(
     product.brand,
     product.name,
     product.category,
+    product.identity?.description ?? '',
     ...(product.identity?.benefits ?? []),
     ...(product.identity?.suitedFor ?? []),
     ...(product.identity?.inciIngredients ?? []),

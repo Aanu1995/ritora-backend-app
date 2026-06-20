@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { ObjectLiteral, Repository } from 'typeorm';
+import '../../test-globals.setup';
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { InAppNotification } from '../../notifications/entities/in-app-notification.entity';
 import { NotificationsService } from '../../notifications/notifications.service';

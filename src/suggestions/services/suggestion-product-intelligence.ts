@@ -162,14 +162,6 @@ export function scoreProductForSuggestion(
     score -= 35;
     cautions.push('pause strong actives while reaction signal is present');
   }
-  if (options.conservativeRestart && activeTags.some(isStrongActiveTag)) {
-    score -= 30;
-    cautions.push('restart gently before using strong actives again');
-  }
-  if (isDaytimeSuggestion(options.daypart) && activeTags.includes('retinoid')) {
-    score -= 25;
-    cautions.push('retinoid is usually better suited to evening');
-  }
   if (
     isDaytimeSuggestion(options.daypart) &&
     product.category === ProductCategory.SunProtection
@@ -309,6 +301,7 @@ export function detectActiveTags(product: InventoryProduct): string[] {
     product.brand,
     product.name,
     product.category,
+    product.identity?.description ?? '',
     ...(product.identity?.inciIngredients ?? []),
     ...(product.guidance?.cautions ?? []),
     ...(product.identity?.benefits ?? []),

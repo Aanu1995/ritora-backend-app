@@ -44,6 +44,7 @@ export const QUICK_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluationC
     ),
     buildPlainSkipDoesNotSuppressSpfCase(),
     buildCategoryOpenEveningCase(),
+    buildQuickVitaminCNotCrowdedOutCase(),
     buildNoExtraStepNeededCase(),
   ];
 
@@ -355,6 +356,109 @@ function buildCategoryOpenEveningCase(): TodaysSuggestionEvaluationCase {
   };
 }
 
+function buildQuickVitaminCNotCrowdedOutCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'quick_refresh',
+    intensity: 'standard',
+    note: 'I am heading out and want quick support for dark marks without a full routine.',
+    activityAt: null,
+    requestedAt: '2026-05-29T08:05:00.000Z',
+  };
+  const products = [
+    productWithPreferredTime({
+      id: 'quick-spf-1',
+      name: 'Morning SPF 50',
+      category: ProductCategory.SunProtection,
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    }),
+    productWithPreferredTime({
+      id: 'quick-niacinamide-1',
+      name: 'Niacinamide Serum',
+      category: ProductCategory.Serum,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['niacinamide'],
+      ingredients: ['niacinamide', 'glycerin'],
+      description: 'Light serum for oil balance and barrier support.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-vitamin-c-1',
+      name: 'Ascorbyl Glucoside Solution 12%',
+      category: ProductCategory.Serum,
+      preferredTimeOfDay: PreferredTimeOfDay.Morning,
+      tags: ['vitamin_c', 'antioxidant', 'pigment-support'],
+      ingredients: ['ascorbyl glucoside', 'glycerin'],
+      description: 'Vitamin C derivative serum for uneven tone and dark marks.',
+    }),
+  ];
+  const profile = skinProfile();
+  profile.primary_goal = 'fade post-acne dark marks';
+  profile.current_concerns = ['dark marks', 'uneven tone'];
+  profile.routine_preferences = {
+    pace: 'steady',
+    am_minutes: 10,
+    pm_minutes: 10,
+  };
+  const contextSummary = buildContextSummary({
+    cacheKey: 'quick_vitamin_c_morning_not_crowded_out',
+    requestContext,
+    profile,
+    products,
+    targetTime: '08:05',
+    daypart: SuggestionDaypart.Morning,
+    productScoreOverrides: {
+      'quick-vitamin-c-1': {
+        suitabilityScore: 96,
+        suitabilityReasons: [
+          'Owned Vitamin C directly fits the dark-mark quick request.',
+        ],
+      },
+      'quick-niacinamide-1': {
+        suitabilityScore: 86,
+        suitabilityReasons: [
+          'Owned niacinamide is compatible, but less direct than Vitamin C for this quick pigment request.',
+        ],
+      },
+    },
+  });
+
+  return {
+    id: 'quick_vitamin_c_morning_not_crowded_out',
+    title: 'Quick morning pigment request considers Vitamin C separately',
+    riskFocus: ['on_demand', 'same_category_selection', 'pigment_support'],
+    manualReviewChecklist: [
+      'Does it select the owned Vitamin C when it is the most direct quick pigment support?',
+      'Does it avoid selecting niacinamide instead solely because both products are serums?',
+      'Does it keep the quick suggestion small and right-now focused?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      requiresSpfProtection: true,
+      requiredProductIds: ['quick-spf-1', 'quick-vitamin-c-1'],
+      maxStepCount: 3,
+    },
+    inputs: {
+      language: 'en',
+      slotId: null,
+      requestSource: SuggestionRequestSource.OnDemand,
+      requestContext,
+      scheduledSlotContext: null,
+      targetDate: TARGET_DATE,
+      targetTime: '08:05',
+      daypart: SuggestionDaypart.Morning,
+      skinProfile: profile,
+      shelfActiveProducts: products,
+      shelfFinishedProductIds: [],
+      routineSteps: [],
+      recentJournalEntries: [],
+      recentApplications: [],
+      contextSummary,
+      environmentSnapshotId: null,
+      aiPersonalizationAllowed: true,
+      aiPersonalizationBlockedReason: null,
+    },
+  };
+}
+
 function productWithPreferredTime(input: {
   id: string;
   name: string;
@@ -487,6 +591,10 @@ function buildContextSummary(input: {
   const targetTime = input.targetTime ?? '20:30';
   const daypart = input.daypart ?? SuggestionDaypart.Evening;
   const products = input.products ?? (input.product ? [input.product] : []);
+  const evidenceSourceIds = quickEvaluationEvidenceSourceIds(
+    input.profile,
+    products,
+  );
   return {
     cacheKey: input.cacheKey ?? 'quick-eval-no-extra-step',
     builtAt: `2026-05-29T${targetTime}:00.000Z`,
@@ -581,7 +689,12 @@ function buildContextSummary(input: {
         evidenceSourceIds:
           product.category === ProductCategory.SunProtection
             ? [SuggestionEvidenceSourceId.AadSunscreenSelection]
-            : [SuggestionEvidenceSourceId.MayoDrySkinCare],
+            : productSupportsPigment(product)
+              ? [
+                  SuggestionEvidenceSourceId.MayoDrySkinCare,
+                  SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+                ]
+              : [SuggestionEvidenceSourceId.MayoDrySkinCare],
       };
     }),
     applicationPatterns: {
@@ -601,10 +714,7 @@ function buildContextSummary(input: {
       aiPersonalizationAllowed: true,
       aiPersonalizationBlockedReason: null,
     },
-    evidenceSources: getSuggestionEvidenceSources([
-      SuggestionEvidenceSourceId.AadSunscreenSelection,
-      SuggestionEvidenceSourceId.MayoDrySkinCare,
-    ]),
+    evidenceSources: getSuggestionEvidenceSources(evidenceSourceIds),
     skippedCandidates: [],
     routineMemory: {
       recordsConsidered: (input.recentApplications ?? []).length,
@@ -623,6 +733,57 @@ function buildContextSummary(input: {
       offShelfUseCount: 0,
     },
   };
+}
+
+function quickEvaluationEvidenceSourceIds(
+  profile: SkinProfile,
+  products: readonly InventoryProduct[],
+): SuggestionEvidenceSourceId[] {
+  const sourceIds = new Set<SuggestionEvidenceSourceId>([
+    SuggestionEvidenceSourceId.MayoDrySkinCare,
+  ]);
+  if (
+    products.some(
+      (product) => product.category === ProductCategory.SunProtection,
+    )
+  ) {
+    sourceIds.add(SuggestionEvidenceSourceId.AadSunscreenSelection);
+  }
+  if (profileOrProductsSupportPigment(profile, products)) {
+    sourceIds.add(
+      SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
+    );
+  }
+  return [...sourceIds];
+}
+
+function profileOrProductsSupportPigment(
+  profile: SkinProfile,
+  products: readonly InventoryProduct[],
+): boolean {
+  const text = [
+    profile.primary_goal ?? '',
+    ...(profile.current_concerns ?? []),
+    ...products.flatMap((product) => [
+      product.identity?.description ?? '',
+      ...(product.identity?.benefits ?? []),
+      ...(product.identity?.suitedFor ?? []),
+    ]),
+  ].join(' ');
+  return /dark marks|post-acne|uneven tone|pigment|hyperpigmentation|pih/i.test(
+    text,
+  );
+}
+
+function productSupportsPigment(product: InventoryProduct): boolean {
+  const text = [
+    product.identity?.description ?? '',
+    ...(product.identity?.benefits ?? []),
+    ...(product.identity?.suitedFor ?? []),
+  ].join(' ');
+  return /dark marks|post-acne|uneven tone|pigment|hyperpigmentation|pih/i.test(
+    text,
+  );
 }
 
 function defaultSuitabilityReasons(product: InventoryProduct): string[] {
