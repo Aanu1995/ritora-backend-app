@@ -239,6 +239,24 @@ describe('suggestion product intelligence', () => {
     );
   });
 
+  it('adds dry-air caution to strong active products outside exfoliant category', () => {
+    const tonerScore = scoreProductForSuggestion(
+      productWithData({
+        category: ProductCategory.Toner,
+        name: 'Glycolic Toner',
+        inciIngredients: ['Glycolic Acid'],
+        inciLastConfirmedAt: '2026-05-01',
+        preferredTimeOfDay: PreferredTimeOfDay.Evening,
+      }),
+      scoringOptions({ environment: highUvDryEnvironment() }),
+    );
+
+    expect(tonerScore.activeTags).toEqual(expect.arrayContaining(['aha']));
+    expect(tonerScore.cautionReasons).toEqual(
+      expect.arrayContaining(['dry air can make strong actives feel harsher']),
+    );
+  });
+
   it('uses current goals, reaction skips, substitutions, recent suggestions, and expiry in ranking', () => {
     const product = productWithData({
       category: ProductCategory.Serum,

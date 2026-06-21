@@ -36,6 +36,7 @@ import { resolveSuggestionProductScores } from './suggestion-product-score-resol
 import { isBlockingSkippedCandidateReason } from './suggestion-safety-policy';
 import {
   isPreferredTimeCompatibleWithDaypart,
+  isSingleUseSuggestionCategory,
   isStrongActiveTag,
 } from './suggestion-product-intelligence';
 
@@ -711,6 +712,7 @@ function areBaselineProductsCompatible(
   if (hasStrongActiveLayeringConflict(left, right)) return false;
   if (hasVitaminCNiacinamideConflict(left, right)) return false;
   if (left.category !== right.category) return true;
+  if (isSingleUseSuggestionCategory(left.category)) return false;
   return hasDistinctSameCategoryEvidence(left, right);
 }
 

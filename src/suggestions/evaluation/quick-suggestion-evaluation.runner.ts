@@ -261,6 +261,7 @@ export class OpenAiQuickSuggestionEvaluationJudge implements QuickSuggestionEval
                   'Skipped/explanation copy may reference owned products from the supplied case by brand/name; fail only when the named product is not in the supplied ownedProducts or output steps.',
                   'A zero-step output can pass when it clearly says no extra product is needed now, the user is already covered or comfortable, or no owned product fits the current timing/safety constraints.',
                   'When compatible owned products outside cleanser/moisturizer/sun-protection exist, fail cleanser/moisturizer/SPF-only outputs unless the supplied case shows a safety, timing, spacing, or request reason to delay those products.',
+                  'Fail outputs that select more than one non-specialist-locked product from a single-use category: cleanser, sun-protection, mask, or exfoliant. These categories are alternatives for one routine slot, not leave-on layers.',
                   'Uncommon uploaded categories such as toner, essence, mask, and lip-care can be valid when they are owned, compatible, and useful for the right-now request.',
                   'Fail outputs that invent products, use off-shelf products, apply a product outside preferredTime, add optional shopping pressure, or add a routine step merely to avoid an empty result.',
                   'Never require invented products, optional gaps, or an application step when no owned product fits the request.',

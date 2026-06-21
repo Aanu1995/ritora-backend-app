@@ -12,7 +12,10 @@ import {
   normalizeLanguage,
   type AppLanguage,
 } from '../../common/i18n/i18n';
-import { isHighUvRisk } from '../../environment-intelligence/environment-adaptation-policy';
+import {
+  isDryHumidity,
+  isHighUvRisk,
+} from '../../environment-intelligence/environment-adaptation-policy';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import {
   ProductCategory,
@@ -74,6 +77,7 @@ import {
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
 import {
   isPreferredTimeCompatibleWithDaypart,
+  isSingleUseSuggestionCategory,
   isStrongActiveTag,
 } from './suggestion-product-intelligence';
 import { isBlockingSkippedCandidateReason } from './suggestion-safety-policy';
@@ -84,6 +88,9 @@ export const SUGGESTION_AI_QUICK_TIMEOUT_MS = 180_000;
 export const SUGGESTION_AI_TIMEOUT_MS = SUGGESTION_AI_TODAYS_TIMEOUT_MS;
 export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 24000;
 const SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS = 2;
+const SUGGESTION_AI_TODAYS_PROVIDER_FAILURE_ATTEMPTS = 2;
+const SUGGESTION_AI_QUICK_PROVIDER_FAILURE_ATTEMPTS = 1;
+const SUGGESTION_AI_MIN_RETRY_TIMEOUT_MS = 1_000;
 
 export interface SuggestionGenerationInputs {
   language?: AppLanguage;
@@ -191,6 +198,7 @@ export class SuggestionAiGenerator {
         prompt,
         reasoningEffort: suggestionReasoningEffort(inputs),
         timeoutMs: suggestionTimeoutMs(inputs),
+        providerFailureAttempts: suggestionProviderFailureAttempts(inputs),
       });
       if (!outputText) {
         throw new Error('OpenAI returned no usable structured output.');
@@ -257,7 +265,10 @@ export class SuggestionAiGenerator {
         'invalid_product_or_step_reference',
       );
     }
-    let repairedSteps = repairRecoverableMissingSteps(inputs, steps);
+    let repairedSteps = repairSingleUseCategoryDuplicates(
+      inputs,
+      repairRecoverableMissingSteps(inputs, steps),
+    );
     let hardSafetyFallbackReason = resolveHardSafetyFallbackReason(
       inputs,
       repairedSteps,
@@ -269,7 +280,10 @@ export class SuggestionAiGenerator {
         hardSafetyFallbackReason,
       );
       if (recoveredSteps) {
-        repairedSteps = recoveredSteps;
+        repairedSteps = repairSingleUseCategoryDuplicates(
+          inputs,
+          recoveredSteps,
+        );
         hardSafetyFallbackReason = null;
       }
     }
@@ -370,17 +384,22 @@ export class SuggestionAiGenerator {
     prompt: string;
     reasoningEffort: OpenAiReasoningEffort;
     timeoutMs: number;
+    providerFailureAttempts: number;
   }): Promise<{
     outputText: string | null;
     payload: OpenAiResponsePayload;
   }> {
+    const startedAt = Date.now();
     let lastPayload: OpenAiResponsePayload | null = null;
     for (
       let attempt = 1;
       attempt <= SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS;
       attempt += 1
     ) {
-      const payload = await this.requestOpenAiResponse(input);
+      const payload = await this.requestOpenAiResponseWithRetry({
+        ...input,
+        startedAt,
+      });
       const outputText = extractOutputText(payload);
       if (outputText) {
         return { outputText, payload };
@@ -392,6 +411,43 @@ export class SuggestionAiGenerator {
       outputText: null,
       payload: lastPayload ?? {},
     };
+  }
+
+  private async requestOpenAiResponseWithRetry(input: {
+    apiKey: string;
+    model: string;
+    prompt: string;
+    reasoningEffort: OpenAiReasoningEffort;
+    timeoutMs: number;
+    providerFailureAttempts: number;
+    startedAt: number;
+  }): Promise<OpenAiResponsePayload> {
+    for (
+      let attempt = 1;
+      attempt <= input.providerFailureAttempts;
+      attempt += 1
+    ) {
+      try {
+        return await this.requestOpenAiResponse({
+          ...input,
+          timeoutMs: remainingOpenAiTimeoutMs(input.timeoutMs, input.startedAt),
+        });
+      } catch (error) {
+        if (
+          attempt >= input.providerFailureAttempts ||
+          remainingOpenAiTimeoutMs(input.timeoutMs, input.startedAt) <=
+            SUGGESTION_AI_MIN_RETRY_TIMEOUT_MS
+        ) {
+          throw error;
+        }
+        this.logger.warn(
+          `AI suggestion provider attempt ${attempt} failed: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }. Retrying within the remaining timeout budget.`,
+        );
+      }
+    }
+    throw new Error('OpenAI suggestion retry attempts exhausted.');
   }
 
   private async requestOpenAiResponse(input: {
@@ -501,6 +557,22 @@ function suggestionTimeoutMs(inputs: SuggestionGenerationInputs): number {
   return inputs.requestSource === SuggestionRequestSource.Scheduled
     ? SUGGESTION_AI_TODAYS_TIMEOUT_MS
     : SUGGESTION_AI_QUICK_TIMEOUT_MS;
+}
+
+function suggestionProviderFailureAttempts(
+  inputs: SuggestionGenerationInputs,
+): number {
+  return inputs.requestSource === SuggestionRequestSource.Scheduled
+    ? SUGGESTION_AI_TODAYS_PROVIDER_FAILURE_ATTEMPTS
+    : SUGGESTION_AI_QUICK_PROVIDER_FAILURE_ATTEMPTS;
+}
+
+function remainingOpenAiTimeoutMs(totalTimeoutMs: number, startedAt: number) {
+  const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw new Error('OpenAI suggestion timeout budget exhausted.');
+  }
+  return remainingMs;
 }
 
 function buildManualBaselineSteps(
@@ -749,6 +821,7 @@ function shouldRemoveStepForHardSafetyRecovery(
     case 'unsafe_medication_strong_active':
     case 'unsafe_reaction_active':
     case 'unsafe_restart_active':
+    case 'unsafe_dry_barrier_active':
       return score ? hasStrongActive(score) : false;
     case 'unsafe_sensitive_history_active':
       return score
@@ -858,6 +931,95 @@ function repairMissingBarrierMoisturizer(
 }
 
 const CONFLICT_REPLACEMENT_SCORE_MARGIN = 8;
+const PRODUCT_CATEGORY_VALUES = new Set<string>(Object.values(ProductCategory));
+
+function repairSingleUseCategoryDuplicates(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+): SuggestionGenerationStepOutput[] {
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const stepsBySingleUseCategory = new Map<
+    ProductCategory,
+    SuggestionGenerationStepOutput[]
+  >();
+  for (const step of steps) {
+    const category = singleUseCategoryForStep(step);
+    if (!category) continue;
+    stepsBySingleUseCategory.set(category, [
+      ...(stepsBySingleUseCategory.get(category) ?? []),
+      step,
+    ]);
+  }
+
+  const keptSteps = new Set(steps);
+  let changed = false;
+  for (const categorySteps of stepsBySingleUseCategory.values()) {
+    if (categorySteps.length <= 1) continue;
+    const lockedSteps = categorySteps.filter(
+      (step) => step.provenance === SuggestionStepProvenance.SpecialistLocked,
+    );
+    if (lockedSteps.length > 0) {
+      for (const step of categorySteps) {
+        if (step.provenance === SuggestionStepProvenance.SpecialistLocked) {
+          continue;
+        }
+        keptSteps.delete(step);
+        changed = true;
+      }
+      continue;
+    }
+
+    const [selectedStep, ...duplicateSteps] = [...categorySteps].sort(
+      (left, right) =>
+        singleUseStepSuitability(right, scoreByProductId) -
+          singleUseStepSuitability(left, scoreByProductId) ||
+        singleUseProvenanceRank(right) - singleUseProvenanceRank(left) ||
+        left.stepOrder - right.stepOrder,
+    );
+    if (!selectedStep) continue;
+    for (const step of duplicateSteps) {
+      keptSteps.delete(step);
+      changed = true;
+    }
+  }
+
+  return changed ? steps.filter((step) => keptSteps.has(step)) : steps;
+}
+
+function singleUseCategoryForStep(
+  step: SuggestionGenerationStepOutput,
+): ProductCategory | null {
+  if (!PRODUCT_CATEGORY_VALUES.has(step.stepLabel)) return null;
+  const category = step.stepLabel as ProductCategory;
+  return isSingleUseSuggestionCategory(category) ? category : null;
+}
+
+function singleUseStepSuitability(
+  step: SuggestionGenerationStepOutput,
+  scoreByProductId: ReadonlyMap<
+    string,
+    SuggestionContextSummary['productScores'][number]
+  >,
+): number {
+  if (!step.inventoryProductId) return -1;
+  return scoreByProductId.get(step.inventoryProductId)?.suitabilityScore ?? -1;
+}
+
+function singleUseProvenanceRank(step: SuggestionGenerationStepOutput): number {
+  switch (step.provenance) {
+    case SuggestionStepProvenance.UserRoutine:
+      return 2;
+    case SuggestionStepProvenance.AiAdded:
+      return 1;
+    default:
+      return 0;
+  }
+}
 
 function repairConflictingLowerScoredAiSelection(
   inputs: SuggestionGenerationInputs,
@@ -986,9 +1148,20 @@ function hasAiLayeringConflict(
   right: SuggestionContextSummary['productScores'][number],
 ): boolean {
   return (
+    hasSingleUseAiCategoryConflict(left, right) ||
     hasExplicitAiLayeringConflict(left, right) ||
     hasStrongActiveAiLayeringConflict(left, right) ||
     hasVitaminCNiacinamideAiConflict(left, right)
+  );
+}
+
+function hasSingleUseAiCategoryConflict(
+  left: SuggestionContextSummary['productScores'][number],
+  right: SuggestionContextSummary['productScores'][number],
+): boolean {
+  return (
+    left.category === right.category &&
+    isSingleUseSuggestionCategory(left.category)
   );
 }
 
@@ -1111,6 +1284,7 @@ function canRepairManualRoutineStep(
     return false;
   }
   if (hasDaytimeStrongActiveConflict(inputs, score)) return false;
+  if (hasDryBarrierStrongActiveCaution(inputs, score)) return false;
   return !(requiresRecentStrongActiveSpacing(inputs) && hasStrongActive(score));
 }
 
@@ -1811,6 +1985,13 @@ function resolveHardSafetyFallbackReason(
     return 'unsafe_restart_active';
   }
   if (
+    selectedScores.some((score) =>
+      hasDryBarrierStrongActiveCaution(inputs, score),
+    )
+  ) {
+    return 'unsafe_dry_barrier_active';
+  }
+  if (
     requiresOwnedDaytimeSpf(inputs) &&
     !selectedScores.some(
       (score) => score.category === ProductCategory.SunProtection,
@@ -1873,6 +2054,46 @@ function hasDaytimeStrongActiveConflict(
     (inputs.contextSummary.environment
       ? isHighUvRisk(inputs.contextSummary.environment.uvRisk)
       : false)
+  );
+}
+
+function hasDryBarrierStrongActiveCaution(
+  inputs: SuggestionGenerationInputs,
+  score: SuggestionContextSummary['productScores'][number],
+): boolean {
+  return hasStrongActive(score) && hasDryBarrierSelectionContext(inputs);
+}
+
+function hasDryBarrierSelectionContext(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  const environment = inputs.contextSummary.environment;
+  const dryEnvironment = environment
+    ? isDryHumidity(environment.humidityBand)
+    : false;
+  const coldDryEnvironment = Boolean(
+    dryEnvironment &&
+    environment?.temperatureBand &&
+    ['cold', 'freezing'].includes(environment.temperatureBand),
+  );
+  const environmentBarrierSignal =
+    inputs.contextSummary.safetyConstraints.includes(
+      'environment_barrier_support',
+    ) ||
+    (environment?.climateSensitivities ?? []).includes('dry_air') ||
+    coldDryEnvironment;
+  if (!dryEnvironment && !environmentBarrierSignal) return false;
+
+  const currentConcernText = JSON.stringify([
+    inputs.skinProfile?.primary_goal ?? '',
+    inputs.skinProfile?.current_concerns ?? [],
+    inputs.contextSummary.skinProfile.primaryGoal ?? '',
+    inputs.contextSummary.skinProfile.activeConcerns,
+    inputs.contextSummary.reaction.indicators,
+    inputs.contextSummary.reaction.concernKeys,
+  ]).toLowerCase();
+  return /\b(dry|dryness|flaking|barrier|tight|stinging|burning)\b/i.test(
+    currentConcernText,
   );
 }
 

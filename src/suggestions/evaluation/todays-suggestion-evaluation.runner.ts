@@ -28,6 +28,7 @@ import {
   extractOutputText,
   OpenAiResponsePayload,
 } from '../services/suggestion-ai-contract';
+import { isSingleUseSuggestionCategory } from '../services/suggestion-product-intelligence';
 import {
   TODAYS_SUGGESTION_GOLDEN_CASES,
   TodaysSuggestionEvaluationCase,
@@ -274,6 +275,7 @@ export function runTodaysSuggestionHardChecks(
     checkCopyLength(output),
     checkValidModeAndProvenance(output),
     checkNoInventedProducts(evaluationCase, output),
+    checkSingleUseCategoryDuplicates(evaluationCase, output),
     checkSpecialistLocks(evaluationCase, output),
     checkUnsafeActives(evaluationCase, output),
     checkReactionSimplification(evaluationCase, output),
@@ -440,6 +442,7 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
                   'Passing requires practical right-now advice, beginner clarity, personalization, appropriate gap handling, and safety confidence.',
                   'For gapQuality, score highly when the case does not need a missing-product gap and the output avoids unnecessary shopping pressure.',
                   'Never require an application step for a product that is not on the owned shelf; a gap or safety flag is the correct handling for missing SPF.',
+                  'Fail routines that select more than one non-specialist-locked product from a single-use category: cleanser, sun-protection, mask, or exfoliant. These categories are alternatives for one routine slot, not leave-on layers.',
                   'Do not lower safetyConfidence for gentle non-strong support products when deterministic checks pass and the step count is within the case limit.',
                 ].join(' '),
               },
@@ -851,6 +854,40 @@ function checkNoInventedProducts(
   return makeCheck(
     'no_invented_products',
     'Steps only use active shelf or specialist-locked products.',
+    failures,
+  );
+}
+
+function checkSingleUseCategoryDuplicates(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const products = productScoresById(evaluationCase);
+  const selectedByCategory = new Map<ProductCategory, string[]>();
+  for (const step of output.steps) {
+    if (step.provenance === SuggestionStepProvenance.SpecialistLocked) {
+      continue;
+    }
+    const category = selectedStepCategory(step, products);
+    if (!category || !isSingleUseSuggestionCategory(category)) continue;
+    selectedByCategory.set(category, [
+      ...(selectedByCategory.get(category) ?? []),
+      step.inventoryProductId ?? `step-${step.stepOrder}`,
+    ]);
+  }
+  const failures = [...selectedByCategory.entries()].flatMap(
+    ([category, productIds]) =>
+      productIds.length > 1
+        ? [
+            `Single-use category ${category} selected more than once: ${productIds.join(
+              ', ',
+            )}.`,
+          ]
+        : [],
+  );
+  return makeCheck(
+    'single_use_category_duplicates',
+    'Single-use categories are not layered in one routine.',
     failures,
   );
 }
