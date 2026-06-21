@@ -1,0 +1,1098 @@
+{
+  "startDate": "2026-06-21",
+  "dayCount": 3,
+  "userHash": "883137772220",
+  "evaluatedDays": 3,
+  "evaluatedSlots": 6,
+  "failedSlots": 0,
+  "diversity": {
+    "evaluatedDays": 3,
+    "evaluatedSlots": 6,
+    "distinctSelectedProductCount": 7,
+    "distinctStepSignatureCount": 2,
+    "productUseCounts": [
+      {
+        "productHash": "4bd78000f7aa",
+        "category": "cleanser",
+        "count": 3
+      },
+      {
+        "productHash": "347fe429cfa9",
+        "category": "treatment",
+        "count": 3
+      },
+      {
+        "productHash": "38dbe8b1924a",
+        "category": "moisturizer",
+        "count": 3
+      },
+      {
+        "productHash": "05d6e73e7c1c",
+        "category": "sun-protection",
+        "count": 3
+      },
+      {
+        "productHash": "a381e6261918",
+        "category": "cleanser",
+        "count": 3
+      },
+      {
+        "productHash": "be54fe31c8ce",
+        "category": "exfoliant",
+        "count": 3
+      },
+      {
+        "productHash": "cf3963739a31",
+        "category": "moisturizer",
+        "count": 3
+      }
+    ],
+    "daypartSummaries": [
+      {
+        "daypart": "evening",
+        "slotCount": 3,
+        "distinctSelectedProductCount": 3,
+        "distinctStepSignatureCount": 1,
+        "repeatedSignatures": [
+          {
+            "stepSignatureHash": "f9a03a7154e8",
+            "count": 3,
+            "stepCategories": [
+              "cleanser",
+              "exfoliant",
+              "moisturizer"
+            ],
+            "stepProductHashes": [
+              "a381e6261918",
+              "be54fe31c8ce",
+              "cf3963739a31"
+            ]
+          }
+        ]
+      },
+      {
+        "daypart": "morning",
+        "slotCount": 3,
+        "distinctSelectedProductCount": 4,
+        "distinctStepSignatureCount": 1,
+        "repeatedSignatures": [
+          {
+            "stepSignatureHash": "944a3822dd68",
+            "count": 3,
+            "stepCategories": [
+              "cleanser",
+              "treatment",
+              "moisturizer",
+              "sun-protection"
+            ],
+            "stepProductHashes": [
+              "4bd78000f7aa",
+              "347fe429cfa9",
+              "38dbe8b1924a",
+              "05d6e73e7c1c"
+            ]
+          }
+        ]
+      }
+    ],
+    "slotPatternSummaries": [
+      {
+        "slotKey": "20:00:00:evening",
+        "slotTime": "20:00:00",
+        "daypart": "evening",
+        "daysEvaluated": 3,
+        "distinctStepSignatureCount": 1,
+        "repeatedSignatures": [
+          {
+            "stepSignatureHash": "f9a03a7154e8",
+            "count": 3,
+            "dates": [
+              "2026-06-21",
+              "2026-06-22",
+              "2026-06-23"
+            ],
+            "stepCategories": [
+              "cleanser",
+              "exfoliant",
+              "moisturizer"
+            ],
+            "stepProductHashes": [
+              "a381e6261918",
+              "be54fe31c8ce",
+              "cf3963739a31"
+            ]
+          }
+        ]
+      },
+      {
+        "slotKey": "10:00:00:morning",
+        "slotTime": "10:00:00",
+        "daypart": "morning",
+        "daysEvaluated": 3,
+        "distinctStepSignatureCount": 1,
+        "repeatedSignatures": [
+          {
+            "stepSignatureHash": "944a3822dd68",
+            "count": 3,
+            "dates": [
+              "2026-06-21",
+              "2026-06-22",
+              "2026-06-23"
+            ],
+            "stepCategories": [
+              "cleanser",
+              "treatment",
+              "moisturizer",
+              "sun-protection"
+            ],
+            "stepProductHashes": [
+              "4bd78000f7aa",
+              "347fe429cfa9",
+              "38dbe8b1924a",
+              "05d6e73e7c1c"
+            ]
+          }
+        ]
+      }
+    ],
+    "warnings": []
+  },
+  "days": [
+    {
+      "targetDate": "2026-06-21",
+      "targetDay": "sun",
+      "slots": [
+        {
+          "targetDate": "2026-06-21",
+          "targetDay": "sun",
+          "slotIdHash": "b692056d4247",
+          "slotTime": "10:00:00",
+          "daypart": "morning",
+          "provider": "openai",
+          "fallbackReason": null,
+          "activeProductCount": 7,
+          "activeCategoryCounts": {
+            "moisturizer": 2,
+            "cleanser": 2,
+            "exfoliant": 1,
+            "sun-protection": 1,
+            "treatment": 1
+          },
+          "scoreDiagnostics": [
+            {
+              "productHash": "05d6e73e7c1c",
+              "category": "sun-protection",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 100,
+              "dataQuality": "verified",
+              "activeTags": [
+                "humectant",
+                "spf"
+              ],
+              "cautionReasons": [
+                "Keep babies and young children out of direct sunlight",
+                "Avoid contact with eyes",
+                "Avoid direct contact with textiles",
+                "Reducing the amount lowers protection significantly"
+              ]
+            },
+            {
+              "productHash": "4bd78000f7aa",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha",
+                "pha",
+                "niacinamide",
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid direct eye contact",
+                "Rinse eyes immediately if contacted"
+              ]
+            },
+            {
+              "productHash": "be54fe31c8ce",
+              "category": "exfoliant",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha"
+              ],
+              "cautionReasons": [
+                "For external use only",
+                "Avoid contact with eyes",
+                "Rinse eyes thoroughly if contacted",
+                "Discontinue if irritation occurs",
+                "Keep out of reach of children"
+              ]
+            },
+            {
+              "productHash": "347fe429cfa9",
+              "category": "treatment",
+              "preferredTimeOfDay": "morning",
+              "suitabilityScore": 77,
+              "dataQuality": "verified",
+              "activeTags": [
+                "azelaic_acid"
+              ],
+              "cautionReasons": [
+                "Avoid the eye contour",
+                "Avoid contact with eyes and mouth",
+                "Use sun protection during the day",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "cf3963739a31",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 73,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid contact with eyes",
+                "Rinse immediately if contacted"
+              ]
+            },
+            {
+              "productHash": "38dbe8b1924a",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Do not apply to eye contour",
+                "Rinse immediately if contact occurs",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "a381e6261918",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "If contact occurs, rinse well with water",
+                "recent same-daypart repeat"
+              ]
+            }
+          ],
+          "stepCount": 4,
+          "stepCategories": [
+            "cleanser",
+            "treatment",
+            "moisturizer",
+            "sun-protection"
+          ],
+          "stepProductHashes": [
+            "4bd78000f7aa",
+            "347fe429cfa9",
+            "38dbe8b1924a",
+            "05d6e73e7c1c"
+          ],
+          "stepSignatureHash": "944a3822dd68",
+          "failures": []
+        },
+        {
+          "targetDate": "2026-06-21",
+          "targetDay": "sun",
+          "slotIdHash": "5cf6465293ec",
+          "slotTime": "20:00:00",
+          "daypart": "evening",
+          "provider": "openai",
+          "fallbackReason": null,
+          "activeProductCount": 7,
+          "activeCategoryCounts": {
+            "moisturizer": 2,
+            "cleanser": 2,
+            "exfoliant": 1,
+            "sun-protection": 1,
+            "treatment": 1
+          },
+          "scoreDiagnostics": [
+            {
+              "productHash": "05d6e73e7c1c",
+              "category": "sun-protection",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "humectant",
+                "spf"
+              ],
+              "cautionReasons": [
+                "Keep babies and young children out of direct sunlight",
+                "Avoid contact with eyes",
+                "Avoid direct contact with textiles",
+                "Reducing the amount lowers protection significantly"
+              ]
+            },
+            {
+              "productHash": "4bd78000f7aa",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 65,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha",
+                "pha",
+                "niacinamide",
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid direct eye contact",
+                "Rinse eyes immediately if contacted",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "be54fe31c8ce",
+              "category": "exfoliant",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 65,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha"
+              ],
+              "cautionReasons": [
+                "For external use only",
+                "Avoid contact with eyes",
+                "Rinse eyes thoroughly if contacted",
+                "Discontinue if irritation occurs",
+                "Keep out of reach of children",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "38dbe8b1924a",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Do not apply to eye contour",
+                "Rinse immediately if contact occurs",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "cf3963739a31",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid contact with eyes",
+                "Rinse immediately if contacted",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "a381e6261918",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "If contact occurs, rinse well with water",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "347fe429cfa9",
+              "category": "treatment",
+              "preferredTimeOfDay": "morning",
+              "suitabilityScore": 53,
+              "dataQuality": "verified",
+              "activeTags": [
+                "azelaic_acid"
+              ],
+              "cautionReasons": [
+                "Avoid the eye contour",
+                "Avoid contact with eyes and mouth",
+                "Use sun protection during the day",
+                "preferred time of day does not match this slot",
+                "recent same-daypart repeat"
+              ]
+            }
+          ],
+          "stepCount": 3,
+          "stepCategories": [
+            "cleanser",
+            "exfoliant",
+            "moisturizer"
+          ],
+          "stepProductHashes": [
+            "a381e6261918",
+            "be54fe31c8ce",
+            "cf3963739a31"
+          ],
+          "stepSignatureHash": "f9a03a7154e8",
+          "failures": []
+        }
+      ]
+    },
+    {
+      "targetDate": "2026-06-22",
+      "targetDay": "mon",
+      "slots": [
+        {
+          "targetDate": "2026-06-22",
+          "targetDay": "mon",
+          "slotIdHash": "e5b0135006c0",
+          "slotTime": "10:00:00",
+          "daypart": "morning",
+          "provider": "openai",
+          "fallbackReason": null,
+          "activeProductCount": 7,
+          "activeCategoryCounts": {
+            "moisturizer": 2,
+            "cleanser": 2,
+            "exfoliant": 1,
+            "sun-protection": 1,
+            "treatment": 1
+          },
+          "scoreDiagnostics": [
+            {
+              "productHash": "05d6e73e7c1c",
+              "category": "sun-protection",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 100,
+              "dataQuality": "verified",
+              "activeTags": [
+                "humectant",
+                "spf"
+              ],
+              "cautionReasons": [
+                "Keep babies and young children out of direct sunlight",
+                "Avoid contact with eyes",
+                "Avoid direct contact with textiles",
+                "Reducing the amount lowers protection significantly"
+              ]
+            },
+            {
+              "productHash": "4bd78000f7aa",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha",
+                "pha",
+                "niacinamide",
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid direct eye contact",
+                "Rinse eyes immediately if contacted"
+              ]
+            },
+            {
+              "productHash": "be54fe31c8ce",
+              "category": "exfoliant",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha"
+              ],
+              "cautionReasons": [
+                "For external use only",
+                "Avoid contact with eyes",
+                "Rinse eyes thoroughly if contacted",
+                "Discontinue if irritation occurs",
+                "Keep out of reach of children"
+              ]
+            },
+            {
+              "productHash": "347fe429cfa9",
+              "category": "treatment",
+              "preferredTimeOfDay": "morning",
+              "suitabilityScore": 77,
+              "dataQuality": "verified",
+              "activeTags": [
+                "azelaic_acid"
+              ],
+              "cautionReasons": [
+                "Avoid the eye contour",
+                "Avoid contact with eyes and mouth",
+                "Use sun protection during the day",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "cf3963739a31",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 73,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid contact with eyes",
+                "Rinse immediately if contacted"
+              ]
+            },
+            {
+              "productHash": "38dbe8b1924a",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Do not apply to eye contour",
+                "Rinse immediately if contact occurs",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "a381e6261918",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "If contact occurs, rinse well with water",
+                "recent same-daypart repeat"
+              ]
+            }
+          ],
+          "stepCount": 4,
+          "stepCategories": [
+            "cleanser",
+            "treatment",
+            "moisturizer",
+            "sun-protection"
+          ],
+          "stepProductHashes": [
+            "4bd78000f7aa",
+            "347fe429cfa9",
+            "38dbe8b1924a",
+            "05d6e73e7c1c"
+          ],
+          "stepSignatureHash": "944a3822dd68",
+          "failures": []
+        },
+        {
+          "targetDate": "2026-06-22",
+          "targetDay": "mon",
+          "slotIdHash": "e6bdabbb1515",
+          "slotTime": "20:00:00",
+          "daypart": "evening",
+          "provider": "openai",
+          "fallbackReason": null,
+          "activeProductCount": 7,
+          "activeCategoryCounts": {
+            "moisturizer": 2,
+            "cleanser": 2,
+            "exfoliant": 1,
+            "sun-protection": 1,
+            "treatment": 1
+          },
+          "scoreDiagnostics": [
+            {
+              "productHash": "05d6e73e7c1c",
+              "category": "sun-protection",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "humectant",
+                "spf"
+              ],
+              "cautionReasons": [
+                "Keep babies and young children out of direct sunlight",
+                "Avoid contact with eyes",
+                "Avoid direct contact with textiles",
+                "Reducing the amount lowers protection significantly"
+              ]
+            },
+            {
+              "productHash": "4bd78000f7aa",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 65,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha",
+                "pha",
+                "niacinamide",
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid direct eye contact",
+                "Rinse eyes immediately if contacted",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "be54fe31c8ce",
+              "category": "exfoliant",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 65,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha"
+              ],
+              "cautionReasons": [
+                "For external use only",
+                "Avoid contact with eyes",
+                "Rinse eyes thoroughly if contacted",
+                "Discontinue if irritation occurs",
+                "Keep out of reach of children",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "38dbe8b1924a",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Do not apply to eye contour",
+                "Rinse immediately if contact occurs",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "cf3963739a31",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid contact with eyes",
+                "Rinse immediately if contacted",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "a381e6261918",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "If contact occurs, rinse well with water",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "347fe429cfa9",
+              "category": "treatment",
+              "preferredTimeOfDay": "morning",
+              "suitabilityScore": 53,
+              "dataQuality": "verified",
+              "activeTags": [
+                "azelaic_acid"
+              ],
+              "cautionReasons": [
+                "Avoid the eye contour",
+                "Avoid contact with eyes and mouth",
+                "Use sun protection during the day",
+                "preferred time of day does not match this slot",
+                "recent same-daypart repeat"
+              ]
+            }
+          ],
+          "stepCount": 3,
+          "stepCategories": [
+            "cleanser",
+            "exfoliant",
+            "moisturizer"
+          ],
+          "stepProductHashes": [
+            "a381e6261918",
+            "be54fe31c8ce",
+            "cf3963739a31"
+          ],
+          "stepSignatureHash": "f9a03a7154e8",
+          "failures": []
+        }
+      ]
+    },
+    {
+      "targetDate": "2026-06-23",
+      "targetDay": "tue",
+      "slots": [
+        {
+          "targetDate": "2026-06-23",
+          "targetDay": "tue",
+          "slotIdHash": "3d85cc65a379",
+          "slotTime": "10:00:00",
+          "daypart": "morning",
+          "provider": "openai",
+          "fallbackReason": null,
+          "activeProductCount": 7,
+          "activeCategoryCounts": {
+            "moisturizer": 2,
+            "cleanser": 2,
+            "exfoliant": 1,
+            "sun-protection": 1,
+            "treatment": 1
+          },
+          "scoreDiagnostics": [
+            {
+              "productHash": "05d6e73e7c1c",
+              "category": "sun-protection",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 100,
+              "dataQuality": "verified",
+              "activeTags": [
+                "humectant",
+                "spf"
+              ],
+              "cautionReasons": [
+                "Keep babies and young children out of direct sunlight",
+                "Avoid contact with eyes",
+                "Avoid direct contact with textiles",
+                "Reducing the amount lowers protection significantly"
+              ]
+            },
+            {
+              "productHash": "4bd78000f7aa",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha",
+                "pha",
+                "niacinamide",
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid direct eye contact",
+                "Rinse eyes immediately if contacted"
+              ]
+            },
+            {
+              "productHash": "be54fe31c8ce",
+              "category": "exfoliant",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha"
+              ],
+              "cautionReasons": [
+                "For external use only",
+                "Avoid contact with eyes",
+                "Rinse eyes thoroughly if contacted",
+                "Discontinue if irritation occurs",
+                "Keep out of reach of children"
+              ]
+            },
+            {
+              "productHash": "347fe429cfa9",
+              "category": "treatment",
+              "preferredTimeOfDay": "morning",
+              "suitabilityScore": 77,
+              "dataQuality": "verified",
+              "activeTags": [
+                "azelaic_acid"
+              ],
+              "cautionReasons": [
+                "Avoid the eye contour",
+                "Avoid contact with eyes and mouth",
+                "Use sun protection during the day",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "cf3963739a31",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 73,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid contact with eyes",
+                "Rinse immediately if contacted"
+              ]
+            },
+            {
+              "productHash": "38dbe8b1924a",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Do not apply to eye contour",
+                "Rinse immediately if contact occurs",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "a381e6261918",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "If contact occurs, rinse well with water",
+                "recent same-daypart repeat"
+              ]
+            }
+          ],
+          "stepCount": 4,
+          "stepCategories": [
+            "cleanser",
+            "treatment",
+            "moisturizer",
+            "sun-protection"
+          ],
+          "stepProductHashes": [
+            "4bd78000f7aa",
+            "347fe429cfa9",
+            "38dbe8b1924a",
+            "05d6e73e7c1c"
+          ],
+          "stepSignatureHash": "944a3822dd68",
+          "failures": []
+        },
+        {
+          "targetDate": "2026-06-23",
+          "targetDay": "tue",
+          "slotIdHash": "343df76c0a88",
+          "slotTime": "20:00:00",
+          "daypart": "evening",
+          "provider": "openai",
+          "fallbackReason": null,
+          "activeProductCount": 7,
+          "activeCategoryCounts": {
+            "moisturizer": 2,
+            "cleanser": 2,
+            "exfoliant": 1,
+            "sun-protection": 1,
+            "treatment": 1
+          },
+          "scoreDiagnostics": [
+            {
+              "productHash": "05d6e73e7c1c",
+              "category": "sun-protection",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 81,
+              "dataQuality": "verified",
+              "activeTags": [
+                "humectant",
+                "spf"
+              ],
+              "cautionReasons": [
+                "Keep babies and young children out of direct sunlight",
+                "Avoid contact with eyes",
+                "Avoid direct contact with textiles",
+                "Reducing the amount lowers protection significantly"
+              ]
+            },
+            {
+              "productHash": "4bd78000f7aa",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 65,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha",
+                "pha",
+                "niacinamide",
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid direct eye contact",
+                "Rinse eyes immediately if contacted",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "be54fe31c8ce",
+              "category": "exfoliant",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 65,
+              "dataQuality": "verified",
+              "activeTags": [
+                "bha"
+              ],
+              "cautionReasons": [
+                "For external use only",
+                "Avoid contact with eyes",
+                "Rinse eyes thoroughly if contacted",
+                "Discontinue if irritation occurs",
+                "Keep out of reach of children",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "38dbe8b1924a",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Do not apply to eye contour",
+                "Rinse immediately if contact occurs",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "cf3963739a31",
+              "category": "moisturizer",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "Avoid contact with eyes",
+                "Rinse immediately if contacted",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "a381e6261918",
+              "category": "cleanser",
+              "preferredTimeOfDay": null,
+              "suitabilityScore": 57,
+              "dataQuality": "verified",
+              "activeTags": [
+                "ceramide",
+                "humectant",
+                "barrier_support"
+              ],
+              "cautionReasons": [
+                "If contact occurs, rinse well with water",
+                "recent same-daypart repeat"
+              ]
+            },
+            {
+              "productHash": "347fe429cfa9",
+              "category": "treatment",
+              "preferredTimeOfDay": "morning",
+              "suitabilityScore": 53,
+              "dataQuality": "verified",
+              "activeTags": [
+                "azelaic_acid"
+              ],
+              "cautionReasons": [
+                "Avoid the eye contour",
+                "Avoid contact with eyes and mouth",
+                "Use sun protection during the day",
+                "preferred time of day does not match this slot",
+                "recent same-daypart repeat"
+              ]
+            }
+          ],
+          "stepCount": 3,
+          "stepCategories": [
+            "cleanser",
+            "exfoliant",
+            "moisturizer"
+          ],
+          "stepProductHashes": [
+            "a381e6261918",
+            "be54fe31c8ce",
+            "cf3963739a31"
+          ],
+          "stepSignatureHash": "f9a03a7154e8",
+          "failures": []
+        }
+      ]
+    }
+  ]
+}

@@ -88,6 +88,57 @@ describe("Today's Suggestion evaluation hard checks", () => {
     );
   });
 
+  it.each([
+    {
+      label: ProductCategory.Cleanser,
+      productId: 'cleanser-1',
+      productName: 'Soft Cream Cleanser',
+    },
+    {
+      label: ProductCategory.SunProtection,
+      productId: 'spf-1',
+      productName: 'Daily SPF 50',
+    },
+    {
+      label: ProductCategory.Mask,
+      productId: 'mask-fragrance-1',
+      productName: 'Fragranced Glow Mask',
+    },
+    {
+      label: ProductCategory.Exfoliant,
+      productId: 'bha-1',
+      productName: 'BHA 2% Liquid',
+    },
+  ])('fails non-locked duplicate $label products in one routine', (fixture) => {
+    const evaluationCase = goldenCase('twelve_product_acne_evening');
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          productId: fixture.productId,
+          productName: fixture.productName,
+          label: fixture.label,
+        }),
+        step({
+          order: 1,
+          productId: fixture.productId,
+          productName: fixture.productName,
+          label: fixture.label,
+        }),
+        step({
+          order: 2,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'single_use_category_duplicates',
+    );
+  });
+
   it('fails specialist-locked step mutation', () => {
     const evaluationCase = goldenCase('specialist_locked_step');
     const output = baseOutput({

@@ -30,6 +30,19 @@ export { SuggestionProductGoalFitReason } from './suggestion-goal-intelligence';
 export const SUGGESTION_PRODUCT_SCORING_VERSION =
   'selection-evidence-introduction-pace-2026-06-14';
 
+const SINGLE_USE_SUGGESTION_CATEGORIES = new Set<ProductCategory>([
+  ProductCategory.Cleanser,
+  ProductCategory.SunProtection,
+  ProductCategory.Mask,
+  ProductCategory.Exfoliant,
+]);
+
+export function isSingleUseSuggestionCategory(
+  category: ProductCategory,
+): boolean {
+  return SINGLE_USE_SUGGESTION_CATEGORIES.has(category);
+}
+
 export enum SuggestionProductDataWarning {
   IngredientListMissing = 'ingredient list missing',
   ProductCategoryNeedsReview = 'product category needs review',
@@ -183,6 +196,15 @@ export function scoreProductForSuggestion(
       options.environment,
     ).scoreCategory(product.category);
     score += environmentScore;
+    if (
+      activeTags.some(isStrongActiveTag) &&
+      isDryHumidity(options.environment.humidityBand)
+    ) {
+      score -= 14;
+      if (!cautions.includes('dry air can make strong actives feel harsher')) {
+        cautions.push('dry air can make strong actives feel harsher');
+      }
+    }
     applyEnvironmentReasons(
       product.category,
       options.environment,

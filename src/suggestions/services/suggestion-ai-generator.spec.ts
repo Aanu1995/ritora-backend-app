@@ -103,7 +103,13 @@ describe('SuggestionAiGenerator', () => {
         temperature: 0,
       }),
     );
-    expect(timeoutSpy).toHaveBeenCalledWith(SUGGESTION_AI_TODAYS_TIMEOUT_MS);
+    const requestedTimeoutMs = timeoutSpy.mock.calls[0]?.[0];
+    expect(requestedTimeoutMs).toBeGreaterThanOrEqual(
+      SUGGESTION_AI_TODAYS_TIMEOUT_MS - 1_000,
+    );
+    expect(requestedTimeoutMs).toBeLessThanOrEqual(
+      SUGGESTION_AI_TODAYS_TIMEOUT_MS,
+    );
   });
 
   it('uses medium reasoning for on-demand quick suggestions', async () => {
@@ -689,6 +695,120 @@ describe('SuggestionAiGenerator', () => {
 
     expect(result.metadata.provider).toBe('openai');
     expect(result.metadata.fallbackReason).toBeNull();
+  });
+
+  it('removes dry-barrier strong active steps instead of falling back', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening hydration with AHA',
+                    body: [
+                      'Dry winter air favors hydration and barrier support tonight.',
+                      'The AHA toner fits the evening slot.',
+                    ],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'aha-1', ProductCategory.Toner),
+                    aiProductStep(2, 'serum-1', ProductCategory.Serum),
+                    aiProductStep(
+                      3,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.skinProfile = {
+      skin_type: 'dry',
+      sensitivity_level: 'medium',
+      primary_goal: 'reduce winter dryness',
+      current_concerns: ['dryness', 'flaking'],
+    } as unknown as SkinProfile;
+    inputs.contextSummary.skinProfile = {
+      ...inputs.contextSummary.skinProfile,
+      primaryGoal: 'reduce winter dryness',
+      skinType: 'dry',
+      sensitivityLevel: 'medium',
+      activeConcerns: ['dryness', 'flaking'],
+    };
+    inputs.contextSummary.environment = {
+      status: EnvironmentStatus.Available,
+      provider: EnvironmentProviderName.OpenMeteo,
+      generatedAt: '2026-04-29T06:00:00.000Z',
+      locationPersonalized: true,
+      season: EnvironmentSeason.Winter,
+      temperatureCelsius: 2,
+      temperatureBand: EnvironmentTemperatureBand.Cold,
+      humidity: 18,
+      humidityBand: EnvironmentHumidityBand.VeryDry,
+      uvIndex: 1,
+      uvRisk: EnvironmentUvRisk.Low,
+      airQualityIndex: 22,
+      airQualityRisk: EnvironmentAirQualityRisk.Good,
+      pm25: null,
+      pm10: null,
+      pollenRisk: null,
+      conditionLabel: 'Cold and dry',
+      waterHardness: EnvironmentWaterHardness.Unknown,
+      waterSensitivity: EnvironmentWaterSensitivity.None,
+      climateSensitivities: ['dry_air'],
+      transitionSignals: [],
+      confidence: EnvironmentConfidence.Provider,
+      stale: false,
+      sourceIds: [SuggestionEvidenceSourceId.MayoDrySkinCare],
+    };
+    inputs.contextSummary.safetyConstraints = ['environment_barrier_support'];
+    inputs.shelfActiveProducts.push(
+      product('aha-1', 'Glycolic Toner', ProductCategory.Toner),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('aha-1', ProductCategory.Toner, 97, ['aha', 'glycolic']),
+      productScore('serum-1', ProductCategory.Serum, 88, ['humectant']),
+      productScore('cleanser-1', ProductCategory.Cleanser, 84, []),
+      productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+        'ceramide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+    const selectedProductIds = result.steps.map(
+      (step) => step.inventoryProductId,
+    );
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(selectedProductIds).not.toContain('aha-1');
+    expect(selectedProductIds).toEqual(
+      expect.arrayContaining(['cleanser-1', 'serum-1', 'moisturizer-1']),
+    );
   });
 
   it('removes strong actives for high-sensitivity reaction history without explicit tolerance', async () => {
@@ -3334,7 +3454,7 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.metadata.provider).toBe('deterministic_baseline');
     expect(result.metadata.fallbackReason).toBe('provider_failure');
     expect(result.explanation.headline).toBe('Using your shelf today');
@@ -3368,6 +3488,92 @@ describe('SuggestionAiGenerator', () => {
         }),
       ]),
     );
+  });
+
+  it('retries scheduled provider failures within the Today timeout budget', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('transient provider failure'))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          output: [
+            {
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    simplifiedForReaction: false,
+                    explanation: {
+                      headline: 'Morning shelf plan',
+                      body: ['Use the best-fitting shelf steps.'],
+                      perStepReasons: [],
+                      skipped: [],
+                      inputs: [],
+                    },
+                    steps: [
+                      aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                      aiProductStep(
+                        1,
+                        'moisturizer-1',
+                        ProductCategory.Moisturizer,
+                      ),
+                      aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+                    ],
+                    gapRecommendations: [],
+                    safetyFlags: [],
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+      });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+  });
+
+  it('does not retry quick suggestion provider failures', async () => {
+    const fetchMock = jest.fn().mockRejectedValue(new Error('network down'));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Noon);
+    inputs.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.requestContext = {
+      intent: 'quick_refresh',
+      intensity: 'minimal',
+      note: 'Need a quick check.',
+      activityAt: null,
+      requestedAt: '2026-04-29T12:00:00.000Z',
+    };
+    inputs.contextSummary.requestSource = SuggestionRequestSource.OnDemand;
+    inputs.contextSummary.onDemand = inputs.requestContext;
+
+    const result = await generator.generate(inputs);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('provider_failure');
   });
 
   it('keeps scheduled fallback product-backed when the saved slot step no longer resolves to an eligible product', async () => {
@@ -4358,6 +4564,212 @@ describe('SuggestionAiGenerator', () => {
     expect(productIds).not.toEqual(
       expect.arrayContaining(['serum-1', 'vitamin-c-1']),
     );
+  });
+
+  it('repairs OpenAI output that stacks two non-locked cleansers in one routine', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening reset',
+                    body: ['Use one cleanse, then moisturize.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'sa-cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.shelfActiveProducts.push(
+      product(
+        'sa-cleanser-1',
+        'SA Smoothing Cleanser',
+        ProductCategory.Cleanser,
+      ),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('sa-cleanser-1', ProductCategory.Cleanser, 95, ['bha']),
+      productScore('cleanser-1', ProductCategory.Cleanser, 88, []),
+      productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+        'ceramide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+    const cleanserIds = result.steps
+      .filter((step) => step.stepLabel === ProductCategory.Cleanser)
+      .map((step) => step.inventoryProductId);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(cleanserIds).toEqual(['sa-cleanser-1']);
+    expect(result.steps.map((step) => step.inventoryProductId)).toContain(
+      'moisturizer-1',
+    );
+  });
+
+  it.each([
+    {
+      category: ProductCategory.SunProtection,
+      daypart: SuggestionDaypart.Morning,
+      existingProductId: 'spf-1',
+      duplicateProductId: 'mineral-spf-1',
+      duplicateProductName: 'Mineral SPF 50',
+      supportProductId: 'moisturizer-1',
+      supportCategory: ProductCategory.Moisturizer,
+    },
+    {
+      category: ProductCategory.Mask,
+      daypart: SuggestionDaypart.Evening,
+      existingProductId: 'clay-mask-1',
+      duplicateProductId: 'calm-mask-1',
+      duplicateProductName: 'Calm Gel Mask',
+      supportProductId: 'moisturizer-1',
+      supportCategory: ProductCategory.Moisturizer,
+    },
+    {
+      category: ProductCategory.Exfoliant,
+      daypart: SuggestionDaypart.Evening,
+      existingProductId: 'pha-exfoliant-1',
+      duplicateProductId: 'enzyme-exfoliant-1',
+      duplicateProductName: 'Enzyme Polish',
+      supportProductId: 'moisturizer-1',
+      supportCategory: ProductCategory.Moisturizer,
+    },
+  ])(
+    'repairs OpenAI output that stacks two non-locked $category products in one routine',
+    async ({
+      category,
+      daypart,
+      existingProductId,
+      duplicateProductId,
+      duplicateProductName,
+      supportProductId,
+      supportCategory,
+    }) => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          output: [
+            {
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    simplifiedForReaction: false,
+                    explanation: {
+                      headline: 'Slot plan',
+                      body: ['Use the best-fitting routine option.'],
+                      perStepReasons: [],
+                      skipped: [],
+                      inputs: [],
+                    },
+                    steps: [
+                      aiProductStep(0, existingProductId, category),
+                      aiProductStep(1, duplicateProductId, category),
+                      aiProductStep(2, supportProductId, supportCategory),
+                    ],
+                    gapRecommendations: [],
+                    safetyFlags: [],
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+      });
+      global.fetch = fetchMock;
+      const generator = new SuggestionAiGenerator({
+        get: jest.fn((key: string) => {
+          if (key === 'OPENAI_API_KEY') return 'sk-test';
+          if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+          return null;
+        }),
+      } as unknown as ConfigService);
+      const inputs = inputsWithScoredShelfProducts(daypart);
+      inputs.shelfActiveProducts.push(
+        product(existingProductId, existingProductId, category),
+        product(duplicateProductId, duplicateProductName, category),
+      );
+      inputs.contextSummary.productScores = [
+        productScore(duplicateProductId, category, 96, []),
+        productScore(existingProductId, category, 84, []),
+        productScore(supportProductId, supportCategory, 82, ['ceramide']),
+      ];
+
+      const result = await generator.generate(inputs);
+      const categoryProductIds = result.steps
+        .filter((step) => step.stepLabel === category)
+        .map((step) => step.inventoryProductId);
+
+      expect(result.metadata.provider).toBe('openai');
+      expect(result.metadata.fallbackReason).toBeNull();
+      expect(categoryProductIds).toEqual([duplicateProductId]);
+      expect(result.steps.map((step) => step.inventoryProductId)).toContain(
+        supportProductId,
+      );
+    },
+  );
+
+  it('does not stack two cleansers in deterministic fallback', async () => {
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn().mockReturnValue(null),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.shelfActiveProducts.push(
+      product(
+        'sa-cleanser-1',
+        'SA Smoothing Cleanser',
+        ProductCategory.Cleanser,
+      ),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('sa-cleanser-1', ProductCategory.Cleanser, 95, ['bha']),
+      productScore('cleanser-1', ProductCategory.Cleanser, 88, []),
+      productScore('serum-1', ProductCategory.Serum, 84, ['niacinamide']),
+      productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+        'ceramide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+    const cleanserIds = result.steps
+      .filter((step) => step.stepLabel === ProductCategory.Cleanser)
+      .map((step) => step.inventoryProductId);
+
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(cleanserIds).toEqual(['sa-cleanser-1']);
   });
 
   it('localizes deterministic fallback copy for Spanish suggestions', async () => {

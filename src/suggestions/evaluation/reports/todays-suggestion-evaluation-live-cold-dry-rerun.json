@@ -1,0 +1,339 @@
+{
+  "reportType": "todays_suggestion_live_ai_evaluation",
+  "generatedAt": "2026-06-21T19:40:13.733Z",
+  "model": "gpt-5.4-mini",
+  "promptVersion": "2026-06-21.v13",
+  "totalCases": 1,
+  "passedCases": 1,
+  "failedCases": 0,
+  "repeatabilityRuns": 1,
+  "repeatabilityFailures": 0,
+  "strict": true,
+  "cases": [
+    {
+      "caseId": "cold_dry_climate_barrier",
+      "title": "Cold dry climate pushes barrier support",
+      "status": "passed",
+      "hardChecksPassed": 24,
+      "hardChecksTotal": 24,
+      "hardCheckFailures": [],
+      "rubric": {
+        "answersQuestion": 5,
+        "beginnerClarity": 5,
+        "personalization": 5,
+        "gapQuality": 5,
+        "safetyConfidence": 5,
+        "passed": true,
+        "explanations": [
+          "Directly answers what to do tonight for dry, flaking skin.",
+          "Clear beginner-friendly steps and simple reasons.",
+          "Uses the cold, very dry environment and favors barrier support over actives.",
+          "No unnecessary gap or shopping pressure; SPF handling is correctly not forced.",
+          "Avoids strong actives and keeps the routine within safe, gentle support."
+        ]
+      },
+      "model": "gpt-5.4-mini",
+      "promptVersion": "2026-06-21.v13",
+      "provider": "openai",
+      "fallbackUsed": false,
+      "fallbackReason": null,
+      "driftHash": "f3cfc47d103a274f189ef6f28a867f3afd4432d29418bc3a9e89807dc325ef52",
+      "repeatability": {
+        "runs": 1,
+        "passed": true,
+        "baselineSignature": "91b311384e033d3986625f41fabb5d625d136bf76b08a130482e0c3fc97b8262",
+        "variations": [],
+        "mismatches": []
+      },
+      "generatedAt": "2026-06-21T19:40:13.733Z",
+      "sanitizedCaseSummary": {
+        "id": "cold_dry_climate_barrier",
+        "title": "Cold dry climate pushes barrier support",
+        "riskFocus": [
+          "environment",
+          "barrier"
+        ],
+        "manualReviewChecklist": [
+          "Does the routine respond to cold/dry context?",
+          "Does it favor barrier support over resurfacing?"
+        ],
+        "request": {
+          "source": "scheduled",
+          "intent": null,
+          "intensity": null,
+          "daypart": "evening",
+          "targetTime": "19:30"
+        },
+        "skinProfile": {
+          "skinType": "dry",
+          "skinTone": "medium",
+          "sensitivityLevel": "medium",
+          "primaryGoal": "reduce winter dryness",
+          "currentConcerns": [
+            "dryness",
+            "flaking"
+          ],
+          "pregnancyStatus": null,
+          "dermatologistCare": null,
+          "safetyContext": {
+            "conditions": [],
+            "medications": [],
+            "photosensitizingOther": false
+          },
+          "activeTolerances": {},
+          "skinBehavior": {},
+          "routinePreferences": {}
+        },
+        "contextSignals": {
+          "reaction": {
+            "hasSignal": false,
+            "severity": null,
+            "confidence": null,
+            "indicators": [],
+            "affectedZones": [],
+            "concernKeys": [],
+            "daysSinceLatestSignal": null,
+            "barrierCompromised": false,
+            "photoInputImages": 0,
+            "multiAnglePhotoEntries": 0
+          },
+          "routineBreak": {
+            "recentlyResumed": false,
+            "lastPausedFrom": null,
+            "lastPausedUntil": null
+          },
+          "applicationPatterns": {
+            "days": 0,
+            "daysSinceLastApplication": null,
+            "conservativeRestart": false,
+            "skippedByCategory": {},
+            "substitutedByCategory": {},
+            "addedOffShelfCount": 0,
+            "editedLogCount": 0,
+            "adherenceByCategory": {}
+          },
+          "appliedProductHistory": null,
+          "routineMemory": null,
+          "environment": {
+            "uvRisk": "moderate",
+            "uvIndex": 4,
+            "humidityBand": "very_dry",
+            "temperatureBand": "cold",
+            "sourceIds": [
+              "open_meteo_weather"
+            ]
+          },
+          "safetyConstraints": []
+        },
+        "spfExpectation": {
+          "required": false,
+          "ownedSunscreen": false,
+          "correctHandling": "SPF handling is not required unless directly relevant."
+        },
+        "ownedProducts": [
+          {
+            "productId": "cleanser-1",
+            "brand": "Ava Lab",
+            "name": "Soft Cream Cleanser",
+            "category": "cleanser",
+            "activeTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "moisturizer-1",
+            "brand": "Ava Lab",
+            "name": "Barrier Cream",
+            "category": "moisturizer",
+            "activeTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "hydrating-serum-1",
+            "brand": "Plain Lab",
+            "name": "Hydration Serum",
+            "category": "serum",
+            "activeTags": [
+              "hydrating",
+              "hyaluronic-acid"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          },
+          {
+            "productId": "aha-1",
+            "brand": "Ava Lab",
+            "name": "Glycolic Toner",
+            "category": "toner",
+            "activeTags": [
+              "aha",
+              "glycolic"
+            ],
+            "dataQuality": "verified",
+            "cautionReasons": []
+          }
+        ],
+        "routineSteps": [],
+        "expectations": {
+          "forbidsStrongActives": true,
+          "forbiddenProductIds": [
+            "aha-1"
+          ],
+          "requiredProductIds": [
+            "moisturizer-1"
+          ],
+          "requiredSafetyKeywords": [
+            "dry"
+          ]
+        }
+      },
+      "sanitizedOutputSummary": {
+        "mode": "ai",
+        "hasReactionSignal": false,
+        "simplifiedForReaction": false,
+        "provider": "openai",
+        "fallbackReason": null,
+        "metadata": {
+          "model": "gpt-5.4-mini",
+          "promptVersion": "2026-06-21.v13",
+          "inputTokens": 7163,
+          "outputTokens": 5595,
+          "totalTokens": 12758,
+          "estimatedCostUsd": 0.004431,
+          "durationMs": 36186
+        },
+        "spfHandling": {
+          "required": false,
+          "ownedSunscreen": false,
+          "hasSunscreenStep": false,
+          "hasSunscreenGap": false
+        },
+        "explanation": {
+          "headline": "Gentle evening hydration",
+          "body": [
+            "This fits dry skin, flaking, and very dry air."
+          ],
+          "perStepReasons": [
+            {
+              "stepOrder": 0,
+              "reason": "Gentle cleanse for a dry evening start."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Adds humectants for winter dryness."
+            },
+            {
+              "stepOrder": 2,
+              "reason": "Seals in moisture and supports the barrier."
+            }
+          ],
+          "skipped": [
+            {
+              "name": "Ava Lab Glycolic Toner",
+              "reason": "Dry air can make strong actives feel harsher."
+            }
+          ],
+          "inputs": [
+            {
+              "label": "target timing",
+              "detail": "targetDate=2026-05-18, targetTime=19:30, daypart=evening"
+            },
+            {
+              "label": "skin profile",
+              "detail": "type=dry, primaryGoal=reduce winter dryness, currentConcerns=dryness; flaking"
+            },
+            {
+              "label": "environment signals",
+              "detail": "season=winter, humidity=18, humidityBand=verydry, temperatureBand=cold, uvIndex=4, uvRisk=moderate"
+            },
+            {
+              "label": "active shelf products",
+              "detail": "Ava Lab Soft Cream Cleanser (cleanser-1), Ava Lab Barrier Cream (moisturizer-1), Plain Lab Hydration Serum"
+            }
+          ]
+        },
+        "steps": [
+          {
+            "resolvedCategory": "cleanser",
+            "resolvedActiveTags": [
+              "cleanser",
+              "gentle"
+            ],
+            "stepOrder": 0,
+            "routineStepId": null,
+            "inventoryProductId": "cleanser-1",
+            "productBrand": "Ava Lab",
+            "productName": "Soft Cream Cleanser",
+            "stepLabel": "cleanser",
+            "provenance": "ai_added",
+            "explanation": "Gentle cleanse for a dry evening start.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "serum",
+            "resolvedActiveTags": [
+              "hydrating",
+              "hyaluronic-acid"
+            ],
+            "stepOrder": 1,
+            "routineStepId": null,
+            "inventoryProductId": "hydrating-serum-1",
+            "productBrand": "Plain Lab",
+            "productName": "Hydration Serum",
+            "stepLabel": "serum",
+            "provenance": "ai_added",
+            "explanation": "Adds humectants for winter dryness.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "moisturizer",
+            "resolvedActiveTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "stepOrder": 2,
+            "routineStepId": null,
+            "inventoryProductId": "moisturizer-1",
+            "productBrand": "Ava Lab",
+            "productName": "Barrier Cream",
+            "stepLabel": "moisturizer",
+            "provenance": "ai_added",
+            "explanation": "Seals in moisture and supports the barrier.",
+            "routineNote": null,
+            "safetyWarnings": []
+          }
+        ],
+        "gapRecommendations": [],
+        "safetyFlags": [
+          {
+            "severity": "info",
+            "message": "Dry air can make skin feel tighter.",
+            "ingredientSlugs": [],
+            "sourceIds": [
+              "open_meteo_weather",
+              "mayo_dry_skin_care"
+            ]
+          },
+          {
+            "severity": "warning",
+            "message": "Cold dry weather favors barrier support.",
+            "ingredientSlugs": [],
+            "sourceIds": [
+              "open_meteo_weather",
+              "mayo_dry_skin_care"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

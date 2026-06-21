@@ -80,10 +80,22 @@ describe('suggestion AI contract', () => {
       'any owned product category may be selected',
     );
     expect(SYSTEM_PROMPT).toContain(
-      'Do not use product category as a one-product limit',
+      'Do not use product category as a general one-product limit',
     );
     expect(SYSTEM_PROMPT).toContain(
-      'Two products in the same category may both be selected',
+      'Single-use routine categories are cleanser, sun-protection, mask, and exfoliant',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not extend this single-use rule to serum, treatment, moisturizer, toner, essence, eye care, lip care, or other',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'those products are alternatives for the same routine slot, not leave-on layers',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Two products in the same category may both be selected only when that category is layerable',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'For single-use categories (cleanser, sun-protection, mask, exfoliant), choose the one product in that category with the strongest current fit',
     );
     expect(SYSTEM_PROMPT).not.toContain(
       'Use at most one non-basic owned product step',
@@ -117,13 +129,19 @@ describe('suggestion AI contract', () => {
       'Current selection inputs are only these supplied values',
     );
     expect(SYSTEM_PROMPT).toContain(
-      'Two products in the same category may both be selected when each has a distinct current selection input',
+      'For single-use categories (cleanser, sun-protection, mask, exfoliant), choose the one product in that category with the strongest current fit',
     );
     expect(SYSTEM_PROMPT).toContain(
       'do not select both products in the same output unless a specialist-locked step requires both',
     );
     expect(SYSTEM_PROMPT).toContain(
       'Rank eligible products using suitabilityScore, preferredTime match, cautionReasons, evidenceSourceIds, current request, goal, journal/photo signals, and environment',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Dry/barrier current context means supplied dry or very_dry humidity, cold dry weather, environment_barrier_support',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'delay AI-added strong actives such as AHA, BHA, retinoids, or benzoyl peroxide unless specialist-locked',
     );
     expect(SYSTEM_PROMPT).toContain(
       'Do not repeat the same basic product set by default',

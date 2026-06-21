@@ -13,10 +13,16 @@ import {
   SuggestionRequestSource,
   SuggestionStepProvenance,
 } from '../suggestions/suggestions.constants';
-import { SuggestionAiGenerator } from '../suggestions/services/suggestion-ai-generator';
+import {
+  SuggestionAiGenerator,
+  type SuggestionGenerationStepOutput,
+} from '../suggestions/services/suggestion-ai-generator';
 import { SuggestionGenerationContextService } from '../suggestions/services/suggestion-generation-context.service';
 import { resolveSuggestionProductScores } from '../suggestions/services/suggestion-product-score-resolver';
-import { isPreferredTimeCompatibleWithDaypart } from '../suggestions/services/suggestion-product-intelligence';
+import {
+  isPreferredTimeCompatibleWithDaypart,
+  isSingleUseSuggestionCategory,
+} from '../suggestions/services/suggestion-product-intelligence';
 
 type AccountSelectionRow = {
   id: string;
@@ -259,6 +265,12 @@ async function evaluateSlot(input: {
       }
     }
   }
+  for (const failure of singleUseCategoryFailures(
+    output.steps,
+    productScores,
+  )) {
+    failures.push(failure);
+  }
 
   const stepProductHashes = output.steps
     .map((step) =>
@@ -293,6 +305,38 @@ async function evaluateSlot(input: {
     stepSignatureHash: hashId(stepProductHashes.join('|')),
     failures: Array.from(new Set(failures)),
   };
+}
+
+function singleUseCategoryFailures(
+  steps: readonly SuggestionGenerationStepOutput[],
+  productScores: ReadonlyMap<
+    string,
+    ReturnType<typeof resolveSuggestionProductScores>[number]
+  >,
+): string[] {
+  const selectedByCategory = new Map<string, string[]>();
+  for (const step of steps) {
+    if (step.provenance === SuggestionStepProvenance.SpecialistLocked) {
+      continue;
+    }
+    const category = step.inventoryProductId
+      ? (productScores.get(step.inventoryProductId)?.category ?? null)
+      : null;
+    if (!category || !isSingleUseSuggestionCategory(category)) continue;
+    selectedByCategory.set(category, [
+      ...(selectedByCategory.get(category) ?? []),
+      step.inventoryProductId ?? `step-${step.stepOrder}`,
+    ]);
+  }
+  return [...selectedByCategory.entries()].flatMap(([category, productIds]) =>
+    productIds.length > 1
+      ? [
+          `single-use category selected more than once: ${category} (${productIds.join(
+            ', ',
+          )})`,
+        ]
+      : [],
+  );
 }
 
 async function resolveEvaluationUser(
@@ -470,7 +514,11 @@ export function buildDiversitySummary(
     productUseCounts,
     daypartSummaries,
     slotPatternSummaries,
-    warnings: diversityWarnings(daypartSummaries, slotPatternSummaries),
+    warnings: diversityWarnings(
+      results,
+      daypartSummaries,
+      slotPatternSummaries,
+    ),
   };
 }
 
@@ -488,17 +536,32 @@ function repeatedSignatureSummaries(results: readonly SlotEvaluationResult[]) {
 }
 
 function diversityWarnings(
+  results: readonly SlotEvaluationResult[],
   daypartSummaries: DiversitySummary['daypartSummaries'],
   slotPatternSummaries: DiversitySummary['slotPatternSummaries'],
 ): string[] {
   const warnings: string[] = [];
+  const resultsByDaypart = groupBy(results, (result) => result.daypart);
+  const resultsBySlotPattern = groupBy(
+    results,
+    (result) => `${result.slotTime}:${result.daypart}`,
+  );
   for (const summary of daypartSummaries) {
-    if (summary.slotCount >= 3 && summary.distinctStepSignatureCount === 1) {
+    const daypartResults = resultsByDaypart.get(summary.daypart) ?? [];
+    if (
+      summary.slotCount >= 3 &&
+      summary.distinctStepSignatureCount === 1 &&
+      hasEligibleUnselectedDiversityAlternative(daypartResults, results)
+    ) {
       warnings.push(
         `${summary.daypart} repeated the same step signature across ${summary.slotCount} generated slots.`,
       );
     }
-    if (summary.slotCount >= 3 && summary.distinctSelectedProductCount <= 2) {
+    if (
+      summary.slotCount >= 3 &&
+      summary.distinctSelectedProductCount <= 2 &&
+      hasEligibleUnselectedDiversityAlternative(daypartResults, results)
+    ) {
       warnings.push(
         `${summary.daypart} used ${summary.distinctSelectedProductCount} distinct product(s) across ${summary.slotCount} generated slots.`,
       );
@@ -507,7 +570,11 @@ function diversityWarnings(
   for (const summary of slotPatternSummaries) {
     if (
       summary.daysEvaluated >= 3 &&
-      summary.distinctStepSignatureCount === 1
+      summary.distinctStepSignatureCount === 1 &&
+      hasEligibleUnselectedDiversityAlternative(
+        resultsBySlotPattern.get(summary.slotKey) ?? [],
+        results,
+      )
     ) {
       warnings.push(
         `${summary.daypart} slot ${summary.slotTime} repeated the same step signature across ${summary.daysEvaluated} evaluated day(s).`,
@@ -515,6 +582,40 @@ function diversityWarnings(
     }
   }
   return Array.from(new Set(warnings));
+}
+
+function hasEligibleUnselectedDiversityAlternative(
+  results: readonly SlotEvaluationResult[],
+  allResults: readonly SlotEvaluationResult[],
+): boolean {
+  const selected = new Set(
+    allResults.flatMap((result) => result.stepProductHashes),
+  );
+  for (const result of results) {
+    for (const diagnostic of result.scoreDiagnostics) {
+      if (!isEligibleDiversityCandidate(result, diagnostic)) continue;
+      if (!selected.has(diagnostic.productHash)) return true;
+    }
+  }
+  return false;
+}
+
+function isEligibleDiversityCandidate(
+  result: SlotEvaluationResult,
+  diagnostic: SlotEvaluationResult['scoreDiagnostics'][number],
+): boolean {
+  if (diagnostic.suitabilityScore < 60) return false;
+  if (
+    result.daypart === 'evening' &&
+    diagnostic.category === 'sun-protection'
+  ) {
+    return false;
+  }
+  return !diagnostic.cautionReasons.some((reason) =>
+    /preferred time of day does not match|recent same-daypart repeat|reaction|spacing|blocked|expired|paused|failed/i.test(
+      reason,
+    ),
+  );
 }
 
 function readDayCount(): number {
