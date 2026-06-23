@@ -65,10 +65,19 @@ describe('suggestion AI contract', () => {
     expect(SYSTEM_PROMPT).toContain('Step timing');
     expect(SYSTEM_PROMPT).toContain('Retinoid caution');
     expect(SYSTEM_PROMPT).toContain('Daytime SPF');
+    expect(SYSTEM_PROMPT).toContain(
+      'sunscreen gapRecommendation with ingredientOrCategory containing the word "sunscreen"',
+    );
     expect(SYSTEM_PROMPT).toContain('Evening sunscreen gaps');
     expect(SYSTEM_PROMPT).toContain('Concise routines');
     expect(SYSTEM_PROMPT).toContain(
-      'Concise means fewer total steps, not a category ban.',
+      'Concise means fewer total steps after ranking eligible products',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'it does not mean banning serums, treatments, toners, essences, masks, or other uploaded categories',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'When routinePreferences.pace=cautious and the matching am_minutes or pm_minutes value is 10 or less, use at most four application steps',
     );
     expect(SYSTEM_PROMPT).toContain(
       'Do not default to cleanser, moisturizer, and SPF',
@@ -92,10 +101,16 @@ describe('suggestion AI contract', () => {
       'those products are alternatives for the same routine slot, not leave-on layers',
     );
     expect(SYSTEM_PROMPT).toContain(
-      'Two products in the same category may both be selected only when that category is layerable',
+      'Two products in the same layerable category may both be selected only when productScores',
     );
     expect(SYSTEM_PROMPT).toContain(
-      'For single-use categories (cleanser, sun-protection, mask, exfoliant), choose the one product in that category with the strongest current fit',
+      'Higher suitabilityScore means stronger current fit only after hard blocks',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'A basic-only plan means zero application steps or only cleanser/moisturizer/sun-protection steps',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'For single-use categories (cleanser, sun-protection, mask, exfoliant), choose the one product in that category with the highest suitabilityScore after hard rules and supplied cautions',
     );
     expect(SYSTEM_PROMPT).not.toContain(
       'Use at most one non-basic owned product step',
@@ -119,17 +134,20 @@ describe('suggestion AI contract', () => {
       'Do not omit a product merely because it appeared in previous applications or suggestions for the same daypart.',
     );
     expect(SYSTEM_PROMPT).toContain(
+      'Absence of recent application logs is not a reason to suppress a tolerated product.',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not require previous application history before selecting introductionStatus=tolerated products.',
+    );
+    expect(SYSTEM_PROMPT).toContain(
       'Do not choose a product merely because it appeared in previous suggestions or routines.',
     );
     expect(SYSTEM_PROMPT).toContain(
       'Do not assume an uploaded product category is less relevant',
     );
-    expect(SYSTEM_PROMPT).toContain('do not return a basic-only plan');
+    expect(SYSTEM_PROMPT).toContain('Do not return a basic-only plan');
     expect(SYSTEM_PROMPT).toContain(
-      'Current selection inputs are only these supplied values',
-    );
-    expect(SYSTEM_PROMPT).toContain(
-      'For single-use categories (cleanser, sun-protection, mask, exfoliant), choose the one product in that category with the strongest current fit',
+      'A current selection input means one of these supplied values points to this exact product or product category',
     );
     expect(SYSTEM_PROMPT).toContain(
       'do not select both products in the same output unless a specialist-locked step requires both',
@@ -142,6 +160,15 @@ describe('suggestion AI contract', () => {
     );
     expect(SYSTEM_PROMPT).toContain(
       'delay AI-added strong actives such as AHA, BHA, retinoids, or benzoyl peroxide unless specialist-locked',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Strong-active spacing applies to leave-on strong-active products',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'A rinse-off cleanser does not count as recent leave-on strong-active exposure',
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      'Do not omit a tolerated eligible retinoid, treatment, serum, toner, essence, or moisturizer only because a cleanser has exfoliating activeTags',
     );
     expect(SYSTEM_PROMPT).toContain(
       'Do not repeat the same basic product set by default',
@@ -742,7 +769,7 @@ describe('suggestion AI contract', () => {
       'For intensity=minimal, use 0-2 application steps',
     );
     expect(prompt).toContain(
-      'Return zero application steps only when the prompt data explicitly shows no current product need',
+      'Return zero application steps only when the prompt data explicitly shows no current product need: no current selection input points to an eligible owned product',
     );
     expect(prompt).toContain('each step has its own current selection input');
     expect(prompt).toContain(

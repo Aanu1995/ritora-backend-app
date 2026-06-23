@@ -21,7 +21,11 @@ import {
   SuggestionRequestContextJson,
   SuggestionRequestSource,
 } from '../suggestions.constants';
-import { getSuggestionEvidenceSources } from '../services/suggestion-evidence-sources';
+import {
+  getSuggestionEvidenceSources,
+  mergeEvidenceSourceIds,
+  sourceIdsForActiveTags,
+} from '../services/suggestion-evidence-sources';
 import {
   TODAYS_SUGGESTION_GOLDEN_CASES,
   type TodaysSuggestionEvaluationCase,
@@ -32,6 +36,8 @@ export const QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID =
   'quick_plain_skip_does_not_suppress_spf';
 export const QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID =
   'quick_category_open_non_serum_evening';
+export const QUICK_SUGGESTION_TOLERATED_RETINOID_CASE_ID =
+  'quick_tolerated_retinoid_after_exfoliating_cleanser';
 
 const TARGET_DATE = '2026-05-29';
 
@@ -45,6 +51,7 @@ export const QUICK_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluationC
     buildPlainSkipDoesNotSuppressSpfCase(),
     buildCategoryOpenEveningCase(),
     buildQuickVitaminCNotCrowdedOutCase(),
+    buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(),
     buildNoExtraStepNeededCase(),
   ];
 
@@ -459,6 +466,168 @@ function buildQuickVitaminCNotCrowdedOutCase(): TodaysSuggestionEvaluationCase {
   };
 }
 
+function buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'quick_refresh',
+    intensity: 'standard',
+    note: 'I want a useful evening step for post-acne marks and rough texture before bed.',
+    activityAt: null,
+    requestedAt: '2026-05-29T21:10:00.000Z',
+  };
+  const products = [
+    productWithPreferredTime({
+      id: 'quick-sa-cleanser-1',
+      name: 'SA Smoothing Cleanser',
+      category: ProductCategory.Cleanser,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['cleanser', 'bha', 'salicylic'],
+      ingredients: ['water', 'glycerin', 'salicylic acid'],
+      description: 'Rinse-off salicylic acid cleanser for congestion.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-retinoid-1',
+      name: '1% Retinol Treatment',
+      category: ProductCategory.Treatment,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['retinoid', 'retinol', 'pigment-support'],
+      ingredients: ['retinol', 'tetrahexyldecyl ascorbate', 'ceramide ng'],
+      description:
+        'Retinol treatment for post-acne marks, texture, pores, and uneven tone.',
+    }),
+    productWithPreferredTime({
+      id: 'quick-moisturizer-1',
+      name: 'Barrier Cream',
+      category: ProductCategory.Moisturizer,
+      preferredTimeOfDay: PreferredTimeOfDay.Either,
+      tags: ['ceramide', 'barrier'],
+      ingredients: ['water', 'glycerin', 'ceramide np', 'panthenol'],
+      description: 'Barrier-support moisturizer.',
+    }),
+  ];
+  const profile = skinProfile();
+  profile.primary_goal = 'fade post-acne marks and improve texture';
+  profile.current_concerns = [
+    'hyperpigmentation',
+    'post-acne marks',
+    'texture',
+    'large pores',
+  ];
+  profile.active_tolerances = {
+    retinoid: { tolerance: 'good', last_used: null },
+  };
+  profile.routine_preferences = {
+    pace: 'steady',
+    am_minutes: 10,
+    pm_minutes: 10,
+  };
+  const recentApplications = [
+    applicationLog({
+      targetDate: '2026-05-28',
+      daypart: SuggestionDaypart.Evening,
+      items: [
+        applicationItem({
+          product: products[0],
+          status: ApplicationItemStatus.Applied,
+          notes: 'Used before shower, no reaction.',
+        }),
+      ],
+    }),
+  ];
+  const contextSummary = buildContextSummary({
+    cacheKey: QUICK_SUGGESTION_TOLERATED_RETINOID_CASE_ID,
+    requestContext,
+    profile,
+    products,
+    targetTime: '21:10',
+    daypart: SuggestionDaypart.Evening,
+    recentApplications,
+    safetyConstraints: ['space_strong_actives'],
+    appliedProductHistory: {
+      windowStartDate: '2026-05-28',
+      windowEndDate: TARGET_DATE,
+      recordsConsidered: 1,
+      products: [
+        {
+          productId: 'quick-sa-cleanser-1',
+          brand: 'Ava Lab',
+          name: 'SA Smoothing Cleanser',
+          category: ProductCategory.Cleanser,
+          stepLabel: ProductCategory.Cleanser,
+          sourceTypes: ['recommended'],
+          dayparts: [SuggestionDaypart.Evening],
+          statuses: [ApplicationItemStatus.Applied],
+          useCount: 1,
+          lastAppliedDate: '2026-05-28',
+          lastAppliedAt: '2026-05-28T20:40:00.000Z',
+          isOffShelf: false,
+          isSubstitution: false,
+        },
+      ],
+    },
+    productScoreOverrides: {
+      'quick-sa-cleanser-1': {
+        suitabilityScore: 74,
+        suitabilityReasons: [
+          'Owned rinse-off BHA cleanser was used yesterday and should not by itself block tolerated retinol.',
+        ],
+      },
+      'quick-retinoid-1': {
+        suitabilityScore: 97,
+        suitabilityReasons: [
+          'Owned tolerated retinol directly fits post-acne marks, texture, and pores for this evening quick request.',
+        ],
+      },
+      'quick-moisturizer-1': {
+        suitabilityScore: 88,
+        suitabilityReasons: [
+          'Owned barrier cream is compatible support after a retinoid step.',
+        ],
+      },
+    },
+  });
+
+  return {
+    id: QUICK_SUGGESTION_TOLERATED_RETINOID_CASE_ID,
+    title:
+      'Quick evening suggestion keeps tolerated retinoid after exfoliating cleanser history',
+    riskFocus: [
+      'on_demand',
+      'tolerated_active_eligibility',
+      'exfoliating_cleanser_history',
+    ],
+    manualReviewChecklist: [
+      'Does it select the owned tolerated retinol for the current evening mark and texture request?',
+      'Does it avoid treating a rinse-off BHA cleanser as a leave-on strong active that blocks retinol?',
+      'Does it avoid deterministic fallback while keeping the quick suggestion small?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      requiredProductIds: ['quick-retinoid-1'],
+      maxStepCount: 3,
+    },
+    inputs: {
+      language: 'en',
+      slotId: null,
+      requestSource: SuggestionRequestSource.OnDemand,
+      requestContext,
+      scheduledSlotContext: null,
+      targetDate: TARGET_DATE,
+      targetTime: '21:10',
+      daypart: SuggestionDaypart.Evening,
+      skinProfile: profile,
+      shelfActiveProducts: products,
+      shelfFinishedProductIds: [],
+      routineSteps: [],
+      recentJournalEntries: [],
+      recentApplications,
+      contextSummary,
+      environmentSnapshotId: null,
+      aiPersonalizationAllowed: true,
+      aiPersonalizationBlockedReason: null,
+    },
+  };
+}
+
 function productWithPreferredTime(input: {
   id: string;
   name: string;
@@ -579,6 +748,8 @@ function buildContextSummary(input: {
   daypart?: SuggestionDaypart;
   recentApplications?: ApplicationLog[];
   skippedByCategory?: Record<string, number>;
+  safetyConstraints?: string[];
+  appliedProductHistory?: SuggestionContextSummary['appliedProductHistory'];
   suitabilityReasons?: string[];
   productScoreOverrides?: Record<
     string,
@@ -707,7 +878,7 @@ function buildContextSummary(input: {
       editedLogCount: 0,
       adherenceByCategory: {},
     },
-    safetyConstraints: [],
+    safetyConstraints: input.safetyConstraints ?? [],
     governance: {
       safetyPolicyVersion: 'quick-evaluation-2026-05-29',
       safetyPolicyReviewedAt: '2026-05-29',
@@ -716,6 +887,7 @@ function buildContextSummary(input: {
     },
     evidenceSources: getSuggestionEvidenceSources(evidenceSourceIds),
     skippedCandidates: [],
+    appliedProductHistory: input.appliedProductHistory,
     routineMemory: {
       recordsConsidered: (input.recentApplications ?? []).length,
       previousSuggestionCount: 0,
@@ -739,22 +911,37 @@ function quickEvaluationEvidenceSourceIds(
   profile: SkinProfile,
   products: readonly InventoryProduct[],
 ): SuggestionEvidenceSourceId[] {
-  const sourceIds = new Set<SuggestionEvidenceSourceId>([
+  const activeTagSourceIds = products.flatMap((product) =>
+    sourceIdsForActiveTags(product.identity?.benefits ?? []),
+  );
+  const hasPhotosensitizingActive = products.some((product) =>
+    (product.identity?.benefits ?? []).some((tag) =>
+      ['retinoid', 'aha', 'bha'].includes(tag),
+    ),
+  );
+  const sourceIds: SuggestionEvidenceSourceId[] = [
     SuggestionEvidenceSourceId.MayoDrySkinCare,
-  ]);
+    ...activeTagSourceIds,
+  ];
   if (
     products.some(
       (product) => product.category === ProductCategory.SunProtection,
     )
   ) {
-    sourceIds.add(SuggestionEvidenceSourceId.AadSunscreenSelection);
+    sourceIds.push(SuggestionEvidenceSourceId.AadSunscreenSelection);
+  }
+  if (hasPhotosensitizingActive) {
+    sourceIds.push(
+      SuggestionEvidenceSourceId.AadSunscreenSelection,
+      SuggestionEvidenceSourceId.FdaAhaSunSensitivity,
+    );
   }
   if (profileOrProductsSupportPigment(profile, products)) {
-    sourceIds.add(
+    sourceIds.push(
       SuggestionEvidenceSourceId.DermNetPostInflammatoryHyperpigmentation,
     );
   }
-  return [...sourceIds];
+  return mergeEvidenceSourceIds(sourceIds);
 }
 
 function profileOrProductsSupportPigment(
