@@ -337,6 +337,16 @@ export function isStrongActiveTag(tag: string): boolean {
   return ['retinoid', 'aha', 'bha', 'benzoyl_peroxide'].includes(tag);
 }
 
+export function isLeaveOnStrongActiveScore(score: {
+  category: ProductCategory;
+  activeTags: readonly string[];
+}): boolean {
+  return (
+    score.category !== ProductCategory.Cleanser &&
+    score.activeTags.some(isStrongActiveTag)
+  );
+}
+
 function buildProductEvidenceSourceIds(
   category: ProductCategory,
   activeTags: string[],

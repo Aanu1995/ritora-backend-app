@@ -1189,6 +1189,100 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('keeps tolerated retinol when the only recent strong-active exposure was an exfoliating cleanser', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening mark support',
+                    body: ['Use the tolerated retinol tonight.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'sa-cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'retinoid-1', ProductCategory.Treatment),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.targetDate = '2026-05-18';
+    inputs.contextSummary.targetDate = '2026-05-18';
+    inputs.shelfActiveProducts.push(
+      product(
+        'sa-cleanser-1',
+        'SA Smoothing Cleanser',
+        ProductCategory.Cleanser,
+      ),
+      product('retinoid-1', 'Retinol Night Serum', ProductCategory.Treatment),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('sa-cleanser-1', ProductCategory.Cleanser, 86, ['bha']),
+      productScore('retinoid-1', ProductCategory.Treatment, 90, ['retinoid']),
+    );
+    inputs.contextSummary.safetyConstraints.push('space_strong_actives');
+    inputs.contextSummary.appliedProductHistory = {
+      windowStartDate: '2026-04-19',
+      windowEndDate: '2026-05-18',
+      recordsConsidered: 30,
+      products: [
+        {
+          productId: 'sa-cleanser-1',
+          brand: 'CeraVe',
+          name: 'SA Smoothing Cleanser',
+          category: ProductCategory.Cleanser,
+          stepLabel: ProductCategory.Cleanser,
+          sourceTypes: ['recommended'],
+          dayparts: ['evening'],
+          statuses: ['applied'],
+          useCount: 1,
+          lastAppliedDate: '2026-05-17',
+          lastAppliedAt: '2026-05-17T20:00:00.000Z',
+          isOffShelf: false,
+          isSubstitution: false,
+        },
+      ],
+    };
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'retinoid-1' }),
+      ]),
+    );
+  });
+
   it('does not reject retinol from the AI path solely because the slot is daytime', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -4252,6 +4346,198 @@ describe('SuggestionAiGenerator', () => {
           ]),
         }),
       ]),
+    );
+  });
+
+  it('normalizes equivalent AI sunscreen gap wording when no SPF is owned', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Morning barrier care',
+                    body: [
+                      'Barrier cream fits the dry-skin note and morning slot.',
+                      'SPF is missing, so I flagged a gap for mark care.',
+                    ],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(
+                      0,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [
+                    {
+                      ingredientOrCategory: 'sun-protection',
+                      reason: 'Missing morning SPF for dark marks.',
+                      budgetTier: null,
+                      goalAlignment:
+                        'Supports post-breakout marks and daily UV protection.',
+                      sourceIds: [
+                        SuggestionEvidenceSourceId.AadSunscreenSelection,
+                        SuggestionEvidenceSourceId.MayoDrySkinCare,
+                      ],
+                    },
+                  ],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Morning);
+    inputs.shelfActiveProducts = inputs.shelfActiveProducts.filter(
+      (productValue) => productValue.id !== 'spf-1',
+    );
+    inputs.contextSummary.productScores =
+      inputs.contextSummary.productScores.filter(
+        (score) => score.productId !== 'spf-1',
+      );
+    inputs.skinProfile = {
+      primary_goal: 'reduce post-breakout marks',
+      current_concerns: ['dark marks', 'dryness'],
+    } as unknown as SkinProfile;
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.gapRecommendations).toHaveLength(1);
+    expect(result.gapRecommendations[0]).toEqual(
+      expect.objectContaining({
+        ingredientOrCategory: expect.stringMatching(/sunscreen/i),
+        sourceIds: expect.arrayContaining([
+          SuggestionEvidenceSourceId.AadSunscreenSelection,
+        ]),
+      }),
+    );
+  });
+
+  it('trims overlong cautious AI routines without falling back', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Gentle texture evening',
+                    body: [
+                      'Kept tonight gentle and barrier-focused.',
+                      'The routine supports dryness, pores, and texture.',
+                    ],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'toner-1', ProductCategory.Toner),
+                    aiProductStep(1, 'essence-1', ProductCategory.Essence),
+                    aiProductStep(
+                      2,
+                      'hydrating-serum-1',
+                      ProductCategory.Serum,
+                    ),
+                    aiProductStep(3, 'niacinamide-1', ProductCategory.Serum),
+                    aiProductStep(4, 'azelaic-1', ProductCategory.Serum),
+                    aiProductStep(
+                      5,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.skinProfile = {
+      primary_goal: 'smooth rough texture gradually',
+      current_concerns: ['texture', 'large pores', 'dryness'],
+      routine_preferences: {
+        pace: 'cautious',
+        pm_minutes: 10,
+      },
+    } as unknown as SkinProfile;
+    inputs.contextSummary.skinProfile.primaryGoal =
+      'smooth rough texture gradually';
+    inputs.contextSummary.skinProfile.activeConcerns = [
+      'texture',
+      'large pores',
+      'dryness',
+    ];
+    inputs.contextSummary.safetyConstraints = ['space_strong_actives'];
+    inputs.shelfActiveProducts.push(
+      product('toner-1', 'Soothing Toner', ProductCategory.Toner),
+      product('essence-1', 'Barrier Essence', ProductCategory.Essence),
+      product('hydrating-serum-1', 'Hydration Serum', ProductCategory.Serum),
+      product('niacinamide-1', 'Niacinamide Serum', ProductCategory.Serum),
+      product('azelaic-1', 'Azelaic Support Serum', ProductCategory.Serum),
+    );
+    inputs.contextSummary.productScores.push(
+      productScore('toner-1', ProductCategory.Toner, 82, ['soothing']),
+      productScore('essence-1', ProductCategory.Essence, 91, [
+        'barrier',
+        'hydrating',
+      ]),
+      productScore('hydrating-serum-1', ProductCategory.Serum, 86, [
+        'hydrating',
+      ]),
+      productScore('niacinamide-1', ProductCategory.Serum, 90, ['niacinamide']),
+      productScore('azelaic-1', ProductCategory.Serum, 87, [
+        'azelaic',
+        'pigment-support',
+      ]),
+    );
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).toHaveLength(4);
+    expect(result.steps.map((step) => step.inventoryProductId)).toContain(
+      'moisturizer-1',
+    );
+    expect(result.steps.map((step) => step.inventoryProductId)).toEqual(
+      expect.arrayContaining(['essence-1', 'niacinamide-1']),
     );
   });
 

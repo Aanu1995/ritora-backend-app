@@ -76,6 +76,7 @@ import {
 } from './suggestion-routine-repeat-policy';
 import { resolveSuggestionProductScores } from './suggestion-product-score-resolver';
 import {
+  isLeaveOnStrongActiveScore,
   isPreferredTimeCompatibleWithDaypart,
   isSingleUseSuggestionCategory,
   isStrongActiveTag,
@@ -269,6 +270,11 @@ export class SuggestionAiGenerator {
       inputs,
       repairRecoverableMissingSteps(inputs, steps),
     );
+    repairedSteps = trimOverlongAiRoutineSteps(
+      inputs,
+      repairedSteps,
+      context.lockedSteps.length > 0,
+    );
     let hardSafetyFallbackReason = resolveHardSafetyFallbackReason(
       inputs,
       repairedSteps,
@@ -280,9 +286,10 @@ export class SuggestionAiGenerator {
         hardSafetyFallbackReason,
       );
       if (recoveredSteps) {
-        repairedSteps = repairSingleUseCategoryDuplicates(
+        repairedSteps = trimOverlongAiRoutineSteps(
           inputs,
-          recoveredSteps,
+          repairSingleUseCategoryDuplicates(inputs, recoveredSteps),
+          context.lockedSteps.length > 0,
         );
         hardSafetyFallbackReason = null;
       }
@@ -868,15 +875,7 @@ function repairMissingOnDemandMoisturizer(
   inputs: SuggestionGenerationInputs,
   steps: SuggestionGenerationStepOutput[],
 ): SuggestionGenerationStepOutput[] {
-  if (
-    inputs.requestSource !== SuggestionRequestSource.OnDemand ||
-    ![
-      'post_workout',
-      'post_sun',
-      'post_swim',
-      'post_makeup_or_shower',
-    ].includes(inputs.requestContext?.intent ?? '')
-  ) {
+  if (!requiresOnDemandMoisturizerSupport(inputs)) {
     return steps;
   }
   const selectedScores = selectedProductScores(inputs, steps);
@@ -900,6 +899,17 @@ function repairMissingOnDemandMoisturizer(
   return moisturizerStep
     ? orderBaselineSteps([...steps, moisturizerStep])
     : steps;
+}
+
+function requiresOnDemandMoisturizerSupport(
+  inputs: SuggestionGenerationInputs,
+): boolean {
+  return (
+    inputs.requestSource === SuggestionRequestSource.OnDemand &&
+    ['post_workout', 'post_sun', 'post_swim', 'post_makeup_or_shower'].includes(
+      inputs.requestContext?.intent ?? '',
+    )
+  );
 }
 
 function repairMissingBarrierMoisturizer(
@@ -1184,10 +1194,7 @@ function hasStrongActiveAiLayeringConflict(
   left: SuggestionContextSummary['productScores'][number],
   right: SuggestionContextSummary['productScores'][number],
 ): boolean {
-  return (
-    left.activeTags.some(isStrongActiveTag) &&
-    right.activeTags.some(isStrongActiveTag)
-  );
+  return isLeaveOnStrongActiveScore(left) && isLeaveOnStrongActiveScore(right);
 }
 
 function hasVitaminCNiacinamideAiConflict(
@@ -1448,6 +1455,159 @@ function orderGeneratedSteps(
     );
   }
   return orderBaselineSteps(steps);
+}
+
+function trimOverlongAiRoutineSteps(
+  inputs: SuggestionGenerationInputs,
+  steps: SuggestionGenerationStepOutput[],
+  hasLockedInput: boolean,
+): SuggestionGenerationStepOutput[] {
+  const maxSteps = maxAiRoutineStepCount(inputs);
+  if (!maxSteps || steps.length <= maxSteps) return steps;
+  if (hasLockedInput || inputs.routineSteps.length > 0) return steps;
+  if (
+    steps.some((step) => step.provenance !== SuggestionStepProvenance.AiAdded)
+  ) {
+    return steps;
+  }
+
+  const scoreByProductId = new Map(
+    resolveSuggestionProductScores(inputs).map((score) => [
+      score.productId,
+      score,
+    ]),
+  );
+  const selectedSteps = steps.map((step) => ({
+    step,
+    score: step.inventoryProductId
+      ? (scoreByProductId.get(step.inventoryProductId) ?? null)
+      : null,
+  }));
+  const requiredProductIds = new Set<string>();
+  addHighestScoredSelectedCategory(
+    selectedSteps,
+    ProductCategory.SunProtection,
+    requiresOwnedDaytimeSpf(inputs),
+    requiredProductIds,
+  );
+  addHighestScoredSelectedCategory(
+    selectedSteps,
+    ProductCategory.Moisturizer,
+    requiresBarrierMoisturizer(inputs),
+    requiredProductIds,
+  );
+
+  const ranked = [...selectedSteps].sort(
+    (left, right) =>
+      selectedStepTrimPriority(inputs, right.step, right.score) -
+        selectedStepTrimPriority(inputs, left.step, left.score) ||
+      left.step.stepOrder - right.step.stepOrder,
+  );
+  const keptProductIds = new Set(requiredProductIds);
+  for (const candidate of ranked) {
+    if (keptProductIds.size >= maxSteps) break;
+    if (!candidate.step.inventoryProductId) continue;
+    keptProductIds.add(candidate.step.inventoryProductId);
+  }
+
+  const trimmed = steps.filter(
+    (step) =>
+      step.inventoryProductId && keptProductIds.has(step.inventoryProductId),
+  );
+  return trimmed.length === steps.length ? steps : trimmed;
+}
+
+function maxAiRoutineStepCount(
+  inputs: SuggestionGenerationInputs,
+): number | null {
+  if (inputs.requestSource === SuggestionRequestSource.OnDemand) {
+    switch (inputs.requestContext?.intensity) {
+      case 'minimal':
+        return requiresOwnedDaytimeSpf(inputs) ||
+          requiresOnDemandMoisturizerSupport(inputs)
+          ? 3
+          : 2;
+      case 'standard':
+      case undefined:
+      case null:
+        return 3;
+      default:
+        return null;
+    }
+  }
+
+  const preferences = inputs.skinProfile?.routine_preferences;
+  const availableMinutes =
+    inputs.daypart === SuggestionDaypart.Morning
+      ? preferences?.am_minutes
+      : inputs.daypart === SuggestionDaypart.Evening
+        ? preferences?.pm_minutes
+        : null;
+  if (
+    preferences?.pace === 'cautious' &&
+    typeof availableMinutes === 'number' &&
+    availableMinutes <= 10
+  ) {
+    return 4;
+  }
+  return null;
+}
+
+function addHighestScoredSelectedCategory(
+  selectedSteps: {
+    step: SuggestionGenerationStepOutput;
+    score: SuggestionContextSummary['productScores'][number] | null;
+  }[],
+  category: ProductCategory,
+  required: boolean,
+  requiredProductIds: Set<string>,
+): void {
+  if (!required) return;
+  const candidate = selectedSteps
+    .filter(
+      (item) =>
+        item.step.inventoryProductId && item.score?.category === category,
+    )
+    .sort(
+      (left, right) =>
+        (right.score?.suitabilityScore ?? 0) -
+          (left.score?.suitabilityScore ?? 0) ||
+        left.step.stepOrder - right.step.stepOrder,
+    )[0];
+  if (candidate?.step.inventoryProductId) {
+    requiredProductIds.add(candidate.step.inventoryProductId);
+  }
+}
+
+function selectedStepTrimPriority(
+  inputs: SuggestionGenerationInputs,
+  step: SuggestionGenerationStepOutput,
+  score: SuggestionContextSummary['productScores'][number] | null,
+): number {
+  let priority = score?.suitabilityScore ?? 0;
+  if (score?.category === ProductCategory.SunProtection) {
+    priority += requiresOwnedDaytimeSpf(inputs) ? 1000 : -100;
+  }
+  if (
+    score?.category === ProductCategory.Moisturizer &&
+    requiresBarrierMoisturizer(inputs)
+  ) {
+    priority += 400;
+  }
+  if (
+    score?.category &&
+    ![
+      ProductCategory.Cleanser,
+      ProductCategory.Moisturizer,
+      ProductCategory.SunProtection,
+    ].includes(score.category)
+  ) {
+    priority += 20;
+  }
+  if (step.provenance === SuggestionStepProvenance.SpecialistLocked) {
+    priority += 10_000;
+  }
+  return priority;
 }
 
 function normalizeExplanationForSelectedSteps(
@@ -1820,14 +1980,11 @@ function latestStrongActiveApplication(inputs: SuggestionGenerationInputs): {
   );
   const strongApplications =
     inputs.contextSummary.appliedProductHistory?.products
-      .filter(
-        (product) =>
-          product.productId &&
-          product.lastAppliedDate &&
-          scoreByProductId
-            .get(product.productId)
-            ?.activeTags.some(isStrongActiveTag),
-      )
+      .filter((product) => {
+        if (!product.productId || !product.lastAppliedDate) return false;
+        const score = scoreByProductId.get(product.productId);
+        return score ? isLeaveOnStrongActiveScore(score) : false;
+      })
       .sort((left, right) =>
         (right.lastAppliedDate ?? '').localeCompare(left.lastAppliedDate ?? ''),
       ) ?? [];
@@ -2452,7 +2609,28 @@ function mergeRequiredDeterministicGapRecommendations(
     if (merged.some((gap) => equivalentGap(gap, deterministicGap))) continue;
     merged.push(deterministicGap);
   }
-  return merged;
+  return normalizeGapRecommendationCopy(inputs, merged);
+}
+
+const SUNSCREEN_GAP_CATEGORY: Record<AppLanguage, string> = {
+  en: 'Broad-spectrum sunscreen SPF 30+',
+  sv: 'Brett spektrum solskydd SPF 30+',
+  es: 'Protector solar de amplio espectro SPF 30+',
+};
+
+function normalizeGapRecommendationCopy(
+  inputs: SuggestionGenerationInputs,
+  gaps: SuggestionGapRecommendationJson[],
+): SuggestionGapRecommendationJson[] {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
+  return gaps.map((gap) =>
+    isSunscreenGap(gap)
+      ? {
+          ...gap,
+          ingredientOrCategory: SUNSCREEN_GAP_CATEGORY[language],
+        }
+      : gap,
+  );
 }
 
 function equivalentGap(

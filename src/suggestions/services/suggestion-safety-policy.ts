@@ -20,7 +20,7 @@ import {
 import { EnvironmentSignalKind } from '../../environment-intelligence/environment-intelligence.constants';
 import type { SuggestionGenerationStepOutput } from './suggestion-ai-generator';
 import { mergeEvidenceSourceIds } from './suggestion-evidence-sources';
-import { isStrongActiveTag } from './suggestion-product-intelligence';
+import { isLeaveOnStrongActiveScore } from './suggestion-product-intelligence';
 
 export function buildSafetyConstraints(
   context: Pick<SuggestionContextSummary, 'reaction' | 'productScores'> &
@@ -339,9 +339,8 @@ function hasRecentStrongActiveApplication(
     context.appliedProductHistory.products
       .filter((product) => {
         if (!product.productId || !product.lastAppliedDate) return false;
-        return scoreByProductId
-          .get(product.productId)
-          ?.activeTags.some(isStrongActiveTag);
+        const score = scoreByProductId.get(product.productId);
+        return score ? isLeaveOnStrongActiveScore(score) : false;
       })
       .map((product) => product.lastAppliedDate as string)
       .sort((left, right) => right.localeCompare(left))[0] ?? null;
