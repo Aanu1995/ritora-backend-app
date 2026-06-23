@@ -39,6 +39,10 @@ import {
   isSingleUseSuggestionCategory,
   isStrongActiveTag,
 } from './suggestion-product-intelligence';
+import {
+  buildCategoryStepExplanation,
+  buildProductScoreStepExplanation,
+} from './suggestion-step-explanations';
 
 const baselineCopy = {
   noStepsHeadline: {
@@ -100,11 +104,6 @@ const baselineCopy = {
     en: 'Restarting gently after your break.',
     sv: 'Startar forsiktigt igen efter din paus.',
     es: 'Retomando suavemente despues de tu pausa.',
-  },
-  goodFit: {
-    en: 'Good fit for this slot.',
-    sv: 'Passar bra for denna tid.',
-    es: 'Encaja bien para este horario.',
   },
   evidenceLabel: { en: 'Evidence', sv: 'Underlag', es: 'Evidencia' },
   environmentLabel: { en: 'Environment', sv: 'Miljo', es: 'Entorno' },
@@ -252,7 +251,9 @@ export function deterministicExplanation(
     ],
     perStepReasons: steps.map((step) => ({
       stepOrder: step.stepOrder,
-      reason: step.explanation ?? baselineCopy.goodFit[language],
+      reason:
+        step.explanation ??
+        buildCategoryStepExplanation(step.stepLabel, language),
     })),
     skipped: inputs.contextSummary.skippedCandidates.map((candidate) => {
       const product = resolveSuggestionProductScores(inputs).find(
@@ -360,34 +361,6 @@ function deterministicSkippedReason(
     sv: 'Hoppas over eftersom dagen behover en enklare rutin.',
     es: 'Se omite porque hoy conviene una rutina mas simple.',
   }[language];
-}
-
-function deterministicStepReason(
-  category: ProductCategory,
-  language: AppLanguage,
-): string {
-  const categoryReasons: Partial<
-    Record<ProductCategory, Record<AppLanguage, string>>
-  > = {
-    [ProductCategory.Cleanser]: {
-      en: 'Gentle cleanse fits this slot.',
-      sv: 'Mild rengoring passar denna tid.',
-      es: 'Una limpieza suave encaja en este horario.',
-    },
-    [ProductCategory.Moisturizer]: {
-      en: 'Barrier support fits this slot.',
-      sv: 'Barriarstod passar denna tid.',
-      es: 'El apoyo de barrera encaja en este horario.',
-    },
-    [ProductCategory.SunProtection]: {
-      en: 'Daytime sun protection fits this slot.',
-      sv: 'Solskydd dagtid passar denna tid.',
-      es: 'La proteccion solar diurna encaja en este horario.',
-    },
-  };
-  return (
-    categoryReasons[category]?.[language] ?? baselineCopy.goodFit[language]
-  );
 }
 
 function deterministicCautionReason(language: AppLanguage): string {
@@ -949,7 +922,10 @@ function productScoreToStep(
     ),
     quantity: toHumanQuantity(product.guidance?.quantity ?? null, language),
     waitAfterMinutes: score.waitMinutes,
-    explanation: deterministicStepReason(score.category, language),
+    explanation: buildProductScoreStepExplanation(score, {
+      language,
+      goalText: primaryGoalTextForExplanation(product, score),
+    }),
     routineNote: null,
     provenance: SuggestionStepProvenance.AiAdded,
     chips: [
@@ -969,4 +945,22 @@ function productScoreToStep(
         ]
       : [],
   };
+}
+
+function primaryGoalTextForExplanation(
+  product: InventoryProduct,
+  score: SuggestionProductScore,
+): string | null {
+  if (
+    score.suitabilityReasons.some((reason) =>
+      /supports (?:main|selected) skin profile goal/i.test(reason),
+    )
+  ) {
+    return (
+      product.identity?.benefits?.find((benefit) => benefit.trim()) ??
+      product.identity?.suitedFor?.find((suitedFor) => suitedFor.trim()) ??
+      null
+    );
+  }
+  return null;
 }

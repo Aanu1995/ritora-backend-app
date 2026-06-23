@@ -82,6 +82,10 @@ import {
   isStrongActiveTag,
 } from './suggestion-product-intelligence';
 import { isBlockingSkippedCandidateReason } from './suggestion-safety-policy';
+import {
+  buildCategoryStepExplanation,
+  buildProductScoreStepExplanation,
+} from './suggestion-step-explanations';
 
 export const SUGGESTION_AI_MODEL_ENV_KEY = 'SUGGESTION_AI_MODEL';
 export const SUGGESTION_AI_TODAYS_TIMEOUT_MS = 480_000;
@@ -1137,8 +1141,10 @@ function buildAiStepForProductScore(
       routineStepId: null,
       inventoryProductId: score.productId,
       stepLabel: score.category,
-      explanation:
-        'Selected because the current scoring better supports this slot and conflicting products should not be layered together.',
+      explanation: buildProductScoreStepExplanation(score, {
+        language: normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE),
+        goalText: goalTextForStepExplanation(inputs),
+      }),
       provenance: SuggestionStepProvenance.AiAdded,
     },
     stepOrder,
@@ -1618,7 +1624,7 @@ function normalizeExplanationForSelectedSteps(
   const selectedProductLabels = selectedProductLabelsForSteps(steps);
   const perStepReasons = steps.map((step) => ({
     stepOrder: step.stepOrder,
-    reason: step.explanation ?? 'Good fit for this slot.',
+    reason: step.explanation ?? fallbackStepExplanation(inputs, step),
   }));
   const body = [
     ...explanation.body.filter(
@@ -1721,22 +1727,39 @@ function sanitizeStepExplanationsForSelectedSteps(
     }
     return {
       ...step,
-      explanation: safeStepExplanation(step.stepLabel),
+      explanation: fallbackStepExplanation(inputs, step),
     };
   });
 }
 
-function safeStepExplanation(stepLabel: StepLabel): string {
-  switch (stepLabel) {
-    case ProductCategory.Cleanser:
-      return 'Gentle cleanse fits this slot.';
-    case ProductCategory.Moisturizer:
-      return 'Barrier support fits this slot.';
-    case ProductCategory.SunProtection:
-      return 'Daytime protection fits this slot.';
-    default:
-      return 'This selected shelf product fits the current context.';
-  }
+function fallbackStepExplanation(
+  inputs: SuggestionGenerationInputs,
+  step: SuggestionGenerationStepOutput,
+): string {
+  const language = normalizeLanguage(inputs.language ?? DEFAULT_LANGUAGE);
+  const score = step.inventoryProductId
+    ? resolveSuggestionProductScores(inputs).find(
+        (productScore) => productScore.productId === step.inventoryProductId,
+      )
+    : null;
+  return score
+    ? buildProductScoreStepExplanation(score, {
+        language,
+        goalText: goalTextForStepExplanation(inputs),
+      })
+    : buildCategoryStepExplanation(step.stepLabel, language);
+}
+
+function goalTextForStepExplanation(
+  inputs: SuggestionGenerationInputs,
+): string | null {
+  return (
+    inputs.contextSummary.goalSignals?.mainGoal ??
+    inputs.contextSummary.goalSignals?.primaryGoal ??
+    inputs.skinProfile?.primary_goal ??
+    inputs.contextSummary.skinProfile.primaryGoal ??
+    null
+  );
 }
 
 function safeHeadline(inputs: SuggestionGenerationInputs): string {

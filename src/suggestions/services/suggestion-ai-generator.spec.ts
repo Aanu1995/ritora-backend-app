@@ -3934,7 +3934,7 @@ describe('SuggestionAiGenerator', () => {
       expect.arrayContaining([
         expect.objectContaining({
           stepOrder: 2,
-          reason: 'Daytime sun protection fits this slot.',
+          reason: 'Protects against UV, which can deepen dark marks.',
         }),
       ]),
     );
@@ -5027,6 +5027,106 @@ describe('SuggestionAiGenerator', () => {
       );
     },
   );
+
+  it('uses product-specific copy when repairing a conflicting AI product selection', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Evening tone support',
+                    body: ['Use a focused evening routine for marks.'],
+                    perStepReasons: [],
+                    skipped: [],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+                    aiProductStep(1, 'vitamin-c-1', ProductCategory.Serum),
+                    aiProductStep(
+                      2,
+                      'moisturizer-1',
+                      ProductCategory.Moisturizer,
+                    ),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.skinProfile = {
+      primary_goal: 'fade post-acne dark marks',
+      current_concerns: ['dark marks', 'uneven tone'],
+    } as SkinProfile;
+    inputs.contextSummary.skinProfile.primaryGoal = 'fade post-acne dark marks';
+    inputs.contextSummary.skinProfile.activeConcerns = [
+      'dark marks',
+      'uneven tone',
+    ];
+    inputs.shelfActiveProducts.push(
+      product('vitamin-c-1', 'Vitamin C Serum', ProductCategory.Serum),
+      product('niacinamide-1', 'Niacinamide Serum', ProductCategory.Serum),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('cleanser-1', ProductCategory.Cleanser, 88, []),
+      productScore('vitamin-c-1', ProductCategory.Serum, 84, ['vitamin_c']),
+      {
+        ...productScore('niacinamide-1', ProductCategory.Serum, 96, [
+          'niacinamide',
+        ]),
+        benefits: ['dark marks', 'uneven tone'],
+      },
+      productScore('moisturizer-1', ProductCategory.Moisturizer, 82, [
+        'ceramide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+    const repairedStep = result.steps.find(
+      (step) => step.inventoryProductId === 'niacinamide-1',
+    );
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.map((step) => step.inventoryProductId)).toContain(
+      'niacinamide-1',
+    );
+    expect(result.steps.map((step) => step.inventoryProductId)).not.toContain(
+      'vitamin-c-1',
+    );
+    expect(repairedStep?.explanation).toBe(
+      'Supports dark marks and uneven tone today.',
+    );
+    expect(repairedStep?.explanation).not.toMatch(
+      /current scoring|conflicting products|layered together|current context/i,
+    );
+    expect(result.explanation.perStepReasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: 'Supports dark marks and uneven tone today.',
+        }),
+      ]),
+    );
+  });
 
   it('does not stack two cleansers in deterministic fallback', async () => {
     const generator = new SuggestionAiGenerator({
