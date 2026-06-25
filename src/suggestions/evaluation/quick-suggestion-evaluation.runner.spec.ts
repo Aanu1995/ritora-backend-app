@@ -178,6 +178,35 @@ describe('Quick Suggestion evaluation runner', () => {
     ).toEqual(expect.objectContaining({ passed: true }));
   });
 
+  it('inherits the selected-step skipped-copy hard check', () => {
+    const evaluationCase = categoryOpenCase();
+
+    const checks = runQuickSuggestionHardChecks(
+      evaluationCase,
+      quickOutput({
+        explanation: {
+          headline: 'Quick gym reset',
+          body: ['Skipped moisturizer to keep this quick.'],
+          perStepReasons: [],
+          skipped: [],
+          inputs: [],
+        },
+        steps: [
+          quickStep(0, 'quick-moisturizer-1', ProductCategory.Moisturizer),
+        ],
+      }),
+    );
+
+    expect(checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'selected_step_skip_copy',
+          passed: false,
+        }),
+      ]),
+    );
+  });
+
   it('passes a zero-step quick suggestion that clearly says nothing is needed now', async () => {
     const evaluationCase = QUICK_SUGGESTION_GOLDEN_CASES.find(
       (candidate) => candidate.id === QUICK_SUGGESTION_NO_STEP_CASE_ID,

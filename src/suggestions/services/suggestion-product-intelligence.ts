@@ -5,7 +5,10 @@ import {
   ShelfStatus,
 } from '../../shelf/shelf.types';
 import { getProductIntroductionSuggestionGuidance } from '../../shelf/product-introduction.policy';
-import { SuggestionProductScore } from '../suggestion-context.types';
+import type {
+  SuggestionIngredientConflictSummary,
+  SuggestionProductScore,
+} from '../suggestion-context.types';
 import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
 import {
   buildEnvironmentAdaptationPolicy,
@@ -28,7 +31,7 @@ import {
 export { SuggestionProductGoalFitReason } from './suggestion-goal-intelligence';
 
 export const SUGGESTION_PRODUCT_SCORING_VERSION =
-  'selection-evidence-introduction-pace-2026-06-14';
+  'selection-evidence-ingredient-conflicts-2026-06-24';
 
 const SINGLE_USE_SUGGESTION_CATEGORIES = new Set<ProductCategory>([
   ProductCategory.Cleanser,
@@ -54,6 +57,7 @@ export enum SuggestionProductDataWarning {
 export type ProductIngredientIntelligence = {
   matchedIngredientCount: number;
   totalIngredientCount: number;
+  conflicts?: SuggestionIngredientConflictSummary[];
 };
 
 const ACTIVE_TAG_PATTERNS: Array<{ tag: string; pattern: RegExp }> = [
@@ -112,6 +116,7 @@ export function scoreProductForSuggestion(
     activeTags,
     options.ingredientIntelligence,
   );
+  const ingredientConflicts = options.ingredientIntelligence?.conflicts ?? [];
   const evidenceSourceIds = mergeEvidenceSourceIds(
     buildProductEvidenceSourceIds(product.category, activeTags),
     options.environment?.sourceIds ?? [],
@@ -248,6 +253,7 @@ export function scoreProductForSuggestion(
       : 'missing',
     dataQuality: productDataQuality.quality,
     dataQualityWarnings: productDataQuality.warnings,
+    ingredientConflicts,
     evidenceSourceIds,
   };
 }

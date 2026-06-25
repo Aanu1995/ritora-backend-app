@@ -218,11 +218,28 @@ function mergeProductScores(
       ...contextScore.dataQualityWarnings,
       ...refreshedScore.dataQualityWarnings,
     ]),
+    ingredientConflicts: mergeIngredientConflicts(
+      contextScore.ingredientConflicts,
+      refreshedScore.ingredientConflicts,
+    ),
     evidenceSourceIds: mergeEvidenceSourceIds(
       contextScore.evidenceSourceIds,
       refreshedScore.evidenceSourceIds,
     ),
   };
+}
+
+function mergeIngredientConflicts(
+  left: SuggestionProductScore['ingredientConflicts'],
+  right: SuggestionProductScore['ingredientConflicts'],
+): SuggestionProductScore['ingredientConflicts'] {
+  const conflictsById = new Map(
+    [...(left ?? []), ...(right ?? [])].map((conflict) => [
+      conflict.id,
+      conflict,
+    ]),
+  );
+  return [...conflictsById.values()];
 }
 
 function shouldRefreshContextScore(score: SuggestionProductScore): boolean {

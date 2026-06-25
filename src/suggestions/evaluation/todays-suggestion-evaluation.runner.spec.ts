@@ -139,6 +139,46 @@ describe("Today's Suggestion evaluation hard checks", () => {
     );
   });
 
+  it('fails explanation copy that says a selected step was skipped', () => {
+    const evaluationCase = goldenCase('post_workout_on_demand');
+    const output = baseOutput({
+      explanation: {
+        headline: 'Quick gym reset',
+        body: [
+          'Cleanse off sweat, then protect with SPF 50.',
+          'Skipped moisturizer to keep this quick.',
+        ],
+        perStepReasons: [],
+        skipped: [],
+        inputs: [],
+      },
+      steps: [
+        step({
+          order: 0,
+          productId: 'cleanser-1',
+          productName: 'Soft Cream Cleanser',
+          label: ProductCategory.Cleanser,
+        }),
+        step({
+          order: 1,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+        step({
+          order: 2,
+          productId: 'spf-1',
+          productName: 'Daily SPF 50',
+          label: ProductCategory.SunProtection,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'selected_step_skip_copy',
+    );
+  });
+
   it('fails specialist-locked step mutation', () => {
     const evaluationCase = goldenCase('specialist_locked_step');
     const output = baseOutput({
@@ -161,6 +201,38 @@ describe("Today's Suggestion evaluation hard checks", () => {
 
     expect(failedCheckIds(evaluationCase, output)).toContain(
       'specialist_locked_steps',
+    );
+  });
+
+  it('fails AI-added earlier-use steps after a specialist-locked treatment', () => {
+    const evaluationCase = goldenCase('specialist_locked_step');
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          routineStepId: 'locked-adapalene-step',
+          productId: 'rx-adapalene-1',
+          productName: 'Adapalene Gel',
+          label: ProductCategory.Treatment,
+          provenance: SuggestionStepProvenance.SpecialistLocked,
+        }),
+        step({
+          order: 1,
+          productId: 'cleanser-1',
+          productName: 'Soft Cream Cleanser',
+          label: ProductCategory.Cleanser,
+        }),
+        step({
+          order: 2,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'specialist_locked_practical_order',
     );
   });
 
@@ -209,6 +281,114 @@ describe("Today's Suggestion evaluation hard checks", () => {
 
     expect(failedCheckIds(evaluationCase, output)).toContain(
       'medical_claim_language',
+    );
+  });
+
+  it('fails generated sensitive profile and location disclosure', () => {
+    const evaluationCase = goldenCase('dark_marks_no_spf_gap');
+    const output = darkMarksOutput({ includeSpfGap: true });
+    output.explanation.inputs = [
+      {
+        label: 'skin profile',
+        detail: 'combination, deep, Black, Fitzpatrick IV, medium sensitivity',
+      },
+      {
+        label: 'location',
+        detail: 'Stockholm, SE',
+      },
+    ];
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'sensitive_profile_disclosure',
+    );
+  });
+
+  it('fails raw reaction-history internals in explanation inputs', () => {
+    const evaluationCase = goldenCase('sensitive_reactive_skin_evening');
+    const output = darkMarksOutput({ includeSpfGap: true });
+    output.explanation.inputs = [
+      {
+        label: 'reactionHistory',
+        detail: 'fragrance -> redness, stinging, severity moderate',
+      },
+    ];
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'raw_reaction_history_disclosure',
+    );
+  });
+
+  it('fails AI-added masks placed after moisturizer', () => {
+    const evaluationCase = goldenCase('twelve_product_acne_evening');
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          productId: 'cleanser-1',
+          productName: 'Soft Cream Cleanser',
+          label: ProductCategory.Cleanser,
+        }),
+        step({
+          order: 1,
+          productId: 'azelaic-1',
+          productName: 'Azelaic Support Serum',
+          label: ProductCategory.Serum,
+        }),
+        step({
+          order: 2,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+        step({
+          order: 3,
+          productId: 'clay-mask-1',
+          productName: 'Calm Clay Mask',
+          label: ProductCategory.Mask,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'practical_step_order',
+    );
+  });
+
+  it('fails selected products with supplied ingredient layering conflicts', () => {
+    const evaluationCase = goldenCase(
+      'tolerated_vitamin_c_morning_not_crowded_out',
+    );
+    const output = baseOutput({
+      steps: [
+        step({
+          order: 0,
+          productId: 'vitamin-c-1',
+          productName: 'Ascorbyl Glucoside Solution 12%',
+          label: ProductCategory.Serum,
+        }),
+        step({
+          order: 1,
+          productId: 'niacinamide-1',
+          productName: 'Niacinamide Serum',
+          label: ProductCategory.Serum,
+        }),
+        step({
+          order: 2,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+        step({
+          order: 3,
+          productId: 'spf-1',
+          productName: 'Daily SPF 50',
+          label: ProductCategory.SunProtection,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'ingredient_layering_conflicts',
     );
   });
 
