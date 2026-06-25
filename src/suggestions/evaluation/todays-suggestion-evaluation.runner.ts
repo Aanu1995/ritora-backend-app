@@ -33,6 +33,10 @@ import {
   TODAYS_SUGGESTION_GOLDEN_CASES,
   TodaysSuggestionEvaluationCase,
 } from './todays-suggestion-golden-cases';
+import {
+  hasIngredientAnalysisLayeringConflict,
+  hasSpecificTextLayeringConflict,
+} from '../services/suggestion-product-compatibility';
 
 const JUDGE_RESPONSE_FORMAT = {
   type: 'json_schema',
@@ -91,9 +95,28 @@ const BASIC_ROUTINE_CATEGORIES = new Set<ProductCategory>([
   ProductCategory.Moisturizer,
   ProductCategory.SunProtection,
 ]);
+const PRACTICAL_STEP_CATEGORY_ORDER: readonly string[] = [
+  ProductCategory.Cleanser,
+  ProductCategory.Mask,
+  ProductCategory.Exfoliant,
+  ProductCategory.Toner,
+  ProductCategory.Essence,
+  ProductCategory.Serum,
+  ProductCategory.Treatment,
+  ProductCategory.EyeCare,
+  ProductCategory.Moisturizer,
+  ProductCategory.SunProtection,
+  ProductCategory.LipCare,
+  ProductCategory.Other,
+] as const;
 
 const MEDICAL_CLAIM_PATTERN =
   /\b(diagnose|diagnosed|diagnosis|cure|cures|cured|curing|prescribe|prescribes|prescribed|prescription|treat|treats|treated|treating)\b/i;
+const SENSITIVE_PROFILE_COPY_PATTERNS = [
+  /\b(?:ethnicity|race|countryCode|country|city|location|skin\s*tone|skinTone|fitzpatrick|phototype)\b/i,
+  /\b(?:Black|White|Asian|Hispanic|Latino|Latina|Mixed)\b/i,
+  /(^|[,;]\s*)(?:deep|fair|light|medium|dark|olive|brown)(?=\s*(?:[,;]|$))/i,
+] as const;
 
 const DEFAULT_CASES = TODAYS_SUGGESTION_GOLDEN_CASES;
 const SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS = 12000;
@@ -272,11 +295,13 @@ export function runTodaysSuggestionHardChecks(
     checkOutputSchema(output),
     checkNoDeterministicFallback(output),
     checkStepOrder(output),
+    checkPracticalStepOrder(output),
     checkCopyLength(output),
     checkValidModeAndProvenance(output),
     checkNoInventedProducts(evaluationCase, output),
     checkSingleUseCategoryDuplicates(evaluationCase, output),
     checkSpecialistLocks(evaluationCase, output),
+    checkSpecialistLockedPracticalOrder(output),
     checkUnsafeActives(evaluationCase, output),
     checkReactionSimplification(evaluationCase, output),
     checkSpfProtection(evaluationCase, output),
@@ -284,6 +309,10 @@ export function runTodaysSuggestionHardChecks(
     checkOnDemandShape(evaluationCase, output),
     checkEvidenceSourceIds(evaluationCase, output),
     checkMedicalClaims(output),
+    checkSensitiveProfileDisclosure(output),
+    checkRawReactionHistoryDisclosure(output),
+    checkSelectedStepSkipCopy(output),
+    checkIngredientLayeringConflicts(evaluationCase, output),
     checkExpectedProductIds(evaluationCase, output),
     checkExpectedAnyProductIds(evaluationCase, output),
     checkSelectedCategoryCoverage(evaluationCase, output),
@@ -821,6 +850,49 @@ function checkCopyLength(
   );
 }
 
+function checkPracticalStepOrder(
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  if (
+    output.steps.some(
+      (step) => step.provenance !== SuggestionStepProvenance.AiAdded,
+    )
+  ) {
+    return makeCheck(
+      'practical_step_order',
+      'AI-added steps follow practical application order.',
+      [],
+    );
+  }
+
+  const orderedSteps = [...output.steps].sort(
+    (left, right) => left.stepOrder - right.stepOrder,
+  );
+  const failures: string[] = [];
+  let previousRank = -1;
+  for (const step of orderedSteps) {
+    const rank = practicalCategoryRank(step.stepLabel);
+    if (rank < previousRank) {
+      failures.push(
+        `Step ${step.stepOrder} (${step.stepLabel}) appears after a later-use category.`,
+      );
+    }
+    previousRank = Math.max(previousRank, rank);
+  }
+  return makeCheck(
+    'practical_step_order',
+    'AI-added steps follow practical application order.',
+    failures,
+  );
+}
+
+function practicalCategoryRank(stepLabel: string): number {
+  const index = PRACTICAL_STEP_CATEGORY_ORDER.findIndex(
+    (category) => category === stepLabel,
+  );
+  return index >= 0 ? index : PRACTICAL_STEP_CATEGORY_ORDER.length;
+}
+
 function checkValidModeAndProvenance(
   output: SuggestionGenerationOutput,
 ): TodaysSuggestionHardCheckResult {
@@ -929,6 +1001,37 @@ function checkSpecialistLocks(
   return makeCheck(
     'specialist_locked_steps',
     'Specialist-locked routine steps remain unchanged.',
+    failures,
+  );
+}
+
+function checkSpecialistLockedPracticalOrder(
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const orderedSteps = [...output.steps].sort(
+    (left, right) => left.stepOrder - right.stepOrder,
+  );
+  const failures: string[] = [];
+  let precedingLockedRank = -1;
+  for (const step of orderedSteps) {
+    const rank = practicalCategoryRank(step.stepLabel);
+    if (step.provenance === SuggestionStepProvenance.SpecialistLocked) {
+      precedingLockedRank = Math.max(precedingLockedRank, rank);
+      continue;
+    }
+    if (
+      step.provenance === SuggestionStepProvenance.AiAdded &&
+      precedingLockedRank >= 0 &&
+      rank < precedingLockedRank
+    ) {
+      failures.push(
+        `AI-added ${step.stepLabel} step ${step.stepOrder} appears after a specialist-locked later-use step.`,
+      );
+    }
+  }
+  return makeCheck(
+    'specialist_locked_practical_order',
+    'AI-added support steps do not contradict specialist-locked order.',
     failures,
   );
 }
@@ -1192,6 +1295,102 @@ function checkMedicalClaims(
   return makeCheck(
     'medical_claim_language',
     'Generated copy avoids diagnose/treat/cure/prescribe claims.',
+    failures,
+  );
+}
+
+function checkSensitiveProfileDisclosure(
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures = generatedCopyFields(output)
+    .filter((field) =>
+      SENSITIVE_PROFILE_COPY_PATTERNS.some((pattern) =>
+        pattern.test(field.text),
+      ),
+    )
+    .map((field) => `${field.label} exposes sensitive profile detail.`);
+  return makeCheck(
+    'sensitive_profile_disclosure',
+    'Generated copy avoids sensitive profile demographics and location.',
+    failures,
+  );
+}
+
+function checkRawReactionHistoryDisclosure(
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const failures = output.explanation.inputs
+    .filter((input) =>
+      /\breaction\s*history\b|reactionhistory|\bseverity\s*[:=]?\s*(mild|moderate|severe)\b|\s(?:→|->|>)\s/i.test(
+        `${input.label} ${input.detail}`,
+      ),
+    )
+    .map((input) => `input.${input.label} exposes raw reaction history.`);
+  return makeCheck(
+    'raw_reaction_history_disclosure',
+    'Generated explanation inputs avoid raw reaction-history internals.',
+    failures,
+  );
+}
+
+function checkSelectedStepSkipCopy(
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const selectedLabels = selectedStepCopyLabels(output.steps);
+  const failures = generatedCopyFields(output)
+    .filter((field) =>
+      textSaysSelectedStepWasSkipped(
+        `${field.label} ${field.text}`,
+        selectedLabels,
+      ),
+    )
+    .map((field) => `${field.label} says a selected step was skipped.`);
+
+  for (const skipped of output.explanation.skipped) {
+    if (selectedLabels.some((label) => labelMatchesText(label, skipped.name))) {
+      failures.push(
+        `skipped.${skipped.name} lists a product/category that was selected.`,
+      );
+    }
+  }
+
+  return makeCheck(
+    'selected_step_skip_copy',
+    'Generated copy does not say selected steps were skipped.',
+    failures,
+  );
+}
+
+function checkIngredientLayeringConflicts(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const products = productScoresById(evaluationCase);
+  const selectedProducts = output.steps
+    .map((step) => productForStep(step, products))
+    .filter((product): product is SuggestionProductScore => Boolean(product));
+  const failures: string[] = [];
+  for (let leftIndex = 0; leftIndex < selectedProducts.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < selectedProducts.length;
+      rightIndex += 1
+    ) {
+      const left = selectedProducts[leftIndex];
+      const right = selectedProducts[rightIndex];
+      if (
+        hasIngredientAnalysisLayeringConflict(left, right) ||
+        hasSpecificTextLayeringConflict(left, right)
+      ) {
+        failures.push(
+          `Selected conflicting products together: ${left.productId} + ${right.productId}.`,
+        );
+      }
+    }
+  }
+  return makeCheck(
+    'ingredient_layering_conflicts',
+    'Selected products respect supplied ingredient and layering conflict data.',
     failures,
   );
 }
@@ -1601,6 +1800,56 @@ function generatedCopyFields(
     });
   }
   return fields;
+}
+
+function selectedStepCopyLabels(
+  steps: readonly SuggestionGenerationStepOutput[],
+): string[] {
+  return [
+    ...new Set(
+      steps
+        .flatMap((step) => [
+          step.inventoryProductId,
+          step.productName,
+          [step.productBrand, step.productName].filter(Boolean).join(' '),
+          step.stepLabel,
+          step.customLabel,
+        ])
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map(normalizeCopyForMatching)
+        .filter((value) => value.length >= 3),
+    ),
+  ];
+}
+
+function textSaysSelectedStepWasSkipped(
+  text: string,
+  selectedLabels: readonly string[],
+): boolean {
+  const normalizedText = normalizeCopyForMatching(text);
+  return (
+    hasSkipIntent(normalizedText) &&
+    selectedLabels.some((label) => labelMatchesText(label, normalizedText))
+  );
+}
+
+function labelMatchesText(label: string, text: string): boolean {
+  const normalizedText = normalizeCopyForMatching(text);
+  if (!normalizedText) return false;
+  return normalizedText.includes(label) || label.includes(normalizedText);
+}
+
+function hasSkipIntent(normalizedText: string): boolean {
+  return /\b(skip|skipped|omit|omitted|pause|paused|hold|held|leave out|left out|not use)\b/.test(
+    normalizedText,
+  );
+}
+
+function normalizeCopyForMatching(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function buildCaseSummary(

@@ -1,3 +1,4 @@
+import type { AnalysisSeverity } from '../ingredients/ingredients.types';
 import type {
   PreferredTimeOfDay,
   ProductCategory,
@@ -333,5 +334,16 @@ export interface SuggestionProductScore {
   inciQuality: 'available' | 'missing';
   dataQuality: 'verified' | 'partial' | 'insufficient';
   dataQualityWarnings: string[];
+  ingredientConflicts?: SuggestionIngredientConflictSummary[];
   evidenceSourceIds: SuggestionEvidenceSourceId[];
+}
+
+export interface SuggestionIngredientConflictSummary {
+  id: string;
+  code: string;
+  severity: AnalysisSeverity;
+  productIds: [string, string];
+  ingredientNames: [string, string];
+  description: string;
+  mitigation: string | null;
 }

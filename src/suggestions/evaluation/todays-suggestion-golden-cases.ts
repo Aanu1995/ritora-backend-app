@@ -12,6 +12,7 @@ import {
   EnvironmentWaterSensitivity,
 } from '../../environment-intelligence/environment-intelligence.constants';
 import type { EnvironmentContextSummary } from '../../environment-intelligence/environment-intelligence.types';
+import { AnalysisSeverity } from '../../ingredients/ingredients.types';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
 import { RoutineStep } from '../../schedule/entities/routine-step.entity';
 import {
@@ -26,6 +27,7 @@ import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import type {
   SuggestionContextSummary,
+  SuggestionIngredientConflictSummary,
   SuggestionProductScore,
 } from '../suggestion-context.types';
 import {
@@ -84,6 +86,18 @@ type ProductDraft = {
 };
 
 const TARGET_DATE = '2026-05-18';
+
+const VITAMIN_C_NIACINAMIDE_CONFLICT: SuggestionIngredientConflictSummary = {
+  id: 'eval-vitamin-c-niacinamide-layering:niacinamide-1:vitamin-c-1',
+  code: 'VITAMIN_C_NIACINAMIDE_LAYERING',
+  severity: AnalysisSeverity.Medium,
+  productIds: ['niacinamide-1', 'vitamin-c-1'],
+  ingredientNames: ['Niacinamide', 'Ascorbyl Glucoside'],
+  description:
+    'Ingredient analysis says these products should be separated instead of layered in the same routine.',
+  mitigation:
+    'Use one in this routine and move the other to a different routine.',
+};
 
 export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluationCase[] =
   [
@@ -1456,6 +1470,12 @@ function productScore(
     category: product.category,
     preferredTimeOfDay:
       product.user_fields?.preferredTimeOfDay ?? PreferredTimeOfDay.Either,
+    benefits: product.identity?.benefits ?? [],
+    suitedFor: product.identity?.suitedFor ?? [],
+    applicationMethod: product.guidance?.applicationMethod ?? null,
+    quantity: product.guidance?.quantity ?? null,
+    guidanceSteps: product.guidance?.steps ?? [],
+    guidanceCautions: product.guidance?.cautions ?? [],
     activeTags,
     suitabilityScore:
       product.category === ProductCategory.SunProtection
@@ -1478,8 +1498,17 @@ function productScore(
     dataQualityWarnings: product.id.includes('limited')
       ? ['Ingredients are missing or incomplete.']
       : [],
+    ingredientConflicts: productIngredientConflicts(product),
     evidenceSourceIds: productSourceIds(product),
   };
+}
+
+function productIngredientConflicts(
+  product: InventoryProduct,
+): SuggestionIngredientConflictSummary[] {
+  return VITAMIN_C_NIACINAMIDE_CONFLICT.productIds.includes(product.id)
+    ? [VITAMIN_C_NIACINAMIDE_CONFLICT]
+    : [];
 }
 
 function productSourceIds(

@@ -132,6 +132,7 @@ export class SuggestionContextBuilder {
       await buildIngredientIntelligenceByProductId(
         this.ingredientIntelligence,
         normalizedInputs.shelfActiveProducts,
+        normalizedInputs.skinProfile,
       );
     const environmentPolicy = buildEnvironmentAdaptationPolicy(
       normalizedInputs.environment,

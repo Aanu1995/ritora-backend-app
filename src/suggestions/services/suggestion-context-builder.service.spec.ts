@@ -14,7 +14,12 @@ import {
 import { SkinJournalEntry } from '../../skin-journal/entities/skin-journal-entry.entity';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
 import { IngredientIntelligenceService } from '../../ingredients/ingredient-intelligence.service';
-import type { ProductForAnalysis } from '../../ingredients/ingredients.types';
+import {
+  AnalysisSeverity,
+  IngredientCategory,
+  type MatchedIngredient,
+  type ProductForAnalysis,
+} from '../../ingredients/ingredients.types';
 import {
   EnvironmentAirQualityRisk,
   EnvironmentConfidence,
@@ -650,6 +655,71 @@ describe('SuggestionContextBuilder', () => {
       ]),
     );
   });
+
+  it('carries ingredient-analysis product conflicts into suggestion product scores', async () => {
+    const ingredientIntelligence = {
+      matchProducts: jest.fn((products: ProductForAnalysis[]) =>
+        Promise.resolve(
+          products.map((productValue) => ({
+            product: productValue,
+            matchedIngredients:
+              productValue.id === 'retinoid-1'
+                ? [matchedIngredient('Retinol', IngredientCategory.Retinoid)]
+                : [matchedIngredient('Glycolic Acid', IngredientCategory.Aha)],
+            unresolvedTokens: [],
+            totalTokens: productValue.inciIngredients.length,
+            resolvedTokens: productValue.inciIngredients.length,
+          })),
+        ),
+      ),
+    } as unknown as IngredientIntelligenceService;
+    const builderWithIngredientIntelligence = new SuggestionContextBuilder(
+      cacheRepo,
+      ingredientIntelligence,
+    );
+
+    const summary = await builderWithIngredientIntelligence.build({
+      ...emptyInput(),
+      skinProfile: skinProfile(),
+      shelfActiveProducts: [
+        retinoidProduct(),
+        product({
+          id: 'aha-1',
+          brand: 'Ava Lab',
+          name: 'Glycolic Acid Toner',
+          category: ProductCategory.Toner,
+          preferredTimeOfDay: PreferredTimeOfDay.Evening,
+          inciIngredients: ['Glycolic Acid'],
+          benefits: ['texture support'],
+        }),
+      ],
+    });
+
+    expect(summary.productScores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'retinoid-1',
+          ingredientConflicts: expect.arrayContaining([
+            expect.objectContaining({
+              code: 'RETINOID_AHA',
+              severity: AnalysisSeverity.High,
+              productIds: ['aha-1', 'retinoid-1'],
+              ingredientNames: ['Retinol', 'Glycolic Acid'],
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          productId: 'aha-1',
+          ingredientConflicts: expect.arrayContaining([
+            expect.objectContaining({
+              code: 'RETINOID_AHA',
+              productIds: ['aha-1', 'retinoid-1'],
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
 });
 
 function repo<T extends ObjectLiteral>() {
@@ -882,6 +952,33 @@ function product(input: {
     },
     updated_at: new Date('2026-04-28T11:00:00.000Z'),
   } as unknown as InventoryProduct;
+}
+
+function matchedIngredient(
+  rawToken: string,
+  category: IngredientCategory,
+): MatchedIngredient {
+  const slug = rawToken.toLowerCase().replace(/\s+/g, '-');
+  return {
+    rawToken,
+    normalizedSlug: slug,
+    concentrationPct: null,
+    confidence: 0.92,
+    inferred: true,
+    ingredient: {
+      slug,
+      displayNameEn: rawToken,
+      summaryEn: `${rawToken} classified as ${category}.`,
+      category,
+      aliases: [],
+      categoryPatterns: [],
+      overlapSeverity: AnalysisSeverity.High,
+      phSensitive: category === IngredientCategory.Aha,
+      photosensitizing: category === IngredientCategory.Retinoid,
+      requiresSpf: category === IngredientCategory.Retinoid,
+      irritationRisk: true,
+    },
+  };
 }
 
 function reactionJournalEntry(): SkinJournalEntry {

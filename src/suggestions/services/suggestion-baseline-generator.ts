@@ -40,6 +40,10 @@ import {
   isStrongActiveTag,
 } from './suggestion-product-intelligence';
 import {
+  hasIngredientAnalysisLayeringConflict,
+  hasSpecificTextLayeringConflict,
+} from './suggestion-product-compatibility';
+import {
   buildCategoryStepExplanation,
   buildProductScoreStepExplanation,
 } from './suggestion-step-explanations';
@@ -681,27 +685,12 @@ function areBaselineProductsCompatible(
   left: SuggestionProductScore,
   right: SuggestionProductScore,
 ): boolean {
-  if (hasExplicitLayeringConflict(left, right)) return false;
+  if (hasIngredientAnalysisLayeringConflict(left, right)) return false;
+  if (hasSpecificTextLayeringConflict(left, right)) return false;
   if (hasStrongActiveLayeringConflict(left, right)) return false;
-  if (hasVitaminCNiacinamideConflict(left, right)) return false;
   if (left.category !== right.category) return true;
   if (isSingleUseSuggestionCategory(left.category)) return false;
   return hasDistinctSameCategoryEvidence(left, right);
-}
-
-function hasExplicitLayeringConflict(
-  left: SuggestionProductScore,
-  right: SuggestionProductScore,
-): boolean {
-  const text = [
-    ...left.cautionReasons,
-    ...right.cautionReasons,
-    ...(left.guidanceCautions ?? []),
-    ...(right.guidanceCautions ?? []),
-  ].join(' ');
-  return /(?:do not|don't|avoid|separate|split|alternate).{0,40}(?:layer|combine|mix|same routine|together)|(?:layer|combine|mix).{0,40}(?:irritat|unstable|less comfortable|not recommended)/i.test(
-    text,
-  );
 }
 
 function hasStrongActiveLayeringConflict(
@@ -711,18 +700,6 @@ function hasStrongActiveLayeringConflict(
   return (
     left.activeTags.some(isStrongActiveTag) &&
     right.activeTags.some(isStrongActiveTag)
-  );
-}
-
-function hasVitaminCNiacinamideConflict(
-  left: SuggestionProductScore,
-  right: SuggestionProductScore,
-): boolean {
-  const leftTags = new Set(left.activeTags);
-  const rightTags = new Set(right.activeTags);
-  return (
-    (leftTags.has('vitamin_c') && rightTags.has('niacinamide')) ||
-    (leftTags.has('niacinamide') && rightTags.has('vitamin_c'))
   );
 }
 
@@ -786,16 +763,16 @@ function orderSelectedBaselineProducts(
 function baselineCategoryRank(category: ProductCategory): number {
   const order = [
     ProductCategory.Cleanser,
+    ProductCategory.Mask,
+    ProductCategory.Exfoliant,
     ProductCategory.Toner,
     ProductCategory.Essence,
     ProductCategory.Serum,
     ProductCategory.Treatment,
-    ProductCategory.Exfoliant,
+    ProductCategory.EyeCare,
     ProductCategory.Moisturizer,
     ProductCategory.SunProtection,
-    ProductCategory.EyeCare,
     ProductCategory.LipCare,
-    ProductCategory.Mask,
     ProductCategory.Other,
   ];
   const index = order.indexOf(category);

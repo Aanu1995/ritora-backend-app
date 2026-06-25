@@ -329,6 +329,16 @@ export function formatScoredContextForPrompt(
       inciQuality: score.inciQuality,
       dataQuality: score.dataQuality,
       dataQualityWarnings: score.dataQualityWarnings,
+      ingredientConflicts: (score.ingredientConflicts ?? [])
+        .slice(0, 8)
+        .map((conflict) => ({
+          code: conflict.code,
+          severity: conflict.severity,
+          productIds: conflict.productIds,
+          ingredientNames: conflict.ingredientNames,
+          description: conflict.description,
+          mitigation: conflict.mitigation,
+        })),
       evidenceSourceIds: score.evidenceSourceIds,
     })),
     environment: formatEnvironmentForPrompt(summary.environment),
