@@ -650,6 +650,65 @@ describe("Today's Suggestion evaluation reporting", () => {
     expect(report.cases[0].status).toBe('failed');
   });
 
+  it('retries transient provider fallback before accepting an evaluation output', async () => {
+    const retryableFallback = darkMarksOutput({ includeSpfGap: true });
+    retryableFallback.metadata.provider = 'deterministic_baseline';
+    retryableFallback.metadata.fallbackReason = 'provider_failure';
+    const recoveredOutput = darkMarksOutput({ includeSpfGap: true });
+    const generate = jest
+      .fn()
+      .mockResolvedValueOnce(retryableFallback)
+      .mockResolvedValueOnce(recoveredOutput);
+
+    const report = await evaluateTodaysSuggestionGoldenCases({
+      generator: { generate },
+      judge: passingJudge,
+      model: 'gpt-4.1-mini',
+      generatedAt: '2026-05-18T08:00:00.000Z',
+      cases: [goldenCase('dark_marks_no_spf_gap')],
+    });
+
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(report.failedCases).toBe(0);
+    expect(report.cases[0]).toEqual(
+      expect.objectContaining({
+        status: 'passed',
+        fallbackUsed: false,
+        fallbackReason: null,
+      }),
+    );
+  });
+
+  it('fails if provider fallback persists after evaluation retries', async () => {
+    const retryableFallback = darkMarksOutput({ includeSpfGap: true });
+    retryableFallback.metadata.provider = 'deterministic_baseline';
+    retryableFallback.metadata.fallbackReason = 'provider_failure';
+    const generate = jest.fn().mockResolvedValue(retryableFallback);
+
+    const report = await evaluateTodaysSuggestionGoldenCases({
+      generator: { generate },
+      judge: passingJudge,
+      model: 'gpt-4.1-mini',
+      generatedAt: '2026-05-18T08:00:00.000Z',
+      cases: [goldenCase('dark_marks_no_spf_gap')],
+    });
+
+    expect(generate).toHaveBeenCalledTimes(3);
+    expect(report.failedCases).toBe(1);
+    expect(report.cases[0]).toEqual(
+      expect.objectContaining({
+        status: 'failed',
+        fallbackUsed: true,
+        fallbackReason: 'provider_failure',
+      }),
+    );
+    expect(report.cases[0].hardCheckFailures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'no_deterministic_fallback' }),
+      ]),
+    );
+  });
+
   it('includes applied product history in judge case summaries', async () => {
     const report = await evaluateTodaysSuggestionGoldenCases({
       generator: {
