@@ -121,6 +121,7 @@ const SENSITIVE_PROFILE_COPY_PATTERNS = [
 const DEFAULT_CASES = TODAYS_SUGGESTION_GOLDEN_CASES;
 const SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS = 12000;
 const SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 2;
+const SUGGESTION_EVALUATION_GENERATION_ATTEMPTS = 3;
 
 export type TodaysSuggestionEvaluationStatus = 'passed' | 'failed';
 
@@ -559,7 +560,10 @@ async function evaluateCase(input: {
   repeatabilityRuns: number;
 }): Promise<TodaysSuggestionCaseResult> {
   try {
-    const output = await input.generator.generate(input.evaluationCase.inputs);
+    const output = await generateEvaluationOutput({
+      generator: input.generator,
+      inputs: input.evaluationCase.inputs,
+    });
     const hardChecks = runTodaysSuggestionHardChecks(
       input.evaluationCase,
       output,
@@ -695,9 +699,10 @@ async function evaluateRepeatability(input: {
   const mismatches: TodaysSuggestionRepeatabilityResult['mismatches'] = [];
   for (let run = 2; run <= input.runs; run += 1) {
     try {
-      const output = await input.generator.generate(
-        input.evaluationCase.inputs,
-      );
+      const output = await generateEvaluationOutput({
+        generator: input.generator,
+        inputs: input.evaluationCase.inputs,
+      });
       const hardChecks = runTodaysSuggestionHardChecks(
         input.evaluationCase,
         output,
@@ -743,6 +748,44 @@ async function evaluateRepeatability(input: {
     variations,
     mismatches,
   };
+}
+
+async function generateEvaluationOutput(input: {
+  generator: TodaysSuggestionEvaluationGenerator;
+  inputs: TodaysSuggestionEvaluationCase['inputs'];
+}): Promise<SuggestionGenerationOutput> {
+  let lastOutput: SuggestionGenerationOutput | null = null;
+  let lastError: unknown = null;
+
+  for (
+    let attempt = 1;
+    attempt <= SUGGESTION_EVALUATION_GENERATION_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      const output = await input.generator.generate(input.inputs);
+      lastOutput = output;
+      if (!isRetryableEvaluationFallback(output)) {
+        return output;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastOutput) return lastOutput;
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Suggestion generation failed.');
+}
+
+function isRetryableEvaluationFallback(
+  output: SuggestionGenerationOutput,
+): boolean {
+  return (
+    output.metadata.provider === 'deterministic_baseline' &&
+    output.metadata.fallbackReason === 'provider_failure'
+  );
 }
 
 function checkOutputSchema(
