@@ -5451,6 +5451,71 @@ describe('SuggestionAiGenerator', () => {
     );
   });
 
+  it('removes skipped-product aliases that do not exactly match owned shelf products', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  simplifiedForReaction: false,
+                  explanation: {
+                    headline: 'Use one breakout step',
+                    body: ['Pick one active tonight.'],
+                    perStepReasons: [],
+                    skipped: [
+                      {
+                        name: 'Ava Lab 1% Retinol care',
+                        reason: 'ingredient/layering caution',
+                      },
+                    ],
+                    inputs: [],
+                  },
+                  steps: [
+                    aiProductStep(0, 'benzoyl-1', ProductCategory.Treatment),
+                  ],
+                  gapRecommendations: [],
+                  safetyFlags: [],
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+    const inputs = inputsWithScoredShelfProducts(SuggestionDaypart.Evening);
+    inputs.shelfActiveProducts.push(
+      product('retinol-1', '1% Retinol Treatment', ProductCategory.Treatment),
+      product(
+        'benzoyl-1',
+        'Benzoyl Peroxide Treatment',
+        ProductCategory.Treatment,
+      ),
+    );
+    inputs.contextSummary.productScores = [
+      productScore('retinol-1', ProductCategory.Treatment, 92, ['retinoid']),
+      productScore('benzoyl-1', ProductCategory.Treatment, 94, [
+        'benzoyl_peroxide',
+      ]),
+    ];
+
+    const result = await generator.generate(inputs);
+
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.explanation.skipped).toEqual([]);
+  });
+
   it('does not stack two cleansers in deterministic fallback', async () => {
     const generator = new SuggestionAiGenerator({
       get: jest.fn().mockReturnValue(null),
@@ -5803,6 +5868,7 @@ function addStableSameDaypartRepeatMemory(
         fingerprint: 'stable-morning-basics',
       },
     ],
+    recentSameDateSuggestions: [],
     recentlySuggestedProductIds: ['cleanser-1', 'moisturizer-1', 'spf-1'],
     exactRepeatCountByFingerprint: { 'stable-morning-basics': 8 },
     skippedProducts: {},

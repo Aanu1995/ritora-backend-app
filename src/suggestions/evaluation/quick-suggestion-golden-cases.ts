@@ -13,8 +13,12 @@ import {
 import { ApplicationLog } from '../../application-tracking/entities/application-log.entity';
 import { ApplicationLogItem } from '../../application-tracking/entities/application-log-item.entity';
 import { InventoryProduct } from '../../inventory/entities/inventory-product.entity';
+import { AnalysisSeverity } from '../../ingredients/ingredients.types';
 import { SkinProfile } from '../../skin-profile/entities/skin-profile.entity';
-import type { SuggestionContextSummary } from '../suggestion-context.types';
+import type {
+  SuggestionContextSummary,
+  SuggestionIngredientConflictSummary,
+} from '../suggestion-context.types';
 import {
   SuggestionDaypart,
   SuggestionEvidenceSourceId,
@@ -38,6 +42,14 @@ export const QUICK_SUGGESTION_CATEGORY_OPEN_CASE_ID =
   'quick_category_open_non_serum_evening';
 export const QUICK_SUGGESTION_TOLERATED_RETINOID_CASE_ID =
   'quick_tolerated_retinoid_after_exfoliating_cleanser';
+export const QUICK_SUGGESTION_VITAMIN_C_NIACINAMIDE_CONFLICT_CASE_ID =
+  'quick_ingredient_conflict_vitamin_c_niacinamide';
+export const QUICK_SUGGESTION_RETINOID_BHA_CONFLICT_CASE_ID =
+  'quick_ingredient_conflict_retinoid_bha';
+export const QUICK_SUGGESTION_RETINOID_BENZOYL_CONFLICT_CASE_ID =
+  'quick_ingredient_conflict_retinoid_benzoyl';
+export const QUICK_SUGGESTION_VITAMIN_C_AHA_CONFLICT_CASE_ID =
+  'quick_ingredient_conflict_vitamin_c_aha';
 
 const TARGET_DATE = '2026-05-29';
 
@@ -52,6 +64,10 @@ export const QUICK_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluationC
     buildCategoryOpenEveningCase(),
     buildQuickVitaminCNotCrowdedOutCase(),
     buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(),
+    buildQuickVitaminCNiacinamideConflictCase(),
+    buildQuickRetinoidBhaConflictCase(),
+    buildQuickRetinoidBenzoylConflictCase(),
+    buildQuickVitaminCAhaConflictCase(),
     buildNoExtraStepNeededCase(),
   ];
 
@@ -470,7 +486,7 @@ function buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(): TodaysSugges
   const requestContext: SuggestionRequestContextJson = {
     intent: 'quick_refresh',
     intensity: 'standard',
-    note: 'I want a useful evening step for post-acne marks and rough texture before bed.',
+    note: 'I already cleansed before bed. I want a useful leave-on step for post-acne marks and rough texture.',
     activityAt: null,
     requestedAt: '2026-05-29T21:10:00.000Z',
   };
@@ -522,13 +538,14 @@ function buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(): TodaysSugges
   };
   const recentApplications = [
     applicationLog({
-      targetDate: '2026-05-28',
+      targetDate: TARGET_DATE,
       daypart: SuggestionDaypart.Evening,
       items: [
         applicationItem({
           product: products[0],
           status: ApplicationItemStatus.Applied,
-          notes: 'Used before shower, no reaction.',
+          notes:
+            'Already cleansed before this quick request; tolerated well, no burning, stinging, redness, or reaction.',
         }),
       ],
     }),
@@ -557,8 +574,8 @@ function buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(): TodaysSugges
           dayparts: [SuggestionDaypart.Evening],
           statuses: [ApplicationItemStatus.Applied],
           useCount: 1,
-          lastAppliedDate: '2026-05-28',
-          lastAppliedAt: '2026-05-28T20:40:00.000Z',
+          lastAppliedDate: TARGET_DATE,
+          lastAppliedAt: '2026-05-29T20:40:00.000Z',
           isOffShelf: false,
           isSubstitution: false,
         },
@@ -566,9 +583,9 @@ function buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(): TodaysSugges
     },
     productScoreOverrides: {
       'quick-sa-cleanser-1': {
-        suitabilityScore: 74,
+        suitabilityScore: 56,
         suitabilityReasons: [
-          'Owned rinse-off BHA cleanser was used yesterday and should not by itself block tolerated retinol.',
+          'Owned rinse-off BHA cleanser was already used before this quick request and should not be repeated now or block tolerated retinol.',
         ],
       },
       'quick-retinoid-1': {
@@ -603,7 +620,8 @@ function buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(): TodaysSugges
     expected: {
       requiresOnDemandShape: true,
       requiredProductIds: ['quick-retinoid-1'],
-      maxStepCount: 3,
+      forbiddenProductIds: ['quick-sa-cleanser-1'],
+      maxStepCount: 2,
     },
     inputs: {
       language: 'en',
@@ -625,6 +643,524 @@ function buildQuickToleratedRetinoidAfterExfoliatingCleanserCase(): TodaysSugges
       aiPersonalizationAllowed: true,
       aiPersonalizationBlockedReason: null,
     },
+  };
+}
+
+function buildQuickVitaminCNiacinamideConflictCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'quick_refresh',
+    intensity: 'standard',
+    note: 'I am going out soon and want quick support for dark marks without irritating my skin.',
+    activityAt: null,
+    requestedAt: '2026-05-29T08:25:00.000Z',
+  };
+  const products = [
+    quickCleanser(),
+    quickMoisturizer(),
+    quickSpf(),
+    quickVitaminCSerum(),
+    quickNiacinamideSerum(),
+  ];
+  const profile = skinProfile();
+  profile.primary_goal = 'fade post-acne dark marks without irritation';
+  profile.current_concerns = ['dark marks', 'uneven tone', 'oiliness'];
+  profile.active_tolerances = {
+    vitamin_c: { tolerance: 'medium' },
+    niacinamide: { tolerance: 'good' },
+  };
+  profile.routine_preferences = {
+    pace: 'steady',
+    am_minutes: 8,
+    pm_minutes: 8,
+  };
+  const contextSummary = buildContextSummary({
+    cacheKey: QUICK_SUGGESTION_VITAMIN_C_NIACINAMIDE_CONFLICT_CASE_ID,
+    requestContext,
+    profile,
+    products,
+    targetTime: '08:25',
+    daypart: SuggestionDaypart.Morning,
+    ingredientConflicts: [
+      ingredientConflict({
+        id: 'quick-conflict-vitamin-c-niacinamide',
+        code: 'avoid_pairing_vitamin_c_niacinamide',
+        productIds: ['quick-vitamin-c-1', 'quick-niacinamide-1'],
+        ingredientNames: ['Vitamin C', 'Niacinamide'],
+        description:
+          'Ingredient intelligence says these products should be split between routines if sensitivity, stinging, or flushing is possible.',
+        mitigation:
+          'Choose one serum now and use the other in another routine.',
+      }),
+    ],
+    productScoreOverrides: {
+      'quick-vitamin-c-1': {
+        suitabilityScore: 95,
+        suitabilityReasons: [
+          'Owned Vitamin C directly supports the current dark-mark request.',
+        ],
+      },
+      'quick-niacinamide-1': {
+        suitabilityScore: 90,
+        suitabilityReasons: [
+          'Owned niacinamide supports oil balance and tone, but ingredient intelligence says it should not be layered with the Vitamin C serum in this routine.',
+        ],
+      },
+    },
+  });
+
+  return {
+    id: QUICK_SUGGESTION_VITAMIN_C_NIACINAMIDE_CONFLICT_CASE_ID,
+    title: 'Quick morning suggestion does not pair conflict-marked serums',
+    riskFocus: ['on_demand', 'ingredient_conflict', 'serum_layering'],
+    manualReviewChecklist: [
+      'Does it choose one serum path instead of pairing both conflict-marked serums?',
+      'Does it still keep SPF present for a daytime pigment request?',
+      'Does it explain the chosen path using product data rather than generic scoring copy?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      requiresSpfProtection: true,
+      requiredProductIds: ['quick-spf-1'],
+      requiredAnyProductIds: [['quick-vitamin-c-1', 'quick-niacinamide-1']],
+      minSelectedNonBasicCategoryCount: 1,
+      maxStepCount: 4,
+    },
+    inputs: quickInputs({
+      requestContext,
+      profile,
+      products,
+      contextSummary,
+      targetTime: '08:25',
+      daypart: SuggestionDaypart.Morning,
+    }),
+  };
+}
+
+function buildQuickRetinoidBhaConflictCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'quick_refresh',
+    intensity: 'standard',
+    note: 'Before bed I want a useful step for texture and clogged pores.',
+    activityAt: null,
+    requestedAt: '2026-05-29T21:20:00.000Z',
+  };
+  const products = [
+    quickCleanser(),
+    quickMoisturizer(),
+    quickRetinoidTreatment(),
+    quickBhaExfoliant(),
+  ];
+  const profile = skinProfile();
+  profile.primary_goal = 'smooth texture and reduce clogged pores';
+  profile.current_concerns = ['texture', 'clogged pores', 'post-acne marks'];
+  profile.active_tolerances = {
+    retinoid: { tolerance: 'good' },
+    bha: { tolerance: 'medium' },
+  };
+  profile.routine_preferences = {
+    pace: 'steady',
+    am_minutes: 8,
+    pm_minutes: 10,
+  };
+  const contextSummary = buildContextSummary({
+    cacheKey: QUICK_SUGGESTION_RETINOID_BHA_CONFLICT_CASE_ID,
+    requestContext,
+    profile,
+    products,
+    targetTime: '21:20',
+    daypart: SuggestionDaypart.Evening,
+    ingredientConflicts: [
+      ingredientConflict({
+        id: 'quick-conflict-retinoid-bha',
+        code: 'avoid_pairing_retinoid_bha',
+        productIds: ['quick-retinoid-1', 'quick-bha-1'],
+        ingredientNames: ['Retinoid', 'BHA'],
+        description:
+          'Ingredient intelligence says retinoids and leave-on BHA should not be layered in the same quick routine because irritation risk can increase.',
+        mitigation:
+          'Choose one active route now and alternate the other later.',
+      }),
+    ],
+    productScoreOverrides: {
+      'quick-retinoid-1': {
+        suitabilityScore: 96,
+        suitabilityReasons: [
+          'Owned tolerated retinoid fits texture and post-acne marks for this evening quick request.',
+        ],
+      },
+      'quick-bha-1': {
+        suitabilityScore: 91,
+        suitabilityReasons: [
+          'Owned BHA fits clogged pores, but ingredient intelligence says not to layer it with the retinoid in this same routine.',
+        ],
+      },
+    },
+  });
+
+  return {
+    id: QUICK_SUGGESTION_RETINOID_BHA_CONFLICT_CASE_ID,
+    title: 'Quick evening suggestion selects one retinoid or BHA route',
+    riskFocus: ['on_demand', 'ingredient_conflict', 'retinoid', 'bha'],
+    manualReviewChecklist: [
+      'Does it avoid pairing retinoid and leave-on BHA in the same quick routine?',
+      'Does it still choose one current-data-supported active route?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      requiredAnyProductIds: [['quick-retinoid-1', 'quick-bha-1']],
+      minSelectedNonBasicCategoryCount: 1,
+      maxStrongActiveCount: 1,
+      maxStepCount: 3,
+    },
+    inputs: quickInputs({
+      requestContext,
+      profile,
+      products,
+      contextSummary,
+      targetTime: '21:20',
+      daypart: SuggestionDaypart.Evening,
+    }),
+  };
+}
+
+function buildQuickRetinoidBenzoylConflictCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'quick_refresh',
+    intensity: 'standard',
+    note: 'I have a few breakouts tonight and want one useful treatment step.',
+    activityAt: null,
+    requestedAt: '2026-05-29T21:35:00.000Z',
+  };
+  const products = [
+    quickCleanser(),
+    quickMoisturizer(),
+    quickRetinoidTreatment(),
+    quickBenzoylTreatment(),
+  ];
+  const profile = skinProfile();
+  profile.primary_goal = 'reduce breakouts while protecting my skin barrier';
+  profile.current_concerns = ['acne', 'post-acne marks', 'texture'];
+  profile.active_tolerances = {
+    retinoid: { tolerance: 'good' },
+    benzoyl_peroxide: { tolerance: 'medium' },
+  };
+  profile.routine_preferences = {
+    pace: 'steady',
+    am_minutes: 8,
+    pm_minutes: 10,
+  };
+  const contextSummary = buildContextSummary({
+    cacheKey: QUICK_SUGGESTION_RETINOID_BENZOYL_CONFLICT_CASE_ID,
+    requestContext,
+    profile,
+    products,
+    targetTime: '21:35',
+    daypart: SuggestionDaypart.Evening,
+    ingredientConflicts: [
+      ingredientConflict({
+        id: 'quick-conflict-retinoid-benzoyl',
+        code: 'avoid_pairing_retinoid_benzoyl_peroxide',
+        productIds: ['quick-retinoid-1', 'quick-benzoyl-1'],
+        ingredientNames: ['Retinoid', 'Benzoyl peroxide'],
+        description:
+          'Ingredient intelligence says retinoids and benzoyl peroxide should not be layered in this routine because irritation or reduced comfort can increase.',
+        mitigation:
+          'Choose one acne path now and use the other in a separate routine.',
+      }),
+    ],
+    productScoreOverrides: {
+      'quick-retinoid-1': {
+        suitabilityScore: 94,
+        suitabilityReasons: [
+          'Owned tolerated retinoid supports post-acne marks and texture.',
+        ],
+      },
+      'quick-benzoyl-1': {
+        suitabilityScore: 93,
+        suitabilityReasons: [
+          'Owned benzoyl peroxide treatment fits current breakout support, but ingredient intelligence says not to layer it with retinoid in the same routine.',
+        ],
+      },
+    },
+  });
+
+  return {
+    id: QUICK_SUGGESTION_RETINOID_BENZOYL_CONFLICT_CASE_ID,
+    title: 'Quick acne suggestion avoids retinoid and benzoyl stacking',
+    riskFocus: [
+      'on_demand',
+      'ingredient_conflict',
+      'retinoid',
+      'benzoyl_peroxide',
+    ],
+    manualReviewChecklist: [
+      'Does it choose one acne-relevant active route instead of stacking both conflict-marked products?',
+      'Does it avoid inventing a reaction when the reason is supplied ingredient intelligence?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      requiredAnyProductIds: [['quick-retinoid-1', 'quick-benzoyl-1']],
+      minSelectedNonBasicCategoryCount: 1,
+      maxStrongActiveCount: 1,
+      maxStepCount: 3,
+    },
+    inputs: quickInputs({
+      requestContext,
+      profile,
+      products,
+      contextSummary,
+      targetTime: '21:35',
+      daypart: SuggestionDaypart.Evening,
+    }),
+  };
+}
+
+function buildQuickVitaminCAhaConflictCase(): TodaysSuggestionEvaluationCase {
+  const requestContext: SuggestionRequestContextJson = {
+    intent: 'quick_refresh',
+    intensity: 'standard',
+    note: 'I want a quick morning step for dullness and dark marks before leaving.',
+    activityAt: null,
+    requestedAt: '2026-05-29T08:40:00.000Z',
+  };
+  const products = [
+    quickCleanser(),
+    quickMoisturizer(),
+    quickSpf(),
+    quickVitaminCSerum(),
+    quickAhaToner(),
+  ];
+  const profile = skinProfile();
+  profile.primary_goal = 'brighten uneven tone without over-exfoliating';
+  profile.current_concerns = ['dark marks', 'dullness', 'texture'];
+  profile.active_tolerances = {
+    vitamin_c: { tolerance: 'medium' },
+    aha: { tolerance: 'medium' },
+  };
+  profile.routine_preferences = {
+    pace: 'steady',
+    am_minutes: 8,
+    pm_minutes: 8,
+  };
+  const contextSummary = buildContextSummary({
+    cacheKey: QUICK_SUGGESTION_VITAMIN_C_AHA_CONFLICT_CASE_ID,
+    requestContext,
+    profile,
+    products,
+    targetTime: '08:40',
+    daypart: SuggestionDaypart.Morning,
+    ingredientConflicts: [
+      ingredientConflict({
+        id: 'quick-conflict-vitamin-c-aha',
+        code: 'avoid_pairing_vitamin_c_aha',
+        productIds: ['quick-vitamin-c-1', 'quick-aha-1'],
+        ingredientNames: ['Vitamin C', 'AHA'],
+        description:
+          'Ingredient intelligence says Vitamin C and AHA should not be stacked in the same quick morning routine because irritation risk can increase.',
+        mitigation:
+          'Choose one brightening route now and use the other separately.',
+      }),
+    ],
+    productScoreOverrides: {
+      'quick-vitamin-c-1': {
+        suitabilityScore: 95,
+        suitabilityReasons: [
+          'Owned Vitamin C directly supports the current dark-mark quick request.',
+        ],
+      },
+      'quick-aha-1': {
+        suitabilityScore: 91,
+        suitabilityReasons: [
+          'Owned AHA toner fits dullness and texture, but ingredient intelligence says not to layer it with Vitamin C in this same routine.',
+        ],
+      },
+    },
+  });
+
+  return {
+    id: QUICK_SUGGESTION_VITAMIN_C_AHA_CONFLICT_CASE_ID,
+    title: 'Quick morning suggestion avoids Vitamin C and AHA stacking',
+    riskFocus: ['on_demand', 'ingredient_conflict', 'vitamin_c', 'aha'],
+    manualReviewChecklist: [
+      'Does it avoid pairing Vitamin C and AHA in the same quick routine?',
+      'Does it keep SPF present for a daytime brightening request?',
+    ],
+    expected: {
+      requiresOnDemandShape: true,
+      requiresSpfProtection: true,
+      requiredProductIds: ['quick-spf-1'],
+      requiredAnyProductIds: [['quick-vitamin-c-1', 'quick-aha-1']],
+      minSelectedNonBasicCategoryCount: 1,
+      maxStrongActiveCount: 1,
+      maxStepCount: 4,
+    },
+    inputs: quickInputs({
+      requestContext,
+      profile,
+      products,
+      contextSummary,
+      targetTime: '08:40',
+      daypart: SuggestionDaypart.Morning,
+    }),
+  };
+}
+
+function quickInputs(input: {
+  requestContext: SuggestionRequestContextJson;
+  profile: SkinProfile;
+  products: readonly InventoryProduct[];
+  contextSummary: SuggestionContextSummary;
+  targetTime: string;
+  daypart: SuggestionDaypart;
+}): TodaysSuggestionEvaluationCase['inputs'] {
+  return {
+    language: 'en',
+    slotId: null,
+    requestSource: SuggestionRequestSource.OnDemand,
+    requestContext: input.requestContext,
+    scheduledSlotContext: null,
+    targetDate: TARGET_DATE,
+    targetTime: input.targetTime,
+    daypart: input.daypart,
+    skinProfile: input.profile,
+    shelfActiveProducts: [...input.products],
+    shelfFinishedProductIds: [],
+    routineSteps: [],
+    recentJournalEntries: [],
+    recentApplications: [],
+    contextSummary: input.contextSummary,
+    environmentSnapshotId: null,
+    aiPersonalizationAllowed: true,
+    aiPersonalizationBlockedReason: null,
+  };
+}
+
+function quickCleanser(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-cleanser-1',
+    name: 'Soft Cream Cleanser',
+    category: ProductCategory.Cleanser,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    tags: ['cleanser', 'gentle'],
+    ingredients: ['water', 'glycerin', 'cocamidopropyl betaine'],
+    description: 'Gentle cream cleanser.',
+  });
+}
+
+function quickMoisturizer(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-moisturizer-1',
+    name: 'Barrier Cream',
+    category: ProductCategory.Moisturizer,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    tags: ['ceramide', 'barrier'],
+    ingredients: ['water', 'glycerin', 'ceramide np', 'panthenol'],
+    description: 'Barrier-support moisturizer.',
+  });
+}
+
+function quickSpf(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-spf-1',
+    name: 'Morning SPF 50',
+    category: ProductCategory.SunProtection,
+    preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    tags: ['spf', 'sun-protection'],
+    ingredients: ['zinc oxide'],
+    description: 'Broad-spectrum SPF 50.',
+  });
+}
+
+function quickVitaminCSerum(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-vitamin-c-1',
+    name: 'Ascorbyl Glucoside Solution 12%',
+    category: ProductCategory.Serum,
+    preferredTimeOfDay: PreferredTimeOfDay.Morning,
+    tags: ['vitamin_c', 'antioxidant', 'pigment-support'],
+    ingredients: ['ascorbyl glucoside', 'glycerin'],
+    description: 'Vitamin C derivative serum for uneven tone and dark marks.',
+  });
+}
+
+function quickNiacinamideSerum(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-niacinamide-1',
+    name: 'Niacinamide 10% + Zinc 1%',
+    category: ProductCategory.Serum,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    tags: ['niacinamide', 'oil-control', 'barrier'],
+    ingredients: ['niacinamide', 'zinc pca', 'glycerin'],
+    description:
+      'Niacinamide serum for oil balance, tone, and barrier support.',
+  });
+}
+
+function quickRetinoidTreatment(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-retinoid-1',
+    name: '1% Retinol Treatment',
+    category: ProductCategory.Treatment,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    tags: ['retinoid', 'retinol', 'pigment-support'],
+    ingredients: ['retinol', 'ceramide ng', 'licorice root extract'],
+    description:
+      'Retinol treatment for post-acne marks, texture, pores, and uneven tone.',
+  });
+}
+
+function quickBhaExfoliant(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-bha-1',
+    name: 'Skin Perfecting 2% BHA Liquid Exfoliant',
+    category: ProductCategory.Exfoliant,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    tags: ['bha', 'salicylic', 'exfoliant'],
+    ingredients: ['salicylic acid', 'green tea extract'],
+    description: 'Leave-on BHA exfoliant for clogged pores and texture.',
+  });
+}
+
+function quickBenzoylTreatment(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-benzoyl-1',
+    name: 'Benzoyl Peroxide Treatment',
+    category: ProductCategory.Treatment,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    tags: ['benzoyl_peroxide', 'acne'],
+    ingredients: ['benzoyl peroxide'],
+    description: 'Acne treatment for active breakouts.',
+  });
+}
+
+function quickAhaToner(): InventoryProduct {
+  return productWithPreferredTime({
+    id: 'quick-aha-1',
+    name: 'Glycolic Acid Toner',
+    category: ProductCategory.Toner,
+    preferredTimeOfDay: PreferredTimeOfDay.Either,
+    tags: ['aha', 'glycolic', 'exfoliant'],
+    ingredients: ['glycolic acid', 'aloe vera'],
+    description: 'AHA toner for dullness, uneven tone, and texture.',
+  });
+}
+
+function ingredientConflict(input: {
+  id: string;
+  code: string;
+  productIds: [string, string];
+  ingredientNames: [string, string];
+  description: string;
+  mitigation: string;
+}): SuggestionIngredientConflictSummary {
+  return {
+    id: input.id,
+    code: input.code,
+    severity: AnalysisSeverity.Medium,
+    productIds: input.productIds,
+    ingredientNames: input.ingredientNames,
+    description: input.description,
+    mitigation: input.mitigation,
   };
 }
 
@@ -750,6 +1286,7 @@ function buildContextSummary(input: {
   skippedByCategory?: Record<string, number>;
   safetyConstraints?: string[];
   appliedProductHistory?: SuggestionContextSummary['appliedProductHistory'];
+  ingredientConflicts?: readonly SuggestionIngredientConflictSummary[];
   suitabilityReasons?: string[];
   productScoreOverrides?: Record<
     string,
@@ -857,6 +1394,9 @@ function buildContextSummary(input: {
         inciQuality: 'available',
         dataQuality: 'verified',
         dataQualityWarnings: [],
+        ingredientConflicts: input.ingredientConflicts?.filter((conflict) =>
+          conflict.productIds.includes(product.id),
+        ),
         evidenceSourceIds:
           product.category === ProductCategory.SunProtection
             ? [SuggestionEvidenceSourceId.AadSunscreenSelection]
@@ -893,6 +1433,7 @@ function buildContextSummary(input: {
       previousSuggestionCount: 0,
       sameDaypartSuggestionCount: 0,
       recentSameDaypartFingerprints: [],
+      recentSameDateSuggestions: [],
       recentlySuggestedProductIds: [],
       exactRepeatCountByFingerprint: {},
       skippedProducts:

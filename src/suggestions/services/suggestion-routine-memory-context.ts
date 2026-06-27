@@ -18,7 +18,9 @@ export function buildRoutineMemory(
   logs: ApplicationLog[],
   suggestions: SuggestionInstance[],
   daypart: SuggestionDaypart,
+  targetDate: string,
 ): NonNullable<SuggestionContextSummary['routineMemory']> {
+  const normalizedTargetDate = toDateOnlyString(targetDate);
   const sortedSuggestions = suggestions.slice().sort(compareSuggestionRecency);
   const suggestionFingerprints = sortedSuggestions
     .map(buildSuggestionFingerprint)
@@ -27,6 +29,9 @@ export function buildRoutineMemory(
     .filter((suggestion) => suggestion.daypart === daypart)
     .map(buildSuggestionFingerprint)
     .filter((fingerprint) => fingerprint.fingerprint.length > 0);
+  const sameDateFingerprints = suggestionFingerprints.filter(
+    (fingerprint) => fingerprint.targetDate === normalizedTargetDate,
+  );
   const exactRepeatCountByFingerprint: Record<string, number> = {};
   const recentlySuggestedProductIds: string[] = [];
   const skippedProducts: Record<string, number> = {};
@@ -75,6 +80,7 @@ export function buildRoutineMemory(
     previousSuggestionCount: suggestions.length,
     sameDaypartSuggestionCount: sameDaypartFingerprints.length,
     recentSameDaypartFingerprints: sameDaypartFingerprints.slice(0, 10),
+    recentSameDateSuggestions: sameDateFingerprints.slice(0, 10),
     recentlySuggestedProductIds: unique(recentlySuggestedProductIds).slice(
       0,
       50,

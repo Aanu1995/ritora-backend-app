@@ -298,6 +298,13 @@ export interface SuggestionRoutineMemory {
     productNames: string[];
     fingerprint: string;
   }[];
+  recentSameDateSuggestions: {
+    targetDate: string;
+    targetTime: string;
+    productIds: string[];
+    productNames: string[];
+    fingerprint: string;
+  }[];
   recentlySuggestedProductIds: string[];
   exactRepeatCountByFingerprint: Record<string, number>;
   skippedProducts: Record<string, number>;

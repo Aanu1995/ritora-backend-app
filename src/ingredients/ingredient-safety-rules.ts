@@ -98,6 +98,17 @@ export const INGREDIENT_CATEGORY_CONFLICT_RULES: ConflictRule[] = [
       'Use vitamin C in the morning and benzoyl peroxide separately.',
   },
   {
+    code: 'VITAMIN_C_AHA',
+    severity: AnalysisSeverity.Medium,
+    left: { categories: [IngredientCategory.VitaminC] },
+    right: { categories: [IngredientCategory.Aha] },
+    descriptionEn:
+      'Vitamin C and exfoliating alpha hydroxy acids can increase same-routine irritation risk.',
+    mitigationEn:
+      'Use vitamin C and alpha hydroxy acids in separate routines if sensitivity, stinging, or dryness appears.',
+    onlyWhenVitaminCIsPhSensitive: true,
+  },
+  {
     code: 'RETINOID_VITAMIN_C',
     severity: AnalysisSeverity.Medium,
     left: { categories: [IngredientCategory.Retinoid] },

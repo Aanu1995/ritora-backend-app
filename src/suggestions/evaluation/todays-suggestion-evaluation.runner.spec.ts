@@ -11,6 +11,7 @@ import type {
 } from '../services/suggestion-ai-generator';
 import {
   TODAYS_SUGGESTION_GOLDEN_CASES,
+  TODAYS_SUGGESTION_LIVE_EVALUATION_CASES,
   TodaysSuggestionEvaluationCase,
 } from './todays-suggestion-golden-cases';
 import {
@@ -34,6 +35,23 @@ describe("Today's Suggestion evaluation hard checks", () => {
         'twelve_product_dark_spots_morning',
         'twelve_product_acne_evening',
         'low_need_maintenance_morning_not_empty',
+      ]),
+    );
+  });
+
+  it('keeps live evaluation focused on current problem-regression cases by default', () => {
+    expect(TODAYS_SUGGESTION_LIVE_EVALUATION_CASES.length).toBeLessThan(
+      TODAYS_SUGGESTION_GOLDEN_CASES.length,
+    );
+    expect(
+      TODAYS_SUGGESTION_LIVE_EVALUATION_CASES.map((item) => item.id),
+    ).toEqual(
+      expect.arrayContaining([
+        'aha_bha_retinoid_conflict',
+        'twelve_product_acne_evening',
+        'tolerated_retinoid_evening_sparse_history',
+        'tolerated_vitamin_c_morning_not_crowded_out',
+        'non_serum_categories_evening',
       ]),
     );
   });

@@ -105,6 +105,7 @@ export class SuggestionContextBuilder {
       normalizedInputs.recentApplications,
       normalizedInputs.recentSuggestions ?? [],
       normalizedInputs.daypart,
+      normalizedInputs.targetDate,
     );
     const applicationProductSignals = buildApplicationProductSignals(
       normalizedInputs.recentApplications,
@@ -166,6 +167,10 @@ export class SuggestionContextBuilder {
             0,
           recentSameDaypartSuggestionCount:
             routineMemory.recentSameDaypartFingerprints.filter((fingerprint) =>
+              fingerprint.productIds.includes(product.id),
+            ).length,
+          recentSameDateSuggestionCount:
+            routineMemory.recentSameDateSuggestions.filter((fingerprint) =>
               fingerprint.productIds.includes(product.id),
             ).length,
           hasReactionSignal: reaction.hasSignal,
