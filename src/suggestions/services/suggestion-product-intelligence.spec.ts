@@ -276,6 +276,7 @@ describe('suggestion product intelligence', () => {
       reactionSkipCount: 1,
       substitutionCount: 1,
       recentSameDaypartSuggestionCount: 1,
+      recentSameDateSuggestionCount: 1,
       hasReactionSignal: false,
       lockedProductIds: new Set(),
       conservativeRestart: false,
@@ -295,6 +296,9 @@ describe('suggestion product intelligence', () => {
         'recent same-daypart repeat',
         'product may be expired',
       ]),
+    );
+    expect(score.cautionReasons).not.toContain(
+      'already suggested earlier on target date',
     );
   });
 

@@ -1808,15 +1808,17 @@ function normalizeExplanationForSelectedSteps(
     ...deterministicExplanationBodyLines(inputs, explanation.body),
   ];
   const skipped = mergeSkippedExplanationItems(
-    explanation.skipped.filter((skipped) => {
-      const normalizedName = normalizeProductCopy(skipped.name);
-      return ![...selectedProductLabels].some(
-        (selected) =>
-          selected.length > 0 &&
-          (normalizedName.includes(selected) ||
-            selected.includes(normalizedName)),
-      );
-    }),
+    filterExactSkippedExplanationItems(inputs, explanation.skipped).filter(
+      (skipped) => {
+        const normalizedName = normalizeProductCopy(skipped.name);
+        return ![...selectedProductLabels].some(
+          (selected) =>
+            selected.length > 0 &&
+            (normalizedName.includes(selected) ||
+              selected.includes(normalizedName)),
+        );
+      },
+    ),
     deterministicSkippedExplanationItems(inputs, selectedProductLabels),
   );
 
@@ -1844,6 +1846,53 @@ function normalizeExplanationForSelectedSteps(
       selectedProductLabels,
     ),
   };
+}
+
+function filterExactSkippedExplanationItems(
+  inputs: SuggestionGenerationInputs,
+  skippedItems: SuggestionExplanationJson['skipped'],
+): SuggestionExplanationJson['skipped'] {
+  const allowedNames = allowedSkippedExplanationNames(inputs);
+  return skippedItems.filter((skipped) =>
+    allowedNames.has(normalizeProductCopy(skipped.name)),
+  );
+}
+
+function allowedSkippedExplanationNames(
+  inputs: SuggestionGenerationInputs,
+): Set<string> {
+  const allowed = new Set<string>();
+  for (const product of inputs.shelfActiveProducts) {
+    addAllowedSkippedExplanationName(allowed, product.id);
+    addAllowedSkippedExplanationName(allowed, product.name);
+    addAllowedSkippedExplanationName(
+      allowed,
+      [product.brand, product.name].filter(Boolean).join(' '),
+    );
+    addAllowedSkippedExplanationName(allowed, product.category);
+  }
+  for (const score of inputs.contextSummary.productScores) {
+    addAllowedSkippedExplanationName(allowed, score.productId);
+    addAllowedSkippedExplanationName(allowed, score.name);
+    addAllowedSkippedExplanationName(
+      allowed,
+      [score.brand, score.name].filter(Boolean).join(' '),
+    );
+    addAllowedSkippedExplanationName(allowed, score.category);
+  }
+  for (const category of Object.values(ProductCategory)) {
+    addAllowedSkippedExplanationName(allowed, category);
+    addAllowedSkippedExplanationName(allowed, category.replace(/-/g, ' '));
+  }
+  return allowed;
+}
+
+function addAllowedSkippedExplanationName(
+  allowed: Set<string>,
+  value: string | null,
+): void {
+  if (!value?.trim()) return;
+  allowed.add(normalizeProductCopy(value));
 }
 
 function normalizeExplanationInputs(
@@ -1882,8 +1931,6 @@ function selectedProductLabelsForSteps(
         step.productBrand && step.productName
           ? `${step.productBrand} ${step.productName}`
           : null,
-        step.stepLabel,
-        step.customLabel,
       ]
         .filter((value): value is string => Boolean(value?.trim()))
         .map((value) => normalizeProductCopy(value)),

@@ -4,6 +4,7 @@ import {
   QUICK_SUGGESTION_GOLDEN_CASES,
   QUICK_SUGGESTION_NO_STEP_CASE_ID,
   QUICK_SUGGESTION_PLAIN_SKIP_CASE_ID,
+  QUICK_SUGGESTION_TOLERATED_RETINOID_CASE_ID,
 } from './quick-suggestion-golden-cases';
 import {
   createLiveQuickSuggestionEvaluationRunner,
@@ -202,6 +203,47 @@ describe('Quick Suggestion evaluation runner', () => {
         expect.objectContaining({
           id: 'selected_step_skip_copy',
           passed: false,
+        }),
+      ]),
+    );
+  });
+
+  it('fails skipped copy that renames an owned product with a near-match alias', () => {
+    const evaluationCase = QUICK_SUGGESTION_GOLDEN_CASES.find(
+      (candidate) =>
+        candidate.id === QUICK_SUGGESTION_TOLERATED_RETINOID_CASE_ID,
+    );
+    expect(evaluationCase).toBeDefined();
+
+    const checks = runQuickSuggestionHardChecks(
+      evaluationCase!,
+      quickOutput({
+        explanation: {
+          headline: 'Evening active',
+          body: ['Use one active tonight.'],
+          perStepReasons: [],
+          skipped: [
+            {
+              name: 'Ava Lab 1% Retinol care',
+              reason: 'ingredient/layering caution',
+            },
+          ],
+          inputs: [],
+        },
+        steps: [
+          quickStep(0, 'quick-moisturizer-1', ProductCategory.Moisturizer),
+        ],
+      }),
+    );
+
+    expect(checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'skipped_product_names',
+          passed: false,
+          failures: expect.arrayContaining([
+            expect.stringContaining('Ava Lab 1% Retinol care'),
+          ]),
         }),
       ]),
     );

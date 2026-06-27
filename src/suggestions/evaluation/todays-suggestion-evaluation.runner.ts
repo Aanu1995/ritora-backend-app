@@ -30,7 +30,7 @@ import {
 } from '../services/suggestion-ai-contract';
 import { isSingleUseSuggestionCategory } from '../services/suggestion-product-intelligence';
 import {
-  TODAYS_SUGGESTION_GOLDEN_CASES,
+  TODAYS_SUGGESTION_LIVE_EVALUATION_CASES,
   TodaysSuggestionEvaluationCase,
 } from './todays-suggestion-golden-cases';
 import {
@@ -118,7 +118,7 @@ const SENSITIVE_PROFILE_COPY_PATTERNS = [
   /(^|[,;]\s*)(?:deep|fair|light|medium|dark|olive|brown)(?=\s*(?:[,;]|$))/i,
 ] as const;
 
-const DEFAULT_CASES = TODAYS_SUGGESTION_GOLDEN_CASES;
+const DEFAULT_CASES = TODAYS_SUGGESTION_LIVE_EVALUATION_CASES;
 const SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS = 12000;
 const SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 2;
 const SUGGESTION_EVALUATION_GENERATION_ATTEMPTS = 3;
@@ -313,6 +313,7 @@ export function runTodaysSuggestionHardChecks(
     checkSensitiveProfileDisclosure(output),
     checkRawReactionHistoryDisclosure(output),
     checkSelectedStepSkipCopy(output),
+    checkSkippedProductNames(evaluationCase, output),
     checkIngredientLayeringConflicts(evaluationCase, output),
     checkExpectedProductIds(evaluationCase, output),
     checkExpectedAnyProductIds(evaluationCase, output),
@@ -1404,6 +1405,26 @@ function checkSelectedStepSkipCopy(
   );
 }
 
+function checkSkippedProductNames(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+  output: SuggestionGenerationOutput,
+): TodaysSuggestionHardCheckResult {
+  const allowedNames = allowedSkippedNames(evaluationCase);
+  const failures = output.explanation.skipped
+    .map((skipped) => skipped.name.trim())
+    .filter((name) => name.length > 0)
+    .filter((name) => !allowedNames.has(normalizeCopyForMatching(name)))
+    .map(
+      (name) =>
+        `Skipped item "${name}" is not an exact owned product name, brand + product name, product ID, or known category.`,
+    );
+  return makeCheck(
+    'skipped_product_names',
+    'Skipped copy references exact owned product names or known categories.',
+    failures,
+  );
+}
+
 function checkIngredientLayeringConflicts(
   evaluationCase: TodaysSuggestionEvaluationCase,
   output: SuggestionGenerationOutput,
@@ -1713,6 +1734,34 @@ function allowedProductIds(
       .map((step) => step.inventory_product_id)
       .filter((id): id is string => Boolean(id)),
   ]);
+}
+
+function allowedSkippedNames(
+  evaluationCase: TodaysSuggestionEvaluationCase,
+): Set<string> {
+  const values = new Set<string>();
+  for (const product of evaluationCase.inputs.shelfActiveProducts) {
+    addAllowedSkippedName(values, product.id);
+    addAllowedSkippedName(values, product.name);
+    addAllowedSkippedName(values, product.category);
+    addAllowedSkippedName(
+      values,
+      [product.brand, product.name].filter(Boolean).join(' '),
+    );
+  }
+  for (const category of Object.values(ProductCategory)) {
+    addAllowedSkippedName(values, category);
+    addAllowedSkippedName(values, category.replace(/-/g, ' '));
+  }
+  return values;
+}
+
+function addAllowedSkippedName(
+  values: Set<string>,
+  value: string | null,
+): void {
+  if (!value?.trim()) return;
+  values.add(normalizeCopyForMatching(value));
 }
 
 function productScoresById(

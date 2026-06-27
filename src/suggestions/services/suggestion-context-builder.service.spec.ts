@@ -720,6 +720,130 @@ describe('SuggestionContextBuilder', () => {
       ]),
     );
   });
+
+  it('surfaces same-date suggestion memory without turning history into a block', async () => {
+    const sameDateSuggestion = {
+      ...previousSuggestion(),
+      target_date: '2026-04-29',
+      target_time: '08:00',
+      daypart: 'morning',
+      steps: [
+        {
+          id: 'suggestion-step-retinoid',
+          step_order: 0,
+          inventory_product_id: 'retinoid-1',
+          product_brand_snapshot: 'Ava Lab',
+          product_name_snapshot: 'Retinal Renewal Serum',
+        },
+      ],
+    } as SuggestionInstance;
+
+    const summary = await builder.build({
+      ...emptyInput(),
+      daypart: 'evening',
+      targetTime: '20:00',
+      shelfActiveProducts: [retinoidProduct()],
+      recentSuggestions: [sameDateSuggestion],
+    });
+
+    expect(summary.routineMemory?.recentSameDateSuggestions).toEqual([
+      expect.objectContaining({
+        targetDate: '2026-04-29',
+        targetTime: '08:00',
+        productIds: ['retinoid-1'],
+      }),
+    ]);
+    const retinoidScore = summary.productScores.find(
+      (score) => score.productId === 'retinoid-1',
+    );
+    expect(retinoidScore?.cautionReasons).not.toContain(
+      'already suggested earlier on target date',
+    );
+    expect(retinoidScore?.suitabilityReasons).toEqual(
+      expect.arrayContaining(['ingredient list available']),
+    );
+  });
+
+  it('turns active avoid-pairing intelligence into product conflicts for suggestions', async () => {
+    const ingredientIntelligence = {
+      matchProducts: jest.fn((products: ProductForAnalysis[]) =>
+        Promise.resolve(
+          products.map((productValue) => ({
+            product: productValue,
+            matchedIngredients:
+              productValue.id === 'niacinamide-serum-1'
+                ? [
+                    matchedIngredient(
+                      'Niacinamide',
+                      IngredientCategory.Niacinamide,
+                    ),
+                  ]
+                : [
+                    matchedIngredient(
+                      'Ascorbyl Glucoside',
+                      IngredientCategory.VitaminC,
+                    ),
+                  ],
+            unresolvedTokens: [],
+            totalTokens: productValue.inciIngredients.length,
+            resolvedTokens: productValue.inciIngredients.length,
+          })),
+        ),
+      ),
+    } as unknown as IngredientIntelligenceService;
+    const builderWithIngredientIntelligence = new SuggestionContextBuilder(
+      cacheRepo,
+      ingredientIntelligence,
+    );
+
+    const summary = await builderWithIngredientIntelligence.build({
+      ...emptyInput(),
+      skinProfile: skinProfile(),
+      shelfActiveProducts: [
+        product({
+          id: 'niacinamide-serum-1',
+          brand: 'The Ordinary',
+          name: 'Niacinamide 10% + Zinc 1%',
+          category: ProductCategory.Serum,
+          preferredTimeOfDay: PreferredTimeOfDay.Evening,
+          inciIngredients: ['Niacinamide'],
+          benefits: ['oil balance support'],
+        }),
+        product({
+          id: 'vitamin-c-serum-1',
+          brand: 'The Ordinary',
+          name: 'Ascorbyl Glucoside Solution 12%',
+          category: ProductCategory.Serum,
+          preferredTimeOfDay: PreferredTimeOfDay.Evening,
+          inciIngredients: ['Ascorbyl Glucoside'],
+          benefits: ['tone support'],
+        }),
+      ],
+    });
+
+    expect(summary.productScores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 'niacinamide-serum-1',
+          ingredientConflicts: expect.arrayContaining([
+            expect.objectContaining({
+              code: 'VITAMIN_C_NIACINAMIDE',
+              productIds: ['niacinamide-serum-1', 'vitamin-c-serum-1'],
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          productId: 'vitamin-c-serum-1',
+          ingredientConflicts: expect.arrayContaining([
+            expect.objectContaining({
+              code: 'VITAMIN_C_NIACINAMIDE',
+              productIds: ['niacinamide-serum-1', 'vitamin-c-serum-1'],
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
 });
 
 function repo<T extends ObjectLiteral>() {

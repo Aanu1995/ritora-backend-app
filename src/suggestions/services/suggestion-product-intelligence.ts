@@ -102,6 +102,7 @@ export function scoreProductForSuggestion(
     reactionSkipCount?: number;
     substitutionCount?: number;
     recentSameDaypartSuggestionCount?: number;
+    recentSameDateSuggestionCount?: number;
     hasReactionSignal: boolean;
     lockedProductIds: Set<string>;
     conservativeRestart: boolean;
@@ -171,6 +172,12 @@ export function scoreProductForSuggestion(
   ) {
     score -= Math.min(16, (options.recentSameDaypartSuggestionCount ?? 0) * 8);
     cautions.push('recent same-daypart repeat');
+  }
+  if (
+    (options.recentSameDateSuggestionCount ?? 0) > 0 &&
+    isRepeatSensitiveActiveProduct(product, activeTags, options)
+  ) {
+    score -= Math.min(12, (options.recentSameDateSuggestionCount ?? 0) * 6);
   }
   if (options.recentUseCount > 4 && activeTags.some(isStrongActiveTag)) {
     score -= 18;
@@ -422,6 +429,32 @@ function isEssentialCurrentContextProduct(
           (tag) => tag === 'barrier_support' || tag === 'ceramide',
         )))
   );
+}
+
+function isRepeatSensitiveActiveProduct(
+  product: InventoryProduct,
+  activeTags: string[],
+  options: {
+    daypart: SuggestionDaypart;
+    lockedProductIds: Set<string>;
+    hasReactionSignal: boolean;
+  },
+): boolean {
+  if (isEssentialCurrentContextProduct(product, activeTags, options)) {
+    return false;
+  }
+  if (
+    product.category === ProductCategory.Cleanser ||
+    product.category === ProductCategory.Moisturizer ||
+    product.category === ProductCategory.SunProtection
+  ) {
+    return false;
+  }
+  return activeTags.some(isRoutineActiveTag);
+}
+
+function isRoutineActiveTag(tag: string): boolean {
+  return !['barrier_support', 'ceramide', 'humectant', 'spf'].includes(tag);
 }
 
 function isExpiredForTargetDate(

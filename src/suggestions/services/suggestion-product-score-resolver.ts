@@ -95,6 +95,10 @@ function buildFallbackScore(
       routineMemory?.recentlySuggestedProductIds.includes(product.id) === true
         ? routineMemory.sameDaypartSuggestionCount
         : 0,
+    recentSameDateSuggestionCount:
+      routineMemory?.recentSameDateSuggestions.filter((fingerprint) =>
+        fingerprint.productIds.includes(product.id),
+      ).length ?? 0,
     hasReactionSignal:
       inputs.contextSummary.reaction.hasSignal ||
       inputs.contextSummary.reaction.barrierCompromised,

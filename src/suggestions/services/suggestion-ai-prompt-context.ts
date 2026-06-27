@@ -241,6 +241,14 @@ export function formatRoutineMemoryForPrompt(
         productIds: fingerprint.productIds,
         productNames: fingerprint.productNames,
       })),
+    recentSameDateSuggestions: memory.recentSameDateSuggestions
+      .slice(0, 10)
+      .map((fingerprint) => ({
+        targetDate: fingerprint.targetDate,
+        targetTime: fingerprint.targetTime,
+        productIds: fingerprint.productIds,
+        productNames: fingerprint.productNames,
+      })),
     recentlySuggestedProductIds: memory.recentlySuggestedProductIds.slice(
       0,
       50,

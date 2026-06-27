@@ -99,6 +99,50 @@ const VITAMIN_C_NIACINAMIDE_CONFLICT: SuggestionIngredientConflictSummary = {
     'Use one in this routine and move the other to a different routine.',
 };
 
+const RETINOID_BHA_CONFLICT: SuggestionIngredientConflictSummary = {
+  id: 'eval-retinoid-bha-layering:bha-1:retinoid-1',
+  code: 'RETINOID_BHA',
+  severity: AnalysisSeverity.High,
+  productIds: ['bha-1', 'retinoid-1'],
+  ingredientNames: ['Salicylic Acid', 'Retinol'],
+  description:
+    'Ingredient analysis says retinoid and BHA products should be separated instead of stacked in the same routine.',
+  mitigation:
+    'Choose one active path for this routine and move the other to a different night.',
+};
+
+const RETINOID_BENZOYL_PEROXIDE_CONFLICT: SuggestionIngredientConflictSummary =
+  {
+    id: 'eval-retinoid-benzoyl-layering:benzoyl-1:retinoid-1',
+    code: 'BENZOYL_PEROXIDE_RETINOID',
+    severity: AnalysisSeverity.High,
+    productIds: ['benzoyl-1', 'retinoid-1'],
+    ingredientNames: ['Benzoyl Peroxide', 'Retinol'],
+    description:
+      'Ingredient analysis says benzoyl peroxide and retinoid products should be separated in this routine.',
+    mitigation:
+      'Use one acne-active route now and place the other in a separate routine.',
+  };
+
+const VITAMIN_C_AHA_CONFLICT: SuggestionIngredientConflictSummary = {
+  id: 'eval-vitamin-c-aha-layering:aha-1:vitamin-c-1',
+  code: 'VITAMIN_C_AHA',
+  severity: AnalysisSeverity.Medium,
+  productIds: ['aha-1', 'vitamin-c-1'],
+  ingredientNames: ['Glycolic Acid', 'Ascorbyl Glucoside'],
+  description:
+    'Ingredient analysis says vitamin C and exfoliating acid products should be separated when same-routine irritation risk is flagged.',
+  mitigation:
+    'Use one brightening or exfoliating active in this routine and move the other to another routine.',
+};
+
+const EVALUATION_INGREDIENT_CONFLICTS = [
+  VITAMIN_C_NIACINAMIDE_CONFLICT,
+  RETINOID_BHA_CONFLICT,
+  RETINOID_BENZOYL_PEROXIDE_CONFLICT,
+  VITAMIN_C_AHA_CONFLICT,
+] as const;
+
 export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluationCase[] =
   [
     buildCase({
@@ -308,6 +352,134 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
       manualReviewChecklist: [
         'Does medication context slow down active escalation?',
         'Does it suggest checking active use with the responsible professional without sounding diagnostic?',
+      ],
+    }),
+    buildCase({
+      id: 'ingredient_conflict_vitamin_c_niacinamide_morning',
+      title: 'Vitamin C and niacinamide conflict keeps one serum out',
+      riskFocus: ['ingredient_conflict', 'serum_layering', 'irritation_risk'],
+      profile: profile({
+        primaryGoal: 'fade post-acne dark marks without irritating skin',
+        currentConcerns: ['dark marks', 'uneven tone', 'oiliness'],
+        activeTolerances: {
+          vitamin_c: { tolerance: 'medium' },
+          niacinamide: { tolerance: 'good' },
+        },
+        routinePreferences: { pace: 'steady', am_minutes: 8 },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '08:15',
+      products: [
+        cleanser(),
+        moisturizer(),
+        sunscreen(),
+        vitaminCSerum(),
+        niacinamideSerum(),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        requiredProductIds: ['spf-1'],
+        requiredAnyProductIds: [['vitamin-c-1', 'niacinamide-1']],
+        minSelectedNonBasicCategoryCount: 1,
+        maxStepCount: 4,
+      },
+      manualReviewChecklist: [
+        'Does it choose one serum path instead of layering both conflict-marked serums?',
+        'Does it still produce a useful morning routine with SPF?',
+      ],
+    }),
+    buildCase({
+      id: 'ingredient_conflict_retinoid_bha_evening',
+      title: 'Retinoid and BHA conflict selects one active route',
+      riskFocus: ['ingredient_conflict', 'retinoid', 'bha', 'barrier_risk'],
+      profile: profile({
+        primaryGoal: 'smooth texture and reduce clogged pores',
+        currentConcerns: ['texture', 'clogged pores', 'acne'],
+        activeTolerances: {
+          retinoid: { tolerance: 'medium' },
+          bha: { tolerance: 'medium' },
+        },
+        routinePreferences: { pace: 'steady', pm_minutes: 10 },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:30',
+      products: [cleanser(), moisturizer(), retinoid(), bhaExfoliant()],
+      expected: {
+        requiredAnyProductIds: [['retinoid-1', 'bha-1']],
+        minSelectedNonBasicCategoryCount: 1,
+        maxStrongActiveCount: 1,
+        maxStepCount: 3,
+      },
+      manualReviewChecklist: [
+        'Does it avoid placing retinoid and BHA in the same routine?',
+        'Does it explain the selected active without inventing a reaction?',
+      ],
+    }),
+    buildCase({
+      id: 'ingredient_conflict_retinoid_benzoyl_evening',
+      title: 'Retinoid and benzoyl peroxide conflict selects one acne path',
+      riskFocus: [
+        'ingredient_conflict',
+        'retinoid',
+        'benzoyl_peroxide',
+        'acne',
+      ],
+      profile: profile({
+        primaryGoal: 'reduce breakouts while protecting the barrier',
+        currentConcerns: ['acne', 'oiliness', 'texture'],
+        activeTolerances: {
+          retinoid: { tolerance: 'medium' },
+          benzoyl_peroxide: { tolerance: 'medium' },
+        },
+        routinePreferences: { pace: 'steady', pm_minutes: 10 },
+      }),
+      daypart: SuggestionDaypart.Evening,
+      targetTime: '20:45',
+      products: [cleanser(), moisturizer(), retinoid(), benzoylTreatment()],
+      expected: {
+        requiredAnyProductIds: [['retinoid-1', 'benzoyl-1']],
+        minSelectedNonBasicCategoryCount: 1,
+        maxStrongActiveCount: 1,
+        maxStepCount: 3,
+      },
+      manualReviewChecklist: [
+        'Does it avoid stacking retinoid and benzoyl peroxide?',
+        'Does it still select one acne-relevant active route when no reaction is present?',
+      ],
+    }),
+    buildCase({
+      id: 'ingredient_conflict_vitamin_c_aha_morning',
+      title: 'Vitamin C and AHA conflict avoids brightening-acid stack',
+      riskFocus: ['ingredient_conflict', 'vitamin_c', 'aha', 'pigment'],
+      profile: profile({
+        primaryGoal: 'brighten uneven tone without over-exfoliating',
+        currentConcerns: ['dark marks', 'texture', 'uneven tone'],
+        activeTolerances: {
+          vitamin_c: { tolerance: 'medium' },
+          aha: { tolerance: 'medium' },
+        },
+        routinePreferences: { pace: 'steady', am_minutes: 8 },
+      }),
+      daypart: SuggestionDaypart.Morning,
+      targetTime: '08:20',
+      products: [
+        cleanser(),
+        moisturizer(),
+        sunscreen(),
+        vitaminCSerum(),
+        morningAhaToner(),
+      ],
+      expected: {
+        requiresSpfProtection: true,
+        requiredProductIds: ['spf-1'],
+        requiredAnyProductIds: [['vitamin-c-1', 'aha-1']],
+        minSelectedNonBasicCategoryCount: 1,
+        maxStrongActiveCount: 1,
+        maxStepCount: 4,
+      },
+      manualReviewChecklist: [
+        'Does it avoid stacking vitamin C and an exfoliating acid?',
+        'Does it keep sunscreen present for a pigment/acid morning?',
       ],
     }),
     buildCase({
@@ -1073,6 +1245,47 @@ export const TODAYS_SUGGESTION_GOLDEN_CASES: readonly TodaysSuggestionEvaluation
     }),
   ];
 
+export const TODAYS_SUGGESTION_LIVE_EVALUATION_CASE_IDS = [
+  'active_reaction_barrier_damage',
+  'aha_bha_retinoid_conflict',
+  'ingredient_conflict_vitamin_c_niacinamide_morning',
+  'ingredient_conflict_retinoid_bha_evening',
+  'ingredient_conflict_retinoid_benzoyl_evening',
+  'ingredient_conflict_vitamin_c_aha_morning',
+  'specialist_locked_step',
+  'repeated_morning_routine_history',
+  'twelve_product_acne_evening',
+  'moderate_broad_shelf_evening_no_cooldown',
+  'tolerated_retinoid_evening_sparse_history',
+  'tolerated_vitamin_c_morning_not_crowded_out',
+  'non_serum_categories_evening',
+] as const;
+
+const LIVE_EVALUATION_CASE_ID_SET = new Set<string>(
+  TODAYS_SUGGESTION_LIVE_EVALUATION_CASE_IDS,
+);
+
+export const TODAYS_SUGGESTION_LIVE_EVALUATION_CASES =
+  TODAYS_SUGGESTION_GOLDEN_CASES.filter((evaluationCase) =>
+    LIVE_EVALUATION_CASE_ID_SET.has(evaluationCase.id),
+  );
+
+const missingLiveEvaluationCaseIds =
+  TODAYS_SUGGESTION_LIVE_EVALUATION_CASE_IDS.filter(
+    (caseId) =>
+      !TODAYS_SUGGESTION_LIVE_EVALUATION_CASES.some(
+        (evaluationCase) => evaluationCase.id === caseId,
+      ),
+  );
+
+if (missingLiveEvaluationCaseIds.length > 0) {
+  throw new Error(
+    `Missing Today's Suggestion live evaluation cases: ${missingLiveEvaluationCaseIds.join(
+      ', ',
+    )}`,
+  );
+}
+
 function buildCase(input: {
   id: string;
   title: string;
@@ -1428,6 +1641,7 @@ function buildHistorySignals(
       previousSuggestionCount: applications.length,
       sameDaypartSuggestionCount: sameDaypartApplications.length,
       recentSameDaypartFingerprints,
+      recentSameDateSuggestions: [],
       recentlySuggestedProductIds: [
         ...new Set(
           recentSameDaypartFingerprints.flatMap((item) => item.productIds),
@@ -1506,9 +1720,9 @@ function productScore(
 function productIngredientConflicts(
   product: InventoryProduct,
 ): SuggestionIngredientConflictSummary[] {
-  return VITAMIN_C_NIACINAMIDE_CONFLICT.productIds.includes(product.id)
-    ? [VITAMIN_C_NIACINAMIDE_CONFLICT]
-    : [];
+  return EVALUATION_INGREDIENT_CONFLICTS.filter((conflict) =>
+    conflict.productIds.includes(product.id),
+  );
 }
 
 function productSourceIds(
@@ -1750,6 +1964,19 @@ function ahaToner() {
     ingredients: ['glycolic acid'],
     cautions: ['May increase sun sensitivity.'],
     preferredTime: PreferredTimeOfDay.Evening,
+  });
+}
+
+function morningAhaToner() {
+  return product({
+    id: 'aha-1',
+    brand: 'Ava Lab',
+    name: 'Morning Glycolic Toner',
+    category: ProductCategory.Toner,
+    tags: ['aha', 'glycolic', 'texture-support'],
+    ingredients: ['glycolic acid'],
+    cautions: ['Use sunscreen and avoid stacking with other acid routines.'],
+    preferredTime: PreferredTimeOfDay.Morning,
   });
 }
 

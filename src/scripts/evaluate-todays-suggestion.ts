@@ -2,7 +2,10 @@ import { mkdir, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { ConfigService } from '@nestjs/config';
 import { evaluationEnvFilePaths, loadEnvFiles } from '../config/env-files';
-import { TODAYS_SUGGESTION_GOLDEN_CASES } from '../suggestions/evaluation/todays-suggestion-golden-cases';
+import {
+  TODAYS_SUGGESTION_GOLDEN_CASES,
+  TODAYS_SUGGESTION_LIVE_EVALUATION_CASES,
+} from '../suggestions/evaluation/todays-suggestion-golden-cases';
 import {
   createLiveTodaysSuggestionEvaluationRunner,
   evaluateTodaysSuggestionGoldenCases,
@@ -36,7 +39,7 @@ export async function runTodaysSuggestionEvaluationCli(
     ? TODAYS_SUGGESTION_GOLDEN_CASES.filter((evaluationCase) =>
         options.caseIds.includes(evaluationCase.id),
       )
-    : TODAYS_SUGGESTION_GOLDEN_CASES;
+    : TODAYS_SUGGESTION_LIVE_EVALUATION_CASES;
   if (cases.length === 0) {
     throw new Error(
       "No Today's Suggestion evaluation cases matched the filter.",
