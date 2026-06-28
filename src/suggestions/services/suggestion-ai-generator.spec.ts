@@ -51,7 +51,7 @@ describe('SuggestionAiGenerator', () => {
     jest.restoreAllMocks();
   });
 
-  it('calls OpenAI with low-temperature structured output for repeatable suggestions', async () => {
+  it('uses a bounded agentic OpenAI workflow for scheduled suggestions', async () => {
     const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -93,15 +93,48 @@ describe('SuggestionAiGenerator', () => {
       inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
     );
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0]?.[1]?.body as string,
-    ) as Record<string, unknown>;
-    expect(body).toEqual(
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const bodies = fetchMock.mock.calls.map(
+      (call) => JSON.parse(call[1]?.body as string) as Record<string, unknown>,
+    );
+    expect(bodies[0]).toEqual(
       expect.objectContaining({
         model: 'gpt-4.1-mini',
         store: false,
         reasoning: { effort: OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT },
         temperature: 0,
+        max_output_tokens: 4000,
+        text: expect.objectContaining({
+          format: expect.objectContaining({
+            name: 'todays_suggestion_agent_plan',
+          }),
+        }),
+      }),
+    );
+    expect(bodies[1]).toEqual(
+      expect.objectContaining({
+        model: 'gpt-4.1-mini',
+        store: false,
+        reasoning: { effort: OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT },
+        temperature: 0,
+        max_output_tokens: 24000,
+        text: expect.objectContaining({
+          format: expect.objectContaining({ name: 'suggestion_response' }),
+        }),
+      }),
+    );
+    expect(bodies[2]).toEqual(
+      expect.objectContaining({
+        model: 'gpt-4.1-mini',
+        store: false,
+        reasoning: { effort: OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT },
+        temperature: 0,
+        max_output_tokens: 5000,
+        text: expect.objectContaining({
+          format: expect.objectContaining({
+            name: 'todays_suggestion_agent_review',
+          }),
+        }),
       }),
     );
     const requestedTimeoutMs = timeoutSpy.mock.calls[0]?.[0];
@@ -111,6 +144,132 @@ describe('SuggestionAiGenerator', () => {
     expect(requestedTimeoutMs).toBeLessThanOrEqual(
       SUGGESTION_AI_TODAYS_TIMEOUT_MS,
     );
+  });
+
+  it('repairs a scheduled suggestion once when agent self-review finds a blocking issue', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(openAiTextResponse(agentPlan()))
+      .mockResolvedValueOnce(
+        openAiTextResponse({
+          simplifiedForReaction: false,
+          explanation: {
+            headline: 'Morning plan',
+            body: ['Use a light morning plan.'],
+            perStepReasons: [],
+            skipped: [],
+            inputs: [],
+          },
+          steps: [aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser)],
+          gapRecommendations: [],
+          safetyFlags: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        openAiTextResponse({
+          passed: false,
+          blockingIssues: [
+            {
+              code: 'missing_required_spf',
+              severity: 'high',
+              message: 'Morning output omitted required owned SPF.',
+              productIds: ['spf-1'],
+            },
+          ],
+          nonBlockingIssues: [],
+          repairInstructions: ['Include the eligible owned SPF step.'],
+        }),
+      )
+      .mockResolvedValueOnce(
+        openAiTextResponse({
+          simplifiedForReaction: false,
+          explanation: {
+            headline: 'Morning shelf plan',
+            body: ['Use your morning shelf steps.'],
+            perStepReasons: [],
+            skipped: [],
+            inputs: [],
+          },
+          steps: [
+            aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+            aiProductStep(1, 'moisturizer-1', ProductCategory.Moisturizer),
+            aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+          ],
+          gapRecommendations: [],
+          safetyFlags: [],
+        }),
+      )
+      .mockResolvedValueOnce(openAiTextResponse(agentPassingReview()));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    const repairBody = JSON.parse(
+      fetchMock.mock.calls[3]?.[1]?.body as string,
+    ) as { input: { content: { text: string }[] }[] };
+    expect(repairBody.input[1]?.content[0]?.text).toContain(
+      'Include the eligible owned SPF step.',
+    );
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ inventoryProductId: 'spf-1' }),
+      ]),
+    );
+  });
+
+  it('retries a scheduled OpenAI rate limit response within the Today timeout budget', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(openAiErrorResponse(429, '0'))
+      .mockResolvedValueOnce(openAiTextResponse(agentPlan()))
+      .mockResolvedValueOnce(
+        openAiTextResponse({
+          simplifiedForReaction: false,
+          explanation: {
+            headline: 'Morning shelf plan',
+            body: ['Use your morning shelf steps.'],
+            perStepReasons: [],
+            skipped: [],
+            inputs: [],
+          },
+          steps: [
+            aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+            aiProductStep(1, 'moisturizer-1', ProductCategory.Moisturizer),
+            aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+          ],
+          gapRecommendations: [],
+          safetyFlags: [],
+        }),
+      )
+      .mockResolvedValueOnce(openAiTextResponse(agentPassingReview()));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
   });
 
   it('uses medium reasoning for on-demand quick suggestions', async () => {
@@ -3569,7 +3728,7 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(result.metadata.provider).toBe('openai');
     expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps).toEqual([]);
@@ -3681,7 +3840,7 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(result.metadata.provider).toBe('openai');
     expect(result.metadata.fallbackReason).toBeNull();
     expect(result.steps).toEqual(
@@ -3717,7 +3876,7 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(result.metadata.provider).toBe('deterministic_baseline');
     expect(result.metadata.fallbackReason).toBe('provider_failure');
     expect(result.explanation.headline).toBe('Using your shelf today');
@@ -3757,7 +3916,7 @@ describe('SuggestionAiGenerator', () => {
     const fetchMock = jest
       .fn()
       .mockRejectedValueOnce(new Error('transient provider failure'))
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: true,
         json: jest.fn().mockResolvedValue({
           output: [
@@ -3805,7 +3964,7 @@ describe('SuggestionAiGenerator', () => {
       inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(result.metadata.provider).toBe('openai');
     expect(result.metadata.fallbackReason).toBeNull();
   });
@@ -3813,6 +3972,7 @@ describe('SuggestionAiGenerator', () => {
   it('retries malformed scheduled structured output within the Today timeout budget', async () => {
     const fetchMock = jest
       .fn()
+      .mockResolvedValueOnce(openAiTextResponse(agentPlan()))
       .mockResolvedValueOnce({
         ok: true,
         json: jest.fn().mockResolvedValue({
@@ -3862,7 +4022,8 @@ describe('SuggestionAiGenerator', () => {
             },
           ],
         }),
-      });
+      })
+      .mockResolvedValueOnce(openAiTextResponse(agentPassingReview()));
     global.fetch = fetchMock;
     const generator = new SuggestionAiGenerator({
       get: jest.fn((key: string) => {
@@ -3876,7 +4037,7 @@ describe('SuggestionAiGenerator', () => {
       inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(result.metadata.provider).toBe('openai');
     expect(result.metadata.fallbackReason).toBeNull();
   });
@@ -5708,6 +5869,70 @@ function product(
     },
     ...overrides,
   } as unknown as InventoryProduct;
+}
+
+function openAiTextResponse(
+  value: unknown,
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  },
+) {
+  return {
+    ok: true,
+    json: jest.fn().mockResolvedValue({
+      output: [
+        {
+          content: [
+            {
+              type: 'output_text',
+              text: JSON.stringify(value),
+            },
+          ],
+        },
+      ],
+      usage,
+    }),
+  };
+}
+
+function openAiErrorResponse(status: number, retryAfter: string | null) {
+  return {
+    ok: false,
+    status,
+    headers: {
+      get: jest.fn((name: string) =>
+        name.toLowerCase() === 'retry-after' ? retryAfter : null,
+      ),
+    },
+  };
+}
+
+function agentPlan() {
+  return {
+    dataAudit: [
+      {
+        source: 'active_shelf_products',
+        status: 'available',
+        notes: 'Owned product data is available.',
+      },
+    ],
+    decisionChecklist: ['Respect ownership, timing, SPF, and conflicts.'],
+    candidateProductIds: ['cleanser-1', 'moisturizer-1', 'spf-1'],
+    blockedProductIds: [],
+    pairingRisks: [],
+    reviewFocus: ['required daytime SPF', 'exact product IDs'],
+  };
+}
+
+function agentPassingReview() {
+  return {
+    passed: true,
+    blockingIssues: [],
+    nonBlockingIssues: [],
+    repairInstructions: [],
+  };
 }
 
 function productScore(
