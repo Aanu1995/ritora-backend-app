@@ -1381,19 +1381,21 @@ function checkSelectedStepSkipCopy(
   output: SuggestionGenerationOutput,
 ): TodaysSuggestionHardCheckResult {
   const selectedLabels = selectedStepCopyLabels(output.steps);
+  const selectedProductLabels = selectedStepProductCopyLabels(output.steps);
   const failures = generatedCopyFields(output)
     .filter((field) =>
-      textSaysSelectedStepWasSkipped(
-        `${field.label} ${field.text}`,
-        selectedLabels,
-      ),
+      textSaysSelectedStepWasSkipped(field.text, selectedLabels),
     )
     .map((field) => `${field.label} says a selected step was skipped.`);
 
   for (const skipped of output.explanation.skipped) {
-    if (selectedLabels.some((label) => labelMatchesText(label, skipped.name))) {
+    if (
+      selectedProductLabels.some((label) =>
+        labelMatchesText(label, skipped.name),
+      )
+    ) {
       failures.push(
-        `skipped.${skipped.name} lists a product/category that was selected.`,
+        `skipped.${skipped.name} lists a product that was selected.`,
       );
     }
   }
@@ -1905,6 +1907,25 @@ function selectedStepCopyLabels(
           step.productName,
           [step.productBrand, step.productName].filter(Boolean).join(' '),
           step.stepLabel,
+          step.customLabel,
+        ])
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map(normalizeCopyForMatching)
+        .filter((value) => value.length >= 3),
+    ),
+  ];
+}
+
+function selectedStepProductCopyLabels(
+  steps: readonly SuggestionGenerationStepOutput[],
+): string[] {
+  return [
+    ...new Set(
+      steps
+        .flatMap((step) => [
+          step.inventoryProductId,
+          step.productName,
+          [step.productBrand, step.productName].filter(Boolean).join(' '),
           step.customLabel,
         ])
         .filter((value): value is string => Boolean(value?.trim()))

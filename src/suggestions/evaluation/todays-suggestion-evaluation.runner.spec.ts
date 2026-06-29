@@ -197,6 +197,82 @@ describe("Today's Suggestion evaluation hard checks", () => {
     );
   });
 
+  it('allows skipped alternatives that share the selected step category', () => {
+    const evaluationCase = goldenCase(
+      'ingredient_conflict_vitamin_c_niacinamide_morning',
+    );
+    const output = baseOutput({
+      explanation: {
+        headline: 'Morning brightening routine',
+        body: ['Vitamin C fits the dark-mark goal this morning.'],
+        perStepReasons: [],
+        skipped: [
+          {
+            name: 'Plain Lab Niacinamide Serum',
+            reason: 'ingredient/layering caution',
+          },
+        ],
+        inputs: [],
+      },
+      steps: [
+        step({
+          order: 0,
+          productId: 'vitamin-c-1',
+          productName: 'Ascorbyl Glucoside Solution 12%',
+          label: ProductCategory.Serum,
+        }),
+        step({
+          order: 1,
+          productId: 'moisturizer-1',
+          productName: 'Barrier Cream',
+          label: ProductCategory.Moisturizer,
+        }),
+        step({
+          order: 2,
+          productId: 'spf-1',
+          productName: 'Daily SPF 50',
+          label: ProductCategory.SunProtection,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).not.toContain(
+      'selected_step_skip_copy',
+    );
+  });
+
+  it('still fails skipped copy that names the selected product exactly', () => {
+    const evaluationCase = goldenCase(
+      'ingredient_conflict_vitamin_c_niacinamide_morning',
+    );
+    const output = baseOutput({
+      explanation: {
+        headline: 'Morning brightening routine',
+        body: ['Vitamin C fits the dark-mark goal this morning.'],
+        perStepReasons: [],
+        skipped: [
+          {
+            name: 'The Ordinary Ascorbyl Glucoside Solution 12%',
+            reason: 'ingredient/layering caution',
+          },
+        ],
+        inputs: [],
+      },
+      steps: [
+        step({
+          order: 0,
+          productId: 'vitamin-c-1',
+          productName: 'Ascorbyl Glucoside Solution 12%',
+          label: ProductCategory.Serum,
+        }),
+      ],
+    });
+
+    expect(failedCheckIds(evaluationCase, output)).toContain(
+      'selected_step_skip_copy',
+    );
+  });
+
   it('fails specialist-locked step mutation', () => {
     const evaluationCase = goldenCase('specialist_locked_step');
     const output = baseOutput({
