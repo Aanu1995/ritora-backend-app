@@ -868,6 +868,18 @@ describe('suggestion AI contract', () => {
     ).toBe('{"ok":true}');
     expect(
       extractOutputText({
+        output: [
+          {
+            content: [
+              { type: 'output_text', text: '{"ok":' },
+              { type: 'output_text', text: 'true}' },
+            ],
+          },
+        ],
+      }),
+    ).toBe('{"ok":true}');
+    expect(
+      extractOutputText({
         output: [{ content: [{ type: 'refusal', refusal: 'no' }] }],
       }),
     ).toBeNull();
