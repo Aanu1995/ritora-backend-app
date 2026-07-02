@@ -2,6 +2,12 @@ import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleAsyncOptions } from '@nestjs/typeorm';
 import { getBooleanConfig, getNumberConfig } from './config-value.utils';
 
+const POOL_MAX_CONNECTIONS = 20;
+const POOL_CONNECTION_TIMEOUT_MS = 5000;
+const POOL_IDLE_TIMEOUT_MS = 30000;
+const STATEMENT_TIMEOUT_MS = 30000;
+const IDLE_IN_TRANSACTION_TIMEOUT_MS = 60000;
+
 export const databaseConfig: TypeOrmModuleAsyncOptions = {
   inject: [ConfigService],
   useFactory: (configService: ConfigService) => {
@@ -28,6 +34,13 @@ export const databaseConfig: TypeOrmModuleAsyncOptions = {
       migrationsRun: false,
       migrations: [__dirname + '/../database/migrations/*{.ts,.js}'],
       logging: databaseLoggingEnabled,
+      extra: {
+        max: POOL_MAX_CONNECTIONS,
+        connectionTimeoutMillis: POOL_CONNECTION_TIMEOUT_MS,
+        idleTimeoutMillis: POOL_IDLE_TIMEOUT_MS,
+        statement_timeout: STATEMENT_TIMEOUT_MS,
+        idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
+      },
     };
   },
 };

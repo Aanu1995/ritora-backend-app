@@ -22,6 +22,7 @@ const AppleStrategyBase = AppleStrategyPackage.Strategy;
 const APPLE_ISSUER = 'https://appleid.apple.com';
 const APPLE_JWKS_URL = 'https://appleid.apple.com/auth/keys';
 const APPLE_JWKS_CACHE_MS = 6 * 60 * 60 * 1000;
+const APPLE_JWKS_FETCH_TIMEOUT_MS = 5000;
 
 type AppleJwtPayload = JwtPayload & {
   email?: unknown;
@@ -148,7 +149,9 @@ export class AppleStrategy extends PassportStrategy(
     const publicKeys = new Map<string, string>();
 
     try {
-      const response = await fetch(APPLE_JWKS_URL);
+      const response = await fetch(APPLE_JWKS_URL, {
+        signal: AbortSignal.timeout(APPLE_JWKS_FETCH_TIMEOUT_MS),
+      });
       if (!response.ok) {
         throw new Error('Apple JWKS request failed');
       }

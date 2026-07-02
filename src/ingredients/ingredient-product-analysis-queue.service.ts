@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, LessThan, LessThanOrEqual, Repository } from 'typeorm';
 import { DEFAULT_LANGUAGE, type AppLanguage } from '../common/i18n/i18n';
+import { mapWithConcurrency } from '../common/utils/concurrency';
 import { InventoryProduct } from '../inventory/entities/inventory-product.entity';
 import {
   IngredientProductAnalysisJob,
@@ -26,6 +27,7 @@ import { buildProductIngredientAnalysisHash } from './ingredient-product-analysi
 const INGREDIENT_PRODUCT_ANALYSIS_MAX_ATTEMPTS = 3;
 const INGREDIENT_PRODUCT_ANALYSIS_SQS_WAIT_TIME_SECONDS = 10;
 const INGREDIENT_PRODUCT_ANALYSIS_STALE_JOB_BATCH_SIZE = 25;
+const SQS_DISPATCH_CONCURRENCY = 8;
 const ACTIVE_JOB_STATUSES: readonly IngredientProductAnalysisJobStatus[] = [
   IngredientProductAnalysisJobStatus.Queued,
   IngredientProductAnalysisJobStatus.Sent,
@@ -176,38 +178,50 @@ export class IngredientProductAnalysisQueueService implements OnModuleDestroy {
       take: limit,
     });
     let sent = 0;
-    for (const job of dueJobs) {
-      const claimed = await this.jobRepo.update(
-        {
-          id: job.id,
-          status: IngredientProductAnalysisJobStatus.Queued,
-          run_after: LessThanOrEqual(now),
-        },
-        {
-          status: IngredientProductAnalysisJobStatus.Sent,
-          last_error: null,
-          updated_at: now,
-        },
-      );
-      if (!claimed.affected) {
-        continue;
-      }
-
-      try {
-        await this.sendSqsJob(job.id);
-        sent += 1;
-      } catch (error) {
-        await this.jobRepo.update(
-          { id: job.id, status: IngredientProductAnalysisJobStatus.Sent },
+    const results = await mapWithConcurrency(
+      dueJobs,
+      SQS_DISPATCH_CONCURRENCY,
+      async (job) => {
+        const claimed = await this.jobRepo.update(
           {
+            id: job.id,
             status: IngredientProductAnalysisJobStatus.Queued,
-            last_error: errorMessage(error),
-            updated_at: new Date(),
+            run_after: LessThanOrEqual(now),
+          },
+          {
+            status: IngredientProductAnalysisJobStatus.Sent,
+            last_error: null,
+            updated_at: now,
           },
         );
+        if (!claimed.affected) {
+          return;
+        }
+
+        try {
+          await this.sendSqsJob(job.id);
+          sent += 1;
+        } catch (error) {
+          await this.jobRepo.update(
+            { id: job.id, status: IngredientProductAnalysisJobStatus.Sent },
+            {
+              status: IngredientProductAnalysisJobStatus.Queued,
+              last_error: errorMessage(error),
+              updated_at: new Date(),
+            },
+          );
+          this.logger.error(
+            `Failed to send ingredient product analysis job ${job.id} to SQS`,
+            error,
+          );
+        }
+      },
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') {
         this.logger.error(
-          `Failed to send ingredient product analysis job ${job.id} to SQS`,
-          error,
+          'Failed to dispatch ingredient product analysis job',
+          result.reason,
         );
       }
     }
