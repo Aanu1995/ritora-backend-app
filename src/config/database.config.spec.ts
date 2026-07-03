@@ -79,4 +79,30 @@ describe('databaseConfig', () => {
 
     expect(options.logging).toBe(true);
   });
+
+  it('configures pool sizing and statement timeouts', () => {
+    const configService = createConfigService({
+      DATABASE_HOST: 'localhost',
+      DATABASE_PORT: 5432,
+      DATABASE_NAME: 'ritora',
+      DATABASE_USER: 'postgres',
+      DATABASE_PASSWORD: 'password',
+      DATABASE_SSL: false,
+      DATABASE_SSL_REJECT_UNAUTHORIZED: false,
+      DATABASE_LOGGING: false,
+      NODE_ENV: 'development',
+    });
+
+    const options = databaseConfig.useFactory?.(configService) as {
+      extra: Record<string, number>;
+    };
+
+    expect(options.extra).toEqual({
+      max: 20,
+      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 30000,
+      statement_timeout: 30000,
+      idle_in_transaction_session_timeout: 60000,
+    });
+  });
 });

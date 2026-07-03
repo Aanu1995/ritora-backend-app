@@ -1,4 +1,5 @@
 import {
+  addDaysToDateString,
   buildSlotInstant,
   clampLeadTimeMinutes,
   clockTimesEqual,
@@ -44,5 +45,28 @@ describe('suggestion helpers', () => {
         'Europe/Stockholm',
       ).toISOString(),
     ).toBe('2026-05-04T06:00:00.000Z');
+  });
+
+  describe('addDaysToDateString', () => {
+    it('adds days across month and year boundaries', () => {
+      expect(addDaysToDateString('2026-01-31', 1)).toBe('2026-02-01');
+      expect(addDaysToDateString('2026-12-31', 1)).toBe('2027-01-01');
+      expect(addDaysToDateString('2026-03-01', -1)).toBe('2026-02-28');
+    });
+
+    it('handles leap years', () => {
+      expect(addDaysToDateString('2028-02-28', 1)).toBe('2028-02-29');
+      expect(addDaysToDateString('2028-02-29', 1)).toBe('2028-03-01');
+    });
+
+    it('advances one calendar day across DST fall-back dates', () => {
+      // 2026-11-01 is a 25-hour day in America/New_York; calendar arithmetic
+      // must still land on the next date.
+      expect(addDaysToDateString('2026-11-01', 1)).toBe('2026-11-02');
+    });
+
+    it('returns the input unchanged when it is not a date string', () => {
+      expect(addDaysToDateString('not-a-date', 1)).toBe('not-a-date');
+    });
   });
 });

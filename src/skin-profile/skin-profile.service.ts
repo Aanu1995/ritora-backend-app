@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { isPostgresUniqueConstraintError } from '../common/utils/database-errors';
 import { nowDate } from '../common/utils/date';
 import { SmartPicksPreparationService } from '../smart-picks/services/smart-picks-preparation.service';
 import { UserConsent } from '../users/entities/user-consent.entity';
@@ -160,7 +161,15 @@ export class SkinProfileService {
           : (dto.hormonalContext ?? {}),
     });
 
-    const savedProfile = await this.profileRepository.save(profile);
+    let savedProfile: SkinProfile;
+    try {
+      savedProfile = await this.profileRepository.save(profile);
+    } catch (error) {
+      if (isPostgresUniqueConstraintError(error)) {
+        throw new ConflictException('Skin profile already exists');
+      }
+      throw error;
+    }
     await this.syncLocationConsent(
       userId,
       this.hasLocationData(savedProfile.country_code, savedProfile.city),

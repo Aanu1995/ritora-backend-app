@@ -287,6 +287,19 @@ describe('SkinProfileService', () => {
       expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
     });
 
+    it('maps a concurrent duplicate insert to a conflict error', async () => {
+      usersService.findById.mockResolvedValue(fakeUser());
+      repo.findOne.mockResolvedValue(null);
+      repo.save.mockRejectedValue(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+
+      await expect(
+        service.create('01TESTUSER', validCreateDto()),
+      ).rejects.toThrow(ConflictException);
+      expect(smartPicksPreparation.scheduleForUser).not.toHaveBeenCalled();
+    });
+
     it('requires health consent for health context', async () => {
       usersService.findById.mockResolvedValue(fakeUser());
       repo.findOne.mockResolvedValue(null);

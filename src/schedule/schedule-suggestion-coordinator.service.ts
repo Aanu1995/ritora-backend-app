@@ -13,6 +13,7 @@ import {
 } from '../suggestions/suggestions.constants';
 import { requeueSuggestionGenerationJob } from '../suggestions/services/suggestion-generation-job-queue';
 import {
+  addDaysToDateString,
   buildSlotInstant,
   clampLeadTimeMinutes,
   clockTimesEqual,
@@ -107,10 +108,8 @@ export class ScheduleSuggestionCoordinator {
       }),
     ]);
     const timeZone = user?.time_zone ?? 'UTC';
-    const dates = [
-      formatDateInTimeZone(timeZone, now),
-      formatDateInTimeZone(timeZone, new Date(now.getTime() + 86_400_000)),
-    ];
+    const today = formatDateInTimeZone(timeZone, now);
+    const dates = [today, addDaysToDateString(today, 1)];
 
     return {
       now,

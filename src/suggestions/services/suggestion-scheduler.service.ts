@@ -32,6 +32,7 @@ import {
 } from '../suggestions.constants';
 import { RoutineBreakService } from './routine-break.service';
 import {
+  addDaysToDateString,
   buildSlotInstant,
   clampLeadTimeMinutes,
   clockTimeToSeconds,
@@ -155,9 +156,10 @@ export class SuggestionScheduler implements OnModuleInit, OnModuleDestroy {
       const timeZone = resolveEffectiveTimeZone(user.time_zone, null);
 
       // Look at today and tomorrow in the user's TZ.
+      const todayInTimeZone = formatDateInTimeZone(timeZone, now);
       const candidateDates = [
-        formatDateInTimeZone(timeZone, now),
-        formatDateInTimeZone(timeZone, new Date(now.getTime() + 86_400_000)),
+        todayInTimeZone,
+        addDaysToDateString(todayInTimeZone, 1),
       ];
       for (const targetDate of candidateDates) {
         if (!matchesDayOfWeek(targetDate, slot.day_of_week)) continue;

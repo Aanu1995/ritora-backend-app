@@ -16,6 +16,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { mapWithConcurrency } from '../../common/utils/concurrency';
 import { SkinJournalAnalysisJob } from '../entities/skin-journal-analysis-job.entity';
 import {
   SKIN_JOURNAL_ANALYSIS_ASSUMED_RUN_COST_USD,
@@ -45,6 +46,7 @@ const CLAIMABLE_JOB_STATUSES: AnalysisJobStatus[] = [
   AnalysisJobStatusValue.Sent,
 ];
 const ANALYSIS_JOB_TABLE_NAME = 'skin_journal_analysis_jobs';
+const SQS_DISPATCH_CONCURRENCY = 8;
 
 export type AnalysisQueueMessage = {
   jobId: string;
@@ -217,20 +219,32 @@ export class SkinJournalAnalysisQueueService
       take: limit,
     });
     let sent = 0;
-    for (const job of dueJobs) {
-      try {
-        await this.sendSqsJob(job.id);
-        job.status = AnalysisJobStatusValue.Sent;
-        job.last_error = null;
-        await this.jobs.save(job);
-        sent += 1;
-      } catch (error) {
-        job.status = AnalysisJobStatusValue.Queued;
-        job.last_error = this.errorMessage(error);
-        await this.jobs.save(job);
+    const results = await mapWithConcurrency(
+      dueJobs,
+      SQS_DISPATCH_CONCURRENCY,
+      async (job) => {
+        try {
+          await this.sendSqsJob(job.id);
+          job.status = AnalysisJobStatusValue.Sent;
+          job.last_error = null;
+          await this.jobs.save(job);
+          sent += 1;
+        } catch (error) {
+          job.status = AnalysisJobStatusValue.Queued;
+          job.last_error = this.errorMessage(error);
+          await this.jobs.save(job);
+          this.logger.error(
+            `Failed to send skin journal analysis job ${job.id} to SQS`,
+            error,
+          );
+        }
+      },
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') {
         this.logger.error(
-          `Failed to send skin journal analysis job ${job.id} to SQS`,
-          error,
+          'Failed to dispatch skin journal analysis job',
+          result.reason,
         );
       }
     }

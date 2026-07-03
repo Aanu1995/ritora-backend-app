@@ -128,6 +128,25 @@ export function formatDateInTimeZone(timeZone: string, at: Date): string {
   }
 }
 
+/**
+ * Add whole days to a YYYY-MM-DD string using calendar arithmetic. Unlike
+ * adding 24h of milliseconds to an instant, this stays correct across DST
+ * transitions (23/25-hour days).
+ */
+export function addDaysToDateString(date: string, days: number): string {
+  const [year, month, day] = date.split('-').map((part) => Number(part));
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return date;
+  }
+  return new Date(Date.UTC(year, month - 1, day + days))
+    .toISOString()
+    .slice(0, 10);
+}
+
 export function formatTimeInTimeZone(timeZone: string, at: Date): string {
   try {
     const formatter = new Intl.DateTimeFormat('en-GB', {

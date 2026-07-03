@@ -10,6 +10,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, LessThan, LessThanOrEqual, Repository } from 'typeorm';
+import { mapWithConcurrency } from '../../common/utils/concurrency';
 import { SmartPickGenerationJob } from '../entities/smart-pick-generation-job.entity';
 import {
   SmartPicksGenerationJobStatus,
@@ -25,6 +26,7 @@ const SMART_PICKS_SQS_VISIBILITY_HEARTBEAT_MS = 60_000;
 const SMART_PICKS_JOB_LOCK_TIMEOUT_MINUTES = 10;
 const SMART_PICKS_STALE_JOB_REAPER_BATCH_SIZE = 25;
 const SMART_PICKS_JOB_DISPATCH_INTERVAL_MS = 5000;
+const SQS_DISPATCH_CONCURRENCY = 8;
 
 const ACTIVE_JOB_STATUSES: readonly SmartPicksGenerationJobStatus[] = [
   SmartPicksGenerationJobStatus.Queued,
@@ -158,35 +160,47 @@ export class SmartPicksGenerationQueueService implements OnModuleDestroy {
       take: limit,
     });
     let sent = 0;
-    for (const job of dueJobs) {
-      const claimed = await this.jobRepo.update(
-        {
-          id: job.id,
-          status: SmartPicksGenerationJobStatus.Queued,
-          run_after: LessThanOrEqual(now),
-        },
-        {
-          status: SmartPicksGenerationJobStatus.Sent,
-          last_error: null,
-          updated_at: now,
-        },
-      );
-      if (!claimed.affected) continue;
-      try {
-        await this.sendSqsJob(job.id);
-        sent += 1;
-      } catch (error) {
-        await this.jobRepo.update(
-          { id: job.id, status: SmartPicksGenerationJobStatus.Sent },
+    const results = await mapWithConcurrency(
+      dueJobs,
+      SQS_DISPATCH_CONCURRENCY,
+      async (job) => {
+        const claimed = await this.jobRepo.update(
           {
+            id: job.id,
             status: SmartPicksGenerationJobStatus.Queued,
-            last_error: errorMessage(error),
-            updated_at: new Date(),
+            run_after: LessThanOrEqual(now),
+          },
+          {
+            status: SmartPicksGenerationJobStatus.Sent,
+            last_error: null,
+            updated_at: now,
           },
         );
+        if (!claimed.affected) return;
+        try {
+          await this.sendSqsJob(job.id);
+          sent += 1;
+        } catch (error) {
+          await this.jobRepo.update(
+            { id: job.id, status: SmartPicksGenerationJobStatus.Sent },
+            {
+              status: SmartPicksGenerationJobStatus.Queued,
+              last_error: errorMessage(error),
+              updated_at: new Date(),
+            },
+          );
+          this.logger.error(
+            `Failed to send Smart Picks generation job ${job.id} to SQS`,
+            error,
+          );
+        }
+      },
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') {
         this.logger.error(
-          `Failed to send Smart Picks generation job ${job.id} to SQS`,
-          error,
+          'Failed to dispatch Smart Picks generation job',
+          result.reason,
         );
       }
     }
