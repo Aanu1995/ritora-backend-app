@@ -35,8 +35,10 @@ import { SuggestionGenerationInputs } from './suggestion-ai-generator';
 import {
   buildPrompt,
   defaultExplanation,
+  describeOpenAiPayloadIssue,
   estimateCost,
   extractOutputText,
+  parseStructuredOutputJson,
   RESPONSE_FORMAT,
   SUGGESTION_PROMPT_MAX_CHARS,
   SYSTEM_PROMPT,
@@ -893,6 +895,55 @@ describe('suggestion AI contract', () => {
       skipped: [],
       inputs: [],
     });
+  });
+
+  it('tolerates output content without a type field', () => {
+    expect(
+      extractOutputText({
+        output: [{ content: [{ text: '{"ok":true}' }] }],
+      }),
+    ).toBe('{"ok":true}');
+    expect(
+      extractOutputText({
+        output: [{ content: [{ refusal: 'no' }] }],
+      }),
+    ).toBeNull();
+  });
+
+  it('describes incomplete and errored provider payloads', () => {
+    expect(
+      describeOpenAiPayloadIssue({
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+      }),
+    ).toBe('response status incomplete (max_output_tokens)');
+    expect(
+      describeOpenAiPayloadIssue({
+        error: { message: 'The model is overloaded.' },
+      }),
+    ).toBe('provider error: The model is overloaded.');
+    expect(describeOpenAiPayloadIssue({ status: 'completed' })).toBeNull();
+    expect(describeOpenAiPayloadIssue({})).toBeNull();
+  });
+
+  it('recovers structured JSON wrapped in fences or prose', () => {
+    expect(parseStructuredOutputJson<{ ok: boolean }>('{"ok":true}')).toEqual({
+      ok: true,
+    });
+    expect(
+      parseStructuredOutputJson<{ ok: boolean }>('```json\n{"ok":true}\n```'),
+    ).toEqual({ ok: true });
+    expect(
+      parseStructuredOutputJson<{ ok: boolean }>(
+        'Here is the routine JSON: {"ok":true}',
+      ),
+    ).toEqual({ ok: true });
+    expect(() =>
+      parseStructuredOutputJson<{ ok: boolean }>('not json at all'),
+    ).toThrow();
+    expect(() =>
+      parseStructuredOutputJson<{ ok: boolean }>('{"ok":'),
+    ).toThrow();
   });
 });
 

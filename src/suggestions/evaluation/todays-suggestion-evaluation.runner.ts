@@ -24,15 +24,16 @@ import {
   SuggestionGenerationOutput,
   SuggestionGenerationStepOutput,
 } from '../services/suggestion-ai-generator';
-import {
-  extractOutputText,
-  OpenAiResponsePayload,
-} from '../services/suggestion-ai-contract';
+import { OpenAiResponsePayload } from '../services/suggestion-ai-contract';
 import { isSingleUseSuggestionCategory } from '../services/suggestion-product-intelligence';
 import {
   TODAYS_SUGGESTION_LIVE_EVALUATION_CASES,
   TodaysSuggestionEvaluationCase,
 } from './todays-suggestion-golden-cases';
+import {
+  requestJudgeRubricWithRetries,
+  throwJudgeHttpError,
+} from './suggestion-evaluation-judge.utils';
 import {
   hasIngredientAnalysisLayeringConflict,
   hasSpecificTextLayeringConflict,
@@ -120,7 +121,7 @@ const SENSITIVE_PROFILE_COPY_PATTERNS = [
 
 const DEFAULT_CASES = TODAYS_SUGGESTION_LIVE_EVALUATION_CASES;
 const SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS = 12000;
-const SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 2;
+const SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 3;
 const SUGGESTION_EVALUATION_GENERATION_ATTEMPTS = 3;
 
 export type TodaysSuggestionEvaluationStatus = 'passed' | 'failed';
@@ -412,15 +413,7 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
       throw new Error('OpenAI evaluation judge configuration is missing.');
     }
 
-    const outputText = await this.requestStructuredJudgement({
-      apiKey,
-      model,
-      input,
-    });
-    if (!outputText) {
-      throw new Error('OpenAI evaluation judge returned no structured output.');
-    }
-    return normalizeRubric(JSON.parse(outputText));
+    return this.requestStructuredJudgement({ apiKey, model, input });
   }
 
   private async requestStructuredJudgement(input: {
@@ -430,17 +423,13 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
       evaluationCase: TodaysSuggestionEvaluationCase;
       output: SuggestionGenerationOutput;
     };
-  }): Promise<string | null> {
-    let outputText: string | null = null;
-    for (
-      let attempt = 1;
-      attempt <= SUGGESTION_EVALUATION_JUDGE_ATTEMPTS;
-      attempt += 1
-    ) {
-      outputText = extractOutputText(await this.requestOpenAiJudgement(input));
-      if (outputText) break;
-    }
-    return outputText;
+  }): Promise<TodaysSuggestionRubricResult> {
+    return requestJudgeRubricWithRetries({
+      attempts: SUGGESTION_EVALUATION_JUDGE_ATTEMPTS,
+      label: 'OpenAI evaluation judge',
+      request: () => this.requestOpenAiJudgement(input),
+      normalize: normalizeRubric,
+    });
   }
 
   private async requestOpenAiJudgement(input: {
@@ -528,7 +517,7 @@ export class OpenAiTodaysSuggestionEvaluationJudge implements TodaysSuggestionEv
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI evaluation judge failed (${response.status}).`);
+      await throwJudgeHttpError('OpenAI evaluation judge', response);
     }
 
     return (await response.json()) as OpenAiResponsePayload;

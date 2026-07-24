@@ -660,10 +660,16 @@ function openAiResponse(
   payload: object,
   ok = true,
   status = 200,
-): Pick<Response, 'json' | 'ok' | 'status'> {
+): Pick<Response, 'json' | 'ok' | 'status'> & {
+  headers: { get: (name: string) => string | null };
+} {
   return {
     ok,
     status,
+    headers: {
+      get: (name: string) =>
+        name.toLowerCase() === 'retry-after' ? '0' : null,
+    },
     json: jest.fn().mockResolvedValue(payload),
   };
 }

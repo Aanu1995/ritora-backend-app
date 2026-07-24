@@ -103,7 +103,7 @@ describe('SuggestionAiGenerator', () => {
         store: false,
         reasoning: { effort: OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT },
         temperature: 0,
-        max_output_tokens: 4000,
+        max_output_tokens: 12000,
         text: expect.objectContaining({
           format: expect.objectContaining({
             name: 'todays_suggestion_agent_plan',
@@ -129,7 +129,7 @@ describe('SuggestionAiGenerator', () => {
         store: false,
         reasoning: { effort: OPENAI_TODAYS_SUGGESTION_REASONING_EFFORT },
         temperature: 0,
-        max_output_tokens: 5000,
+        max_output_tokens: 12000,
         text: expect.objectContaining({
           format: expect.objectContaining({
             name: 'todays_suggestion_agent_review',
@@ -137,11 +137,15 @@ describe('SuggestionAiGenerator', () => {
         }),
       }),
     );
-    const requestedTimeoutMs = timeoutSpy.mock.calls[0]?.[0];
-    expect(requestedTimeoutMs).toBeGreaterThanOrEqual(
-      SUGGESTION_AI_TODAYS_TIMEOUT_MS - 1_000,
+    // The auxiliary plan call gets a capped timeout so a hung plan request
+    // cannot starve the main generation call of its budget.
+    const planTimeoutMs = timeoutSpy.mock.calls[0]?.[0];
+    expect(planTimeoutMs).toBeLessThanOrEqual(150_000);
+    const generationTimeoutMs = timeoutSpy.mock.calls[1]?.[0];
+    expect(generationTimeoutMs).toBeGreaterThanOrEqual(
+      SUGGESTION_AI_TODAYS_TIMEOUT_MS - 5_000,
     );
-    expect(requestedTimeoutMs).toBeLessThanOrEqual(
+    expect(generationTimeoutMs).toBeLessThanOrEqual(
       SUGGESTION_AI_TODAYS_TIMEOUT_MS,
     );
   });
@@ -3876,7 +3880,8 @@ describe('SuggestionAiGenerator', () => {
 
     const result = await generator.generate(inputs);
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    // Two non-fatal plan attempts plus four generation attempts.
+    expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(result.metadata.provider).toBe('deterministic_baseline');
     expect(result.metadata.fallbackReason).toBe('provider_failure');
     expect(result.explanation.headline).toBe('Using your shelf today');
@@ -4023,6 +4028,223 @@ describe('SuggestionAiGenerator', () => {
           ],
         }),
       })
+      .mockResolvedValueOnce(openAiTextResponse(agentPassingReview()));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+  });
+
+  it('continues scheduled generation when the agent plan request fails', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(openAiErrorResponse(400, null))
+      .mockResolvedValueOnce(
+        openAiTextResponse({
+          simplifiedForReaction: false,
+          explanation: {
+            headline: 'Morning shelf plan',
+            body: ['Use the best-fitting shelf steps.'],
+            perStepReasons: [],
+            skipped: [],
+            inputs: [],
+          },
+          steps: [
+            aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+            aiProductStep(1, 'moisturizer-1', ProductCategory.Moisturizer),
+            aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+          ],
+          gapRecommendations: [],
+          safetyFlags: [],
+        }),
+      )
+      .mockResolvedValueOnce(openAiTextResponse(agentPassingReview()));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.length).toBeGreaterThan(0);
+  });
+
+  it('accepts scheduled output when the agent review request fails', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(openAiTextResponse(agentPlan()))
+      .mockResolvedValueOnce(
+        openAiTextResponse({
+          simplifiedForReaction: false,
+          explanation: {
+            headline: 'Morning shelf plan',
+            body: ['Use the best-fitting shelf steps.'],
+            perStepReasons: [],
+            skipped: [],
+            inputs: [],
+          },
+          steps: [
+            aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+            aiProductStep(1, 'moisturizer-1', ProductCategory.Moisturizer),
+            aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+          ],
+          gapRecommendations: [],
+          safetyFlags: [],
+        }),
+      )
+      .mockResolvedValueOnce(openAiErrorResponse(400, null));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.length).toBeGreaterThan(0);
+  });
+
+  it('does not retry non-retryable OpenAI request errors', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(openAiErrorResponse(400, null));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    // One failed plan call (non-fatal) plus one failed generation call:
+    // neither burns retry attempts on a permanent 400.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.metadata.provider).toBe('deterministic_baseline');
+    expect(result.metadata.fallbackReason).toBe('provider_failure');
+  });
+
+  it('recovers scheduled structured output wrapped in markdown fences', async () => {
+    const suggestionJson = JSON.stringify({
+      simplifiedForReaction: false,
+      explanation: {
+        headline: 'Morning shelf plan',
+        body: ['Use the best-fitting shelf steps.'],
+        perStepReasons: [],
+        skipped: [],
+        inputs: [],
+      },
+      steps: [
+        aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+        aiProductStep(1, 'moisturizer-1', ProductCategory.Moisturizer),
+        aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+      ],
+      gapRecommendations: [],
+      safetyFlags: [],
+    });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(openAiTextResponse(agentPlan()))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          output: [
+            {
+              content: [
+                {
+                  type: 'output_text',
+                  text: `\`\`\`json\n${suggestionJson}\n\`\`\``,
+                },
+              ],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce(openAiTextResponse(agentPassingReview()));
+    global.fetch = fetchMock;
+    const generator = new SuggestionAiGenerator({
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as ConfigService);
+
+    const result = await generator.generate(
+      inputsWithScoredShelfProducts(SuggestionDaypart.Morning),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.metadata.provider).toBe('openai');
+    expect(result.metadata.fallbackReason).toBeNull();
+    expect(result.steps.length).toBeGreaterThan(0);
+  });
+
+  it('retries an incomplete scheduled response within the structured output budget', async () => {
+    const incompleteResponse = {
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+        output: [],
+      }),
+    };
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(openAiTextResponse(agentPlan()))
+      .mockResolvedValueOnce(incompleteResponse)
+      .mockResolvedValueOnce(
+        openAiTextResponse({
+          simplifiedForReaction: false,
+          explanation: {
+            headline: 'Morning shelf plan',
+            body: ['Use the best-fitting shelf steps.'],
+            perStepReasons: [],
+            skipped: [],
+            inputs: [],
+          },
+          steps: [
+            aiProductStep(0, 'cleanser-1', ProductCategory.Cleanser),
+            aiProductStep(1, 'moisturizer-1', ProductCategory.Moisturizer),
+            aiProductStep(2, 'spf-1', ProductCategory.SunProtection),
+          ],
+          gapRecommendations: [],
+          safetyFlags: [],
+        }),
+      )
       .mockResolvedValueOnce(openAiTextResponse(agentPassingReview()));
     global.fetch = fetchMock;
     const generator = new SuggestionAiGenerator({

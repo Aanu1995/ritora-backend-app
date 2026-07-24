@@ -16,6 +16,7 @@ import {
 } from './todays-suggestion-golden-cases';
 import {
   evaluateTodaysSuggestionGoldenCases,
+  OpenAiTodaysSuggestionEvaluationJudge,
   runTodaysSuggestionHardChecks,
   sanitizeEvaluationText,
   sanitizeForReport,
@@ -615,6 +616,109 @@ describe("Today's Suggestion evaluation hard checks", () => {
     expect(failedCheckIds(evaluationCase, output)).toContain(
       'no_deterministic_fallback',
     );
+  });
+});
+
+describe("Today's Suggestion evaluation judge", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  const rubricText = JSON.stringify({
+    answersQuestion: 5,
+    beginnerClarity: 5,
+    personalization: 5,
+    gapQuality: 5,
+    safetyConfidence: 5,
+    passed: true,
+    explanations: ['Clear and safe.'],
+  });
+
+  function judgeConfig() {
+    return {
+      get: jest.fn((key: string) => {
+        if (key === 'OPENAI_API_KEY') return 'sk-test';
+        if (key === 'SUGGESTION_AI_MODEL') return 'gpt-4.1-mini';
+        return null;
+      }),
+    } as unknown as import('@nestjs/config').ConfigService;
+  }
+
+  function judgeTextResponse(text: string) {
+    return {
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        output: [{ content: [{ type: 'output_text', text }] }],
+      }),
+    };
+  }
+
+  function judgeErrorResponse(status: number) {
+    return {
+      ok: false,
+      status,
+      headers: {
+        get: jest.fn((name: string) =>
+          name.toLowerCase() === 'retry-after' ? '0' : null,
+        ),
+      },
+      text: jest
+        .fn()
+        .mockResolvedValue(
+          JSON.stringify({ error: { message: 'temporary judge outage' } }),
+        ),
+    };
+  }
+
+  function judgeInput() {
+    return {
+      evaluationCase: goldenCase('dark_marks_no_spf_gap'),
+      output: darkMarksOutput({ includeSpfGap: true }),
+    };
+  }
+
+  it('retries transient judge failures before succeeding', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(judgeErrorResponse(429))
+      .mockResolvedValueOnce(judgeErrorResponse(500))
+      .mockResolvedValueOnce(judgeTextResponse(rubricText));
+    global.fetch = fetchMock;
+
+    const judge = new OpenAiTodaysSuggestionEvaluationJudge(judgeConfig());
+    const rubric = await judge.judge(judgeInput());
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(rubric.passed).toBe(true);
+    expect(rubric.safetyConfidence).toBe(5);
+  });
+
+  it('retries invalid judge JSON before succeeding', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(judgeTextResponse('not valid json'))
+      .mockResolvedValueOnce(judgeTextResponse(rubricText));
+    global.fetch = fetchMock;
+
+    const judge = new OpenAiTodaysSuggestionEvaluationJudge(judgeConfig());
+    const rubric = await judge.judge(judgeInput());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(rubric.passed).toBe(true);
+  });
+
+  it('does not retry non-retryable judge request errors', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(judgeErrorResponse(400));
+    global.fetch = fetchMock;
+
+    const judge = new OpenAiTodaysSuggestionEvaluationJudge(judgeConfig());
+
+    await expect(judge.judge(judgeInput())).rejects.toThrow(
+      'OpenAI evaluation judge failed (400)',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

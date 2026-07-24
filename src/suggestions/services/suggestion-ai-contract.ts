@@ -77,8 +77,11 @@ const RESPONSE_LANGUAGE_LABELS: Record<AppLanguage, string> = {
 };
 
 export interface OpenAiResponsePayload {
+  status?: string;
+  error?: { code?: string; message?: string } | null;
+  incomplete_details?: { reason?: string } | null;
   output?: {
-    content?: { type: string; text?: string; refusal?: string }[];
+    content?: { type?: string; text?: string; refusal?: string }[];
   }[];
   usage?: {
     input_tokens?: number;
@@ -282,13 +285,51 @@ export function extractOutputText(
   const chunks: string[] = [];
   for (const message of payload.output ?? []) {
     for (const content of message.content ?? []) {
-      if (content.refusal || content.type.includes('refusal')) {
+      if (content.refusal || content.type?.includes('refusal')) {
         return null;
       }
       if (content.text) chunks.push(content.text);
     }
   }
   return chunks.length ? chunks.join('') : null;
+}
+
+export function describeOpenAiPayloadIssue(
+  payload: OpenAiResponsePayload,
+): string | null {
+  if (payload.error?.message || payload.error?.code) {
+    return `provider error: ${payload.error.message ?? payload.error.code}`;
+  }
+  if (payload.status && payload.status !== 'completed') {
+    const reason = payload.incomplete_details?.reason;
+    return `response status ${payload.status}${reason ? ` (${reason})` : ''}`;
+  }
+  return null;
+}
+
+export function parseStructuredOutputJson<T>(outputText: string): T {
+  try {
+    return JSON.parse(outputText) as T;
+  } catch (error) {
+    const recovered = recoverJsonObjectText(outputText);
+    if (recovered !== null) {
+      return JSON.parse(recovered) as T;
+    }
+    throw error;
+  }
+}
+
+function recoverJsonObjectText(value: string): string | null {
+  const withoutFences = value
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+  const start = withoutFences.indexOf('{');
+  const end = withoutFences.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  const candidate = withoutFences.slice(start, end + 1);
+  return candidate === value ? null : candidate;
 }
 
 export function estimateCost(usage: {

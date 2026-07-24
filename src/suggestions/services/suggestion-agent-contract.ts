@@ -4,8 +4,11 @@ const AGENT_PROMPT_MAX_CHARS = 72_000;
 const AGENT_PROMPT_TRUNCATION_NOTE =
   '\n\n[Agent prompt context trimmed to fit the safe payload budget.]';
 
-export const SUGGESTION_AGENT_PLAN_MAX_OUTPUT_TOKENS = 4000;
-export const SUGGESTION_AGENT_REVIEW_MAX_OUTPUT_TOKENS = 5000;
+// Reasoning tokens count against max_output_tokens on the OpenAI Responses
+// API, so high-reasoning-effort models need generous headroom or the plan and
+// review calls come back with status=incomplete and truncated JSON.
+export const SUGGESTION_AGENT_PLAN_MAX_OUTPUT_TOKENS = 12000;
+export const SUGGESTION_AGENT_REVIEW_MAX_OUTPUT_TOKENS = 12000;
 export const SUGGESTION_AGENT_GENERATION_ATTEMPTS = 2;
 
 export interface SuggestionAgentDataAuditItem {

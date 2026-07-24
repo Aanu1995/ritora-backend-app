@@ -1,6 +1,6 @@
 {
   "reportType": "todays_suggestion_live_ai_evaluation",
-  "generatedAt": "2026-06-29T09:34:35.540Z",
+  "generatedAt": "2026-07-03T19:58:10.526Z",
   "model": "gpt-5.4-mini",
   "promptVersion": "2026-06-28.v18-agentic-clarity",
   "totalCases": 13,
@@ -25,9 +25,10 @@
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Appropriately answers tonight’s routine with gentle cleanser + barrier cream and skips all forbidden strong actives.",
-          "Clearly explains why actives are spaced, including yesterday’s retinoid use.",
-          "No unnecessary shopping or SPF gap handling; safety handling is appropriate for the case."
+          "Gives a practical tonight routine: cleanse and moisturize.",
+          "Correctly spaces retinoid/AHA/BHA after yesterday’s retinoid use.",
+          "No unnecessary product gap or shopping pressure.",
+          "No unsafe active stacking; step count stays within limit."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -35,15 +36,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "fc53af544a970696c6b82f10be00817ed1b0fae2306053e8f2c9ccb035ef99a5",
+      "driftHash": "7e52fd19d08014040a34910888a462fae2559445211143d873c7d0b2d2be46f9",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "14cee0f339dc6f70b023cdff21ada4e4585eb22315d1df0ceda42c9bed768850",
+        "baselineSignature": "62b771bd11a42c27d992611784d859fb7a6926a3d808a718e90ccee4c15a9ffc",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "aha_bha_retinoid_conflict",
         "title": "Conflicting actives are spaced instead of stacked",
@@ -255,11 +256,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 21794,
-          "outputTokens": 11120,
-          "totalTokens": 32914,
-          "estimatedCostUsd": 0.009941,
-          "durationMs": 80791
+          "inputTokens": 23556,
+          "outputTokens": 16825,
+          "totalTokens": 40381,
+          "estimatedCostUsd": 0.013628,
+          "durationMs": 90846
         },
         "spfHandling": {
           "required": false,
@@ -268,52 +269,51 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Keep it gentle tonight",
+          "headline": "Gentle evening reset",
           "body": [
-            "Cleanser and barrier cream fit tonight.",
-            "Strong actives are spaced out tonight.",
-            "Texture actives can wait for another evening.",
+            "Cleanse, then moisturize for bed.",
+            "Strong actives are spaced tonight.",
             "Ava Lab Retinol Night Serum was used yesterday, so retinoid and exfoliating steps stay spaced tonight."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle start before barrier support."
+              "reason": "Gentle cleanse before bed."
             },
             {
               "stepOrder": 1,
-              "reason": "Finish with barrier support."
+              "reason": "Ceramide support after cleansing."
             }
           ],
           "skipped": [
             {
               "name": "Ava Lab Glycolic Toner",
-              "reason": "Strong active should be spaced carefully for this scenario."
+              "reason": "strong-active spacing"
             },
             {
               "name": "Ava Lab BHA 2% Liquid",
-              "reason": "Strong active should be spaced carefully for this scenario."
+              "reason": "strong-active spacing"
             },
             {
               "name": "Ava Lab Retinol Night Serum",
-              "reason": "Strong active should be spaced carefully for this scenario."
+              "reason": "strong-active spacing"
             }
           ],
           "inputs": [
             {
               "label": "target timing",
-              "detail": "2026-05-18 20:00 evening"
+              "detail": "2026-05-18 20:00, evening"
             },
             {
-              "label": "primary goal",
+              "label": "primaryGoal",
               "detail": "improve texture"
             },
             {
-              "label": "current concerns",
-              "detail": "texture; clogged pores"
+              "label": "currentConcerns",
+              "detail": "texture, clogged pores"
             },
             {
-              "label": "safety constraint",
+              "label": "safetyConstraints",
               "detail": "spacestrongactives"
             }
           ]
@@ -332,7 +332,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle start before barrier support.",
+            "explanation": "Gentle cleanse before bed.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -349,7 +349,7 @@
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Finish with barrier support.",
+            "explanation": "Ceramide support after cleansing.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -358,13 +358,18 @@
         "safetyFlags": [
           {
             "severity": "warning",
-            "message": "Strong actives are spaced out tonight.",
-            "ingredientSlugs": [],
+            "message": "Strong actives are spaced tonight.",
+            "ingredientSlugs": [
+              "aha",
+              "bha",
+              "retinoid"
+            ],
             "sourceIds": [
               "mayo_dry_skin_care",
-              "aad_retinoid_retinol",
               "aad_acne_treatment",
-              "fda_aha_sun_sensitivity"
+              "aad_retinoid_retinol",
+              "fda_aha_sun_sensitivity",
+              "dermnet_topical_retinoids"
             ]
           }
         ]
@@ -379,17 +384,15 @@
       "hardCheckFailures": [],
       "rubric": {
         "answersQuestion": 5,
-        "beginnerClarity": 4,
+        "beginnerClarity": 5,
         "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Uses one serum path instead of layering both conflict-marked serums.",
-          "Includes the owned sunscreen as a direct morning step.",
-          "Adapts to the goal of fading marks with lower irritation risk.",
-          "No unnecessary gap or shopping pressure.",
-          "Clear enough for a beginner, though it could add simple usage amounts or wait times."
+          "Gives a clear morning routine with SPF and one serum path.",
+          "Uses the supplied shelf and the dark-mark goal appropriately.",
+          "Avoids layering the conflicting serums and includes owned sunscreen directly."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -397,15 +400,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "368054caf6aa400ad57ad401e23dcdac17e871ba7678d5c721e971cff8c4bda1",
+      "driftHash": "b18b9421228db09ac7438dfc651787db6243bd4c4ec92097d873675753fc763a",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "3f074ecbae27d3703aebd1a0068f9758ad77f11a41f76f151bffeaef8ceb097a",
+        "baselineSignature": "42c4aba995f21e579705701ab5cccf4c5cbd3ba6fb226696791f49ede23c0126",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "ingredient_conflict_vitamin_c_niacinamide_morning",
         "title": "Vitamin C and niacinamide conflict keeps one serum out",
@@ -585,11 +588,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 19361,
-          "outputTokens": 24274,
-          "totalTokens": 43635,
-          "estimatedCostUsd": 0.017469,
-          "durationMs": 182139
+          "inputTokens": 20847,
+          "outputTokens": 12202,
+          "totalTokens": 33049,
+          "estimatedCostUsd": 0.010448,
+          "durationMs": 64900
         },
         "spfHandling": {
           "required": true,
@@ -598,70 +601,59 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Gentle morning for marks",
+          "headline": "Morning dark-mark support",
           "body": [
-            "Built for dark marks, oiliness, and daytime protection.",
-            "Niacinamide keeps the routine calm and skin-friendly."
+            "This morning routine targets dark marks gently.",
+            "It pairs vitamin C with SPF 50.",
+            "Niacinamide is saved for a different routine."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle start before care."
+              "reason": "Gentle first step to remove morning residue."
             },
             {
               "stepOrder": 1,
-              "reason": "Good tolerance for tone and oiliness."
+              "reason": "Pigment-support serum for morning use."
             },
             {
               "stepOrder": 2,
-              "reason": "Adds barrier support under sunscreen."
+              "reason": "Barrier support before sunscreen."
             },
             {
               "stepOrder": 3,
-              "reason": "Required morning protection."
+              "reason": "Required daytime protection for dark marks."
             }
           ],
           "skipped": [
             {
-              "name": "The Ordinary Ascorbyl Glucoside Solution 12%",
+              "name": "Plain Lab Niacinamide Serum",
               "reason": "ingredient/layering caution"
             }
           ],
           "inputs": [
             {
-              "label": "request source",
-              "detail": "scheduled"
+              "label": "target timing",
+              "detail": "targetDate=2026-05-18, targetTime=08:15, daypart=morning"
             },
             {
-              "label": "targetDate",
-              "detail": "2026-05-18"
-            },
-            {
-              "label": "targetTime",
-              "detail": "08:15"
-            },
-            {
-              "label": "daypart",
-              "detail": "morning"
-            },
-            {
-              "label": "primaryGoal",
+              "label": "primary goal",
               "detail": "fade post-acne dark marks without irritating skin"
             },
             {
-              "label": "currentConcerns",
-              "detail": "dark marks; uneven tone; oiliness"
+              "label": "current concerns",
+              "detail": "dark marks, uneven tone, oiliness"
             },
             {
-              "label": "routinePreferences.amminutes",
-              "detail": "8"
+              "label": "routine pace",
+              "detail": "steady; amminutes=8"
             },
             {
-              "label": "activeTolerances",
-              "detail": "vitaminc medium; niacinamide good"
+              "label": "active tolerances",
+              "detail": "vitaminc=tolerance medium; niacinamide=tolerance good"
             },
             {
-              "label": "safetyConstraint",
+              "label": "safety constraint",
               "detail": "daytimespfavailable"
             }
           ]
@@ -680,23 +672,25 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle start before care.",
+            "explanation": "Gentle first step to remove morning residue.",
             "routineNote": null,
             "safetyWarnings": []
           },
           {
             "resolvedCategory": "serum",
             "resolvedActiveTags": [
-              "niacinamide"
+              "vitamin_c",
+              "antioxidant",
+              "pigment-support"
             ],
             "stepOrder": 1,
             "routineStepId": null,
-            "inventoryProductId": "niacinamide-1",
-            "productBrand": "Plain Lab",
-            "productName": "Niacinamide Serum",
+            "inventoryProductId": "vitamin-c-1",
+            "productBrand": "The Ordinary",
+            "productName": "Ascorbyl Glucoside Solution 12%",
             "stepLabel": "serum",
             "provenance": "ai_added",
-            "explanation": "Good tolerance for tone and oiliness.",
+            "explanation": "Pigment-support serum for morning use.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -713,7 +707,7 @@
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Adds barrier support under sunscreen.",
+            "explanation": "Barrier support before sunscreen.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -730,7 +724,7 @@
             "productName": "Daily SPF 50",
             "stepLabel": "sun-protection",
             "provenance": "ai_added",
-            "explanation": "Required morning protection.",
+            "explanation": "Required daytime protection for dark marks.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -761,14 +755,15 @@
       "rubric": {
         "answersQuestion": 5,
         "beginnerClarity": 4,
-        "personalization": 4,
+        "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Chooses one valid active route for tonight and avoids pairing retinol with BHA.",
-          "Uses the supplied goal of clogged pores/texture and the owned BHA product.",
-          "No SPF gap needed here; no shopping pressure added."
+          "Uses one active route only: retinol, not BHA.",
+          "Fits the evening timing, texture goal, and 10-minute pace.",
+          "No unnecessary shopping or SPF gap handling is introduced.",
+          "Overall routine is safe and appropriately simple."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -776,15 +771,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "6a5a0507dabd93489a99a5c79666182cc183787cb5827bd75f9ab59445bcf728",
+      "driftHash": "478cf2eaea85fdf4bd52ac9a7e54a3fb32cddb1f6139bd0d8c9e9e30b095839b",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "e85ae269fc0e926b3111c9e52d815a2635ebb51f5b5b738d98ce8ed718473020",
+        "baselineSignature": "d85a2c7a711ccbc0fd51e4b61a21ba6384c0f350e7f80eebf005b288602c46e1",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "ingredient_conflict_retinoid_bha_evening",
         "title": "Retinoid and BHA conflict selects one active route",
@@ -948,11 +943,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 17972,
-          "outputTokens": 18229,
-          "totalTokens": 36201,
-          "estimatedCostUsd": 0.013633,
-          "durationMs": 131284
+          "inputTokens": 19308,
+          "outputTokens": 15628,
+          "totalTokens": 34936,
+          "estimatedCostUsd": 0.012273,
+          "durationMs": 120058
         },
         "spfHandling": {
           "required": false,
@@ -961,31 +956,35 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Pore Focus Night",
+          "headline": "Evening retinol routine",
           "body": [
-            "One pore-focused active tonight.",
-            "Cleanse, then moisturize after the wait."
+            "Retinol fits this evening slot and your texture goal.",
+            "Cleanser and moisturizer keep the routine balanced."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Targets clogged pores and texture."
+              "reason": "Gentle prep for the active."
+            },
+            {
+              "stepOrder": 1,
+              "reason": "Best fit for texture and clogged pores."
+            },
+            {
+              "stepOrder": 2,
+              "reason": "Adds barrier support after retinol."
             }
           ],
           "skipped": [
             {
-              "name": "Ava Lab Retinol Night Serum",
-              "reason": "strong-active spacing"
+              "name": "Ava Lab BHA 2% Liquid",
+              "reason": "ingredient/layering caution"
             }
           ],
           "inputs": [
             {
-              "label": "request source",
-              "detail": "scheduled"
-            },
-            {
-              "label": "targetDate / targetTime / daypart",
-              "detail": "2026-05-18 / 20:30 / evening"
+              "label": "target timing",
+              "detail": "targetDate=2026-05-18, targetTime=20:30, daypart=evening"
             },
             {
               "label": "primaryGoal",
@@ -996,45 +995,75 @@
               "detail": "texture, clogged pores, acne"
             },
             {
-              "label": "routinePreferences.pmminutes",
-              "detail": "10"
-            },
-            {
-              "label": "reaction.hasSignal",
-              "detail": "false"
+              "label": "routine pace",
+              "detail": "steady; pmminutes=10"
             }
           ]
         },
         "steps": [
           {
-            "resolvedCategory": "exfoliant",
+            "resolvedCategory": "cleanser",
             "resolvedActiveTags": [
-              "bha",
-              "salicylic"
+              "cleanser",
+              "gentle"
             ],
             "stepOrder": 0,
             "routineStepId": null,
-            "inventoryProductId": "bha-1",
+            "inventoryProductId": "cleanser-1",
             "productBrand": "Ava Lab",
-            "productName": "BHA 2% Liquid",
-            "stepLabel": "exfoliant",
+            "productName": "Soft Cream Cleanser",
+            "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Targets clogged pores and texture.",
+            "explanation": "Gentle prep for the active.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "treatment",
+            "resolvedActiveTags": [
+              "retinoid",
+              "retinol"
+            ],
+            "stepOrder": 1,
+            "routineStepId": null,
+            "inventoryProductId": "retinoid-1",
+            "productBrand": "Ava Lab",
+            "productName": "Retinol Night Serum",
+            "stepLabel": "treatment",
+            "provenance": "ai_added",
+            "explanation": "Best fit for texture and clogged pores.",
             "routineNote": null,
             "safetyWarnings": [
               {
                 "severity": "warning",
-                "message": "Do not pair with retinol tonight.",
+                "message": "Can feel drying; keep daytime SPF in mind.",
                 "ingredientSlugs": [
-                  "bha",
-                  "retinoid"
+                  "retinoid",
+                  "retinol"
                 ],
                 "sourceIds": [
-                  "aad_acne_treatment",
+                  "aad_retinoid_retinol",
                   "dermnet_topical_retinoids"
                 ]
               }
             ]
+          },
+          {
+            "resolvedCategory": "moisturizer",
+            "resolvedActiveTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "stepOrder": 2,
+            "routineStepId": null,
+            "inventoryProductId": "moisturizer-1",
+            "productBrand": "Ava Lab",
+            "productName": "Barrier Cream",
+            "stepLabel": "moisturizer",
+            "provenance": "ai_added",
+            "explanation": "Adds barrier support after retinol.",
+            "routineNote": null,
+            "safetyWarnings": []
           }
         ],
         "gapRecommendations": [],
@@ -1065,15 +1094,15 @@
       "hardCheckFailures": [],
       "rubric": {
         "answersQuestion": 5,
-        "beginnerClarity": 5,
+        "beginnerClarity": 4,
         "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Uses a valid right-now evening routine.",
-          "Chooses one acne active only (retinoid) and avoids stacking with benzoyl peroxide.",
-          "Matches the shelf, timing, and 3-step limit; no SPF gap is needed here."
+          "Uses one acne-relevant active path (retinoid) and avoids stacking it with benzoyl peroxide.",
+          "Fits the owned shelf, medium sensitivity, evening timing, and 3-step limit.",
+          "No SPF gap is needed here because SPF is not required and none is owned."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -1081,7 +1110,7 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "79d7e4480b55dffff2be6981a52ec82379f4651cc09eed4796aeee93df8a6ce8",
+      "driftHash": "b0be5148678d6464fb5c37261860e9ba19a6049a79546d3f96845814ccfb2370",
       "repeatability": {
         "runs": 1,
         "passed": true,
@@ -1089,7 +1118,7 @@
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "ingredient_conflict_retinoid_benzoyl_evening",
         "title": "Retinoid and benzoyl peroxide conflict selects one acne path",
@@ -1253,11 +1282,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 18033,
-          "outputTokens": 20243,
-          "totalTokens": 38276,
-          "estimatedCostUsd": 0.014851,
-          "durationMs": 147739
+          "inputTokens": 19764,
+          "outputTokens": 12673,
+          "totalTokens": 32437,
+          "estimatedCostUsd": 0.010568,
+          "durationMs": 152034
         },
         "spfHandling": {
           "required": false,
@@ -1266,22 +1295,23 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Evening breakout support",
+          "headline": "Night breakouts routine",
           "body": [
-            "Barrier Cream keeps things comfortable."
+            "Soft Cream Cleanser gives a gentle start.",
+            "Barrier Cream helps keep the routine comfortable."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle cleanse before the active."
+              "reason": "Gentle start for evening cleansing."
             },
             {
               "stepOrder": 1,
-              "reason": "Evening retinol for breakouts and texture."
+              "reason": "Supports retinoid and retinol today."
             },
             {
               "stepOrder": 2,
-              "reason": "Barrier support after care."
+              "reason": "Barrier support after the active."
             }
           ],
           "skipped": [
@@ -1292,16 +1322,20 @@
           ],
           "inputs": [
             {
-              "label": "Target timing",
-              "detail": "2026-05-18, 20:45, evening"
+              "label": "target timing",
+              "detail": "2026-05-18 20:45, evening"
             },
             {
-              "label": "Primary goal",
+              "label": "primary goal",
               "detail": "reduce breakouts while protecting the barrier"
             },
             {
-              "label": "PM minutes",
-              "detail": "10 minutes"
+              "label": "routine pace",
+              "detail": "steady"
+            },
+            {
+              "label": "pmminutes",
+              "detail": "10"
             }
           ]
         },
@@ -1319,7 +1353,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle cleanse before the active.",
+            "explanation": "Gentle start for evening cleansing.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -1336,12 +1370,12 @@
             "productName": "Retinol Night Serum",
             "stepLabel": "treatment",
             "provenance": "ai_added",
-            "explanation": "Evening retinol for breakouts and texture.",
+            "explanation": "Supports retinoid and retinol today.",
             "routineNote": null,
             "safetyWarnings": [
               {
                 "severity": "warning",
-                "message": "Retinoids can feel dry; use at night and keep daytime SPF tomorrow.",
+                "message": "Use at night; expect some dryness and wear daytime SPF tomorrow.",
                 "ingredientSlugs": [
                   "retinoid",
                   "retinol"
@@ -1366,7 +1400,7 @@
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Barrier support after care.",
+            "explanation": "Barrier support after the active.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -1399,16 +1433,17 @@
       "hardCheckFailures": [],
       "rubric": {
         "answersQuestion": 5,
-        "beginnerClarity": 4,
+        "beginnerClarity": 5,
         "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Answers the morning use-case clearly with a usable routine.",
-          "Avoids the vitamin C + AHA stack by choosing only vitamin C.",
-          "Includes the owned sunscreen as a direct step, which is required for pigment concerns.",
-          "No unnecessary gap or shopping pressure; the routine stays within the step limit."
+          "Answers the morning routine request directly.",
+          "Clear for a beginner: simple order and reasons.",
+          "Uses the supplied goal, concerns, owned products, and SPF requirement.",
+          "No unnecessary gap/shopping pressure; skipping AHA is appropriate.",
+          "Safe: avoids Vitamin C + AHA stacking and includes owned sunscreen."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -1416,15 +1451,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "6b07f343fb564a2fb96453aceae98139a5baef8b2cf867f06f987f8af6fa995e",
+      "driftHash": "b1c54415ee063865ace14c897228b5c1ce079a6ec5fe7e46f99411ba1377bb58",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "a52088f32b0fe23d4d6e5dcc0c19da5c95d7ec023e4ebd37136dee6becd9da4b",
+        "baselineSignature": "42c4aba995f21e579705701ab5cccf4c5cbd3ba6fb226696791f49ede23c0126",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "ingredient_conflict_vitamin_c_aha_morning",
         "title": "Vitamin C and AHA conflict avoids brightening-acid stack",
@@ -1608,11 +1643,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 19389,
-          "outputTokens": 21676,
-          "totalTokens": 41065,
-          "estimatedCostUsd": 0.015914,
-          "durationMs": 161873
+          "inputTokens": 21263,
+          "outputTokens": 9694,
+          "totalTokens": 30957,
+          "estimatedCostUsd": 0.009006,
+          "durationMs": 55941
         },
         "spfHandling": {
           "required": true,
@@ -1621,54 +1656,50 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Short brightening morning",
+          "headline": "Gentle routine",
           "body": [
-            "Vitamin C fits dark marks and uneven tone without over-exfoliating."
+            "Vitamin C supports uneven tone today."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle morning cleanse."
+              "reason": "Gentle start before actives."
             },
             {
               "stepOrder": 1,
-              "reason": "Brightening support for dark marks."
+              "reason": "Tone support without extra exfoliation."
             },
             {
               "stepOrder": 2,
-              "reason": "Supports spf and sunscreen today."
+              "reason": "Barrier support before sunscreen."
+            },
+            {
+              "stepOrder": 3,
+              "reason": "Required morning UV protection."
             }
           ],
           "skipped": [
             {
               "name": "Ava Lab Morning Glycolic Toner",
               "reason": "ingredient/layering caution"
-            },
-            {
-              "name": "Ava Lab Barrier Cream",
-              "reason": "lower suitabilityScore"
             }
           ],
           "inputs": [
             {
-              "label": "target timing",
-              "detail": "targetDate=2026-05-18, targetTime=08:20, daypart=morning"
+              "label": "Target timing",
+              "detail": "2026-05-18 08:20, morning"
             },
             {
-              "label": "skin profile",
-              "detail": "combination, medium sensitivity"
+              "label": "Primary goal",
+              "detail": "Brighten uneven tone without over-exfoliating"
             },
             {
-              "label": "primaryGoal",
-              "detail": "brighten uneven tone without over-exfoliating"
-            },
-            {
-              "label": "currentConcerns",
+              "label": "Current concerns",
               "detail": "dark marks, texture, uneven tone"
             },
             {
-              "label": "routinePreferences",
-              "detail": "pace=steady, amminutes=8"
+              "label": "Routine pace",
+              "detail": "steady; 8 morning minutes"
             }
           ]
         },
@@ -1686,7 +1717,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle morning cleanse.",
+            "explanation": "Gentle start before actives.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -1704,7 +1735,24 @@
             "productName": "Ascorbyl Glucoside Solution 12%",
             "stepLabel": "serum",
             "provenance": "ai_added",
-            "explanation": "Brightening support for dark marks.",
+            "explanation": "Tone support without extra exfoliation.",
+            "routineNote": null,
+            "safetyWarnings": []
+          },
+          {
+            "resolvedCategory": "moisturizer",
+            "resolvedActiveTags": [
+              "ceramide",
+              "barrier"
+            ],
+            "stepOrder": 2,
+            "routineStepId": null,
+            "inventoryProductId": "moisturizer-1",
+            "productBrand": "Ava Lab",
+            "productName": "Barrier Cream",
+            "stepLabel": "moisturizer",
+            "provenance": "ai_added",
+            "explanation": "Barrier support before sunscreen.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -1714,14 +1762,14 @@
               "spf",
               "sunscreen"
             ],
-            "stepOrder": 2,
+            "stepOrder": 3,
             "routineStepId": null,
             "inventoryProductId": "spf-1",
             "productBrand": "Ava Lab",
             "productName": "Daily SPF 50",
             "stepLabel": "sun-protection",
             "provenance": "ai_added",
-            "explanation": "Supports spf and sunscreen today.",
+            "explanation": "Required morning UV protection.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -1757,10 +1805,11 @@
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Matches the reaction/barrier-damage scenario and pauses strong actives.",
-          "Includes the required moisturizer and keeps the routine simple.",
-          "No unnecessary product gap/shopping pressure.",
-          "Clear, beginner-friendly explanation of why tonight is recovery-focused."
+          "Directly answers tonight’s routine with barrier-first steps.",
+          "Simple enough for a beginner to follow.",
+          "Uses the supplied reaction signal, sensitive-skin profile, and owned shelf products.",
+          "No unnecessary shopping gap; SPF handling is correctly omitted.",
+          "Avoids forbidden strong actives and stays within the 3-step limit."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -1768,15 +1817,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "8992dd2919437ddfc671e0055bbc7bfe326de0b1b1c94923161aec7c4a272088",
+      "driftHash": "2c6d669c6f3d6746777a5a86422177d0c4a128485aaf5f8316f6f465527fe8ca",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "3d85f066ea09dacc88cfe336c8888830d0c975ea1952807473b07b9af84e3ef6",
+        "baselineSignature": "819280d16eacdb44db38b3b190d85b96b814feb78eb0004b65d9abef111f9c36",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "active_reaction_barrier_damage",
         "title": "Active barrier damage strips routine back to recovery basics",
@@ -1978,11 +2027,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 22015,
-          "outputTokens": 11208,
-          "totalTokens": 33223,
-          "estimatedCostUsd": 0.010027,
-          "durationMs": 83725
+          "inputTokens": 24190,
+          "outputTokens": 18628,
+          "totalTokens": 42818,
+          "estimatedCostUsd": 0.014805,
+          "durationMs": 103038
         },
         "spfHandling": {
           "required": false,
@@ -1991,20 +2040,19 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Gentle recovery night",
+          "headline": "Gentle barrier reset tonight",
           "body": [
-            "Reaction signals are present, so tonight stays gentle.",
-            "Hydration and barrier support come before acne actives.",
-            "Strong actives are paused for now."
+            "The recent reaction signal points to a simple barrier-focused night.",
+            "I kept out the strong actives and used hydrating support."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle start for a stressed barrier."
+              "reason": "Gentle cleanse to start the evening reset."
             },
             {
               "stepOrder": 1,
-              "reason": "Adds hydration without a strong active."
+              "reason": "Adds hydration before the barrier cream."
             },
             {
               "stepOrder": 2,
@@ -2027,28 +2075,24 @@
           ],
           "inputs": [
             {
-              "label": "target timing",
-              "detail": "2026-05-18 20:10 evening"
+              "label": "Target timing",
+              "detail": "2026-05-18, 20:10, evening"
             },
             {
-              "label": "primaryGoal",
+              "label": "Primary goal",
               "detail": "clear acne without damaging barrier"
             },
             {
-              "label": "currentConcerns",
+              "label": "Current concerns",
               "detail": "acne, burning, flaking"
             },
             {
-              "label": "reaction signal",
-              "detail": "true; redness, stinging, dry patches; barrier compromised"
+              "label": "Recent journal/photo signal",
+              "detail": "2026-05-18 completed; reactionSignal=true"
             },
             {
-              "label": "safetyConstraints",
+              "label": "Safety constraints",
               "detail": "barrierrecoverymode, avoidnewstrongactives, spacestrongactives"
-            },
-            {
-              "label": "known sensitivity",
-              "detail": "new exfoliant caused burning, flaking, redness"
             }
           ]
         },
@@ -2066,7 +2110,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle start for a stressed barrier.",
+            "explanation": "Gentle cleanse to start the evening reset.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -2083,7 +2127,7 @@
             "productName": "Hydration Serum",
             "stepLabel": "serum",
             "provenance": "ai_added",
-            "explanation": "Adds hydration without a strong active.",
+            "explanation": "Adds hydration before the barrier cream.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -2109,15 +2153,11 @@
         "safetyFlags": [
           {
             "severity": "warning",
-            "message": "Barrier looks stressed; keep tonight gentle and pause strong actives.",
+            "message": "Gentle cleansing and moisturizing fit barrier stress tonight.",
             "ingredientSlugs": [],
             "sourceIds": [
               "mayo_dry_skin_care",
-              "national_eczema_society_hard_water",
-              "aad_retinoid_retinol",
-              "aad_acne_treatment",
-              "fda_aha_sun_sensitivity",
-              "dermnet_topical_retinoids"
+              "national_eczema_society_hard_water"
             ]
           },
           {
@@ -2139,17 +2179,17 @@
       "hardChecksTotal": 31,
       "hardCheckFailures": [],
       "rubric": {
-        "answersQuestion": 4,
+        "answersQuestion": 5,
         "beginnerClarity": 4,
         "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Preserves the specialist-locked adapalene step and provenance correctly.",
-          "Conservative moisturizer add-on is appropriate around a locked retinoid.",
-          "Avoids the forbidden BHA and does not invent an SPF application step.",
-          "Minor clarity gap: cleanser is mentioned in prose but not represented as a step."
+          "Keeps the specialist-locked adapalene step unchanged and uses the correct provenance.",
+          "No unnecessary shopping or SPF gap handling; sunscreen is not required in this case.",
+          "Advice is clear enough for a beginner, though fairly minimal.",
+          "Avoids the forbidden BHA step and stays conservative around the prescription active."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -2157,15 +2197,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "19eaa8e1684060f3f38a5409efd38a85b03ec363cba07877c253a01f59139696",
+      "driftHash": "09132b8daa60640a047314796863462ade232b5b7e7a72d793f6ce7f153ff0e2",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "9629913f89924dae3984abc0240c12e003aef73b21ba8f66703b1b940693f81f",
+        "baselineSignature": "c3ccc9751997254ee7ab16f4b96640cf9dda3afd0d70f7c74097f246f94b1bce",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "specialist_locked_step",
         "title": "Specialist-locked step remains immutable",
@@ -2315,7 +2355,7 @@
         }
       },
       "sanitizedOutputSummary": {
-        "mode": "mixed",
+        "mode": "manual",
         "hasReactionSignal": false,
         "simplifiedForReaction": false,
         "provider": "openai",
@@ -2323,11 +2363,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 17442,
-          "outputTokens": 25501,
-          "totalTokens": 42943,
-          "estimatedCostUsd": 0.017917,
-          "durationMs": 175209
+          "inputTokens": 18387,
+          "outputTokens": 22229,
+          "totalTokens": 40616,
+          "estimatedCostUsd": 0.016095,
+          "durationMs": 124294
         },
         "spfHandling": {
           "required": false,
@@ -2336,31 +2376,35 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Tonight's acne routine",
+          "headline": "Evening care plan",
           "body": [
-            "Extra strong actives stay separate tonight; follow clinician guidance when applicable.",
-            "Cleanse first, then wait 10 minutes after adapalene."
+            "This routine keeps extra strong actives out tonight.",
+            "Follow clinician guidance for the locked care step."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Specialist night step; use as directed."
-            },
-            {
-              "stepOrder": 1,
-              "reason": "Barrier support after adapalene."
+              "reason": "Specialist-directed night care."
             }
           ],
           "skipped": [
             {
               "name": "Ava Lab BHA 2% Liquid",
-              "reason": "ingredient/layering caution"
+              "reason": "strong-active spacing"
             }
           ],
           "inputs": [
             {
-              "label": "target timing",
-              "detail": "2026-05-18, 21:15, evening"
+              "label": "targetDate",
+              "detail": "2026-05-18"
+            },
+            {
+              "label": "targetTime",
+              "detail": "21:15"
+            },
+            {
+              "label": "daypart",
+              "detail": "evening"
             },
             {
               "label": "primaryGoal",
@@ -2380,11 +2424,7 @@
             },
             {
               "label": "specialist-locked step",
-              "detail": "locked-adapalene-step, Derm Clinic Adapalene Gel"
-            },
-            {
-              "label": "trusted evidence summaries",
-              "detail": "Retinoids can be drying; broad-spectrum SPF 30+ is recommended; gentle cleansing and moisturizing support barrier"
+              "detail": "locked-adapalene-step / Derm Clinic Adapalene Gel"
             }
           ]
         },
@@ -2402,44 +2442,37 @@
             "productName": "Adapalene Gel",
             "stepLabel": "treatment",
             "provenance": "specialist_locked",
-            "explanation": "Specialist night step; use as directed.",
+            "explanation": "Specialist-directed night care.",
             "routineNote": "Use exactly as directed by dermatologist.",
             "safetyWarnings": [
               {
                 "severity": "warning",
-                "message": "Can feel drying; moisturize tonight and use SPF tomorrow.",
+                "message": "Can feel drying; use daytime SPF and moisturizer support.",
                 "ingredientSlugs": [
                   "adapalene"
                 ],
                 "sourceIds": [
                   "aad_retinoid_retinol",
                   "dermnet_topical_retinoids",
-                  "mayo_dry_skin_care",
-                  "aad_sunscreen_selection"
+                  "mayo_dry_skin_care"
                 ]
               }
             ]
-          },
-          {
-            "resolvedCategory": "moisturizer",
-            "resolvedActiveTags": [
-              "ceramide",
-              "barrier"
-            ],
-            "stepOrder": 1,
-            "routineStepId": null,
-            "inventoryProductId": "moisturizer-1",
-            "productBrand": "Ava Lab",
-            "productName": "Barrier Cream",
-            "stepLabel": "moisturizer",
-            "provenance": "ai_added",
-            "explanation": "Barrier support after adapalene.",
-            "routineNote": null,
-            "safetyWarnings": []
           }
         ],
         "gapRecommendations": [],
         "safetyFlags": [
+          {
+            "severity": "warning",
+            "message": "Follow clinician guidance for the locked retinoid step.",
+            "ingredientSlugs": [
+              "adapalene"
+            ],
+            "sourceIds": [
+              "aad_retinoid_retinol",
+              "dermnet_topical_retinoids"
+            ]
+          },
           {
             "severity": "info",
             "message": "Photosensitizing actives increase the importance of daytime sun protection.",
@@ -2466,15 +2499,17 @@
       "hardCheckFailures": [],
       "rubric": {
         "answersQuestion": 5,
-        "beginnerClarity": 4,
+        "beginnerClarity": 5,
         "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Gives a complete right-now morning routine with owned products and SPF included.",
-          "Niacinamide is justified by the dark-marks/pigment goal, not just variety.",
-          "No missing-product gap is needed; the plan stays within the step limit and avoids unsafe actives."
+          "Directly answers what to use today with a complete morning routine.",
+          "Clear, beginner-friendly step order and simple reasons.",
+          "Uses the supplied goals, concerns, shelf products, and strong repeat history appropriately.",
+          "No product gap was needed; the routine avoids unnecessary shopping pressure.",
+          "SPF is included as required, and the added niacinamide fits the pigment goal without safety issues."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -2482,7 +2517,7 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "e03f386acf1d347f45cc700e165c78432abe0f50b17d125cc2322313c666e468",
+      "driftHash": "1a59aa678f360cdfefc145b01eb9e6663aebee4ed4e86d6477fe39da7eaea72a",
       "repeatability": {
         "runs": 1,
         "passed": true,
@@ -2490,7 +2525,7 @@
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "repeated_morning_routine_history",
         "title": "Repeated morning history informs but does not force product selection",
@@ -2718,11 +2753,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 22611,
-          "outputTokens": 10722,
-          "totalTokens": 33333,
-          "estimatedCostUsd": 0.009825,
-          "durationMs": 77904
+          "inputTokens": 24186,
+          "outputTokens": 11986,
+          "totalTokens": 36172,
+          "estimatedCostUsd": 0.010819,
+          "durationMs": 69011
         },
         "spfHandling": {
           "required": true,
@@ -2731,28 +2766,28 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Morning pigment support",
+          "headline": "Morning pigment protection",
           "body": [
-            "Kept a steady morning routine for dark marks and dryness.",
-            "Niacinamide adds pigment support without changing the shelf plan.",
-            "SPF stays in for daytime pigment protection."
+            "Kept the routine gentle and protective.",
+            "Added niacinamide for dark marks.",
+            "SPF stays in for daytime protection."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle start for the morning routine."
+              "reason": "Gentle morning reset."
             },
             {
               "stepOrder": 1,
-              "reason": "Adds pigment-supporting care for dark marks."
+              "reason": "Pigment-supporting step."
             },
             {
               "stepOrder": 2,
-              "reason": "Helps support comfort and dryness."
+              "reason": "Adds barrier support."
             },
             {
               "stepOrder": 3,
-              "reason": "Daytime SPF protects pigment goals."
+              "reason": "Finishes with daytime UV protection."
             }
           ],
           "skipped": [],
@@ -2762,19 +2797,19 @@
               "detail": "2026-05-18 07:50, morning"
             },
             {
-              "label": "primaryGoal",
+              "label": "primary goal",
               "detail": "maintain pigment protection"
             },
             {
-              "label": "currentConcerns",
-              "detail": "dark marks; dryness"
+              "label": "current concerns",
+              "detail": "dark marks, dryness"
             },
             {
-              "label": "skinBehavior",
-              "detail": "pihtendency=high; sunscreenhabit=daily"
+              "label": "active shelf products",
+              "detail": "Ava Lab Soft Cream Cleanser; Ava Lab Barrier Cream; Ava Lab Daily SPF 50; Plain Lab Niacinamide Serum"
             },
             {
-              "label": "safetyConstraint",
+              "label": "safety constraint",
               "detail": "daytimespfavailable"
             }
           ]
@@ -2793,7 +2828,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle start for the morning routine.",
+            "explanation": "Gentle morning reset.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -2809,7 +2844,7 @@
             "productName": "Niacinamide Serum",
             "stepLabel": "serum",
             "provenance": "ai_added",
-            "explanation": "Adds pigment-supporting care for dark marks.",
+            "explanation": "Pigment-supporting step.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -2826,7 +2861,7 @@
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Helps support comfort and dryness.",
+            "explanation": "Adds barrier support.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -2843,7 +2878,7 @@
             "productName": "Daily SPF 50",
             "stepLabel": "sun-protection",
             "provenance": "ai_added",
-            "explanation": "Daytime SPF protects pigment goals.",
+            "explanation": "Finishes with daytime UV protection.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -2879,9 +2914,9 @@
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Actionable evening routine: cleanser, clay mask, azelaic serum, moisturizer.",
-          "Good personalization from acne/oiliness, medium sensitivity, and recent retinoid use; it avoids stacking strong actives.",
-          "No SPF gap is needed for this evening case, so not adding one is appropriate."
+          "Uses a practical evening routine and spaces stronger actives after yesterday’s retinoid.",
+          "Clear enough for a beginner, though the clay-mask timing isn’t spelled out.",
+          "No SPF gap is needed for this evening case, and it avoids shopping pressure."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -2889,7 +2924,7 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "c81e81571c190cdc587afb34d3c95a527ffaa4db86eabbf56ff29be58690af86",
+      "driftHash": "cca9e79aec2e8ada955c7fb1d0a1d6544e52ebefa23374a1c3c930ccc8e72ed4",
       "repeatability": {
         "runs": 1,
         "passed": true,
@@ -2897,7 +2932,7 @@
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "twelve_product_acne_evening",
         "title": "Twelve-product acne shelf selects one sensible active path at night",
@@ -3259,11 +3294,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 33164,
-          "outputTokens": 19327,
-          "totalTokens": 52491,
-          "estimatedCostUsd": 0.016571,
-          "durationMs": 134078
+          "inputTokens": 34877,
+          "outputTokens": 31344,
+          "totalTokens": 66221,
+          "estimatedCostUsd": 0.024038,
+          "durationMs": 225485
         },
         "spfHandling": {
           "required": false,
@@ -3272,74 +3307,62 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Breakout Calm Night",
+          "headline": "Calm breakout night",
           "body": [
-            "Short evening routine focused on breakouts and calm.",
-            "Strong actives are spaced tonight.",
+            "A steady evening for breakouts and oiliness.",
+            "Stronger actives stay out tonight.",
             "Ava Lab Retinol Night Serum was used yesterday, so retinoid and exfoliating steps stay spaced tonight."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle reset before actives."
+              "reason": "Gentle cleanse before leave-ons."
             },
             {
               "stepOrder": 1,
-              "reason": "Helps with oil and clogged pores."
+              "reason": "Oil-control reset before leave-ons."
             },
             {
               "stepOrder": 2,
-              "reason": "Supports azelaic and pigment support today."
+              "reason": "Targets breakouts and clogged pores."
             },
             {
               "stepOrder": 3,
-              "reason": "Keeps the barrier comfortable."
+              "reason": "Barrier support to finish calm."
             }
           ],
           "skipped": [
             {
-              "name": "Daily SPF 50",
+              "name": "Ava Lab Daily SPF 50",
               "reason": "preferredTime mismatch"
             },
             {
-              "name": "Hydration Serum",
-              "reason": "lower suitabilityScore"
-            },
-            {
-              "name": "Niacinamide Serum",
-              "reason": "lower suitabilityScore"
-            },
-            {
-              "name": "Soothing Toner",
-              "reason": "lower suitabilityScore"
-            },
-            {
-              "name": "BHA 2% Liquid",
-              "reason": "Strong active should be spaced carefully for this scenario."
-            },
-            {
-              "name": "Retinol Night Serum",
-              "reason": "Strong active should be spaced carefully for this scenario."
-            },
-            {
-              "name": "Benzoyl Peroxide Gel",
-              "reason": "Strong active should be spaced carefully for this scenario."
-            },
-            {
-              "name": "Fragranced Glow Mask",
-              "reason": "Known fragrance sensitivity makes this a poor fit."
-            },
-            {
               "name": "Ava Lab BHA 2% Liquid",
-              "reason": "Paused to space strong actives after recent use."
+              "reason": "strong-active spacing"
             },
             {
               "name": "Ava Lab Retinol Night Serum",
-              "reason": "Paused to space strong actives after recent use."
+              "reason": "strong-active spacing"
             },
             {
               "name": "Ava Lab Benzoyl Peroxide Gel",
-              "reason": "Paused to space strong actives after recent use."
+              "reason": "strong-active spacing"
+            },
+            {
+              "name": "Plain Lab Hydration Serum",
+              "reason": "lower suitabilityScore"
+            },
+            {
+              "name": "Plain Lab Niacinamide Serum",
+              "reason": "lower suitabilityScore"
+            },
+            {
+              "name": "Plain Lab Soothing Toner",
+              "reason": "lower suitabilityScore"
+            },
+            {
+              "name": "Glow Brand Fragranced Glow Mask",
+              "reason": "lower suitabilityScore"
             }
           ],
           "inputs": [
@@ -3348,16 +3371,16 @@
               "detail": "2026-05-18 20:45, evening"
             },
             {
-              "label": "primary goal",
+              "label": "primaryGoal",
               "detail": "reduce breakouts while keeping barrier calm"
             },
             {
-              "label": "routine preferences",
-              "detail": "steady pace, pmminutes 10, maxactivenightsperweek 3"
+              "label": "routine pace",
+              "detail": "steady; pmminutes 10; maxactivenightsperweek 3"
             },
             {
-              "label": "safety constraints",
-              "detail": "daytimespfavailable, spacestrongactives"
+              "label": "safetyConstraints",
+              "detail": "daytimespfavailable; spacestrongactives"
             }
           ]
         },
@@ -3375,7 +3398,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle reset before actives.",
+            "explanation": "Gentle cleanse before leave-ons.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -3392,7 +3415,7 @@
             "productName": "Calm Clay Mask",
             "stepLabel": "mask",
             "provenance": "ai_added",
-            "explanation": "Helps with oil and clogged pores.",
+            "explanation": "Oil-control reset before leave-ons.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -3409,7 +3432,7 @@
             "productName": "Azelaic Support Serum",
             "stepLabel": "serum",
             "provenance": "ai_added",
-            "explanation": "Supports azelaic and pigment support today.",
+            "explanation": "Targets breakouts and clogged pores.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -3426,7 +3449,7 @@
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Keeps the barrier comfortable.",
+            "explanation": "Barrier support to finish calm.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -3444,16 +3467,16 @@
       "hardCheckFailures": [],
       "rubric": {
         "answersQuestion": 5,
-        "beginnerClarity": 5,
+        "beginnerClarity": 4,
         "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Answers the evening routine request directly with a clear 4-step plan.",
-          "Uses the owned shelf well and matches the goal of congestion + uneven tone without overrelying on basics.",
-          "Avoids stacking strong actives and stays within the case step limit.",
-          "No SPF gap is needed for this evening case, so omitting sunscreen is appropriate."
+          "Uses the owned shelf appropriately for an evening routine.",
+          "Includes more than cleanser/moisturizer and stays within the 4-step limit.",
+          "No SPF step or gap is needed here.",
+          "No unsafe stacking of strong actives or forbidden products."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -3461,7 +3484,7 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "b12bb40026773155abae09120271ce58c17a7d277eaa5909c250dc500d162934",
+      "driftHash": "4a14c11d4afca0d6aafa8b537dbdacf52b167bfba82a93766e6e756ac9a590fc",
       "repeatability": {
         "runs": 1,
         "passed": true,
@@ -3469,7 +3492,7 @@
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "moderate_broad_shelf_evening_no_cooldown",
         "title": "Moderate broad evening shelf does not collapse to cleanser and moisturizer",
@@ -3824,11 +3847,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 32112,
-          "outputTokens": 21146,
-          "totalTokens": 53258,
-          "estimatedCostUsd": 0.017504,
-          "durationMs": 159994
+          "inputTokens": 33903,
+          "outputTokens": 31751,
+          "totalTokens": 65654,
+          "estimatedCostUsd": 0.024136,
+          "durationMs": 178581
         },
         "spfHandling": {
           "required": false,
@@ -3837,28 +3860,29 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Steady evening support",
+          "headline": "Steady evening pore care",
           "body": [
-            "This keeps tonight's routine calm and focused.",
-            "Cleanse, then use the soothing toner and azelaic serum.",
-            "Finish with barrier cream; stronger actives wait."
+            "This stays calm and simple for evening.",
+            "Cleanser and toner prep the skin.",
+            "Azelaic Support Serum leads the pore and tone work.",
+            "Barrier Cream finishes with support."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle reset before care."
+              "reason": "Gentle start for the evening."
             },
             {
               "stepOrder": 1,
-              "reason": "Adds a soothing buffer."
+              "reason": "Adds a calm, watery layer."
             },
             {
               "stepOrder": 2,
-              "reason": "Best fit for dark spots and pores."
+              "reason": "Best fit for pores and tone tonight."
             },
             {
               "stepOrder": 3,
-              "reason": "Seals in comfort after care."
+              "reason": "Seals in comfort after actives."
             }
           ],
           "skipped": [
@@ -3867,23 +3891,23 @@
               "reason": "preferredTime mismatch"
             },
             {
-              "name": "Ava Lab BHA 2% Liquid",
-              "reason": "strong-active spacing"
+              "name": "Ava Lab Retinol Night Serum",
+              "reason": "lower suitabilityScore"
             },
             {
-              "name": "Ava Lab Retinol Night Serum",
-              "reason": "strong-active spacing"
+              "name": "Ava Lab BHA 2% Liquid",
+              "reason": "lower suitabilityScore"
             },
             {
               "name": "Ava Lab Benzoyl Peroxide Gel",
-              "reason": "strong-active spacing"
-            },
-            {
-              "name": "Plain Lab Hydration Serum",
               "reason": "lower suitabilityScore"
             },
             {
               "name": "Plain Lab Niacinamide Serum",
+              "reason": "lower suitabilityScore"
+            },
+            {
+              "name": "Plain Lab Hydration Serum",
               "reason": "lower suitabilityScore"
             },
             {
@@ -3892,25 +3916,29 @@
             },
             {
               "name": "Glow Brand Fragranced Glow Mask",
-              "reason": "lower suitabilityScore"
+              "reason": "productScore cautionReason"
             }
           ],
           "inputs": [
             {
-              "label": "Target timing",
-              "detail": "targetDate=2026-05-18, targetTime=20:30, daypart=evening"
+              "label": "target timing",
+              "detail": "2026-05-18 20:30, evening"
             },
             {
-              "label": "Primary goal",
+              "label": "primaryGoal",
               "detail": "improve congestion and uneven tone while staying steady"
             },
             {
-              "label": "Current concerns",
+              "label": "currentConcerns",
               "detail": "clogged pores, dark spots, uneven texture"
             },
             {
-              "label": "Routine preferences",
-              "detail": "pace steady, pmminutes 12, maxactivenightsperweek 3"
+              "label": "routinePreferences",
+              "detail": "steady pace; 12 pm minutes; max 3 active nights/week"
+            },
+            {
+              "label": "skin profile",
+              "detail": "combination skin; medium sensitivity"
             }
           ]
         },
@@ -3928,7 +3956,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle reset before care.",
+            "explanation": "Gentle start for the evening.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -3945,7 +3973,7 @@
             "productName": "Soothing Toner",
             "stepLabel": "toner",
             "provenance": "ai_added",
-            "explanation": "Adds a soothing buffer.",
+            "explanation": "Adds a calm, watery layer.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -3962,7 +3990,7 @@
             "productName": "Azelaic Support Serum",
             "stepLabel": "serum",
             "provenance": "ai_added",
-            "explanation": "Best fit for dark spots and pores.",
+            "explanation": "Best fit for pores and tone tonight.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -3979,7 +4007,7 @@
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Seals in comfort after care.",
+            "explanation": "Seals in comfort after actives.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -3997,16 +4025,17 @@
       "hardCheckFailures": [],
       "rubric": {
         "answersQuestion": 5,
-        "beginnerClarity": 5,
+        "beginnerClarity": 4,
         "personalization": 5,
         "gapQuality": 5,
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Includes the required retinoid and keeps to one strong active.",
-          "Matches the evening timing and the goal of fine lines/texture.",
-          "No unnecessary shopping or SPF gap handling was introduced.",
-          "Routine is beginner-readable and within the step limit."
+          "Includes the required retinoid in a simple 3-step evening routine.",
+          "Clear for a beginner, though it is a bit terse on amounts/frequency.",
+          "Uses the provided goal and good retinoid tolerance appropriately; sparse history did not suppress retinol.",
+          "No SPF gap is needed here, so the absence of a gap is appropriate.",
+          "Avoids stacking retinol with another strong active and stays within the step limit."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -4014,15 +4043,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "d3f6bde55c5271d10e33df19707d6195f58a67fb38a0a5ca72131a0c2d70d8b2",
+      "driftHash": "5727a22e1139d33cb3457158b5fdba71f4f47d0f2b802cc69816e67e14a85510",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "07e664ceb41b9cdc62aeb61054e6689422ef5f6eebbe06ee694c94185c726836",
+        "baselineSignature": "d85a2c7a711ccbc0fd51e4b61a21ba6384c0f350e7f80eebf005b288602c46e1",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "tolerated_retinoid_evening_sparse_history",
         "title": "Tolerated retinoid remains eligible when history is quiet and no reaction is present",
@@ -4196,11 +4225,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 20062,
-          "outputTokens": 18155,
-          "totalTokens": 38217,
-          "estimatedCostUsd": 0.013902,
-          "durationMs": 129219
+          "inputTokens": 22016,
+          "outputTokens": 25812,
+          "totalTokens": 47828,
+          "estimatedCostUsd": 0.01879,
+          "durationMs": 142872
         },
         "spfHandling": {
           "required": false,
@@ -4209,31 +4238,30 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Retinol night for texture",
+          "headline": "Evening retinol routine",
           "body": [
-            "Retinol leads tonight for fine lines and texture.",
-            "Niacinamide adds steady texture support.",
-            "Cleanser and barrier cream keep the routine calm."
+            "Retinol is the strongest fit tonight.",
+            "Gentle cleanse first, then retinol, then barrier cream."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle start before actives."
+              "reason": "Use before active steps."
             },
             {
               "stepOrder": 1,
-              "reason": "Steady texture support."
+              "reason": "Apply after cleansing."
             },
             {
               "stepOrder": 2,
-              "reason": "Best match for fine lines."
-            },
-            {
-              "stepOrder": 3,
-              "reason": "Barrier support after retinol."
+              "reason": "Finish with barrier support."
             }
           ],
           "skipped": [
+            {
+              "name": "Plain Lab Niacinamide Serum",
+              "reason": "lower suitabilityScore"
+            },
             {
               "name": "The Ordinary Ascorbyl Glucoside Solution 12%",
               "reason": "preferredTime mismatch"
@@ -4241,32 +4269,40 @@
           ],
           "inputs": [
             {
-              "label": "Target timing",
-              "detail": "2026-05-18 20:30, evening"
+              "label": "targetDate",
+              "detail": "2026-05-18"
             },
             {
-              "label": "Primary goal",
+              "label": "targetTime",
+              "detail": "20:30"
+            },
+            {
+              "label": "daypart",
+              "detail": "evening"
+            },
+            {
+              "label": "primaryGoal",
               "detail": "smooth fine lines and uneven texture"
             },
             {
-              "label": "Current concerns",
-              "detail": "fine lines; texture"
+              "label": "currentConcerns",
+              "detail": "fine lines, texture"
             },
             {
-              "label": "Routine pace",
-              "detail": "steady"
-            },
-            {
-              "label": "PM minutes",
+              "label": "pmminutes",
               "detail": "12"
             },
             {
-              "label": "Active tolerances",
-              "detail": "retinoid good; niacinamide good"
+              "label": "maxactivenightsperweek",
+              "detail": "3"
             },
             {
-              "label": "Product timing",
-              "detail": "Retinol Night Serum: evening; Ascorbyl Glucoside Solution 12%: morning; others: either"
+              "label": "retinoid tolerance",
+              "detail": "good"
+            },
+            {
+              "label": "niacinamide tolerance",
+              "detail": "good"
             }
           ]
         },
@@ -4284,23 +4320,7 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle start before actives.",
-            "routineNote": null,
-            "safetyWarnings": []
-          },
-          {
-            "resolvedCategory": "serum",
-            "resolvedActiveTags": [
-              "niacinamide"
-            ],
-            "stepOrder": 1,
-            "routineStepId": null,
-            "inventoryProductId": "niacinamide-1",
-            "productBrand": "Plain Lab",
-            "productName": "Niacinamide Serum",
-            "stepLabel": "serum",
-            "provenance": "ai_added",
-            "explanation": "Steady texture support.",
+            "explanation": "Use before active steps.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -4310,21 +4330,21 @@
               "retinoid",
               "retinol"
             ],
-            "stepOrder": 2,
+            "stepOrder": 1,
             "routineStepId": null,
             "inventoryProductId": "retinoid-1",
             "productBrand": "Ava Lab",
             "productName": "Retinol Night Serum",
             "stepLabel": "treatment",
             "provenance": "ai_added",
-            "explanation": "Best match for fine lines.",
+            "explanation": "Apply after cleansing.",
             "routineNote": null,
             "safetyWarnings": [
               {
                 "severity": "warning",
-                "message": "Retinoids can feel drying; moisturizer support helps.",
+                "message": "Can feel dry; use moisturizer after and daytime SPF tomorrow.",
                 "ingredientSlugs": [
-                  "retinoid"
+                  "retinol"
                 ],
                 "sourceIds": [
                   "aad_retinoid_retinol",
@@ -4339,14 +4359,14 @@
               "ceramide",
               "barrier"
             ],
-            "stepOrder": 3,
+            "stepOrder": 2,
             "routineStepId": null,
             "inventoryProductId": "moisturizer-1",
             "productBrand": "Ava Lab",
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Barrier support after retinol.",
+            "explanation": "Finish with barrier support.",
             "routineNote": null,
             "safetyWarnings": []
           }
@@ -4385,9 +4405,10 @@
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Uses the owned vitamin C and keeps niacinamide separate, matching the case’s pigment and layering guidance.",
-          "Includes the owned SPF as a direct morning step, which is required here.",
-          "Routine is clear, personalized, and within the 3-4 step limit with no unnecessary gap/shopping pressure."
+          "Uses the owned morning essentials and includes the required SPF step.",
+          "Keeps vitamin C in the routine for pigment support instead of crowding it out with niacinamide.",
+          "Avoids stacking vitamin C and niacinamide together, matching the supplied caution.",
+          "No unnecessary shopping gap is introduced; the routine stays within the case step limit."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -4395,15 +4416,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "a3756aebf8358c2800fa4c63c71b569df3ca6a57114bb3ad735d822a1072f85b",
+      "driftHash": "1d4044267dfc2110a03906443815f7bd3bbeb20c44ed4aeb822cd954fe8811d0",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "adba7985c5660f52ce5f16c1a3f3aff6e709a6ceb362c124cd7411f019a61751",
+        "baselineSignature": "c23c874c75ef2e81480858896bff9731e4661ace046a9437965bbd6629296209",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "tolerated_vitamin_c_morning_not_crowded_out",
         "title": "Tolerated vitamin C is considered separately from niacinamide for pigment goals",
@@ -4647,11 +4668,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 21936,
-          "outputTokens": 14482,
-          "totalTokens": 36418,
-          "estimatedCostUsd": 0.01198,
-          "durationMs": 111447
+          "inputTokens": 23193,
+          "outputTokens": 13671,
+          "totalTokens": 36864,
+          "estimatedCostUsd": 0.011682,
+          "durationMs": 80997
         },
         "spfHandling": {
           "required": true,
@@ -4660,31 +4681,30 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Morning dark-mark routine",
+          "headline": "Brighten and protect",
           "body": [
-            "Vitamin C is the best morning fit for dark marks.",
-            "Cleanse, then layer serum, moisturizer, and SPF.",
-            "Niacinamide is skipped today so it stays separate from vitamin C."
+            "Vitamin C fits the dark-mark goal and morning timing.",
+            "SPF 50 stays in for daytime protection."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle start before actives."
+              "reason": "Supports cleanser and gentle today."
             },
             {
               "stepOrder": 1,
-              "reason": "Best morning fit for pigment support."
+              "reason": "Morning pigment support."
             },
             {
               "stepOrder": 2,
-              "reason": "Barrier support before SPF."
-            },
-            {
-              "stepOrder": 3,
-              "reason": "Daytime protection for dark-mark care."
+              "reason": "Finish with daytime protection."
             }
           ],
           "skipped": [
+            {
+              "name": "Ava Lab Barrier Cream",
+              "reason": "lower suitabilityScore"
+            },
             {
               "name": "Plain Lab Niacinamide Serum",
               "reason": "ingredient/layering caution"
@@ -4692,8 +4712,12 @@
           ],
           "inputs": [
             {
+              "label": "request source",
+              "detail": "scheduled"
+            },
+            {
               "label": "target timing",
-              "detail": "2026-05-18 08:00 morning"
+              "detail": "targetDate=2026-05-18, targetTime=08:00, daypart=morning"
             },
             {
               "label": "primaryGoal",
@@ -4704,19 +4728,19 @@
               "detail": "dark marks; uneven tone"
             },
             {
-              "label": "routinePreferences.amminutes",
-              "detail": "10"
+              "label": "routinePreferences",
+              "detail": "amminutes=10; pace=steady"
             },
             {
-              "label": "activeTolerances.vitaminc",
-              "detail": "good"
+              "label": "activeTolerances",
+              "detail": "vitaminc=good; niacinamide=good"
             },
             {
-              "label": "activeTolerances.niacinamide",
-              "detail": "good"
+              "label": "recent application summary",
+              "detail": "2026-05-17 morning: items=3"
             },
             {
-              "label": "safetyConstraints",
+              "label": "safetyConstraint",
               "detail": "daytimespfavailable"
             }
           ]
@@ -4735,9 +4759,22 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle start before actives.",
+            "explanation": "Supports cleanser and gentle today.",
             "routineNote": null,
-            "safetyWarnings": []
+            "safetyWarnings": [
+              {
+                "severity": "info",
+                "message": "Use this step gently today.",
+                "ingredientSlugs": [
+                  "cleanser",
+                  "gentle",
+                  "humectant"
+                ],
+                "sourceIds": [
+                  "mayo_dry_skin_care"
+                ]
+              }
+            ]
           },
           {
             "resolvedCategory": "serum",
@@ -4753,24 +4790,7 @@
             "productName": "Ascorbyl Glucoside Solution 12%",
             "stepLabel": "serum",
             "provenance": "ai_added",
-            "explanation": "Best morning fit for pigment support.",
-            "routineNote": null,
-            "safetyWarnings": []
-          },
-          {
-            "resolvedCategory": "moisturizer",
-            "resolvedActiveTags": [
-              "ceramide",
-              "barrier"
-            ],
-            "stepOrder": 2,
-            "routineStepId": null,
-            "inventoryProductId": "moisturizer-1",
-            "productBrand": "Ava Lab",
-            "productName": "Barrier Cream",
-            "stepLabel": "moisturizer",
-            "provenance": "ai_added",
-            "explanation": "Barrier support before SPF.",
+            "explanation": "Morning pigment support.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -4780,26 +4800,16 @@
               "spf",
               "sunscreen"
             ],
-            "stepOrder": 3,
+            "stepOrder": 2,
             "routineStepId": null,
             "inventoryProductId": "spf-1",
             "productBrand": "Ava Lab",
             "productName": "Daily SPF 50",
             "stepLabel": "sun-protection",
             "provenance": "ai_added",
-            "explanation": "Daytime protection for dark-mark care.",
+            "explanation": "Finish with daytime protection.",
             "routineNote": null,
-            "safetyWarnings": [
-              {
-                "severity": "info",
-                "message": "Broad-spectrum SPF supports daytime dark-mark care.",
-                "ingredientSlugs": [],
-                "sourceIds": [
-                  "aad_sunscreen_selection",
-                  "dermnet_post_inflammatory_hyperpigmentation"
-                ]
-              }
-            ]
+            "safetyWarnings": []
           }
         ],
         "gapRecommendations": [],
@@ -4833,11 +4843,9 @@
         "safetyConfidence": 5,
         "passed": true,
         "explanations": [
-          "Gives a concrete evening routine using owned products only.",
-          "Step reasons are simple and beginner-friendly.",
-          "Uses the supplied goals: oiliness control plus comfort, with uploaded support categories.",
-          "No shopping gap is needed here, and SPF is correctly omitted for evening.",
-          "All steps are within the case limit and no serious safety issue appears."
+          "Answers the evening-use question with a practical routine.",
+          "Uses the supplied shelf and adds compatible support categories instead of forcing serum/treatment/exfoliant.",
+          "No SPF step is fine for an evening suggestion, and no shopping gap was needed."
         ]
       },
       "model": "gpt-5.4-mini",
@@ -4845,15 +4853,15 @@
       "provider": "openai",
       "fallbackUsed": false,
       "fallbackReason": null,
-      "driftHash": "91500d01ac4a281190fb2e0d01752a32d954ff9962ab2704287fa563f5d2c222",
+      "driftHash": "7e6ec5e7a75da03d3d0fdcf019e9b62a369a35bde2b9d0d82650169c67da4051",
       "repeatability": {
         "runs": 1,
         "passed": true,
-        "baselineSignature": "28a5179af0135e48146bb7f4abdfc2c12fe0f127d97a35c9e97eca34a1bd4cb7",
+        "baselineSignature": "15aeb6d332db77e9d1cde4df5b5fbb29c9b4b9a521b5fc16fd11fccf0cae2f1c",
         "variations": [],
         "mismatches": []
       },
-      "generatedAt": "2026-06-29T09:34:35.540Z",
+      "generatedAt": "2026-07-03T19:58:10.526Z",
       "sanitizedCaseSummary": {
         "id": "non_serum_categories_evening",
         "title": "Evening shelf can choose uploaded non-serum support categories",
@@ -5112,11 +5120,11 @@
         "metadata": {
           "model": "gpt-5.4-mini",
           "promptVersion": "2026-06-28.v18-agentic-clarity",
-          "inputTokens": 22327,
-          "outputTokens": 13240,
-          "totalTokens": 35567,
-          "estimatedCostUsd": 0.011293,
-          "durationMs": 98953
+          "inputTokens": 23799,
+          "outputTokens": 17016,
+          "totalTokens": 40815,
+          "estimatedCostUsd": 0.013779,
+          "durationMs": 101941
         },
         "spfHandling": {
           "required": false,
@@ -5125,59 +5133,67 @@
           "hasSunscreenGap": false
         },
         "explanation": {
-          "headline": "Evening balance reset",
+          "headline": "Comfort-first evening routine",
           "body": [
-            "Keeps this evening routine short.",
-            "Targets shine while supporting comfort."
+            "Gentle cleanse, then soothe and hydrate.",
+            "It stays short for your 10-minute evening slot."
           ],
           "perStepReasons": [
             {
               "stepOrder": 0,
-              "reason": "Gentle cleanse before leave-ons."
+              "reason": "Gentle cleanse for evening oil balance."
             },
             {
               "stepOrder": 1,
-              "reason": "Oil-control step for shine."
+              "reason": "Calms the tight-after-cleansing feel."
             },
             {
               "stepOrder": 2,
-              "reason": "Adds light hydration and comfort."
+              "reason": "Adds barrier hydration before cream."
             },
             {
               "stepOrder": 3,
-              "reason": "Finishes with barrier support."
+              "reason": "Seals in comfort for night."
             }
           ],
           "skipped": [
             {
               "name": "Ava Lab Daily SPF 50",
               "reason": "preferredTime mismatch"
+            },
+            {
+              "name": "Ava Lab Calm Clay Mask",
+              "reason": "lower suitabilityScore"
+            },
+            {
+              "name": "Ava Lab Comfort Lip Balm",
+              "reason": "lower suitabilityScore"
             }
           ],
           "inputs": [
+            {
+              "label": "request source",
+              "detail": "scheduled"
+            },
             {
               "label": "target timing",
               "detail": "2026-05-18 20:15, evening"
             },
             {
-              "label": "primary goal",
+              "label": "primaryGoal",
               "detail": "keep skin comfortable while reducing visible oiliness"
             },
             {
-              "label": "current concerns",
-              "detail": "oiliness, tightness after cleansing, dullness"
+              "label": "currentConcerns",
+              "detail": "oiliness; tightness after cleansing; dullness"
             },
             {
-              "label": "routine preference",
-              "detail": "pmminutes=10, pace=steady"
+              "label": "routinePreferences",
+              "detail": "pmminutes = 10"
             },
             {
-              "label": "product preferredTime",
-              "detail": "Ava Lab Daily SPF 50: morning"
-            },
-            {
-              "label": "recent application summaries",
-              "detail": "2026-05-17 morning; 2026-05-16 evening"
+              "label": "active shelf product preferredTime",
+              "detail": "Ava Lab Daily SPF 50 = morning"
             }
           ]
         },
@@ -5195,24 +5211,24 @@
             "productName": "Soft Cream Cleanser",
             "stepLabel": "cleanser",
             "provenance": "ai_added",
-            "explanation": "Gentle cleanse before leave-ons.",
+            "explanation": "Gentle cleanse for evening oil balance.",
             "routineNote": null,
             "safetyWarnings": []
           },
           {
-            "resolvedCategory": "mask",
+            "resolvedCategory": "toner",
             "resolvedActiveTags": [
-              "oil-control",
-              "mask"
+              "soothing",
+              "panthenol"
             ],
             "stepOrder": 1,
             "routineStepId": null,
-            "inventoryProductId": "clay-mask-1",
-            "productBrand": "Ava Lab",
-            "productName": "Calm Clay Mask",
-            "stepLabel": "mask",
+            "inventoryProductId": "soothing-toner-1",
+            "productBrand": "Plain Lab",
+            "productName": "Soothing Toner",
+            "stepLabel": "toner",
             "provenance": "ai_added",
-            "explanation": "Oil-control step for shine.",
+            "explanation": "Calms the tight-after-cleansing feel.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -5229,7 +5245,7 @@
             "productName": "Barrier Essence",
             "stepLabel": "essence",
             "provenance": "ai_added",
-            "explanation": "Adds light hydration and comfort.",
+            "explanation": "Adds barrier hydration before cream.",
             "routineNote": null,
             "safetyWarnings": []
           },
@@ -5246,7 +5262,7 @@
             "productName": "Barrier Cream",
             "stepLabel": "moisturizer",
             "provenance": "ai_added",
-            "explanation": "Finishes with barrier support.",
+            "explanation": "Seals in comfort for night.",
             "routineNote": null,
             "safetyWarnings": []
           }

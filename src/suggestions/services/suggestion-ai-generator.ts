@@ -55,9 +55,11 @@ import {
 import {
   buildPrompt,
   defaultExplanation,
+  describeOpenAiPayloadIssue,
   estimateCost,
   extractOutputText,
   OpenAiResponsePayload,
+  parseStructuredOutputJson,
   RawSuggestionResponse,
   RESPONSE_FORMAT,
   SYSTEM_PROMPT,
@@ -115,9 +117,14 @@ export const SUGGESTION_AI_MAX_OUTPUT_TOKENS = 24000;
 const SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 const SUGGESTION_AI_TODAYS_PROVIDER_FAILURE_ATTEMPTS = 4;
 const SUGGESTION_AI_QUICK_PROVIDER_FAILURE_ATTEMPTS = 1;
+const SUGGESTION_AGENT_AUXILIARY_PROVIDER_FAILURE_ATTEMPTS = 2;
+const SUGGESTION_AGENT_AUXILIARY_CALL_TIMEOUT_MS = 150_000;
 const SUGGESTION_AI_MIN_RETRY_TIMEOUT_MS = 1_000;
 const SUGGESTION_AI_RATE_LIMIT_RETRY_BASE_DELAY_MS = 15_000;
 const SUGGESTION_AI_RATE_LIMIT_RETRY_MAX_DELAY_MS = 60_000;
+const SUGGESTION_AI_TRANSIENT_RETRY_BASE_DELAY_MS = 250;
+const SUGGESTION_AI_TRANSIENT_RETRY_MAX_DELAY_MS = 2_000;
+const SUGGESTION_AI_ERROR_DETAIL_MAX_CHARS = 240;
 type OpenAiJsonSchemaResponseFormat =
   | typeof RESPONSE_FORMAT
   | typeof SUGGESTION_AGENT_PLAN_RESPONSE_FORMAT
@@ -257,7 +264,12 @@ export class SuggestionAiGenerator {
         providerFailureAttempts: suggestionProviderFailureAttempts(inputs),
       });
       if (!rawOutput) {
-        throw new Error('OpenAI returned no usable structured output.');
+        const payloadIssue = describeOpenAiPayloadIssue(payload);
+        throw new Error(
+          `OpenAI returned no usable structured output${
+            payloadIssue ? ` (${payloadIssue})` : ''
+          }.`,
+        );
       }
       return this.assembleOutput(inputs, rawOutput, {
         model,
@@ -289,22 +301,36 @@ export class SuggestionAiGenerator {
     startedAt: number;
   }): Promise<SuggestionGenerationOutput> {
     const payloads: OpenAiResponsePayload[] = [];
-    const { parsedOutput: plan, payload: planPayload } =
-      await this.requestStructuredJson<SuggestionAgentPlan>({
-        apiKey: input.apiKey,
-        model: input.model,
-        prompt: buildSuggestionAgentPlanningPrompt(input.prompt),
-        systemPrompt: SUGGESTION_AGENT_PLANNER_SYSTEM_PROMPT,
-        responseFormat: SUGGESTION_AGENT_PLAN_RESPONSE_FORMAT,
-        maxOutputTokens: SUGGESTION_AGENT_PLAN_MAX_OUTPUT_TOKENS,
-        reasoningEffort: suggestionReasoningEffort(input.inputs),
-        timeoutMs: suggestionTimeoutMs(input.inputs),
-        providerFailureAttempts: suggestionProviderFailureAttempts(
-          input.inputs,
-        ),
-        startedAt: input.startedAt,
-      });
-    payloads.push(planPayload);
+    let plan: SuggestionAgentPlan | null = null;
+    try {
+      const { parsedOutput, payload: planPayload } =
+        await this.requestStructuredJson<SuggestionAgentPlan>({
+          apiKey: input.apiKey,
+          model: input.model,
+          prompt: buildSuggestionAgentPlanningPrompt(input.prompt),
+          systemPrompt: SUGGESTION_AGENT_PLANNER_SYSTEM_PROMPT,
+          responseFormat: SUGGESTION_AGENT_PLAN_RESPONSE_FORMAT,
+          maxOutputTokens: SUGGESTION_AGENT_PLAN_MAX_OUTPUT_TOKENS,
+          reasoningEffort: suggestionReasoningEffort(input.inputs),
+          timeoutMs: auxiliaryAgentTimeoutMs(
+            input.startedAt,
+            suggestionTimeoutMs(input.inputs),
+          ),
+          providerFailureAttempts:
+            SUGGESTION_AGENT_AUXILIARY_PROVIDER_FAILURE_ATTEMPTS,
+          startedAt: input.startedAt,
+        });
+      plan = parsedOutput;
+      payloads.push(planPayload);
+    } catch (error) {
+      // The plan is bounded guidance, not a hard dependency: generation and
+      // backend validation still enforce every hard rule without it.
+      this.logger.warn(
+        `Scheduled suggestion agent planning failed: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }. Continuing without a plan.`,
+      );
+    }
 
     let repairInstructions: string[] = [];
     let lastReview: SuggestionAgentReview | null = null;
@@ -330,29 +356,49 @@ export class SuggestionAiGenerator {
       });
       payloads.push(payload);
       if (!rawOutput) {
-        throw new Error('OpenAI returned no usable scheduled suggestion.');
+        const payloadIssue = describeOpenAiPayloadIssue(payload);
+        throw new Error(
+          `OpenAI returned no usable scheduled suggestion${
+            payloadIssue ? ` (${payloadIssue})` : ''
+          }.`,
+        );
       }
 
-      const { parsedOutput: review, payload: reviewPayload } =
-        await this.requestStructuredJson<SuggestionAgentReview>({
-          apiKey: input.apiKey,
-          model: input.model,
-          prompt: buildSuggestionAgentReviewPrompt({
-            basePrompt: input.prompt,
-            plan: plan ?? {},
-            output: rawOutput,
-          }),
-          systemPrompt: SUGGESTION_AGENT_REVIEW_SYSTEM_PROMPT,
-          responseFormat: SUGGESTION_AGENT_REVIEW_RESPONSE_FORMAT,
-          maxOutputTokens: SUGGESTION_AGENT_REVIEW_MAX_OUTPUT_TOKENS,
-          reasoningEffort: suggestionReasoningEffort(input.inputs),
-          timeoutMs: suggestionTimeoutMs(input.inputs),
-          providerFailureAttempts: suggestionProviderFailureAttempts(
-            input.inputs,
-          ),
-          startedAt: input.startedAt,
-        });
-      payloads.push(reviewPayload);
+      let review: SuggestionAgentReview | null = null;
+      try {
+        const { parsedOutput, payload: reviewPayload } =
+          await this.requestStructuredJson<SuggestionAgentReview>({
+            apiKey: input.apiKey,
+            model: input.model,
+            prompt: buildSuggestionAgentReviewPrompt({
+              basePrompt: input.prompt,
+              plan: plan ?? {},
+              output: rawOutput,
+            }),
+            systemPrompt: SUGGESTION_AGENT_REVIEW_SYSTEM_PROMPT,
+            responseFormat: SUGGESTION_AGENT_REVIEW_RESPONSE_FORMAT,
+            maxOutputTokens: SUGGESTION_AGENT_REVIEW_MAX_OUTPUT_TOKENS,
+            reasoningEffort: suggestionReasoningEffort(input.inputs),
+            timeoutMs: auxiliaryAgentTimeoutMs(
+              input.startedAt,
+              suggestionTimeoutMs(input.inputs),
+            ),
+            providerFailureAttempts:
+              SUGGESTION_AGENT_AUXILIARY_PROVIDER_FAILURE_ATTEMPTS,
+            startedAt: input.startedAt,
+          });
+        review = parsedOutput;
+        payloads.push(reviewPayload);
+      } catch (error) {
+        // Self-review is a quality gate on top of deterministic backend
+        // validation; accept the generated output when the review call
+        // itself cannot complete.
+        this.logger.warn(
+          `Scheduled suggestion agent review request failed: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }. Accepting output pending backend validation.`,
+        );
+      }
       lastReview = review;
       if (!review || agentReviewPassed(review)) {
         return this.assembleOutput(input.inputs, rawOutput, {
@@ -567,7 +613,8 @@ export class SuggestionAiGenerator {
       if (outputText) {
         try {
           return {
-            rawOutput: JSON.parse(outputText) as RawSuggestionResponse,
+            rawOutput:
+              parseStructuredOutputJson<RawSuggestionResponse>(outputText),
             payload,
           };
         } catch (error) {
@@ -590,6 +637,17 @@ export class SuggestionAiGenerator {
         }
       }
       lastPayload = payload;
+      const payloadIssue = describeOpenAiPayloadIssue(payload);
+      if (
+        payloadIssue &&
+        attempt < SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS &&
+        remainingOpenAiTimeoutMs(input.timeoutMs, startedAt) >
+          SUGGESTION_AI_MIN_RETRY_TIMEOUT_MS
+      ) {
+        this.logger.warn(
+          `AI suggestion structured output attempt ${attempt} returned no usable output (${payloadIssue}). Retrying within the remaining timeout budget.`,
+        );
+      }
     }
 
     if (lastParseError) {
@@ -629,11 +687,24 @@ export class SuggestionAiGenerator {
       const payload = await this.requestOpenAiResponseWithRetry(input);
       const outputText = extractOutputText(payload);
       if (!outputText) {
+        lastPayload = payload;
+        const payloadIssue = describeOpenAiPayloadIssue(payload);
+        if (
+          payloadIssue &&
+          attempt < SUGGESTION_AI_STRUCTURED_OUTPUT_ATTEMPTS &&
+          remainingOpenAiTimeoutMs(input.timeoutMs, input.startedAt) >
+            SUGGESTION_AI_MIN_RETRY_TIMEOUT_MS
+        ) {
+          this.logger.warn(
+            `AI suggestion agent structured output attempt ${attempt} returned no usable output (${payloadIssue}). Retrying within the remaining timeout budget.`,
+          );
+          continue;
+        }
         return { parsedOutput: null, payload };
       }
       try {
         return {
-          parsedOutput: JSON.parse(outputText) as T,
+          parsedOutput: parseStructuredOutputJson<T>(outputText),
           payload,
         };
       } catch (error) {
@@ -685,11 +756,11 @@ export class SuggestionAiGenerator {
           timeoutMs: remainingOpenAiTimeoutMs(input.timeoutMs, input.startedAt),
         });
       } catch (error) {
+        if (!isRetryableOpenAiFailure(error)) {
+          throw error;
+        }
         const retryDelayMs = openAiRetryDelayMs(error, attempt);
-        const remainingMs = remainingOpenAiTimeoutMs(
-          input.timeoutMs,
-          input.startedAt,
-        );
+        const remainingMs = input.timeoutMs - (Date.now() - input.startedAt);
         if (
           attempt >= input.providerFailureAttempts ||
           remainingMs <= retryDelayMs + SUGGESTION_AI_MIN_RETRY_TIMEOUT_MS
@@ -757,6 +828,7 @@ export class SuggestionAiGenerator {
       throw new OpenAiSuggestionHttpError(
         response.status,
         parseRetryAfterMs(response.headers.get('retry-after')),
+        await readOpenAiErrorDetail(response),
       );
     }
 
@@ -816,9 +888,40 @@ class OpenAiSuggestionHttpError extends Error {
   constructor(
     readonly status: number,
     readonly retryAfterMs: number | null,
+    detail?: string | null,
   ) {
-    super(`OpenAI suggestion call failed (${status}).`);
+    super(
+      `OpenAI suggestion call failed (${status})${detail ? `: ${detail}` : ''}.`,
+    );
   }
+}
+
+async function readOpenAiErrorDetail(response: {
+  text?: () => Promise<string>;
+}): Promise<string | null> {
+  try {
+    const body = await response.text?.();
+    if (!body?.trim()) return null;
+    let detail = body;
+    try {
+      const parsed = JSON.parse(body) as {
+        error?: { message?: string; code?: string };
+      };
+      detail = parsed.error?.message ?? parsed.error?.code ?? body;
+    } catch {
+      // Keep the raw body when it is not JSON.
+    }
+    return detail.trim().slice(0, SUGGESTION_AI_ERROR_DETAIL_MAX_CHARS);
+  } catch {
+    return null;
+  }
+}
+
+function isRetryableOpenAiFailure(error: unknown): boolean {
+  if (error instanceof OpenAiSuggestionHttpError) {
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  }
+  return true;
 }
 
 function suggestionReasoningEffort(
@@ -833,6 +936,21 @@ function suggestionTimeoutMs(inputs: SuggestionGenerationInputs): number {
   return inputs.requestSource === SuggestionRequestSource.Scheduled
     ? SUGGESTION_AI_TODAYS_TIMEOUT_MS
     : SUGGESTION_AI_QUICK_TIMEOUT_MS;
+}
+
+// Auxiliary agent calls (plan, self-review) must never consume the whole
+// generation budget: one hung plan request would otherwise starve the actual
+// suggestion call. The effective remaining time for the auxiliary call is
+// min(overall remaining budget, SUGGESTION_AGENT_AUXILIARY_CALL_TIMEOUT_MS).
+function auxiliaryAgentTimeoutMs(
+  startedAt: number,
+  totalTimeoutMs: number,
+): number {
+  const elapsedMs = Math.max(0, Date.now() - startedAt);
+  return Math.min(
+    totalTimeoutMs,
+    elapsedMs + SUGGESTION_AGENT_AUXILIARY_CALL_TIMEOUT_MS,
+  );
 }
 
 function suggestionProviderFailureAttempts(
@@ -880,12 +998,16 @@ function metadataUsageFromPayloads(
 }
 
 function openAiRetryDelayMs(error: unknown, attempt: number): number {
-  if (!(error instanceof OpenAiSuggestionHttpError)) return 0;
-  if (error.status !== 429) return 0;
-  if (error.retryAfterMs !== null) return error.retryAfterMs;
+  if (error instanceof OpenAiSuggestionHttpError && error.status === 429) {
+    if (error.retryAfterMs !== null) return error.retryAfterMs;
+    return Math.min(
+      SUGGESTION_AI_RATE_LIMIT_RETRY_BASE_DELAY_MS * attempt,
+      SUGGESTION_AI_RATE_LIMIT_RETRY_MAX_DELAY_MS,
+    );
+  }
   return Math.min(
-    SUGGESTION_AI_RATE_LIMIT_RETRY_BASE_DELAY_MS * attempt,
-    SUGGESTION_AI_RATE_LIMIT_RETRY_MAX_DELAY_MS,
+    SUGGESTION_AI_TRANSIENT_RETRY_BASE_DELAY_MS * attempt,
+    SUGGESTION_AI_TRANSIENT_RETRY_MAX_DELAY_MS,
   );
 }
 

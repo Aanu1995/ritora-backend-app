@@ -17,12 +17,13 @@ import {
   SUGGESTION_PROMPT_VERSION,
   SuggestionRequestSource,
 } from '../suggestions.constants';
-import {
-  extractOutputText,
-  type OpenAiResponsePayload,
-} from '../services/suggestion-ai-contract';
+import { type OpenAiResponsePayload } from '../services/suggestion-ai-contract';
 import type { TodaysSuggestionEvaluationCase } from './todays-suggestion-golden-cases';
 import { QUICK_SUGGESTION_GOLDEN_CASES } from './quick-suggestion-golden-cases';
+import {
+  requestJudgeRubricWithRetries,
+  throwJudgeHttpError,
+} from './suggestion-evaluation-judge.utils';
 import {
   runTodaysSuggestionHardChecks,
   sanitizeForReport,
@@ -59,7 +60,7 @@ const QUICK_JUDGE_RESPONSE_FORMAT = {
 } as const;
 
 const QUICK_SUGGESTION_EVALUATION_JUDGE_MAX_OUTPUT_TOKENS = 12000;
-const QUICK_SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 2;
+const QUICK_SUGGESTION_EVALUATION_JUDGE_ATTEMPTS = 3;
 const DEFAULT_CASES = QUICK_SUGGESTION_GOLDEN_CASES;
 
 export type QuickSuggestionEvaluationStatus = 'passed' | 'failed';
@@ -195,37 +196,12 @@ export class OpenAiQuickSuggestionEvaluationJudge implements QuickSuggestionEval
       );
     }
 
-    const outputText = await this.requestStructuredJudgement({
-      apiKey,
-      model,
-      input,
+    return requestJudgeRubricWithRetries({
+      attempts: QUICK_SUGGESTION_EVALUATION_JUDGE_ATTEMPTS,
+      label: 'OpenAI quick suggestion evaluation judge',
+      request: () => this.requestOpenAiJudgement({ apiKey, model, input }),
+      normalize: normalizeRubric,
     });
-    if (!outputText) {
-      throw new Error(
-        'OpenAI quick suggestion evaluation judge returned no structured output.',
-      );
-    }
-    return normalizeRubric(JSON.parse(outputText));
-  }
-
-  private async requestStructuredJudgement(input: {
-    apiKey: string;
-    model: string;
-    input: {
-      evaluationCase: TodaysSuggestionEvaluationCase;
-      output: SuggestionGenerationOutput;
-    };
-  }): Promise<string | null> {
-    let outputText: string | null = null;
-    for (
-      let attempt = 1;
-      attempt <= QUICK_SUGGESTION_EVALUATION_JUDGE_ATTEMPTS;
-      attempt += 1
-    ) {
-      outputText = extractOutputText(await this.requestOpenAiJudgement(input));
-      if (outputText) break;
-    }
-    return outputText;
   }
 
   private async requestOpenAiJudgement(input: {
@@ -316,8 +292,9 @@ export class OpenAiQuickSuggestionEvaluationJudge implements QuickSuggestionEval
     });
 
     if (!response.ok) {
-      throw new Error(
-        `OpenAI quick suggestion evaluation judge failed (${response.status}).`,
+      await throwJudgeHttpError(
+        'OpenAI quick suggestion evaluation judge',
+        response,
       );
     }
 
